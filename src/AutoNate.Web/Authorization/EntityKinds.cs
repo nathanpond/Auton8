@@ -10,6 +10,12 @@ public static class EntityKinds
     public const string WorkflowModel = "workflowmodel";
     public const string WorkflowExecution = "workflowexecution";
     public const string WorkflowTask = "workflowtask";
+
+    // #112. Advancing a waiting process from outside it. Deliberately its own
+    // kind rather than an action on WorkflowExecution: the caller is an
+    // integration account saying "payment cleared", and it must be grantable
+    // without also granting cancel/override/delete on every execution.
+    public const string WorkflowMessage = "workflowmessage";
     public const string SiteConfig = "siteconfig";
     public const string Plugin = "plugin";
 

@@ -1,6 +1,7 @@
 package com.autonate.flowableevents;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.flowable.bpmn.model.ExtensionAttribute;
 import org.flowable.bpmn.model.ServiceTask;
 import org.flowable.common.engine.api.FlowableException;
+import org.flowable.engine.delegate.BpmnError;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.junit.jupiter.api.Test;
 
@@ -121,6 +123,99 @@ class AutoNateBehaviorDelegateTests {
             delegate.execute(execution);
 
             assertEquals("userNotFound", execution.getVariable("unlockResult"));
+        }
+    }
+
+    // #114. A declared business error must become a BpmnError, which the engine
+    // routes to a matching error boundary event and does NOT retry.
+    @Test
+    void executeThrowsBpmnError_WhenTheHostReportsADeclaredBusinessError() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        var responseBody = """
+            {
+              "variableUpdates": { "payResult": { "type": "string", "value": "declined" } },
+              "failed": true,
+              "failureCode": "PAYMENT_DECLINED",
+              "failureMessage": "card declined",
+              "businessErrorCode": "PAYMENT_DECLINED"
+            }
+            """;
+        try (var fixture = HttpFixture.start(captured, 200, responseBody)) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.charge");
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(fixture.baseUrl());
+
+            var thrown = assertThrows(BpmnError.class, () -> delegate.execute(execution));
+            assertEquals("PAYMENT_DECLINED", thrown.getErrorCode());
+
+            // The variable updates still landed. An error boundary path routinely
+            // branches on what the behaviour recorded before it failed, so losing
+            // them would make the error less useful than a plain failure.
+            assertEquals("declined", execution.getVariable("payResult"));
+        }
+    }
+
+    // The complement, and the one that matters most: a failure the host did NOT
+    // declare stays an ordinary predictable failure. It must not become a
+    // BpmnError, or "the database was briefly unreachable" travels down the
+    // "payment declined" branch. The host strips the field for undeclared codes;
+    // this pins that the delegate honours its absence rather than inferring one
+    // from failureCode, which carries the same string.
+    @Test
+    void executeDoesNotThrow_WhenAFailureCarriesNoBusinessErrorCode() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        var responseBody = """
+            {
+              "variableUpdates": { "payResult": { "type": "string", "value": "declined" } },
+              "failed": true,
+              "failureCode": "PAYMENT_DECLINED",
+              "failureMessage": "card declined"
+            }
+            """;
+        try (var fixture = HttpFixture.start(captured, 200, responseBody)) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.charge");
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(fixture.baseUrl());
+
+            delegate.execute(execution);
+
+            assertEquals("declined", execution.getVariable("payResult"));
+        }
+    }
+
+    // #223. A diagram may name its own callback base URL, and it wins over the
+    // configured one. Both directions are asserted: without the attribute the
+    // configured value is still used, which is every production diagram and the
+    // half that would break silently.
+    @Test
+    void executeCallsTheOverrideBaseUrl_WhenTheTaskCarriesOne() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        try (var fixture = HttpFixture.start(captured, 200, "{}")) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.test");
+            // Configured base points somewhere unreachable; the override is the
+            // fixture. If the override were ignored this would fail to connect.
+            task.addAttribute(
+                flowableAttribute("autonateCallbackBaseUrl", fixture.baseUrl().toString()));
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(URI.create("http://127.0.0.1:1/"));
+
+            delegate.execute(execution);
+
+            assertNotNull(captured.get(), "The override base URL was not called.");
+        }
+    }
+
+    @Test
+    void executeCallsTheConfiguredBaseUrl_WhenTheTaskCarriesNoOverride() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        try (var fixture = HttpFixture.start(captured, 200, "{}")) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.test");
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(fixture.baseUrl());
+
+            delegate.execute(execution);
+
+            assertNotNull(captured.get(), "The configured base URL was not called.");
         }
     }
 

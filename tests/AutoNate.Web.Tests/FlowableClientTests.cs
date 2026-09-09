@@ -6,6 +6,7 @@ using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -142,7 +143,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Get, "service/repository/process-definitions",
             HttpStatusCode.InternalServerError, "boom");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.GetLatestProcessDefinitionAsync("k"));
         Assert.Contains("Flowable could not query the latest deployed process definition", ex.Message);
     }
@@ -167,7 +168,7 @@ public sealed class FlowableClientTests
         Assert.Equal("inst-1", summary.Id);
         Assert.Equal("pd-1", summary.ProcessDefinitionId);
 
-        var sent = Assert.Single(stub.Requests);
+        var sent = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances");
         Assert.Contains("\"processDefinitionKey\":\"my_flow\"", sent.Body);
         // No variables provided — empty variables array.
         Assert.Contains("\"variables\":[]", sent.Body);
@@ -184,7 +185,7 @@ public sealed class FlowableClientTests
             "my_flow",
             variables: new Dictionary<string, object?> { ["foo"] = 42, ["bar"] = "baz" });
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         Assert.Contains("\"name\":\"foo\"", body);
         Assert.Contains("\"value\":42", body);
         Assert.Contains("\"name\":\"bar\"", body);
@@ -201,7 +202,7 @@ public sealed class FlowableClientTests
 
         var summary = await client.StartProcessInstanceAsync("my_flow", name: "Lead Qualification (3)");
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         Assert.Contains("\"name\":\"Lead Qualification (3)\"", body);
         Assert.Equal("Lead Qualification (3)", summary.Name);
     }
@@ -215,7 +216,7 @@ public sealed class FlowableClientTests
 
         await client.StartProcessInstanceAsync("my_flow");
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         // Body should not include a top-level name field at all when null.
         Assert.DoesNotContain("\"name\"", body);
     }
@@ -436,7 +437,7 @@ public sealed class FlowableClientTests
 
         await client.CompleteTaskAsync("t-1");
 
-        var sent = Assert.Single(stub.Requests);
+        var sent = RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-1");
         Assert.Contains("\"action\":\"complete\"", sent.Body);
         Assert.Contains("\"variables\":[]", sent.Body);
     }
@@ -450,7 +451,7 @@ public sealed class FlowableClientTests
         await client.CompleteTaskAsync("t-2",
             new Dictionary<string, object?> { ["approved"] = true });
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-2").Body!;
         Assert.Contains("\"name\":\"approved\"", body);
         Assert.Contains("\"value\":true", body);
     }
@@ -462,7 +463,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "task already completed");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.CompleteTaskAsync("t-3"));
         Assert.Contains("Flowable could not complete the user task", ex.Message);
         Assert.Contains("task already completed", ex.Message);
@@ -516,7 +517,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "no such user");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateTaskAssigneeAsync("t-3", "ghost"));
         Assert.Contains("Flowable could not reassign the user task", ex.Message);
     }
@@ -560,7 +561,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "task already completed");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateTaskDueDateAsync("t-3", DateTimeOffset.UtcNow));
         Assert.Contains("Flowable could not update the user task due date", ex.Message);
     }
@@ -605,12 +606,16 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/process-instances/inst-1/variables",
             HttpStatusCode.BadRequest, "bad var");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateProcessVariablesAsync("inst-1", new[]
             {
                 new ProcessVariableUpdate { Name = "x", Value = 1 }
             }));
         Assert.Contains("Flowable could not update the process variables", ex.Message);
+
+        // #226. The status is the point: the endpoint passes Flowable's own 4xx
+        // through instead of relabelling a caller error as a server fault.
+        Assert.Equal(HttpStatusCode.BadRequest, ex.StatusCode);
     }
 
     // --- GetCompletedAssigneesForActivityAsync -------------------------------
@@ -987,7 +992,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Post, "service/runtime/signals",
             HttpStatusCode.BadRequest, "no listener");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.BroadcastSignalAsync("Nope"));
         Assert.Contains("broadcast signal 'Nope'", ex.Message);
     }
@@ -1055,7 +1060,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Get, "service/runtime/executions",
             HttpStatusCode.InternalServerError, "boom");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.ListExecutionsBySignalSubscriptionAsync("record.created"));
         Assert.Contains("list executions waiting on 'record.created'", ex.Message);
     }
@@ -1170,14 +1175,226 @@ public sealed class FlowableClientTests
         Assert.Contains("AutoNate script task capability probe", ex.Message);
     }
 
+    // --- #177: cancelled vs completed in the execution diagram -----------------
+
+    [Fact]
+    public async Task An_activity_cancelled_by_a_boundary_event_renders_as_cancelled()
+    {
+        // The defect: cancellation was read from the PROCESS INSTANCE's DeleteReason,
+        // so an activity cancelled by an interrupting boundary event inside a
+        // still-running process contributed nothing — and then fell through into
+        // completedActivityIds, which is built by excluding the cancelled set.
+        //
+        // The instance here has NO DeleteReason and no EndTime: it is still running,
+        // which is the whole point. A test on a cancelled instance passes today and
+        // proves nothing.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-177",
+            instance: new { id = "pi-177", processDefinitionId = "pd-1" },
+            activities: new object[]
+            {
+                // Flowable records NO deleteReason here — verified against 8.0.0 by
+                // firing a real timer boundary. The cancelled task is
+                // indistinguishable from a completed one by that field, which is why
+                // the fix reads the diagram instead.
+                new { activityId = "work", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "timeout", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "before", endTime = "2026-09-07T10:00:00Z" },
+                new { activityId = "escalated" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-177");
+
+        Assert.Contains("work", detail.CancelledActivityIds);
+        // The half that was actually broken: it must not ALSO read as completed.
+        Assert.DoesNotContain("work", detail.CompletedActivityIds);
+        // And a genuinely completed activity beside it is unaffected.
+        Assert.Contains("before", detail.CompletedActivityIds);
+        Assert.Contains("escalated", detail.CurrentActivityIds);
+    }
+
+    [Fact]
+    public async Task A_non_interrupting_boundary_does_not_mark_its_activity_cancelled()
+    {
+        // The complement, and the error that would be worse than the bug: a
+        // non-interrupting boundary fires ALONGSIDE its activity and cancels
+        // nothing, so treating it as a cancellation would render a healthy running
+        // task as killed.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-noncancel",
+            instance: new { id = "pi-noncancel", processDefinitionId = "pd-1" },
+            activities: new object[]
+            {
+                new { activityId = "notify", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "alongside", endTime = "2026-09-07T10:00:06Z" },
+                // Something still live, so the method does not fall back to a
+                // runtime lookup for the current activity.
+                new { activityId = "after" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-noncancel");
+
+        Assert.DoesNotContain("alongside", detail.CancelledActivityIds);
+        Assert.Contains("alongside", detail.CompletedActivityIds);
+    }
+
+    [Fact]
+    public async Task A_wholly_cancelled_instance_still_renders_as_it_did()
+    {
+        // AC3's regression guard. The instance-level path keeps its 5-second
+        // cancelWindow fallback, which covers Flowable versions whose REST history
+        // omits the per-activity field on a torn-down process — here `late` carries
+        // no deleteReason and is caught only by that window.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-whole",
+            instance: new
+            {
+                id = "pi-whole",
+                processDefinitionId = "pd-1",
+                deleteReason = "cancelled by operator",
+                endTime = "2026-09-07T10:00:10Z"
+            },
+            activities: new object[]
+            {
+                new { activityId = "late", endTime = "2026-09-07T10:00:09Z" },
+                new { activityId = "early", endTime = "2026-09-07T09:00:00Z" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-whole");
+
+        Assert.Contains("late", detail.CancelledActivityIds);
+        Assert.DoesNotContain("late", detail.CompletedActivityIds);
+        // Well outside the window, so it finished normally before the cancellation.
+        Assert.Contains("early", detail.CompletedActivityIds);
+    }
+
+    private static void StubDiagram(
+        StubHttpMessageHandler stub, string instanceId, object instance, object[] activities)
+    {
+        stub.WhenJson(HttpMethod.Get, $"service/history/historic-process-instances/{instanceId}", instance);
+        stub.WhenJson(HttpMethod.Get, $"service/repository/process-definitions/pd-1",
+            new { id = "pd-1", key = "k", name = "N", graphicalNotationDefined = true });
+        stub.WhenStatus(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata",
+            HttpStatusCode.OK,
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                         xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+              <process id="k" isExecutable="true">
+                <startEvent id="s" />
+                <userTask id="work" />
+                <boundaryEvent id="timeout" attachedToRef="work" cancelActivity="true" />
+                <userTask id="alongside" />
+                <boundaryEvent id="notify" attachedToRef="alongside" cancelActivity="false" />
+              </process>
+              <bpmndi:BPMNDiagram id="d">
+                <bpmndi:BPMNPlane id="p" bpmnElement="k">
+                  <bpmndi:BPMNShape id="sh" bpmnElement="s">
+                    <dc:Bounds x="1" y="1" width="36" height="36" />
+                  </bpmndi:BPMNShape>
+                </bpmndi:BPMNPlane>
+              </bpmndi:BPMNDiagram>
+            </definitions>
+            """);
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances",
+            new { data = activities, total = activities.Length });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-variable-instances",
+            new { data = Array.Empty<object>(), total = 0 });
+    }
+
+    // --- #158: the conditional-event nudge ------------------------------------
+
+    [Fact]
+    public async Task CompleteTaskAsync_AsksTheEngineToReevaluateConditions()
+    {
+        // Flowable does not re-evaluate conditional events when a token moves, so
+        // completing a task can land a process on a catch whose condition is already
+        // true and leave it there forever. This is the call that prevents it.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks/t-9",
+            new { id = "t-9", processInstanceId = "pi-9" });
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-9", HttpStatusCode.OK);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions", HttpStatusCode.OK);
+
+        await client.CompleteTaskAsync("t-9");
+
+        var evaluated = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions");
+        Assert.NotNull(evaluated);
+
+        // After the completion, not before: evaluating first would evaluate a world
+        // the completion had not yet changed.
+        var completedAt = stub.Requests.ToList().FindIndex(r =>
+            r.Method == HttpMethod.Post && r.Url.EndsWith("service/runtime/tasks/t-9", StringComparison.Ordinal));
+        var evaluatedAt = stub.Requests.ToList().FindIndex(r =>
+            r.Url.EndsWith("evaluate-conditions", StringComparison.Ordinal));
+        Assert.True(completedAt < evaluatedAt, "Conditions were evaluated before the task was completed.");
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_StillCompletes_WhenTheNudgeFails()
+    {
+        // The nudge is housekeeping; the completion is the user's action. Reporting
+        // failure for work that succeeded would be a worse bug than the one the
+        // nudge prevents, so a failing evaluate must not propagate.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks/t-10",
+            new { id = "t-10", processInstanceId = "pi-10" });
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-10", HttpStatusCode.OK);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/process-instances/pi-10/evaluate-conditions",
+            HttpStatusCode.InternalServerError);
+
+        // The assertion is the absence of a throw.
+        await client.CompleteTaskAsync("t-10");
+
+        Assert.NotNull(RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-10"));
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_StillCompletes_WhenTheTaskCannotBeRead()
+    {
+        // The pre-flight lookup exists only to enable the nudge. If it fails we lose
+        // the nudge, not the completion — otherwise a lookup hiccup would start
+        // failing task completions, trading a rare silent hang for a common loud
+        // failure.
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Get, "service/runtime/tasks/t-11", HttpStatusCode.InternalServerError);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-11", HttpStatusCode.OK);
+
+        await client.CompleteTaskAsync("t-11");
+
+        Assert.NotNull(RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-11"));
+        Assert.DoesNotContain(stub.Requests, r => r.Url.EndsWith("evaluate-conditions", StringComparison.Ordinal));
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /// <summary>
+    /// The one request whose URL ends with <paramref name="path"/> and whose method
+    /// matches.
+    /// </summary>
+    /// <remarks>
+    /// #158 gave both <c>CompleteTaskAsync</c> and <c>StartProcessInstanceAsync</c>
+    /// a second call — a task lookup before completing, and a conditional-event
+    /// nudge afterwards — so <c>Assert.Single(stub.Requests)</c> no longer says what
+    /// these tests mean. Selecting the request under test keeps them about the body
+    /// they were written to pin, and leaves the extra calls to the tests that
+    /// actually assert on them.
+    /// </remarks>
+    private static StubHttpMessageHandler.RecordedRequest RequestFor(StubHttpMessageHandler stub, HttpMethod method, string path) =>
+        Assert.Single(stub.Requests, request =>
+            request.Method == method && request.Url.EndsWith(path, StringComparison.Ordinal));
 
     private static (FlowableClient client, StubHttpMessageHandler stub) CreateClient()
     {
         var stub = new StubHttpMessageHandler();
         var http = new HttpClient(stub) { BaseAddress = new Uri(BaseAddress) };
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var client = new FlowableClient(http, Options.Create(new FlowableOptions { BaseUrl = BaseAddress }), cache);
+        var client = new FlowableClient(
+            http,
+            Options.Create(new FlowableOptions { BaseUrl = BaseAddress }),
+            cache,
+            NullLogger<FlowableClient>.Instance);
         return (client, stub);
     }
 }

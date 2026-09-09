@@ -1031,3 +1031,67 @@
   stroke-width: 2.5px !important;
   stroke-dasharray: 2 2 !important;
 }
+
+/* #107: the BPMN support panel gained a "not available" section and an annotations
+   strip. "Coming soon" and "not available" look similar to an author and are
+   opposite problems — one is work we owe, one the engine cannot do — so they do not
+   share a colour. */
+.workflow-bpmn-types-column-unavailable {
+    background: linear-gradient(180deg, #fdeeee 0%, #fdf6f6 100%);
+    border-color: #edc4c4;
+    max-height: none;
+}
+
+.workflow-bpmn-types-column-unavailable .workflow-bpmn-types-column-header h3,
+.workflow-bpmn-types-column-unavailable .workflow-bpmn-types-count {
+    color: #97282a;
+}
+
+.workflow-bpmn-types-column-annotations {
+    background: linear-gradient(180deg, #f2f4f8 0%, #fafbfc 100%);
+    border-color: #d9e2ec;
+    max-height: none;
+}
+
+.workflow-bpmn-types-column-annotations .workflow-bpmn-types-column-header h3,
+.workflow-bpmn-types-column-annotations .workflow-bpmn-types-count {
+    color: #486581;
+}
+
+.workflow-bpmn-types-note {
+    margin: 0 0 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: #52606d;
+}
+
+.workflow-bpmn-types-reasons {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.workflow-bpmn-types-reasons li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.5rem 0.7rem;
+    background: #fff;
+    border: 1px solid #edc4c4;
+    border-radius: 0.6rem;
+}
+
+.workflow-bpmn-types-reason-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #97282a;
+}
+
+.workflow-bpmn-types-reason-text {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: #52606d;
+}

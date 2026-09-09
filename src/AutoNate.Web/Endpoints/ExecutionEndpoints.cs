@@ -207,6 +207,20 @@ public static class ExecutionEndpoints
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+            // #218. Show the operator the diagram the author drew, not the one
+            // the engine was given.
+            //
+            // Publish expands elements Flowable cannot run into ones it can, so
+            // the deployed resource contains nodes that exist in no stored
+            // diagram. Rendering it shows an operator a shape nobody authored,
+            // and the ids of those generated nodes highlight nothing.
+            //
+            // Pinned to the version THIS instance is running. Fetching the latest
+            // stored model instead would show an operator a diagram their process
+            // never followed the moment anyone republishes, which is worse than
+            // showing the expansion.
+            detail = await RenderAuthoredDiagramAsync(db, detail, cancellationToken);
             // Project only the three columns the handler actually reads — ErrorStackTrace
             // can be tens of KB and is surfaced on the history endpoint, not here.
             var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
@@ -214,8 +228,11 @@ public static class ExecutionEndpoints
                 .Select(e => new { e.ActivityId, e.ErrorMessage, e.OccurredAtUtc })
                 .ToListAsync(cancellationToken);
 
+            // Mapped like every other id surface. A half-mapped diagram
+            // highlights nothing and reads as though the process never reached
+            // the element.
             var failedActivityIds = errorRows
-                .Select(e => e.ActivityId)
+                .Select(e => MapActivityId(detail, e.ActivityId))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
 
@@ -236,7 +253,7 @@ public static class ExecutionEndpoints
             // because retries can produce successively different messages and the
             // most recent one is what the operator wants to see in the tooltip.
             var errorMessagesByActivityId = errorRows
-                .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
+                .GroupBy(e => MapActivityId(detail, e.ActivityId), StringComparer.Ordinal)
                 .Select(g => new
                 {
                     ActivityId = g.Key,
@@ -262,6 +279,20 @@ public static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+
+            // #218. The same mapping the diagram gets. History showing an
+            // activity id that appears in no diagram the author has ever seen is
+            // the same defect one surface over.
+            var expansionSources = await flowable.GetExpansionSourceMapAsync(
+                processInstanceId, cancellationToken);
+            if (expansionSources.Count > 0)
+            {
+                history = history
+                    .Select(e => expansionSources.TryGetValue(e.ActivityId, out var source)
+                        ? e with { ActivityId = source }
+                        : e)
+                    .ToList();
+            }
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionHistoryViewed,
@@ -511,6 +542,29 @@ public static class ExecutionEndpoints
             return Results.Ok(tasks);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        // #113. The child instances a call activity in this one started.
+        //
+        // Without this a stuck call activity is a process with an empty task list
+        // and no explanation — the engine knows where the work is and the app had
+        // no way to say so.
+        executions.MapGet("/{processInstanceId}/children", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var children = await flowable.GetChildProcessInstancesAsync(
+                processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionChildrenViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = children.Count },
+                cancellationToken);
+            return Results.Ok(children);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
         executions.MapGet("/{processInstanceId}/activities/{activityId}/completed-assignees", async (
             string processInstanceId,
             string activityId,
@@ -536,7 +590,40 @@ public static class ExecutionEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #226. `variables` missing from the body deserialises to null, and the
+            // next line dereferenced it — a malformed request answered as a 500
+            // NullReferenceException. A body we cannot read is the caller's to fix.
+            if (request?.Variables is null or { Count: 0 })
+            {
+                return Results.BadRequest(new
+                {
+                    message = "The request body must contain a non-empty 'variables' array."
+                });
+            }
+
+            try
+            {
+                await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // Flowable classified this correctly — 409 for a variable that
+                // already exists, 400 for a value its converter cannot take.
+                // Re-wrapping it as a 500 loses that and pages someone about a
+                // typo. Its 5xx is not caught: that one really is a fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+            // #158: Flowable does not re-evaluate conditional events when a variable
+            // changes. Without this, a process parked on `${approved == true}` stays
+            // parked after someone sets `approved` to true here — the feature looks
+            // broken, and nothing says why. Established by running it against 8.0.0.
+            //
+            // Unconditional rather than gated on "does this definition have a
+            // conditional event": the check would need the diagram, and asking the
+            // engine to evaluate an instance with no conditional events is a no-op.
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesSet,
@@ -555,7 +642,40 @@ public static class ExecutionEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #226. `variables` missing from the body deserialises to null, and the
+            // next line dereferenced it — a malformed request answered as a 500
+            // NullReferenceException. A body we cannot read is the caller's to fix.
+            if (request?.Variables is null or { Count: 0 })
+            {
+                return Results.BadRequest(new
+                {
+                    message = "The request body must contain a non-empty 'variables' array."
+                });
+            }
+
+            try
+            {
+                await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // Flowable classified this correctly — 409 for a variable that
+                // already exists, 400 for a value its converter cannot take.
+                // Re-wrapping it as a 500 loses that and pages someone about a
+                // typo. Its 5xx is not caught: that one really is a fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+            // #158: Flowable does not re-evaluate conditional events when a variable
+            // changes. Without this, a process parked on `${approved == true}` stays
+            // parked after someone sets `approved` to true here — the feature looks
+            // broken, and nothing says why. Established by running it against 8.0.0.
+            //
+            // Unconditional rather than gated on "does this definition have a
+            // conditional event": the check would need the diagram, and asking the
+            // engine to evaluate an instance with no conditional events is a no-op.
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesAdded,
@@ -563,6 +683,94 @@ public static class ExecutionEndpoints
                 resource: new { processInstanceId },
                 details: new { variableCount = request.Variables.Count, names = request.Variables.Select(v => v.Name).ToArray() },
                 cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        // #163. An ad-hoc subprocess has no predetermined order: the process says
+        // what CAN be done and a person decides what happens next. These three
+        // endpoints are that person's surface.
+        executions.MapGet("/{processInstanceId}/adhoc", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var states = await flowable.GetAdhocSubProcessesAsync(processInstanceId, cancellationToken);
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocActivitiesViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { subProcessCount = states.Count },
+                cancellationToken);
+
+            return Results.Ok(states);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/adhoc/{executionId}/activities/{activityId}", async (
+            string processInstanceId,
+            string executionId,
+            string activityId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await flowable.StartAdhocActivityAsync(executionId, activityId, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // An activity that is not enabled, or an execution that is not an
+                // ad-hoc subprocess. #226's rule: the engine classified it, so do
+                // not relabel it as a server fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+
+            // An ad-hoc process has no fixed order to reconstruct afterwards, so
+            // this record is the only account of what was decided and by whom.
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocActivityStarted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { executionId, activityId },
+                cancellationToken);
+
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/adhoc/{executionId}/complete", async (
+            string processInstanceId,
+            string executionId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await flowable.CompleteAdhocSubProcessAsync(executionId, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocSubProcessCompleted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { executionId },
+                cancellationToken);
+
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -1042,4 +1250,47 @@ public static class ExecutionEndpoints
         var shortCode = string.IsNullOrWhiteSpace(rawShortCode) ? null : rawShortCode!.Trim();
         return (mode, shortCode);
     }
+
+    // #218. Swap the deployed diagram for the stored one this instance's version
+    // was published from, and map every generated activity id back onto the
+    // author's element.
+    //
+    // Falls back to the deployed XML whenever the stored version cannot be found
+    // — an instance older than version tracking, or a definition deployed outside
+    // Auton8. Showing the expansion is worse than showing the author's diagram,
+    // but far better than showing nothing.
+    private static async Task<WorkflowExecutionDiagramDetail> RenderAuthoredDiagramAsync(
+        AutoNateDbContext db,
+        WorkflowExecutionDiagramDetail detail,
+        CancellationToken cancellationToken)
+    {
+        if (detail.ExpansionSourceIds.Count > 0)
+        {
+            detail = detail with
+            {
+                CompletedActivityIds = MapAll(detail, detail.CompletedActivityIds),
+                CurrentActivityIds = MapAll(detail, detail.CurrentActivityIds),
+                CancelledActivityIds = MapAll(detail, detail.CancelledActivityIds)
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(detail.ProcessDefinitionId)) return detail;
+
+        var storedXml = await db.WorkflowModelVersions.AsNoTracking()
+            .Where(v => v.ProcessDefinitionId == detail.ProcessDefinitionId)
+            .Select(v => v.BpmnXml)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(storedXml) ? detail : detail with { BpmnXml = storedXml };
+    }
+
+    private static IReadOnlyList<string> MapAll(
+        WorkflowExecutionDiagramDetail detail, IReadOnlyList<string> ids) =>
+        ids.Select(id => MapActivityId(detail, id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    /// <summary>A generated activity id becomes the author's element (#218).</summary>
+    private static string MapActivityId(WorkflowExecutionDiagramDetail detail, string activityId) =>
+        detail.ExpansionSourceIds.TryGetValue(activityId, out var source) ? source : activityId;
 }

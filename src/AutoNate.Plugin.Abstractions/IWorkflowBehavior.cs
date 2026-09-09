@@ -29,4 +29,18 @@ public interface IWorkflowBehavior
     // failures (DB down, etc.), throw — the bridge converts that to a
     // FlowableException so the engine retries.
     Task<BehaviorResult> ExecuteAsync(BehaviorContext context, CancellationToken cancellationToken);
+
+    // #114. The business error codes this behaviour may raise, and which an error
+    // boundary event may therefore catch. Opt-in and closed: a code not listed
+    // here is not catchable no matter what ExecuteAsync returns.
+    //
+    // A DEFAULT implementation, so a plugin built against the pinned 1.0.0.0 ABI
+    // keeps loading and keeps compiling — it simply declares nothing and can raise
+    // no catchable error, which is the safe default.
+    //
+    // For behaviour authors: return the same strings you type into the error
+    // boundary event's code field in the studio. They match character for
+    // character, and a mismatch is silent — the error stays unhandled rather than
+    // being routed.
+    IReadOnlyCollection<string> CatchableErrorCodes => Array.Empty<string>();
 }

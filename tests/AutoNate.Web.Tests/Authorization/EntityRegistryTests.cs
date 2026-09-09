@@ -12,7 +12,7 @@ public sealed class EntityRegistryTests
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(20, kinds.Count);
+        Assert.Equal(21, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -21,6 +21,10 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.WorkflowModel, kinds);
         Assert.Contains(EntityKinds.WorkflowExecution, kinds);
         Assert.Contains(EntityKinds.WorkflowTask, kinds);
+        // #112. Its own kind rather than an action on WorkflowExecution, so an
+        // integration account can be granted exactly "may advance a process"
+        // without also gaining cancel, override and delete on every execution.
+        Assert.Contains(EntityKinds.WorkflowMessage, kinds);
         Assert.Contains(EntityKinds.Plugin, kinds);
         Assert.Contains(EntityKinds.Form, kinds);
         Assert.Contains(EntityKinds.ExternalConnection, kinds);

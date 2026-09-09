@@ -32,6 +32,32 @@ public interface IFlowableClient
 
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Generated activity id -> the author's element it was expanded from, for
+    /// the definition this instance runs (#218).
+    /// </summary>
+    /// <remarks>
+    /// Separate from the diagram detail because the history endpoint needs the
+    /// same mapping and has no reason to pull the whole diagram to get it.
+    /// </remarks>
+    /// <summary>
+    /// Which activities can be started right now in each ad-hoc subprocess of a
+    /// running instance (#163).
+    /// </summary>
+    Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default);
+
+    /// <summary>Starts one enabled activity in an ad-hoc subprocess (#163).</summary>
+    Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default);
+
+    /// <summary>Completes an ad-hoc subprocess regardless of its condition (#163).</summary>
+    Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default);
+
     // Chronological per-activity history for a process instance, ascending by
     // start time. Drives the History tab on the workflow execution modal.
     Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);
@@ -102,6 +128,18 @@ public interface IFlowableClient
 
     Task UpdateProcessVariablesAsync(string processInstanceId, IReadOnlyList<ProcessVariableUpdate> updates, CancellationToken cancellationToken = default);
 
+    // #158: asks the engine to re-evaluate the instance's conditional events.
+    //
+    // Flowable does NOT re-evaluate them when a variable changes — established by
+    // running it, not by reading docs: a catch on `${approved == true}` stays parked
+    // after `approved` is set to true, and advances only when this is called. Same
+    // for conditional boundary events, interrupting and not.
+    //
+    // So this is the link that makes conditional events work at all. Without it they
+    // deploy, wait forever, and look exactly like a broken feature — which is the
+    // silent no-op this epic exists to end.
+    Task EvaluateConditionalEventsAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     // Creates one or more new variables on the running instance. Flowable's
     // REST API splits create vs. update — POST .../variables 409s if any
     // entry already exists, and PUT .../variables 4xxs when one doesn't —
@@ -137,5 +175,61 @@ public interface IFlowableClient
     // instead of relying on Flowable's broadcast.
     Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
+        CancellationToken cancellationToken = default);
+
+    // #112. Every execution waiting on `messageName` in a definition, narrowed to
+    // those whose `correlationKey` process variable equals `correlationValue`.
+    //
+    // The narrowing happens in the ENGINE, not here: POST /query/executions takes
+    // messageEventSubscriptionName and processInstanceVariables together. That
+    // matters for the multi-match rule — the count this returns is the number of
+    // instances that genuinely matched, not a page of them, so refusing with "3
+    // instances matched" is exact rather than a guess.
+    Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default);
+
+    // Same, for a receive task. A receive task carries no message subscription, so
+    // it is addressed by its activity id — a genuinely different lookup, verified
+    // against Flowable 8.0.0.
+    Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default);
+
+    // Delivers to one waiting execution. `messageEventReceived` for a message
+    // event; the receive-task variant uses `trigger`, because a receive task has
+    // no subscription for the engine to match a message name against.
+    Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
+
+    Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
+
+    // Starts a new instance through a message start event. Returns the new
+    // instance id.
+    // #113. The instances a call activity in this one started.
+    //
+    // The engine records the relationship (superProcessInstanceId) and nothing in
+    // the app surfaced it. That matters more than it sounds: while a parent waits
+    // on a call activity its OWN task list is empty, so from the parent alone a
+    // running child is indistinguishable from a hung process.
+    Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default);
+
+    Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default);
 }

@@ -1,7 +1,7 @@
 namespace AutoNate.Web.Services.SystemIssues;
 
 // One remediator per detector that knows how to safely fix an issue. The
-// dispatcher polls open issues with `next_remediation_after_utc <= NOW()` and
+// dispatcher polls open issues with `next_remediation_after_utc <= <caller clock>` and
 // invokes the remediator that claims the matching detector_id (or
 // fingerprint-prefix). Returning Success marks the issue auto_resolved;
 // Failure bumps the attempt count with exponential backoff up to MaxAttempts.

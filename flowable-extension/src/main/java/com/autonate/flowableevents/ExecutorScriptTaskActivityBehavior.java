@@ -10,9 +10,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.flowable.bpmn.model.BaseElement;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.flowable.engine.impl.bpmn.behavior.ScriptTaskActivityBehavior;
@@ -49,6 +52,15 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
 
     private static final String CallbackSecretHeader = "X-AutoNate-Internal-Token";
     private static final String CorrelationIdHeader = "X-Correlation-Id";
+
+    private static final String FlowableExtensionNamespace = "http://flowable.org/bpmn";
+
+    // #218. Written onto the generated script task by the complex-gateway
+    // expansion: the sequence-flow ids the routing script may return.
+    private static final String AllowedRoutesAttribute = "autonateAllowedRoutes";
+
+    // The variable the routes arrive in on the sandbox side.
+    private static final String RoutesVariable = "autonateRoutes";
 
     private final transient HttpClient httpClient;
     private final transient ObjectMapper objectMapper;
@@ -109,6 +121,25 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         }
 
         var callbackBase = properties.getCallbackBaseUrl();
+
+        // #218/#223. The deployed element may name its own callback host. Without
+        // this the engine sends every script to the configured app whatever
+        // published the workflow, so an E2E-published script task executes in a
+        // different process against a different database.
+        var flowElement = execution.getCurrentFlowElement();
+        if (flowElement instanceof BaseElement baseElement) {
+            var override = readFlowableAttribute(baseElement, "autonateCallbackBaseUrl");
+            if (override != null && !override.isBlank()) {
+                try {
+                    callbackBase = URI.create(override.trim());
+                } catch (IllegalArgumentException exception) {
+                    throw new FlowableException(
+                        "Script task '" + activityId + "' carries an invalid " +
+                        "flowable:autonateCallbackBaseUrl ('" + override + "').", exception);
+                }
+            }
+        }
+
         var sharedSecret = properties.getCallbackSharedSecret();
         if (callbackBase == null) {
             throw new FlowableException(
@@ -138,7 +169,20 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         // JavaScript is what lets a Python script task work at all.
         body.put("scriptFormat", language == null || language.isBlank() ? "javascript" : language);
         body.put("correlationId", correlationId);
-        body.set("variables", snapshotVariables(execution));
+        var variables = snapshotVariables(execution);
+
+        // #218. A routing script has to know what it may return. The routes are
+        // handed over as an ordinary variable rather than injected into the
+        // script body: generating code would put execution semantics in Auton8,
+        // which is the line epic #40 draws.
+        var routes = allowedRoutes(execution);
+        if (!routes.isEmpty()) {
+            var array = objectMapper.createArrayNode();
+            routes.forEach(array::add);
+            variables.set(RoutesVariable, array);
+        }
+
+        body.set("variables", variables);
         return body;
     }
 
@@ -233,8 +277,76 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         // so it keeps working unchanged.
         if (resultVariable != null && !resultVariable.isBlank()) {
             var result = parsed.get("result");
-            execution.setVariable(resultVariable, result == null ? null : toJavaValue(result));
+            var value = result == null ? null : toJavaValue(result);
+            enforceRouteContract(execution, value, activityId, correlationId);
+            execution.setVariable(resultVariable, value);
         }
+    }
+
+    /**
+     * #218. A complex gateway's routing script must return one of the routes it
+     * was given.
+     *
+     * <p>Without this the gateway falls through to its default flow, or to no
+     * flow at all, and a script with a typo in a route id looks exactly like a
+     * script that deliberately chose the other branch. A wrong branch taken
+     * silently is the failure this milestone exists to end, so the activity
+     * fails and the message names both what came back and what was allowed.
+     *
+     * <p>Applies only to generated route script tasks. An ordinary script task
+     * carries no route list and is unaffected.
+     */
+    private void enforceRouteContract(
+        DelegateExecution execution,
+        Object value,
+        String activityId,
+        String correlationId
+    ) {
+        var routes = allowedRoutes(execution);
+        if (routes.isEmpty()) return;
+
+        var chosen = value == null ? null : String.valueOf(value);
+        if (chosen != null && routes.contains(chosen)) return;
+
+        throw new FlowableException(
+            "Routing script for '" + activityId + "' returned " +
+            (value == null ? "null" : "'" + chosen + "'") +
+            ", which is not one of its routes " + routes +
+            ". A routing script must return one of the route ids it was given" +
+            " (correlationId " + correlationId + ").");
+    }
+
+    /** The route ids the expansion wrote onto this script task, if any. */
+    private List<String> allowedRoutes(DelegateExecution execution) {
+        var flowElement = execution.getCurrentFlowElement();
+        if (!(flowElement instanceof BaseElement baseElement)) return List.of();
+
+        var raw = readFlowableAttribute(baseElement, AllowedRoutesAttribute);
+        if (raw == null || raw.isBlank()) return List.of();
+
+        var routes = new ArrayList<String>();
+        for (var part : raw.split(",")) {
+            var trimmed = part.trim();
+            if (!trimmed.isEmpty()) routes.add(trimmed);
+        }
+        return List.copyOf(routes);
+    }
+
+    // Reads a flowable: attribute off a BaseElement. Mirrors the same helper in
+    // AutoNateBehaviorDelegate; the namespace check matters because an author
+    // may legitimately have an attribute of the same local name in their own.
+    private static String readFlowableAttribute(BaseElement element, String localName) {
+        var attributes = element.getAttributes();
+        if (attributes == null) return null;
+        var matching = attributes.get(localName);
+        if (matching == null) return null;
+        for (var attribute : matching) {
+            if (FlowableExtensionNamespace.equals(attribute.getNamespace())) {
+                var value = attribute.getValue();
+                return value == null ? null : value.trim();
+            }
+        }
+        return null;
     }
 
     private String errorMessage(String body) {

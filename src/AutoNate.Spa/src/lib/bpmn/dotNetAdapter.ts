@@ -11,6 +11,13 @@ export type WorkflowCallbacks = {
   // describeBusinessObject returns so the React layer can route to the right
   // editor modal.
   RequestConfigureElement?: (element: unknown) => void | Promise<void>;
+  // #167. Fired when the studio converts a manual task or a plain task into a user
+  // task, because neither waits — the engine passes straight through both. Carries
+  // every element converted in one go, so a diagram opened with several produces one
+  // notice rather than one per element.
+  NotifyTasksConverted?: (
+    converted: Array<{ id: string; name: string | null; was: string }>
+  ) => void | Promise<void>;
   // Single-task or single-assignee completion from the diagram context menu.
   CompleteTaskFromContextMenu?: (
     activityId: string,

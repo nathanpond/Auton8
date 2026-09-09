@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<process id="catch_timer" name="catch_timer" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="m"/>
+  <intermediateCatchEvent id="m"><timerEventDefinition><timeDuration>PT1M</timeDuration></timerEventDefinition></intermediateCatchEvent>
+  <sequenceFlow id="f2" sourceRef="m" targetRef="e"/>
+  <endEvent id="e"/>
+</process>
+</definitions>

@@ -285,4 +285,44 @@ public sealed class ScriptTaskIdentityTests
         var doc = XDocument.Parse(Process(Script("t"), "workflowAuthor"));
         Assert.False(ScriptTaskIdentity.DeclaresSystemIdentity(doc));
     }
+
+    // #218. The complex gateway's routing script is copied onto a generated
+    // script task at publish, runAs and all. If the system-identity gate scanned
+    // only `scriptTask`, an author without the permission could reach the same
+    // privilege by putting it on a gateway instead — the gate would still be
+    // there and still pass.
+    [Fact]
+    public void A_complex_gateway_asking_to_run_as_system_is_caught_by_the_same_gate()
+    {
+        var doc = XDocument.Parse("""
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:autonate="http://autonate.dev/workflows">
+              <bpmn:process id="p" isExecutable="true">
+                <bpmn:complexGateway id="cg" autonate:runAs="system">
+                  <bpmn:script>return 'fa';</bpmn:script>
+                </bpmn:complexGateway>
+              </bpmn:process>
+            </bpmn:definitions>
+            """);
+
+        Assert.True(ScriptTaskIdentity.DeclaresSystemIdentity(doc));
+        Assert.Equal("system", ScriptTaskIdentity.DeclaredIdentities(doc)["cg"]);
+    }
+
+    [Fact]
+    public void A_complex_gateway_without_a_declared_identity_does_not_trip_the_gate()
+    {
+        var doc = XDocument.Parse("""
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+              <bpmn:process id="p" isExecutable="true">
+                <bpmn:complexGateway id="cg"><bpmn:script>return 'fa';</bpmn:script></bpmn:complexGateway>
+              </bpmn:process>
+            </bpmn:definitions>
+            """);
+
+        // The complement: a gate that fired on every gateway would pass the test
+        // above while refusing every ordinary workflow.
+        Assert.False(ScriptTaskIdentity.DeclaresSystemIdentity(doc));
+        Assert.Empty(ScriptTaskIdentity.DeclaredIdentities(doc));
+    }
 }

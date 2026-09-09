@@ -72,6 +72,19 @@ export type WorkflowElementSnapshot = {
   timerDate?: string | null;
   serviceTaskKind?: string | null;
   behaviorKey?: string | null;
+  // #158. `conditionExpression` above carries a conditional event's condition too —
+  // same concept as a sequence flow's, and `type` tells the two apart.
+  cancelActivity?: boolean | null;
+  // #157. Distinct from timerDuration/timerDate/timerCycleCron so a boundary event
+  // cannot route to the start-event or intermediate-catch editors.
+  boundaryTimerDuration?: string | null;
+  boundaryTimerDate?: string | null;
+  boundaryTimerCycle?: string | null;
+  attachedTo?: string | null;
+  // #168. Serialises to flowable:async on the activity — the step becomes its
+  // own transaction boundary, so a failure retries it alone. Optional so an
+  // older snapshot leaves an existing setting alone rather than clearing it.
+  retryPoint?: boolean | null;
 };
 
 export type PrepareWorkflowRequest = {
@@ -139,4 +152,25 @@ export async function markWorkflowViewed(id: string): Promise<void> {
 function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response;
   return response?.status === 404;
+}
+
+// #166. What a child process declares, so a call activity's mapping offers real
+// targets instead of a free-text box the author must remember names for.
+export type WorkflowDataDeclaration = {
+  name: string;
+  type: string | null;
+  // "input" and "output" are an activity's contract; "variable" is a data object
+  // or store. A parent maps INTO the child's inputs and OUT OF its outputs.
+  kind: "input" | "output" | "variable";
+};
+
+export async function getWorkflowDeclarations(
+  processKey: string,
+  signal?: AbortSignal
+): Promise<WorkflowDataDeclaration[]> {
+  const { data } = await api.get<WorkflowDataDeclaration[]>(
+    `/api/workflows/${encodeURIComponent(processKey)}/declarations`,
+    { signal }
+  );
+  return data;
 }

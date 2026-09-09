@@ -20,6 +20,7 @@ public static class WorkflowResourceKinds
     public const string WorkflowModel = "workflow.model";
     public const string Execution = "workflow.execution";
     public const string Task = "workflow.task";
+    public const string Message = "workflow.message";
 }
 
 public static class WorkflowAdminEventTypes
@@ -47,6 +48,19 @@ public static class WorkflowAdminEventTypes
     public const string TaskDueDateChanged = "workflow.task.due.date.changed";
     public const string TaskCompleted = "workflow.task.completed";
 
+    // #163. Starting an activity in someone else's case is a mutation on their
+    // work, and an ad-hoc process has no fixed order to reconstruct it from —
+    // the audit trail IS the record of what was decided and by whom.
+    public const string AdhocActivityStarted = "workflow.adhoc.activity.started";
+    public const string AdhocSubProcessCompleted = "workflow.adhoc.completed";
+
+    // #112. Advancing someone else's running process from outside it is a
+    // privileged mutation on their work, so who did it and to which instance is
+    // on the record — including the refusals, because a multi-match means a
+    // process is modelled wrong and nobody finds that out from a 409 alone.
+    public const string MessageDelivered = "workflow.message.delivered";
+    public const string MessageRefused = "workflow.message.refused";
+
     // View events (Phase 4)
     public const string ModelListViewed = "workflow.model.list.viewed";
     public const string ModelViewed = "workflow.model.viewed";
@@ -57,6 +71,8 @@ public static class WorkflowAdminEventTypes
     public const string ExecutionHistoryViewed = "workflow.execution.history.viewed";
     public const string ExecutionLogViewed = "workflow.execution.log.viewed";
     public const string ExecutionTasksViewed = "workflow.execution.tasks.viewed";
+    public const string AdhocActivitiesViewed = "workflow.adhoc.activities.viewed";
+    public const string ExecutionChildrenViewed = "workflow.execution.children.viewed";
     public const string ExecutionCompletedAssigneesViewed = "workflow.execution.completed-assignees.viewed";
     public const string TasksAssignedToMeViewed = "workflow.task.assigned-to-me.viewed";
     public const string TasksAssignedToTeamViewed = "workflow.task.assigned-to-team.viewed";

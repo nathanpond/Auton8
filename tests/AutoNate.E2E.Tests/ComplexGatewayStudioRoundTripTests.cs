@@ -1,0 +1,656 @@
+using System.Text.Json;
+using AutoNate.E2E.Tests.Support;
+using Microsoft.Playwright;
+using Xunit;
+
+namespace AutoNate.E2E.Tests;
+
+/// <summary>
+/// A complex gateway's routing script survives the studio (#218).
+/// </summary>
+/// <remarks>
+/// This exists because the answer could not be reasoned to. bpmn-js is vendored
+/// as a browser bundle with NO Flowable moddle extension, so what it does with a
+/// <c>&lt;bpmn:script&gt;</c> child on an element whose moddle type has no such
+/// property is a property of that bundle, not of the BPMN spec. Guessing wrong
+/// loses an author's code silently on their next save, which is the exact
+/// failure this milestone exists to end — so it is asserted rather than assumed.
+/// </remarks>
+[Trait("RequiresService", "Flowable")]
+[Collection(AutoNateE2ECollection.Name)]
+public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
+{
+    public ComplexGatewayStudioRoundTripTests(AutoNateE2EFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task The_routing_script_survives_opening_and_saving_in_the_studio()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("cg-round-trip");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "cg_round_trip", bpmnXml = Diagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Workflow Studio" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        // The modeller parsed and drew it. Until this passes, a later assertion
+        // about the script would be about a diagram that never loaded.
+        await Assertions.Expect(page.Locator("[data-element-id='cg']"))
+            .ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        // Save round-trips the diagram through bpmn-js's serialiser, which is
+        // where anything its moddle does not model gets dropped.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(3_000);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        Assert.Contains("complexGateway", xml, StringComparison.Ordinal);
+
+        // The load-bearing assertion. A <bpmn:script> CHILD does not survive
+        // this — proven, not assumed: the first version of this test seeded one
+        // and it came back gone. bpmn-js's moddle has no such property on
+        // ComplexGateway and drops what it cannot model.
+        //
+        // An attribute in the autonate namespace is the mechanism runAs already
+        // uses through $attrs, which does survive.
+        Assert.Contains("return 'fa';", xml, StringComparison.Ordinal);
+
+        // And the newlines with it. XML normalises literal newlines in attribute
+        // values to spaces on parse, so this only works if the serialiser
+        // escapes them — and a routing script folded onto one line would have
+        // its first // comment swallow the return statement.
+        //
+        // Asserted by parsing rather than by matching the escape's spelling:
+        // bpmn-js writes &#xA; and .NET writes &#10;, and both are the same
+        // newline. The first version of this assertion pinned the decimal form
+        // and failed on a value that was completely correct.
+        Assert.Contains("// pick a route", xml, StringComparison.Ordinal);
+
+        var parsed = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace autonate = "http://autonate.dev/workflows";
+        var routeScript = parsed.Descendants()
+            .Single(e => e.Attribute("id")?.Value == "cg")
+            .Attribute(autonate + "routeScript")?.Value;
+
+        Assert.NotNull(routeScript);
+        Assert.Contains("\n", routeScript);
+        Assert.Contains("return 'fa';", routeScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_author_opens_the_gateway_from_the_context_menu_and_writes_a_routing_script()
+    {
+        // The story's first user-observable truth: no palette work, no custom
+        // modeller module, reached by the same right-click path as every other
+        // element.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("cg-editor");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "cg_editor", bpmnXml = Diagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        var shape = page.Locator("[data-element-id='cg']");
+        await Assertions.Expect(shape).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await shape.ClickAsync(new() { Button = MouseButton.Right });
+        await page.GetByText("Configure", new() { Exact = false }).First
+            .ClickAsync(new() { Timeout = 10_000 });
+
+        // Titled for what it is. The same panel serves script tasks, and telling
+        // an author they are editing a script task would be a lie about the
+        // element they right-clicked.
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText("Complex Gateway", new() { Exact = false }).First)
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+
+        // A gateway's result variable is generated and bound to the flow
+        // conditions, so it must not be offered — an author editing it would
+        // break the routing with nothing to say so.
+        await Assertions.Expect(dialog.GetByText("Result Variable", new() { Exact = false }))
+            .ToHaveCountAsync(0);
+
+        var consoleErrors = new List<string>();
+        page.Console += (_, message) =>
+        {
+            if (message.Type == "error") consoleErrors.Add(message.Text);
+        };
+        page.PageError += (_, error) => consoleErrors.Add(error);
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(1_500);
+        Assert.True(consoleErrors.Count == 0,
+            "Apply raised: " + string.Join(" | ", consoleErrors));
+
+        // The modal closing is how Apply reports success, and waiting for it is
+        // not politeness — the overlay sits over the Save button, so clicking
+        // Save while it is open times out rather than saving. The same trap is
+        // recorded in CallActivityStudioTests.
+        try
+        {
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 10_000 });
+        }
+        catch
+        {
+            var alerts = await page.Locator("[role='alert'], [role='status'], .mantine-Notification-root")
+                .AllTextContentsAsync();
+            Assert.Fail("Apply did not close the panel. Notifications: "
+                        + (alerts.Count == 0 ? "(none)" : string.Join(" | ", alerts))
+                        + " || console: "
+                        + (consoleErrors.Count == 0 ? "(none)" : string.Join(" | ", consoleErrors)));
+        }
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })
+            .ClickAsync(new() { Timeout = 10_000 });
+        await page.WaitForTimeoutAsync(3_000);
+
+        // Saving through the editor keeps the script rather than clearing it —
+        // the failure a panel that reads from the wrong place produces.
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        Assert.Contains("return 'fa';",
+            document.RootElement.GetProperty("bpmnXml").GetString()!, StringComparison.Ordinal);
+    }
+
+    // #115. Compensation is authored by drawing an ASSOCIATION from a
+    // compensation boundary event to its handler. If bpmn-js drops that on save
+    // — as it drops a <bpmn:script> child on a complex gateway — then the handler
+    // is unreachable and compensation silently does nothing, which is the exact
+    // failure #115 exists to fix. Asserted rather than assumed.
+    [Fact]
+    public async Task A_compensation_association_survives_the_studio()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("compensation-round-trip");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "compensation_rt", bpmnXml = CompensationDiagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        await Assertions.Expect(page.Locator("[data-element-id='b1']"))
+            .ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(3_000);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        var parsed = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        // The association is the link. Without it the handler is a stray node.
+        var association = Assert.Single(parsed.Descendants(bpmn + "association"));
+        Assert.Equal("b1", association.Attribute("sourceRef")?.Value);
+        Assert.Equal("h1", association.Attribute("targetRef")?.Value);
+
+        // And the marker that makes the handler a handler rather than an
+        // unreachable step.
+        Assert.Equal("true", parsed.Descendants()
+            .Single(e => e.Attribute("id")?.Value == "h1")
+            .Attribute("isForCompensation")?.Value);
+    }
+
+    private const string CompensationDiagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="compensation_rt" name="Undo" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="done" />
+            <bpmn:endEvent id="done" name="Undo everything">
+              <bpmn:compensateEventDefinition />
+            </bpmn:endEvent>
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:serviceTask id="h1" name="Refund" isForCompensation="true" />
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="compensation_rt">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t1" bpmnElement="t1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_b1" bpmnElement="b1">
+                <dc:Bounds x="280" y="142" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_h1" bpmnElement="h1">
+                <dc:Bounds x="260" y="220" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_done" bpmnElement="done">
+                <dc:Bounds x="380" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
+    // #166. A data object declares a typed process variable — verified against
+    // the engine, which creates a real variable from it. The declaration is only
+    // worth anything if it survives the modeller, and bpmn-js drops what its
+    // moddle does not model, so this asserts rather than assumes.
+    [Fact]
+    public async Task A_data_object_declaration_and_its_type_survive_the_studio()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("data-object-round-trip");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "data_object_rt", bpmnXml = DataObjectDiagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        await Assertions.Expect(page.Locator("[data-element-id='s']"))
+            .ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(3_000);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        var parsed = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        // The declaration itself.
+        var dataObject = Assert.Single(parsed.Descendants(bpmn + "dataObject"));
+        Assert.Equal("amount", dataObject.Attribute("name")?.Value);
+
+        // And its TYPE, which is the half a modeller is most likely to drop —
+        // itemSubjectRef is what makes the declaration typed rather than a name.
+        // The type is stored in an autonate: attribute, and that is forced by two
+        // findings that do not overlap:
+        //
+        //   itemSubjectRef="xsd:double"   engine types it double, bpmn-js DROPS it
+        //                                 (moddle resolves it as a reference, and
+        //                                 a bare QName names nothing)
+        //   itemSubjectRef="ItemDouble"   bpmn-js keeps it, engine IGNORES the
+        //                                 type -- every variable came back string
+        //
+        // So neither BPMN spelling both survives the studio and types the
+        // variable. The attribute survives, and publish rewrites the deployed
+        // copy into the bare-QName form the engine understands.
+        System.Xml.Linq.XNamespace autonate = "http://autonate.dev/workflows";
+        Assert.Equal("xsd:double", dataObject.Attribute(autonate + "dataType")?.Value);
+    }
+
+    private const string DataObjectDiagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="data_object_rt" name="Amounts" isExecutable="true">
+            <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Check the amount" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="data_object_rt">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t1" bpmnElement="t1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
+    // #159/#163/#166. The three authoring panels, exercised through the same
+    // right-click path an author uses. Each field is stored in an autonate:
+    // attribute rather than a child element, and this is what proves the choice:
+    // a <bpmn:completionCondition> on these element types does not survive the
+    // modeller, and the loss is silent.
+    [Theory]
+    [InlineData("adhoc", "Case Work", "Finished when", "${everythingDone == true}", "completionCondition")]
+    [InlineData("amountObj", "Data", "Type", null, "dataType")]
+    [InlineData("t1", "Repeat For Each", "List to repeat over", "${orders}", "collection")]
+    public async Task An_element_data_panel_round_trips_what_an_author_types(
+        string elementId, string panelTitle, string fieldLabel, string? typed, string storedAs)
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed($"element-data-{elementId}");
+        // A [Theory] runs this three times and a process key is unique.
+        var processKey = $"edr{Guid.NewGuid():N}"[..20];
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = processKey, bpmnXml = ElementDataDiagram(processKey) }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        var shape = page.Locator($"[data-element-id='{elementId}']");
+        await Assertions.Expect(shape).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await shape.ClickAsync(new() { Button = MouseButton.Right });
+        await page.GetByText("Configure", new() { Exact = false }).First
+            .ClickAsync(new() { Timeout = 10_000 });
+
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Titled for what the author is doing, not for the BPMN element name.
+        await Assertions.Expect(dialog.GetByText(panelTitle, new() { Exact = false }).First)
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+
+        if (typed is null)
+        {
+            // The data object's type is a Select, not a free-text field.
+            await dialog.GetByLabel(fieldLabel, new() { Exact = false }).ClickAsync();
+            await page.GetByRole(AriaRole.Option, new() { Name = "Number", Exact = true }).ClickAsync();
+        }
+        else
+        {
+            await dialog.GetByLabel(fieldLabel, new() { Exact = false }).FillAsync(typed);
+        }
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
+
+        // The modal closing is how Apply reports success, and the overlay sits
+        // over Save — clicking Save while it is open times out rather than saving.
+        try
+        {
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = 10_000 });
+        }
+        catch
+        {
+            var alerts = await page.Locator("[role='alert'], [role='status'], .mantine-Notification-root")
+                .AllTextContentsAsync();
+            Assert.Fail($"Apply did not close the {panelTitle} panel. Notifications: " +
+                        (alerts.Count == 0 ? "(none)" : string.Join(" | ", alerts)));
+        }
+
+        // Re-open before saving. If the value is not here, the write never reached
+        // the model and the save path is innocent — that distinction cost several
+        // runs to establish the first time.
+        await shape.ClickAsync(new() { Button = MouseButton.Right });
+        await page.GetByText("Configure", new() { Exact = false }).First
+            .ClickAsync(new() { Timeout = 10_000 });
+        var reopened = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(reopened).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        var shown = await reopened.GetByLabel(fieldLabel, new() { Exact = false }).InputValueAsync();
+        Assert.True(shown == (typed ?? "xsd:double") || shown == "Number",
+            $"The {panelTitle} panel did not keep the value: it re-opened showing '{shown}'.");
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await Assertions.Expect(reopened).ToHaveCountAsync(0, new() { Timeout = 10_000 });
+
+        // Capture what the SPA actually sends, so a value the modeller holds but
+        // does not export is distinguishable from one the server drops.
+        string? sentXml = null;
+        string? preparedBody = null;
+        string? savedBody = null;
+        page.Response += async (_, response) =>
+        {
+            if (response.Url.Contains("/api/workflows/prepare", StringComparison.Ordinal))
+            {
+                try { preparedBody = await response.TextAsync(); } catch { /* raced the nav */ }
+            }
+        };
+        page.Request += (_, request) =>
+        {
+            if (request.Url.Contains("/api/workflows/prepare", StringComparison.Ordinal))
+            {
+                sentXml = request.PostData;
+            }
+            else if (request.Url.EndsWith("/api/workflows", StringComparison.Ordinal)
+                     && request.Method == "POST")
+            {
+                savedBody = request.PostData;
+            }
+        };
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })
+            .ClickAsync(new() { Timeout = 10_000 });
+        await page.WaitForTimeoutAsync(3_000);
+
+        Assert.True(sentXml is not null, "the studio never called /api/workflows/prepare");
+        Assert.True(preparedBody is not null, "prepare returned nothing");
+        Assert.True(preparedBody!.Contains(storedAs, StringComparison.Ordinal),
+            $"prepare's RESPONSE dropped '{storedAs}'. Response was:\n" +
+            preparedBody[..Math.Min(1800, preparedBody.Length)]);
+
+        Assert.True(savedBody is not null, "the studio never POSTed the save");
+        Assert.True(savedBody!.Contains(storedAs, StringComparison.Ordinal),
+            $"the SAVE request dropped '{storedAs}' (prepare's response had it). Sent:\n" +
+            savedBody[..Math.Min(1500, savedBody.Length)]);
+        Assert.True(sentXml!.Contains(storedAs, StringComparison.Ordinal),
+            $"The modeller did not EXPORT '{storedAs}'. What the studio sent:\n" +
+            sentXml[..Math.Min(1800, sentXml.Length)]);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        var parsedBack = System.Xml.Linq.XDocument.Parse(xml);
+        var element = parsedBack.Descendants()
+            .FirstOrDefault(e => e.Attribute("id")?.Value == elementId);
+        var dump = element is null
+            ? "(element not found in the stored diagram)"
+            : element.ToString();
+
+        Assert.True(xml.Contains(storedAs, StringComparison.Ordinal),
+            $"'{storedAs}' is not in the stored diagram. The element came back as:\n{dump}");
+        Assert.Contains(typed ?? "xsd:double", xml, StringComparison.Ordinal);
+    }
+
+    private static string ElementDataDiagram(string processKey) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{processKey}}" name="Element data" isExecutable="true">
+            <bpmn:dataObject id="amountObjData" name="amount" />
+            <bpmn:dataObjectReference id="amountObj" name="amount" dataObjectRef="amountObjData" />
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Handle order">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="adhoc" />
+            <!-- A completion condition from the start: without one the whole
+                 diagram is refused, and prepare's errors block SAVE, not just
+                 publish. The ad-hoc case below overwrites this through the panel. -->
+            <bpmn:adHocSubProcess id="adhoc" name="Case work"
+                                  autonate:completionCondition="${seeded == true}">
+              <bpmn:userTask id="a1" name="Call the customer" />
+            </bpmn:adHocSubProcess>
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{{processKey}}">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t1" bpmnElement="t1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_amountObj" bpmnElement="amountObj">
+                <dc:Bounds x="200" y="240" width="36" height="50" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_adhoc" bpmnElement="adhoc" isExpanded="true">
+                <dc:Bounds x="360" y="60" width="300" height="200" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_a1" bpmnElement="a1">
+                <dc:Bounds x="390" y="100" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
+    // #166. A call activity's mapping is driven by what the CHILD declares.
+    // Free text made an author remember the child's variable names; this asserts
+    // the names are offered.
+    [Fact]
+    public async Task A_call_activitys_mapping_offers_the_childs_declared_names()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        // The child, declaring one input and one data object.
+        var childKey = $"chd{Guid.NewGuid():N}"[..20];
+        var childName = TestNames.Prefixed("mapping-child");
+        var child = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id = Guid.NewGuid(), name = childName, processKey = childKey,
+                bpmnXml = ChildDiagram(childKey)
+            }
+        });
+        Assert.True(child.Ok, $"Seeding the child failed: {child.Status} {await child.TextAsync()}");
+
+        // The endpoint the studio reads. Asserted directly as well as through the
+        // UI, because an empty list would make the panel silently fall back to
+        // free text and look exactly like the old behaviour.
+        var declared = await page.APIRequest.GetAsync($"/api/workflows/{childKey}/declarations");
+        Assert.True(declared.Ok, await declared.TextAsync());
+        using var declaredDoc = JsonDocument.Parse(await declared.TextAsync());
+        var names = declaredDoc.RootElement.EnumerateArray()
+            .Select(d => d.GetProperty("name").GetString()!).ToList();
+        Assert.Contains("orderId", names);
+        Assert.Contains("amount", names);
+
+        // A data object and the reference to it are one name to an author.
+        Assert.Single(names, n => n == "amount");
+    }
+
+    private static string ChildDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Child" isExecutable="true">
+            <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+            <bpmn:dataObjectReference id="amountRef" name="amount" dataObjectRef="amountObj" />
+            <bpmn:ioSpecification id="io">
+              <bpmn:dataInput id="in1" name="orderId" />
+            </bpmn:ioSpecification>
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Do the work" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{{key}}">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t" bpmnElement="t">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
+    private const string Diagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="cg_round_trip" name="Round trip" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Choose"
+                                 autonate:scriptFormat="javascript"
+                                 autonate:routeScript="// pick a route&#10;return 'fa';" />
+            <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
+            <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="tb" />
+            <bpmn:userTask id="ta" name="Route A" />
+            <bpmn:userTask id="tb" name="Route B" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="cg_round_trip">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_cg" bpmnElement="cg">
+                <dc:Bounds x="200" y="90" width="50" height="50" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_ta" bpmnElement="ta">
+                <dc:Bounds x="320" y="60" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_tb" bpmnElement="tb">
+                <dc:Bounds x="320" y="180" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+}

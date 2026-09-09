@@ -372,6 +372,35 @@ context.Behaviors.Register(new MyBehavior(/* ... */));
 
 Same lifecycle as menu items: registrations are tagged with the plugin id, wiped on disable, FK-cascaded on delete. In-flight `ExecuteAsync` calls finish (the ALC stays loaded), but new invocations after disable 404 from the host endpoint, which the Flowable bridge surfaces as a system failure (job retry).
 
+#### Raising a business error a workflow can catch (#114)
+
+A behaviour has **three** ways to end, and they mean different things to the engine:
+
+| return | what the engine does | use it for |
+|---|---|---|
+| `BehaviorResult.Ok(...)` | continues | it worked |
+| `BehaviorResult.Fail(code, msg)` | continues, with your variables set | a predictable outcome the author branches on with a gateway — "userNotFound" |
+| `BehaviorResult.BusinessError(code, msg)` | throws a BPMN error the author catches with an **error boundary event** | a business failure that should change the route — "payment declined" |
+| *throw an exception* | job failure, retried, then dead-lettered | an operational fault — the database was unreachable |
+
+`BusinessError` is **opt-in and closed**. Declare the codes you may raise:
+
+```csharp
+public sealed class ChargeCardBehavior : IWorkflowBehavior
+{
+    public IReadOnlyCollection<string> CatchableErrorCodes => ["PAYMENT_DECLINED"];
+
+    public Task<BehaviorResult> ExecuteAsync(BehaviorContext context, CancellationToken ct)
+        => Task.FromResult(BehaviorResult.BusinessError("PAYMENT_DECLINED", "Card was declined"));
+}
+```
+
+The **host enforces the declaration**: a `BusinessErrorCode` you did not list is stripped, logged, and left as an ordinary failure — still visible, still retryable, just not routable. That is deliberate. If any failure could become a catchable BPMN error, "the database was briefly unreachable" would travel down the "payment declined" branch, and the process would look like it handled something it never understood.
+
+The code must match the error boundary event's code in the studio **character for character**. A mismatch is silent: the error simply stays unhandled.
+
+`CatchableErrorCodes` has a default implementation returning nothing, so a plugin built before this existed keeps compiling and loading unchanged — and raises no catchable error, which is the safe default.
+
 ### 8. Build & package
 
 ```bash

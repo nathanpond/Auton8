@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
 import {
   ActionIcon,
+  Autocomplete,
   Alert,
   Box,
   Button,
@@ -14,17 +15,15 @@ import {
   Group,
   List,
   Modal,
-  MultiSelect,
-  NumberInput,
-  Paper,
   Radio,
-  ScrollArea,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
@@ -42,11 +41,13 @@ import {
   WORKFLOWS_QUERY_KEY
 } from "@/hooks/useWorkflows";
 import {
+  type WorkflowDataDeclaration,
   PrepareWorkflowResponse,
   WorkflowElementSnapshot,
   markWorkflowViewed,
   prepareWorkflow,
-  saveWorkflow
+  saveWorkflow,
+  getWorkflowDeclarations
 } from "@/api/workflows";
 import {
   WorkflowDefaultVariable,
@@ -55,6 +56,14 @@ import {
 } from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
 import { extractProcessVariables } from "@/lib/bpmn/processVariables";
+import {
+  ANNOTATION_ELEMENTS,
+  COMING_SOON_ELEMENTS,
+  EXECUTABLE_SUPPORTED_ELEMENTS,
+  FLOWABLE_VERSION,
+  groupByCategory,
+  type BpmnSupportGroup
+} from "@/lib/bpmn/support";
 import {
   defaultRecurrenceState,
   describeRecurrence,
@@ -157,6 +166,31 @@ type TimerStartEventEditor = {
 type TimerIntermediateMode = "duration" | "date";
 type TimerIntermediateValueKind = "literal" | "expression";
 
+// #158. One editor for all three placements a conditional event can occupy —
+// intermediate catch, boundary, and the event-subprocess start (#162) — because the
+// thing being edited is the same condition in each. `interrupting` is meaningful
+// only on a boundary event and is null elsewhere.
+// #157. A timer boundary carries all three timer kinds; the start-event editor
+// knows only cycle and the intermediate-catch editor only duration and date.
+type TimerBoundaryEventEditor = {
+  id: string;
+  name: string;
+  mode: "duration" | "date" | "cycle";
+  duration: string;
+  date: string;
+  cycle: string;
+  interrupting: boolean;
+  attachedTo: string | null;
+};
+
+type ConditionalEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  conditionExpression: string;
+  interrupting: boolean | null;
+};
+
 type TimerIntermediateCatchEventEditor = {
   id: string;
   type: string;
@@ -178,7 +212,72 @@ type ServiceTaskEditor = {
   name: string;
   kind: ServiceTaskKind;
   behaviorKey: string;
+  // #168. Serialises to flowable:async — see the switch in the service-task
+  // panel for what it buys the author.
+  retryPoint: boolean;
 };
+
+type MessageElementEditor = {
+  id: string;
+  type: string;
+  name: string;
+  // "start" | "catch" | "send" — decides which fields are meaningful.
+  direction: string;
+  correlationKey: string;
+  targetProcessKey: string;
+  messageName: string;
+  editableMessageName: boolean;
+};
+
+type CodedEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  // "error" | "escalation"
+  kind: string;
+  code: string;
+  // null when the element is not a boundary event, or is an error boundary —
+  // BPMN gives an error boundary no choice, it always interrupts.
+  interrupting: boolean | null;
+};
+
+type SignalEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  signalName: string;
+  // "instance" | "global"
+  scope: string;
+  interrupting: boolean | null;
+};
+
+type VariableMapping = { source: string; target: string };
+
+type CallActivityEditor = {
+  id: string;
+  type: string;
+  name: string;
+  calledElement: string;
+  inputs: VariableMapping[];
+  outputs: VariableMapping[];
+};
+
+// #159/#163/#166. One editor for the three element-data shapes, discriminated by
+// `kind`. Three separate editors would each have to be cleared by every branch —
+// the pattern clearEditors() exists to end.
+type ElementDataEditor =
+  | { kind: "adhoc"; id: string; type: string; name: string; completionCondition: string; sequential: boolean }
+  | { kind: "dataObject"; id: string; type: string; name: string; dataType: string }
+  | {
+      kind: "multiInstance";
+      id: string;
+      type: string;
+      name: string;
+      collection: string;
+      elementVariable: string;
+      completionCondition: string;
+      sequential: boolean;
+    };
 
 type GenericElementEditor = {
   id: string;
@@ -221,6 +320,13 @@ type ElementSelection = {
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
+  adhocCompletionCondition?: string | null;
+  adhocOrdering?: string | null;
+  dataObjectType?: string | null;
+  multiInstanceCollection?: string | null;
+  multiInstanceElementVariable?: string | null;
+  multiInstanceCompletionCondition?: string | null;
+  multiInstanceSequential?: boolean | null;
   assignee?: string | null;
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
@@ -239,6 +345,39 @@ type ElementSelection = {
   sourceType?: string | null;
   userFormMode?: string | null;
   userFormShortCode?: string | null;
+  // #158. Present only on elements carrying a conditionalEventDefinition — the
+  // key's ABSENCE is what keeps timer intermediate catch events out of the
+  // conditional editor, since onRequestConfigure routes on $type plus key presence.
+  cancelActivity?: boolean | null;
+  // #157. Present only on a boundary event carrying a timer definition — their
+  // ABSENCE is what keeps conditional boundary events out of the timer editor,
+  // since both kinds carry cancelActivity.
+  boundaryTimerDuration?: string | null;
+  boundaryTimerDate?: string | null;
+  boundaryTimerCycle?: string | null;
+  attachedTo?: string | null;
+  // #168. Present only on service tasks the studio recognises, like
+  // serviceTaskKind and behaviorKey above.
+  retryPoint?: boolean | null;
+  // #112. Present only on message-carrying elements, receive tasks and send
+  // tasks. Their absence is what keeps everything else out of the message editor.
+  messageDirection?: string | null;
+  messageCorrelationKey?: string | null;
+  messageTargetProcessKey?: string | null;
+  messageName?: string | null;
+  // #114. Present only on error/escalation events.
+  codedEventKind?: string | null;
+  codedEventCode?: string | null;
+  codedEventInterrupting?: boolean | null;
+  // #113. Present only on a call activity.
+  calledElement?: string | null;
+  callInputs?: { source: string; target: string }[] | null;
+  callOutputs?: { source: string; target: string }[] | null;
+  // #156. Present only on signal events.
+  signalEventName?: string | null;
+  signalEventScope?: string | null;
+  signalEventIsNew?: boolean | null;
+  signalEventInterrupting?: boolean | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -375,8 +514,23 @@ export default function WorkflowStudio() {
   const [timerIntermediateEditor, setTimerIntermediateEditor] =
     useState<TimerIntermediateCatchEventEditor | null>(null);
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
+  const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
+  const [codedEventEditor, setCodedEventEditor] = useState<CodedEventEditor | null>(null);
+  const [callActivityEditor, setCallActivityEditor] = useState<CallActivityEditor | null>(null);
+  const [signalEditor, setSignalEditor] = useState<SignalEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
+  const [elementDataEditor, setElementDataEditor] = useState<ElementDataEditor | null>(null);
+  const [conditionalEventEditor, setConditionalEventEditor] =
+    useState<ConditionalEventEditor | null>(null);
+  const [timerBoundaryEditor, setTimerBoundaryEditor] =
+    useState<TimerBoundaryEventEditor | null>(null);
+  // #167. A diagram opened with manual or generic tasks in it has been changed
+  // without the author doing anything, so this is a condition belonging to the page
+  // rather than feedback on an action — an in-page Alert, not a toast (CLAUDE.md).
+  const [convertedTasks, setConvertedTasks] = useState<
+    Array<{ id: string; name: string | null; was: string }>
+  >([]);
 
   const sortedWorkflows = useMemo(
     () => [...workflows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
@@ -401,8 +555,83 @@ export default function WorkflowStudio() {
     setDirty(true);
   }, []);
 
+  // Every element editor this component owns. Adding one means adding it
+  // here and nowhere else.
+  const clearEditors = useCallback(() => {
+    setCallActivityEditor(null);
+    setCodedEventEditor(null);
+    setConditionalEventEditor(null);
+    setGatewayEditor(null);
+    setGenericEditor(null);
+    setMessageEditor(null);
+    setScriptTaskEditor(null);
+    setSequenceFlowEditor(null);
+    setServiceTaskEditor(null);
+    setSignalEditor(null);
+    setSignalStartEditor(null);
+    setTimerBoundaryEditor(null);
+    setTimerIntermediateEditor(null);
+    setTimerStartEditor(null);
+    setUserTaskEditor(null);
+  }, []);
+
   const onRequestConfigure = useCallback((raw: unknown) => {
+    // #159/#163/#166. One call, at the top, instead of every branch clearing
+    // every other editor. That pattern was 148 lines inside this callback and
+    // grew quadratically: each editor added had to be cleared in every branch,
+    // and the one branch that forgot left two modals open at once. Clearing
+    // first and letting the matching branch set its own is the same behaviour
+    // with the failure mode removed.
+    clearEditors();
     const selection = raw as ElementSelection;
+    // #157. Before the conditional branch: both boundary shapes carry
+    // cancelActivity, and only the timer one carries the boundaryTimer* keys, so
+    // presence of those is what tells them apart.
+    const isTimerBoundary =
+      !!selection &&
+      selection.type === "bpmn:BoundaryEvent" &&
+      ("boundaryTimerDuration" in selection ||
+        "boundaryTimerDate" in selection ||
+        "boundaryTimerCycle" in selection);
+    if (isTimerBoundary && selection) {
+      const duration = (selection.boundaryTimerDuration ?? "").trim();
+      const date = (selection.boundaryTimerDate ?? "").trim();
+      const cycle = (selection.boundaryTimerCycle ?? "").trim();
+      setTimerBoundaryEditor({
+        id: selection.id,
+        name: selection.name ?? "",
+        // Default to duration for a freshly dropped event, which is the common case.
+        mode: cycle ? "cycle" : date ? "date" : "duration",
+        duration,
+        date,
+        cycle,
+        interrupting: selection.cancelActivity !== false,
+        attachedTo: selection.attachedTo ?? null
+      });
+      return;
+    }
+    // #158. First branch, because a conditional BOUNDARY event is the one shape no
+    // other branch below claims — and routing on $type alone would send every
+    // intermediate catch event here, timer ones included. describeConditionalEvent
+    // omits these keys entirely unless a conditionalEventDefinition is present, so
+    // presence is the discriminator.
+    const isConditionalEvent =
+      !!selection &&
+      ("conditionExpression" in selection && "cancelActivity" in selection) &&
+      (selection.type === "bpmn:IntermediateCatchEvent" ||
+        selection.type === "bpmn:BoundaryEvent" ||
+        selection.type === "bpmn:StartEvent");
+    if (isConditionalEvent && selection) {
+      setConditionalEventEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        conditionExpression: selection.conditionExpression ?? "",
+        interrupting:
+          selection.type === "bpmn:BoundaryEvent" ? selection.cancelActivity !== false : null
+      });
+      return;
+    }
     const isTimerIntermediateCatch =
       !!selection &&
       selection.type === "bpmn:IntermediateCatchEvent" &&
@@ -420,14 +649,6 @@ export default function WorkflowStudio() {
           selection.timerDate
         )
       );
-      setTimerStartEditor(null);
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
     const isTimerStart =
@@ -455,14 +676,6 @@ export default function WorkflowStudio() {
           ? "Auton8 doesn't recognize this cron expression. The picker is locked — edit the raw cron below or clear it to start fresh."
           : null
       });
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
     const isSignalStart =
@@ -488,16 +701,80 @@ export default function WorkflowStudio() {
           ? [...selection.recordTypeShortCodes]
           : []
       });
-      setTimerStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
+    // #113. A call activity carries its own configuration and would otherwise
+    // reach the generic editor, where the author could only rename it.
+    if (selection && selection.type === "bpmn:CallActivity") {
+      setCallActivityEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        calledElement: selection.calledElement ?? "",
+        inputs: selection.callInputs ?? [],
+        outputs: selection.callOutputs ?? []
+      });
+      return;
+    }
+
+    // #156. Signal events carry their own definition type; without this they
+    // reach the generic editor with nowhere to put a name or a scope.
+    if (selection && typeof selection.signalEventName === "string") {
+      setSignalEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        signalName: selection.signalEventName,
+        // A signal that already exists keeps the scope it has — opening one must
+        // not silently propose changing what a deployed process does. Only a
+        // NEW signal defaults to instance.
+        scope: selection.signalEventIsNew ? "instance" : (selection.signalEventScope ?? "global"),
+        interrupting:
+          typeof selection.signalEventInterrupting === "boolean"
+            ? selection.signalEventInterrupting
+            : null
+      });
+      return;
+    }
+
+    // #114. Error and escalation events, routed before the message branch: they
+    // carry their own definition type and would otherwise reach the generic
+    // editor with nowhere to put a code.
+    if (selection && typeof selection.codedEventKind === "string") {
+      setCodedEventEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        kind: selection.codedEventKind,
+        code: selection.codedEventCode ?? "",
+        interrupting:
+          typeof selection.codedEventInterrupting === "boolean"
+            ? selection.codedEventInterrupting
+            : null
+      });
+      return;
+    }
+
+    // #112. Before the service-task branch — a send task is a message element
+    // first, and a receive task would otherwise land in the generic editor with
+    // nowhere to put a correlation key.
+    if (selection && typeof selection.messageDirection === "string") {
+      setMessageEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        direction: selection.messageDirection,
+        correlationKey: selection.messageCorrelationKey ?? "",
+        targetProcessKey: selection.messageTargetProcessKey ?? "",
+        messageName: selection.messageName ?? "",
+        // Only a send task names its own message; everywhere else the name comes
+        // from the <bpmn:message> the diagram declares, and editing it here would
+        // silently diverge from it.
+        editableMessageName: selection.type === "bpmn:SendTask"
+      });
+      return;
+    }
+
     const isServiceTask =
       !!selection &&
       selection.type === "bpmn:ServiceTask" &&
@@ -511,19 +788,57 @@ export default function WorkflowStudio() {
         type: selection.type,
         name: selection.name ?? "",
         kind: "behavior",
-        behaviorKey: selection.behaviorKey ?? ""
+        behaviorKey: selection.behaviorKey ?? "",
+        retryPoint: selection.retryPoint === true
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
-    if (selection && selection.type === "bpmn:ScriptTask") {
+    // #218. A complex gateway routes on an author's script, and the fields it
+    // needs are the script panel's fields. Routed here rather than given a
+    // twentieth editor of its own — every editor added to this component has to
+    // be cleared by every other branch, and that list is already the most
+    // fragile thing in the file.
+    // #159/#163/#166. Before the task branches, because a multi-instance marker
+    // sits on an activity that also matches one of them — presence of the
+    // multiInstance* keys is the discriminator, per load-bearing fact 3.
+    if (selection && "multiInstanceCollection" in selection) {
+      setElementDataEditor({
+        kind: "multiInstance",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        collection: selection.multiInstanceCollection ?? "",
+        elementVariable: selection.multiInstanceElementVariable ?? "",
+        completionCondition: selection.multiInstanceCompletionCondition ?? "",
+        sequential: selection.multiInstanceSequential === true
+      });
+      return;
+    }
+
+    if (selection && "adhocCompletionCondition" in selection) {
+      setElementDataEditor({
+        kind: "adhoc",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        completionCondition: selection.adhocCompletionCondition ?? "",
+        sequential: selection.adhocOrdering === "Sequential"
+      });
+      return;
+    }
+
+    if (selection && "dataObjectType" in selection) {
+      setElementDataEditor({
+        kind: "dataObject",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        dataType: selection.dataObjectType ?? ""
+      });
+      return;
+    }
+
+    if (selection && (selection.type === "bpmn:ScriptTask" || selection.type === "bpmn:ComplexGateway")) {
       setScriptTaskEditor({
         id: selection.id,
         type: selection.type,
@@ -536,14 +851,6 @@ export default function WorkflowStudio() {
         script: selection.script ?? "",
         resultVariable: selection.resultVariable ?? ""
       });
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -552,14 +859,6 @@ export default function WorkflowStudio() {
         conditionExpression: selection.conditionExpression ?? "",
         sourceType: selection.sourceType ?? null
       });
-      setScriptTaskEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
     } else if (
       selection &&
       (selection.type === "bpmn:ExclusiveGateway" || selection.type === "bpmn:InclusiveGateway")
@@ -581,14 +880,6 @@ export default function WorkflowStudio() {
         defaultFlowId: validDefaultFlowId,
         outgoingFlows
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGenericEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -618,47 +909,34 @@ export default function WorkflowStudio() {
         userFormMode,
         userFormShortCode: (selection.userFormShortCode ?? "").trim()
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
     } else if (selection) {
       setGenericEditor({
         id: selection.id,
         type: selection.type,
         name: selection.name ?? ""
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-    } else {
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
     }
-  }, []);
+    // No trailing `else`: with nothing selected, clearEditors() at the top has
+    // already closed every panel. That branch used to hold nothing but the
+    // clear-calls, and removing them left an empty block behind.
+  }, [clearEditors]);
+
+  const onTasksConverted = useCallback(
+    (converted: Array<{ id: string; name: string | null; was: string }>) => {
+      // Accumulate rather than replace: a drop after an import should not erase the
+      // notice explaining what the import already changed.
+      setConvertedTasks((previous) => [...previous, ...converted]);
+    },
+    []
+  );
 
   const callbacks = useMemo(
     () => ({
       NotifyDiagramChanged: onDiagramChanged,
-      RequestConfigureElement: onRequestConfigure
+      RequestConfigureElement: onRequestConfigure,
+      NotifyTasksConverted: onTasksConverted
     }),
-    [onDiagramChanged, onRequestConfigure]
+    [onDiagramChanged, onRequestConfigure, onTasksConverted]
   );
 
   const { containerRef, handle, loading: modelerLoading, error: modelerError } = useBpmnModeler({
@@ -700,6 +978,8 @@ export default function WorkflowStudio() {
     setServiceTaskEditor(null);
     setGatewayEditor(null);
     setGenericEditor(null);
+    setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -945,6 +1225,63 @@ export default function WorkflowStudio() {
       setTimerIntermediateEditor(null);
     });
 
+  const applyTimerBoundary = () =>
+    runBusy("applying timer boundary event changes", async () => {
+      if (!handle || !timerBoundaryEditor) {
+        throw new Error("Select a timer boundary event before applying changes.");
+      }
+
+      const { mode, duration, date, cycle } = timerBoundaryEditor;
+      const value = (mode === "duration" ? duration : mode === "date" ? date : cycle).trim();
+      if (!value) {
+        // Refused here as well as at publish: a timer with no time deploys, never
+        // fires, and the activity it guards waits forever.
+        throw new Error(
+          mode === "duration"
+            ? "Enter a duration (e.g. PT15M) before applying."
+            : mode === "date"
+              ? "Enter a date/time (e.g. 2026-12-31T09:00:00) before applying."
+              : "Enter a repeating cycle (e.g. R3/PT1H) before applying."
+        );
+      }
+
+      await workflow.updateTimerBoundaryEventProperties(handle, {
+        id: timerBoundaryEditor.id,
+        name: timerBoundaryEditor.name,
+        boundaryTimerDuration: mode === "duration" ? value : "",
+        boundaryTimerDate: mode === "date" ? value : "",
+        boundaryTimerCycle: mode === "cycle" ? value : "",
+        cancelActivity: timerBoundaryEditor.interrupting
+      });
+      setTimerBoundaryEditor(null);
+    });
+
+  const applyConditionalEvent = () =>
+    runBusy("applying conditional event changes", async () => {
+      if (!handle || !conditionalEventEditor) {
+        throw new Error("Select a conditional event before applying changes.");
+      }
+
+      const expression = conditionalEventEditor.conditionExpression.trim();
+      if (!expression) {
+        // Refused here as well as at publish: an empty condition is written as a
+        // condition element that never evaluates, so the process waits forever.
+        throw new Error("Enter a condition (e.g. ${approved == true}) before applying.");
+      }
+
+      await workflow.updateConditionalEventProperties(handle, {
+        id: conditionalEventEditor.id,
+        name: conditionalEventEditor.name,
+        conditionExpression: expression,
+        cancelActivity:
+          conditionalEventEditor.interrupting === null
+            ? undefined
+            : conditionalEventEditor.interrupting
+      });
+      setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
+    });
+
   const applyServiceTask = () =>
     runBusy("applying service task changes", async () => {
       if (!handle || !serviceTaskEditor) {
@@ -958,9 +1295,85 @@ export default function WorkflowStudio() {
         id: serviceTaskEditor.id,
         name: serviceTaskEditor.name,
         serviceTaskKind: serviceTaskEditor.kind,
-        behaviorKey
+        behaviorKey,
+        retryPoint: serviceTaskEditor.retryPoint
       });
       setServiceTaskEditor(null);
+    });
+
+  const applyMessageElement = () =>
+    runBusy("applying message settings", async () => {
+      if (!handle || !messageEditor) {
+        throw new Error("Select a message element before applying changes.");
+      }
+      await workflow.updateMessageElementProperties(handle, {
+        id: messageEditor.id,
+        name: messageEditor.name,
+        correlationKey: messageEditor.correlationKey,
+        targetProcessKey: messageEditor.targetProcessKey,
+        messageName: messageEditor.messageName
+      });
+      setMessageEditor(null);
+    });
+
+  const applyCodedEvent = () =>
+    runBusy("applying event code", async () => {
+      if (!handle || !codedEventEditor) {
+        throw new Error("Select an error or escalation event before applying changes.");
+      }
+      await workflow.updateCodedEventProperties(handle, {
+        id: codedEventEditor.id,
+        name: codedEventEditor.name,
+        kind: codedEventEditor.kind,
+        code: codedEventEditor.code,
+        interrupting: codedEventEditor.interrupting
+      });
+      setCodedEventEditor(null);
+    });
+
+  const applyCallActivity = () =>
+    runBusy("applying call activity settings", async () => {
+      if (!handle || !callActivityEditor) {
+        throw new Error("Select a call activity before applying changes.");
+      }
+      if (!callActivityEditor.calledElement.trim()) {
+        throw new Error("Pick which workflow this step should run.");
+      }
+      await workflow.updateCallActivityProperties(handle, {
+        id: callActivityEditor.id,
+        name: callActivityEditor.name,
+        calledElement: callActivityEditor.calledElement,
+        inputs: callActivityEditor.inputs,
+        outputs: callActivityEditor.outputs
+      });
+      setCallActivityEditor(null);
+    });
+
+  const applySignalEvent = () =>
+    runBusy("applying signal settings", async () => {
+      if (!handle || !signalEditor) {
+        throw new Error("Select a signal event before applying changes.");
+      }
+      if (!signalEditor.signalName.trim()) {
+        throw new Error("Give the signal a name — that is what matches one end to the other.");
+      }
+      await workflow.updateSignalElementProperties(handle, {
+        id: signalEditor.id,
+        name: signalEditor.name,
+        signalName: signalEditor.signalName,
+        scope: signalEditor.scope,
+        interrupting: signalEditor.interrupting
+      });
+      setSignalEditor(null);
+    });
+
+  const applyElementData = () =>
+    runBusy("applying element changes", async () => {
+      if (!handle || !elementDataEditor) {
+        throw new Error("Select an element before applying changes.");
+      }
+      await workflow.updateElementDataProperties(handle, elementDataEditor);
+      setElementDataEditor(null);
     });
 
   const applyGeneric = () =>
@@ -973,6 +1386,8 @@ export default function WorkflowStudio() {
         name: genericEditor.name
       });
       setGenericEditor(null);
+    setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     });
 
   const applyGateway = () =>
@@ -1089,23 +1504,54 @@ export default function WorkflowStudio() {
             to Flowable, and start new executions from the current model.
           </Text>
         </Stack>
-        <Button
-          variant="gradient"
-          gradient={{ from: "#2680c2", to: "#0f609b", deg: 135 }}
-          radius="xl"
-          size="sm"
-          onClick={() => setShowBpmnTypesModal(true)}
-          title="View supported BPMN node types"
-          leftSection={<i className="fa fa-sitemap" aria-hidden="true" />}
-          rightSection={<i className="fa fa-arrow-right" aria-hidden="true" />}
-        >
-          Supported BPMN Types
-        </Button>
+        {/* #107: was "Supported BPMN Types", which the panel outgrew — it now also
+            says what is coming, what the engine cannot run, and what never
+            executes by design. The native `title` went with it; tooltips in this
+            app are Mantine's, which screen readers announce. */}
+        <Tooltip label="What the studio offers, and what Flowable will run">
+          <Button
+            variant="gradient"
+            gradient={{ from: "#2680c2", to: "#0f609b", deg: 135 }}
+            radius="xl"
+            size="sm"
+            onClick={() => setShowBpmnTypesModal(true)}
+            leftSection={<i className="fa fa-sitemap" aria-hidden="true" />}
+            rightSection={<i className="fa fa-arrow-right" aria-hidden="true" />}
+          >
+            BPMN element support
+          </Button>
+        </Tooltip>
       </Group>
 
       {error && (
         <Alert color="red" variant="light" mb="sm">
           {error}
+        </Alert>
+      )}
+      {convertedTasks.length > 0 && (
+        <Alert
+          color="blue"
+          variant="light"
+          mb="sm"
+          withCloseButton
+          onClose={() => setConvertedTasks([])}
+          title={
+            convertedTasks.length === 1
+              ? "Converted to a user task"
+              : `Converted ${convertedTasks.length} steps to user tasks`
+          }
+        >
+          Auton8 runs work through user tasks. A manual task or a plain task looks
+          like a step somebody performs, but the engine passes straight through it
+          without waiting for anyone — so the process would finish having skipped it.
+          {convertedTasks.some((task) => task.name) && (
+            <>
+              {" "}
+              Converted:{" "}
+              {convertedTasks.map((task) => task.name ?? task.id).join(", ")}.
+            </>
+          )}{" "}
+          Give each one an assignee, or candidate users or groups, before publishing.
         </Alert>
       )}
       {status && (
@@ -1365,6 +1811,33 @@ export default function WorkflowStudio() {
         />
       )}
 
+      {timerBoundaryEditor && (
+        <TimerBoundaryEventModal
+          editor={timerBoundaryEditor}
+          onChange={setTimerBoundaryEditor}
+          onClose={() => {
+            if (busy) return;
+            setTimerBoundaryEditor(null);
+          }}
+          onApply={applyTimerBoundary}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {conditionalEventEditor && (
+        <ConditionalEventModal
+          editor={conditionalEventEditor}
+          onChange={setConditionalEventEditor}
+          onClose={() => {
+            if (busy) return;
+            setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
+          }}
+          onApply={applyConditionalEvent}
+          disabled={!!busy || !handle}
+        />
+      )}
+
       {serviceTaskEditor && (
         <ServiceTaskModal
           editor={serviceTaskEditor}
@@ -1374,6 +1847,59 @@ export default function WorkflowStudio() {
             setServiceTaskEditor(null);
           }}
           onApply={applyServiceTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {messageEditor && (
+        <MessageElementModal
+          editor={messageEditor}
+          onChange={setMessageEditor}
+          onClose={() => {
+            if (busy) return;
+            setMessageEditor(null);
+          }}
+          onApply={applyMessageElement}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {signalEditor && (
+        <SignalEventModal
+          editor={signalEditor}
+          onChange={setSignalEditor}
+          onClose={() => {
+            if (busy) return;
+            setSignalEditor(null);
+          }}
+          onApply={applySignalEvent}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {callActivityEditor && (
+        <CallActivityModal
+          editor={callActivityEditor}
+          currentProcessKey={currentModel?.processKey ?? null}
+          onChange={setCallActivityEditor}
+          onClose={() => {
+            if (busy) return;
+            setCallActivityEditor(null);
+          }}
+          onApply={applyCallActivity}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {codedEventEditor && (
+        <CodedEventModal
+          editor={codedEventEditor}
+          onChange={setCodedEventEditor}
+          onClose={() => {
+            if (busy) return;
+            setCodedEventEditor(null);
+          }}
+          onApply={applyCodedEvent}
           disabled={!!busy || !handle}
         />
       )}
@@ -1391,6 +1917,19 @@ export default function WorkflowStudio() {
         />
       )}
 
+      {elementDataEditor && (
+        <ElementDataModal
+          editor={elementDataEditor}
+          onChange={setElementDataEditor}
+          onClose={() => {
+            if (busy) return;
+            setElementDataEditor(null);
+          }}
+          onApply={applyElementData}
+          disabled={!!busy}
+        />
+      )}
+
       {genericEditor && (
         <GenericElementModal
           editor={genericEditor}
@@ -1398,6 +1937,8 @@ export default function WorkflowStudio() {
           onClose={() => {
             if (busy) return;
             setGenericEditor(null);
+    setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
           }}
           onApply={applyGeneric}
           disabled={!!busy || !handle}
@@ -2092,6 +2633,137 @@ function CreateWorkflowModal({
   );
 }
 
+// #159/#163/#166. The panel behind the three element-data shapes.
+//
+// Each field is a real label bound to its control, and the copy says what the
+// value DOES rather than naming the BPMN attribute — an author setting a
+// completion condition is deciding when the case is finished, not editing
+// `completionCondition`.
+function ElementDataModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: ElementDataEditor;
+  onChange: (next: ElementDataEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const title =
+    editor.kind === "adhoc"
+      ? "Case Work"
+      : editor.kind === "dataObject"
+        ? "Data"
+        : "Repeat For Each";
+
+  return (
+    <Modal opened onClose={onClose} title={title} size="lg">
+      <Stack gap="md">
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
+
+        {editor.kind === "adhoc" && (
+          <>
+            <Text size="sm" c="dimmed">
+              The steps inside run in no fixed order — a person picks what happens next,
+              as often as they need, until this condition is true.
+            </Text>
+            <TextInput
+              label="Finished when"
+              placeholder="${approved == true}"
+              description="Without this the section can never finish, and publishing is refused."
+              value={editor.completionCondition}
+              onChange={(e) => onChange({ ...editor, completionCondition: e.currentTarget.value })}
+            />
+            <Switch
+              label="Run the steps one at a time"
+              checked={editor.sequential}
+              onChange={(e) => onChange({ ...editor, sequential: e.currentTarget.checked })}
+            />
+          </>
+        )}
+
+        {editor.kind === "dataObject" && (
+          <>
+            <Text size="sm" c="dimmed">
+              Declares a process variable by this name. Conditions can then use it without
+              being warned that nothing sets it.
+            </Text>
+            <Select
+              label="Type"
+              data={[
+                { value: "", label: "Not specified" },
+                { value: "xsd:string", label: "Text" },
+                { value: "xsd:double", label: "Number" },
+                { value: "xsd:boolean", label: "Yes / no" },
+                { value: "xsd:dateTime", label: "Date and time" }
+              ]}
+              description="Sets the variable's starting type. It is not enforced once the process is running."
+              value={editor.dataType}
+              onChange={(value) => onChange({ ...editor, dataType: value ?? "" })}
+            />
+          </>
+        )}
+
+        {editor.kind === "multiInstance" && (
+          <>
+            <Text size="sm" c="dimmed">
+              Runs this step once per item in a list. Each run sees its own item under the
+              name below.
+            </Text>
+            <TextInput
+              label="List to repeat over"
+              placeholder="${items}"
+              value={editor.collection}
+              onChange={(e) => onChange({ ...editor, collection: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Name for each item"
+              placeholder="item"
+              description="Scripts read it with variables.get('item')."
+              value={editor.elementVariable}
+              onChange={(e) => onChange({ ...editor, elementVariable: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Stop early when"
+              placeholder="${nrOfCompletedInstances >= 2}"
+              description="Optional. Remaining runs are cancelled when this becomes true."
+              value={editor.completionCondition}
+              onChange={(e) => onChange({ ...editor, completionCondition: e.currentTarget.value })}
+            />
+            <Switch
+              label="Run them one at a time"
+              description="Off means every item runs at once."
+              checked={editor.sequential}
+              onChange={(e) => onChange({ ...editor, sequential: e.currentTarget.checked })}
+            />
+          </>
+        )}
+
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={disabled}>
+            Cancel
+          </Button>
+          <Button onClick={onApply} loading={disabled}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 function ScriptTaskModal({
   editor,
   onChange,
@@ -2107,12 +2779,26 @@ function ScriptTaskModal({
   disabled: boolean;
   canElevate: boolean;
 }) {
+  // #218. The same panel edits a complex gateway's routing script — the fields
+  // are the fields — but the copy must not tell an author they are editing a
+  // script task, and a gateway's result variable is generated, not theirs.
+  const isRoutingGateway = editor.type === "bpmn:ComplexGateway";
+
   return (
-    <Modal opened onClose={onClose} title="Script Task" size="xl">
+    <Modal
+      opened
+      onClose={onClose}
+      title={isRoutingGateway ? "Complex Gateway" : "Script Task"}
+      size="xl"
+    >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Edit the selected BPMN script task. Auton8 saves the JavaScript body inline in the
-          BPMN XML and validates it before save or publish.
+          {isRoutingGateway
+            ? "This gateway routes on your script. Return the id of one of its outgoing " +
+              "sequence flows; returning anything else fails the step rather than quietly " +
+              "taking a branch. The ids are available to the script as autonateRoutes."
+            : "Edit the selected BPMN script task. Auton8 saves the JavaScript body inline in the " +
+              "BPMN XML and validates it before save or publish."}
         </Text>
 
         <Group gap="xs" wrap="wrap">
@@ -2122,7 +2808,7 @@ function ScriptTaskModal({
 
         <Group gap="md" grow align="flex-start" wrap="wrap">
           <TextInput
-            label="Task Name"
+            label={isRoutingGateway ? "Gateway Name" : "Task Name"}
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
           />
@@ -2138,11 +2824,16 @@ function ScriptTaskModal({
             }
             allowDeselect={false}
           />
-          <TextInput
-            label="Result Variable"
-            value={editor.resultVariable}
-            onChange={(e) => onChange({ ...editor, resultVariable: e.currentTarget.value })}
-          />
+          {/* A routing gateway's result variable is generated by the publish-time
+              expansion and bound to the outgoing flows' conditions. Offering it
+              here would let an author break the binding with no way to tell. */}
+          {!isRoutingGateway && (
+            <TextInput
+              label="Result Variable"
+              value={editor.resultVariable}
+              onChange={(e) => onChange({ ...editor, resultVariable: e.currentTarget.value })}
+            />
+          )}
         </Group>
 
         {/* #153. Unset is the default and the common case; the two explicit
@@ -2237,6 +2928,25 @@ function ScriptTaskModal({
           key={`${editor.scriptFormat}:${editor.script}`}
           script={editor.script}
           scriptFormat={editor.scriptFormat}
+        />
+
+        <Divider />
+
+        {/* #168. Script tasks are always retry points — WorkflowBpmnXml's
+            ForceAsyncScriptTasks sets flowable:async on every one at publish,
+            so a thrown error becomes a job failure instead of a 500 on the
+            start call. Shown as fixed rather than as a switch that silently
+            does nothing. */}
+        <Switch
+          label="Retry this step on its own if it fails"
+          description={
+            "Always on for script tasks. Auton8 saves the workflow's progress just before a " +
+            "script runs, so a script that fails is retried by itself and its error is reported " +
+            "rather than failing the whole start."
+          }
+          checked
+          disabled
+          readOnly
         />
 
         <Group justify="flex-end" gap="xs">
@@ -3214,11 +3924,570 @@ function ServiceTaskModal({
           </label>
         )}
 
+        <Divider />
+
+        {/* #168. Worded as what it does, not as "async". The trade-off is
+            stated because an author choosing this should know what they are
+            buying: a checkpoint costs a brief pause and saves redoing the work
+            in front of it. */}
+        <Switch
+          label="Retry this step on its own if it fails"
+          description={
+            "Auton8 saves the workflow's progress just before this step. If the step fails it is " +
+            "retried by itself, instead of redoing everything since the last save. The trade-off " +
+            "is that the workflow pauses here briefly even when nothing goes wrong."
+          }
+          checked={editor.retryPoint}
+          onChange={(e) => onChange({ ...editor, retryPoint: e.currentTarget.checked })}
+        />
+
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>
             Close
           </Button>
           <Button onClick={onApply} disabled={disabled || !editor.behaviorKey.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #112. One modal for every message element, because they differ only in which
+// fields mean anything:
+//
+//   start — nothing to correlate to; no instance exists yet, so a key written
+//           here would look like a filter that silently matches everything.
+//   catch — a correlation key: which process variable identifies THIS instance
+//           to a sender.
+//   send  — which workflow to address, and the variable here whose value picks
+//           the instance over there.
+function MessageElementModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: MessageElementEditor;
+  onChange: (next: MessageElementEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isSend = editor.direction === "send";
+  const isStart = editor.direction === "start";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (Message)`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isSend
+            ? "Tell another workflow that something happened here. Auton8 finds the one waiting " +
+              "process instance whose correlation value matches, and delivers to it."
+            : isStart
+              ? "Starts a new run of this workflow when this message arrives. Nothing is waiting " +
+                "yet, so there is nothing to correlate against."
+              : "Waits here until this message arrives. The correlation key is how a sender says " +
+                "which run of this workflow it means."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Message element name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Await payment"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Message</span>
+          <input
+            className="form-control"
+            aria-label="Message"
+            value={editor.messageName}
+            disabled={!editor.editableMessageName}
+            onChange={(e) => onChange({ ...editor, messageName: e.target.value })}
+            placeholder="paymentCleared"
+          />
+          <p className="workflow-modal-note">
+            {editor.editableMessageName
+              ? "The name a sender uses to address this."
+              : "Comes from the message declared on the diagram, so it always matches what the " +
+                "engine subscribes to."}
+          </p>
+        </label>
+
+        {isSend && (
+          <label className="workflow-field">
+            <span>Send to workflow</span>
+            <input
+              className="form-control"
+              aria-label="Send to workflow"
+              value={editor.targetProcessKey}
+              onChange={(e) => onChange({ ...editor, targetProcessKey: e.target.value })}
+              placeholder="orders"
+            />
+            <p className="workflow-modal-note">
+              The process key of the workflow to notify. Auton8 never broadcasts &mdash; a message
+              goes to exactly one waiting run, or the send reports that it found none.
+            </p>
+          </label>
+        )}
+
+        {!isStart && (
+          <label className="workflow-field">
+            <span>Correlation key</span>
+            <input
+              className="form-control"
+              aria-label="Correlation key"
+              value={editor.correlationKey}
+              onChange={(e) => onChange({ ...editor, correlationKey: e.target.value })}
+              placeholder="orderId"
+            />
+            <p className="workflow-modal-note">
+              {isSend
+                ? "The process variable here whose value identifies the run to notify."
+                : "The process variable that identifies this run. A sender supplies its value."}{" "}
+              It must be unique among waiting runs: if two match, Auton8 refuses and tells the
+              sender how many, rather than picking one.
+            </p>
+          </label>
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #114. Error and escalation events share one editor because they share one
+// mechanism: a code thrown at one point and caught at another. The whole risk in
+// that mechanism is that the two codes do not match, in which case nothing
+// happens and nothing says so — which is why the code is the only required field
+// and why the note says out loud what a mismatch costs.
+function CodedEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: CodedEventEditor;
+  onChange: (next: CodedEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isError = editor.kind === "error";
+  const noun = isError ? "Error" : "Escalation";
+  const isThrowing =
+    editor.type === "bpmn:EndEvent" || editor.type === "bpmn:IntermediateThrowEvent";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (${noun})`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isError
+            ? isThrowing
+              ? "Stops this stretch of the process and hands control to whichever boundary event " +
+                "carries the same code."
+              : "Catches an error raised inside the activity this is attached to, and takes the " +
+                "process down this path instead. An error boundary always interrupts."
+            : isThrowing
+              ? "Raises a flag for something further out to handle. Unlike an error, the process " +
+                "carries on from here."
+              : "Handles an escalation raised inside the activity this is attached to."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Event name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder={isError ? "Payment declined" : "Needs a manager"}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>{noun} code</span>
+          <input
+            className="form-control"
+            aria-label={`${noun} code`}
+            value={editor.code}
+            onChange={(e) => onChange({ ...editor, code: e.target.value })}
+            placeholder={isError ? "PAYMENT_DECLINED" : "NEEDS_MANAGER"}
+          />
+          <p className="workflow-modal-note">
+            This is what matches one end to the other, character for character. A code that
+            nothing catches is not a warning at publish for escalations &mdash; it just means
+            nobody was listening. For errors it <strong>is</strong> refused at publish, because
+            an error nobody catches destroys the whole run.
+          </p>
+        </label>
+
+        {editor.interrupting !== null && (
+          <Switch
+            label="Stop the attached step while this is handled"
+            description={
+              "On, the step is cancelled and only this path continues. Off, the step keeps " +
+              "running and this path runs alongside it."
+            }
+            checked={editor.interrupting}
+            onChange={(e) => onChange({ ...editor, interrupting: e.currentTarget.checked })}
+          />
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.code.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #113. Choosing, not typing. The list is the published workflows, which is what
+// makes the publish-time check meaningful: a key picked from here resolves, and
+// publish pins the exact version it resolved to.
+//
+// The current workflow is excluded. A first version calling itself has nothing to
+// resolve and is refused at publish anyway; leaving it in the list would offer a
+// choice that cannot work.
+function CallActivityModal({
+  editor,
+  currentProcessKey,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: CallActivityEditor;
+  currentProcessKey: string | null;
+  onChange: (next: CallActivityEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  // #166. The child's declared data, so the mapping rows offer its real names.
+  // Falls back to free text when the child declares nothing — which is most
+  // children today, and must keep working exactly as it did.
+  const { data: childDeclarations = [] } = useQuery<WorkflowDataDeclaration[]>({
+    queryKey: ["workflow-declarations", editor.calledElement],
+    queryFn: ({ signal }) => getWorkflowDeclarations(editor.calledElement, signal),
+    enabled: editor.calledElement.length > 0
+  });
+
+  const { data: workflows = [], isLoading } = useWorkflows();
+
+  const choices = workflows.filter(
+    (w) => w.publishedVersionNumber != null && w.processKey !== currentProcessKey
+  );
+  const chosenIsMissing =
+    editor.calledElement.length > 0 &&
+    !choices.some((w) => w.processKey === editor.calledElement);
+
+  // The child's declarations, its own kind first so the useful names are at the
+  // top, then everything else it declares. De-duplicated because a data object
+  // and the reference to it are one name to an author.
+  const childNames = (preferred: "input" | "output") => [
+    ...new Set([
+      ...childDeclarations.filter((d) => d.kind === preferred).map((d) => d.name),
+      ...childDeclarations.filter((d) => d.kind === "variable").map((d) => d.name)
+    ])
+  ];
+
+  const renderMappings = (
+    label: string,
+    hint: string,
+    rows: VariableMapping[],
+    onRows: (next: VariableMapping[]) => void,
+    sourceSuggestions: string[],
+    targetSuggestions: string[]
+  ) => (
+    <Box>
+      <Text size="sm" fw={500}>{label}</Text>
+      <Text size="xs" c="dimmed" mb="xs">{hint}</Text>
+      <Stack gap="xs">
+        {rows.map((row, index) => (
+          <Group key={index} gap="xs" wrap="nowrap">
+            {/* Autocomplete, not Select: the child's declarations are a
+                suggestion, not a closed set. A parent may legitimately map into
+                a variable the child sets in a script and never declared, and a
+                closed list would make that unauthorable. `form-control` was a
+                ColorAdmin leftover — that stylesheet is long gone, so these were
+                unstyled inputs in a Mantine app. */}
+            <Autocomplete
+              aria-label={`${label} source ${index + 1}`}
+              value={row.source}
+              data={sourceSuggestions}
+              placeholder="from"
+              onChange={(value) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, source: value } : r)))
+              }
+            />
+            <Text size="sm" c="dimmed">→</Text>
+            <Autocomplete
+              aria-label={`${label} target ${index + 1}`}
+              value={row.target}
+              data={targetSuggestions}
+              placeholder="to"
+              onChange={(value) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, target: value } : r)))
+              }
+            />
+            <Button
+              variant="subtle"
+              size="compact-sm"
+              aria-label={`Remove ${label} row ${index + 1}`}
+              onClick={() => onRows(rows.filter((_, i) => i !== index))}
+            >
+              Remove
+            </Button>
+          </Group>
+        ))}
+        <Button
+          variant="default"
+          size="compact-sm"
+          onClick={() => onRows([...rows, { source: "", target: "" }])}
+        >
+          Add {label.toLowerCase()}
+        </Button>
+      </Stack>
+    </Box>
+  );
+
+  return (
+    <Modal opened onClose={onClose} title="Call Activity" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Runs another workflow as a step here and waits for it to finish. The version running
+          now is locked in when you publish this workflow &mdash; republishing the other one
+          will not change what this step calls, so a process already running cannot change
+          behaviour underneath you.
+        </Text>
+
+        {/* #113. Both of these are consequences of pinning that an author has to
+            be told, because neither is guessable from the diagram. */}
+        <Alert color="blue" variant="light" title="Two things to know">
+          <Text size="sm">
+            <strong>To pick up a newer version of the other workflow, publish this one again.</strong>{" "}
+            That is the only way to move a call activity forward &mdash; which is deliberate, but it
+            does mean a fix to a shared workflow reaches callers only as each is republished.
+          </Text>
+          <Text size="sm" mt="xs">
+            <strong>Cancelling a run of this workflow also cancels the run it started here.</strong>{" "}
+            The other workflow&apos;s run ends with the same reason; it is not left going on its own.
+          </Text>
+        </Alert>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Step name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Call activity name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Run credit check"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Workflow to run</span>
+          <select
+            className="form-select"
+            aria-label="Workflow to run"
+            value={editor.calledElement}
+            disabled={isLoading}
+            onChange={(e) => onChange({ ...editor, calledElement: e.target.value })}
+          >
+            <option value="">{isLoading ? "Loading…" : "Select a workflow…"}</option>
+            {choices.map((w) => (
+              <option key={w.id} value={w.processKey}>
+                {w.name}
+              </option>
+            ))}
+            {/* A key saved earlier whose workflow is gone or unpublished stays
+                visible, so an author can see what is wired up before changing it
+                rather than finding the field mysteriously blank. */}
+            {chosenIsMissing && (
+              <option value={editor.calledElement}>
+                {editor.calledElement} (not published on this server)
+              </option>
+            )}
+          </select>
+          {chosenIsMissing && (
+            <p className="workflow-modal-note text-warning">
+              Nothing published has that key. Publishing this workflow will be refused until it
+              exists &mdash; which is deliberate: otherwise this step fails when someone runs it.
+            </p>
+          )}
+        </label>
+
+        {/* Sending IN, the target is a name inside the child: its declared inputs
+            first, then anything else it declares. Bringing BACK, the source is a
+            name inside the child — its outputs first — and the target is a name
+            here, which this diagram's own declarations can suggest. */}
+        {renderMappings(
+          "Send in",
+          "Variables from this workflow, and the name each arrives under in the other one.",
+          editor.inputs,
+          (inputs) => onChange({ ...editor, inputs }),
+          [],
+          childNames("input")
+        )}
+
+        {renderMappings(
+          "Bring back",
+          "Variables from the other workflow, and the name each returns under here.",
+          editor.outputs,
+          (outputs) => onChange({ ...editor, outputs }),
+          childNames("output"),
+          []
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.calledElement.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #156. One editor for every signal event — throw, catch, boundary, end — because
+// they share one mechanism: a name raised at one point and caught at another.
+//
+// The failure mode worth designing against is a mistyped name, which produces
+// silence rather than an error, so the note says that out loud.
+function SignalEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: SignalEventEditor;
+  onChange: (next: SignalEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isThrowing =
+    editor.type === "bpmn:EndEvent" || editor.type === "bpmn:IntermediateThrowEvent";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (Signal)`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isThrowing
+            ? "Raises a signal. Everything listening for that name reacts — a signal is a broadcast, unlike a message, which goes to exactly one waiting run."
+            : "Waits for a signal with this name to be raised."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Event name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Signal event name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Approved"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Signal name</span>
+          <input
+            className="form-control"
+            aria-label="Signal name"
+            value={editor.signalName}
+            onChange={(e) => onChange({ ...editor, signalName: e.target.value })}
+            placeholder="approved"
+          />
+          <p className="workflow-modal-note">
+            This is what matches one end to the other, character for character. A name nothing
+            listens for is not an error &mdash; a signal is a broadcast, so it simply reaches
+            nobody, which looks exactly like a mistyped name.
+          </p>
+        </label>
+
+        <label className="workflow-field">
+          <span>Who hears it</span>
+          <select
+            className="form-select"
+            aria-label="Who hears it"
+            value={editor.scope}
+            onChange={(e) => onChange({ ...editor, scope: e.target.value })}
+          >
+            <option value="instance">Only this run of this workflow</option>
+            <option value="global">Any workflow listening for this name</option>
+          </select>
+          <p className="workflow-modal-note">
+            {editor.scope === "instance"
+              ? "The safe default. Another run of this same workflow will not react, and neither will anything else."
+              : "Careful: every workflow listening for this name reacts, including ones you did not write. Two unrelated workflows both using a name like “approved” will couple to each other, and neither diagram will show it."}
+          </p>
+        </label>
+
+        {editor.interrupting !== null && (
+          <Switch
+            label="Stop the attached step while this is handled"
+            description={
+              "On, the step is cancelled and only this path continues. Off, the step keeps " +
+              "running and this path runs alongside it."
+            }
+            checked={editor.interrupting}
+            onChange={(e) => onChange({ ...editor, interrupting: e.currentTarget.checked })}
+          />
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.signalName.trim()}>
             Apply
           </Button>
         </Group>
@@ -3805,133 +5074,247 @@ function UserTaskModal({
   );
 }
 
-type BpmnTypeGroup = {
-  category: string;
-  items: string[];
-};
+// #107: the BPMN types panel is derived from the support manifest, not from two
+// hand-kept arrays beside it.
+//
+// It used to be `SUPPORTED_BPMN_TYPES` and `COMING_SOON_BPMN_TYPES` declared here,
+// maintained in parallel with the palette and with the backend's `UnsupportedRuntime*`
+// deny-lists. #103 deployed all 68 to a running Flowable and found the three lists
+// disagreeing on 47 of them — 22 shown as "coming soon" that deployed unhindered, and
+// 25 refused at runtime that the engine runs. Adding support for an element is now
+// one edit to `src/shared/bpmn-support.json`, and this panel follows.
+// #157. The timer boundary editor.
+//
+// Three kinds, one at a time — Flowable rejects a definition carrying two, so the
+// picker is a radio rather than three independent fields. What the editor adds over
+// three text boxes is the interrupting choice, worded as what it does to the work
+// rather than as the BPMN attribute name.
+function TimerBoundaryEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: TimerBoundaryEventEditor;
+  onChange: (next: TimerBoundaryEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const value =
+    editor.mode === "duration" ? editor.duration : editor.mode === "date" ? editor.date : editor.cycle;
 
-const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
-  {
-    category: "Events",
-    items: [
-      "Start Event (None)",
-      "Signal Start Event",
-      "Timer Start Event",
-      "Intermediate Catch (Timer)",
-      "End Event (None)",
-      "End Event (Terminate)"
-    ]
-  },
-  {
-    category: "Tasks",
-    items: ["Task (Generic)", "User Task", "Script Task", "Service Task (Behavior)"]
-  },
-  {
-    category: "Gateways",
-    items: ["Exclusive Gateway (XOR)", "Inclusive Gateway (OR)", "Parallel Gateway (AND)"]
-  },
-  {
-    category: "Flows",
-    items: ["Sequence Flow"]
-  }
-];
-
-const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
-  {
-    category: "Start Events",
-    items: [
-      "Message Start Event",
-      "Conditional Start Event",
-      "Error Start Event",
-      "Escalation Start Event",
-      "Compensation Start Event"
-    ]
-  },
-  {
-    category: "Intermediate Events",
-    items: [
-      "Intermediate Throw (None)",
-      "Intermediate Throw (Message)",
-      "Intermediate Throw (Signal)",
-      "Intermediate Throw (Escalation)",
-      "Intermediate Throw (Link)",
-      "Intermediate Throw (Compensation)",
-      "Intermediate Catch (Message)",
-      "Intermediate Catch (Signal)",
-      "Intermediate Catch (Conditional)",
-      "Intermediate Catch (Link)"
-    ]
-  },
-  {
-    category: "Boundary Events",
-    items: [
-      "Message Boundary",
-      "Timer Boundary",
-      "Signal Boundary",
-      "Conditional Boundary",
-      "Error Boundary",
-      "Escalation Boundary",
-      "Cancel Boundary",
-      "Compensation Boundary"
-    ]
-  },
-  {
-    category: "End Events",
-    items: [
-      "Message End",
-      "Signal End",
-      "Error End",
-      "Escalation End",
-      "Cancel End",
-      "Compensation End"
-    ]
-  },
-  {
-    category: "Tasks",
-    items: [
-      "Send Task",
-      "Receive Task",
-      "Manual Task",
-      "Business Rule Task",
-      "Call Activity"
-    ]
-  },
-  {
-    category: "Sub-Processes",
-    items: ["Sub-Process (Embedded)", "Event Sub-Process", "Transaction", "Ad-Hoc Sub-Process"]
-  },
-  {
-    category: "Gateways",
-    items: ["Event-Based Gateway", "Complex Gateway"]
-  },
-  {
-    category: "Activity Markers",
-    items: ["Loop Marker", "Multi-Instance (Parallel)", "Multi-Instance (Sequential)", "Compensation Marker"]
-  },
-  {
-    category: "Collaboration",
-    items: ["Pool / Participant", "Lane", "Message Flow"]
-  },
-  {
-    category: "Data",
-    items: ["Data Object Reference", "Data Store Reference", "Data Input", "Data Output"]
-  },
-  {
-    category: "Artifacts",
-    items: ["Text Annotation", "Group", "Association"]
-  }
-];
-
-function BpmnTypesModal({ onClose }: { onClose: () => void }) {
-  const supportedCount = SUPPORTED_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
-  const comingSoonCount = COMING_SOON_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
+  const field = {
+    duration: {
+      label: "Duration",
+      description: "An ISO-8601 duration measured from when the activity starts.",
+      placeholder: "PT15M"
+    },
+    date: {
+      label: "Date and time",
+      description: "A fixed moment. The timer fires then, whatever the activity is doing.",
+      placeholder: "2026-12-31T09:00:00"
+    },
+    cycle: {
+      label: "Repeating cycle",
+      description: "An ISO-8601 repeating interval. Bound the repeats, or it fires forever.",
+      placeholder: "R3/PT1H"
+    }
+  }[editor.mode];
 
   return (
-    <Modal opened onClose={onClose} title="Supported BPMN Types" size="xl">
+    <Modal opened onClose={onClose} title="Timer Boundary Event" size="lg">
+      <Stack gap="md">
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(event) => onChange({ ...editor, name: event.currentTarget.value })}
+          placeholder="Escalate after 15 minutes"
+        />
+
+        <Radio.Group
+          label="When it fires"
+          value={editor.mode}
+          onChange={(mode) =>
+            onChange({ ...editor, mode: mode as TimerBoundaryEventEditor["mode"] })
+          }
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio value="duration" label="After a period of time" />
+            <Radio value="date" label="At a specific date and time" />
+            <Radio value="cycle" label="Repeatedly, on a cycle" />
+          </Stack>
+        </Radio.Group>
+
+        <TextInput
+          label={field.label}
+          description={field.description}
+          value={value}
+          placeholder={field.placeholder}
+          onChange={(event) => {
+            const next = event.currentTarget.value;
+            onChange({
+              ...editor,
+              duration: editor.mode === "duration" ? next : editor.duration,
+              date: editor.mode === "date" ? next : editor.date,
+              cycle: editor.mode === "cycle" ? next : editor.cycle
+            });
+          }}
+        />
+
+        <Radio.Group
+          label="When it fires, what happens to the activity?"
+          value={editor.interrupting ? "interrupt" : "continue"}
+          onChange={(choice) => onChange({ ...editor, interrupting: choice === "interrupt" })}
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio value="interrupt" label="Cancel it and take the timer's path instead" />
+            <Radio value="continue" label="Leave it running and take the timer's path as well" />
+          </Stack>
+        </Radio.Group>
+
+        {editor.mode === "cycle" && editor.interrupting && (
+          <Alert color="yellow" variant="light" title="A repeating timer that interrupts fires once">
+            Cancelling the activity removes the timer with it, so the remaining repeats
+            never happen. Repeating timers are usually left non-interrupting.
+          </Alert>
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || value.trim().length === 0}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #158. One editor for every conditional event placement.
+//
+// The condition is a raw expression, matching how exclusive gateways already work
+// — consistency with what ships, and a builder would need a raw escape hatch
+// anyway. What the editor adds over a bare text box is the two things an author
+// cannot infer: that the condition is not re-checked continuously, and (on a
+// boundary event) what interrupting actually does to the attached activity.
+function ConditionalEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: ConditionalEventEditor;
+  onChange: (next: ConditionalEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isBoundary = editor.interrupting !== null;
+  const expression = editor.conditionExpression.trim();
+
+  return (
+    <Modal opened onClose={onClose} title="Conditional Event" size="lg">
+      <Stack gap="md">
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(event) => onChange({ ...editor, name: event.currentTarget.value })}
+          placeholder="When approved"
+        />
+
+        <TextInput
+          label="Condition"
+          description="A Flowable expression. The process continues when it evaluates to true."
+          value={editor.conditionExpression}
+          onChange={(event) =>
+            onChange({ ...editor, conditionExpression: event.currentTarget.value })
+          }
+          placeholder="${approved == true}"
+          error={
+            expression.length > 0 && !expression.startsWith("${")
+              ? "Wrap the condition in ${ } so Flowable evaluates it."
+              : null
+          }
+        />
+
+        {isBoundary && (
+          <Radio.Group
+            label="When the condition becomes true"
+            value={editor.interrupting ? "interrupt" : "continue"}
+            onChange={(value) => onChange({ ...editor, interrupting: value === "interrupt" })}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio
+                value="interrupt"
+                label="Cancel the attached activity and take this path"
+              />
+              <Radio
+                value="continue"
+                label="Take this path as well, and let the attached activity carry on"
+              />
+            </Stack>
+          </Radio.Group>
+        )}
+
+        {/* The one thing an author cannot discover by trying it, because trying it
+            looks like the feature is broken. Established by running it against
+            Flowable 8.0.0, not read from documentation. */}
+        <Alert color="blue" variant="light" title="Conditions are checked when something changes">
+          Flowable does not watch this condition continuously. Auton8 asks it to
+          re-check after a process variable is set or a user task is completed, which
+          covers the usual ways a condition becomes true. A condition that is already
+          true when the process arrives here still waits for the next such change.
+        </Alert>
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || expression.length === 0}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function BpmnTypesModal({ onClose }: { onClose: () => void }) {
+  // Three display buckets from two manifest axes. "Coming soon" and "not available"
+  // both read as unsupported to an author, but they are opposite problems — one is
+  // work we have not done, the other is work the engine cannot do — and an author
+  // deciding whether to wait or to redraw needs to know which.
+  const supported = groupByCategory(EXECUTABLE_SUPPORTED_ELEMENTS);
+  const comingSoon = groupByCategory(
+    COMING_SOON_ELEMENTS.filter((element) => element.engine !== "cannot-execute")
+  );
+  const unavailable = COMING_SOON_ELEMENTS.filter(
+    (element) => element.engine === "cannot-execute"
+  );
+  const annotations = ANNOTATION_ELEMENTS;
+
+  const count = (groups: BpmnSupportGroup[]) =>
+    groups.reduce((n, group) => n + group.items.length, 0);
+
+  return (
+    <Modal
+      opened
+      onClose={onClose}
+      title="BPMN element support"
+      size="xl"
+      classNames={{ content: "workflow-bpmn-types-modal" }}
+    >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          The full set of BPMN 2.0 node types the Auton8 workflow studio can model and execute
-          today, alongside what is on the roadmap.
+          What the Auton8 workflow studio can model and execute today, and what is still
+          to come. Every verdict here was established by deploying the element to
+          Flowable {FLOWABLE_VERSION} and starting it. An element the engine cannot run
+          is refused when you publish, rather than deploying and quietly doing nothing.
         </Text>
 
         <div className="workflow-bpmn-types-grid">
@@ -3941,14 +5324,14 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
                 <i className="fa fa-circle-check" aria-hidden="true"></i>
                 Supported
               </h3>
-              <span className="workflow-bpmn-types-count">{supportedCount}</span>
+              <span className="workflow-bpmn-types-count">{count(supported)}</span>
             </header>
-            {SUPPORTED_BPMN_TYPES.map((group) => (
+            {supported.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">
                 <h4>{group.category}</h4>
                 <ul>
                   {group.items.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li key={item.name}>{item.name}</li>
                   ))}
                 </ul>
               </div>
@@ -3959,22 +5342,71 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
             <header className="workflow-bpmn-types-column-header">
               <h3>
                 <i className="fa fa-hourglass-half" aria-hidden="true"></i>
-                Coming Soon
+                Coming soon
               </h3>
-              <span className="workflow-bpmn-types-count">{comingSoonCount}</span>
+              <span className="workflow-bpmn-types-count">{count(comingSoon)}</span>
             </header>
-            {COMING_SOON_BPMN_TYPES.map((group) => (
+            <p className="workflow-bpmn-types-note">
+              Flowable runs these. The studio has no property editor for them yet, so
+              publishing one is refused until its story lands.
+            </p>
+            {comingSoon.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">
                 <h4>{group.category}</h4>
                 <ul>
                   {group.items.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li key={item.name}>{item.name}</li>
                   ))}
                 </ul>
               </div>
             ))}
           </section>
         </div>
+
+        {unavailable.length > 0 && (
+          <section className="workflow-bpmn-types-column workflow-bpmn-types-column-unavailable">
+            <header className="workflow-bpmn-types-column-header">
+              <h3>
+                <i className="fa fa-circle-exclamation" aria-hidden="true"></i>
+                Not available
+              </h3>
+              <span className="workflow-bpmn-types-count">{unavailable.length}</span>
+            </header>
+            <p className="workflow-bpmn-types-note">
+              Flowable {FLOWABLE_VERSION} cannot run these, so publishing a diagram that
+              uses one is refused with the reason below.
+            </p>
+            <ul className="workflow-bpmn-types-reasons">
+              {unavailable.map((item) => (
+                <li key={item.name}>
+                  <span className="workflow-bpmn-types-reason-name">{item.name}</span>
+                  <span className="workflow-bpmn-types-reason-text">{item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="workflow-bpmn-types-column workflow-bpmn-types-column-annotations">
+          <header className="workflow-bpmn-types-column-header">
+            <h3>
+              <i className="fa fa-note-sticky" aria-hidden="true"></i>
+              Annotations
+            </h3>
+            <span className="workflow-bpmn-types-count">{annotations.length}</span>
+          </header>
+          <p className="workflow-bpmn-types-note">
+            Draw these freely — BPMN defines them as documentation. They never execute,
+            and that is not a gap in Auton8.
+          </p>
+          <div className="workflow-bpmn-types-group">
+            <ul>
+              {annotations.map((item) => (
+                <li key={item.name}>{item.name}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
         <Group justify="flex-end">
           <Button onClick={onClose}>Close</Button>

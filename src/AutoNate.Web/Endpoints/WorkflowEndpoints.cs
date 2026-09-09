@@ -2,6 +2,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Xml.Linq;
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Services.Workflow.Behaviors;
+using Microsoft.Extensions.Options;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
@@ -44,6 +46,25 @@ public static class WorkflowEndpoints
                 details: new { resultCount = augmented.Length },
                 cancellationToken);
             return Results.Ok(augmented);
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
+
+        // #166. What a child process declares, so a parent's call activity can
+        // offer real mapping targets instead of a free-text box the author has to
+        // remember the child's variable names for.
+        group.MapGet("/{processKey}/declarations", async (
+            string processKey,
+            IWorkflowModelStore store,
+            CancellationToken cancellationToken) =>
+        {
+            var model = await store.GetByProcessKeyAsync(processKey, cancellationToken);
+            if (model is null)
+            {
+                // Not an error: a parent may name a child that is not published
+                // yet, and publish already refuses that with a better message.
+                return Results.Ok(Array.Empty<WorkflowDataDeclaration>());
+            }
+
+            return Results.Ok(WorkflowBpmnXml.ExtractDataDeclarations(model.BpmnXml));
         }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
 
         group.MapGet("/latest", async (
@@ -233,6 +254,7 @@ public static class WorkflowEndpoints
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
             IAuthorizer authorizer,
+            IOptions<WorkflowBehaviorOptions> behaviorOptions,
             ClaimsPrincipal actor,
             CancellationToken cancellationToken) =>
         {
@@ -267,7 +289,90 @@ public static class WorkflowEndpoints
                 }
             }
 
-            var deployment = await flowable.DeployProcessAsync(model, cancellationToken);
+            // #225. The FULL validation set, at the endpoint that actually
+            // deploys.
+            //
+            // It used to be the small promoted subset, because prepare was where
+            // validation lived and the studio happens to call prepare first. A
+            // direct API caller does not, so every rule written as a gate was
+            // advisory — an unsupported element, a subprocess with no start
+            // event, a timer boundary that never fires, all reached the engine
+            // unchecked.
+            //
+            // This is a real contract change and was measured before being made:
+            // 4 of the 11 models in the dev database are newly refused, every one
+            // for a defect that already fails at run time (the script API #147
+            // removed, and #153's unresolvable identity). It converts a silent
+            // runtime failure into a loud publish-time one.
+            //
+            // Run on the STORED xml, before expansion, so an author is told about
+            // the element they drew rather than one publish generated.
+            var validationErrors = WorkflowBpmnXml.ValidateProcess(model.BpmnXml).Errors;
+            if (validationErrors.Count > 0)
+            {
+                return Results.BadRequest(new { errors = validationErrors });
+            }
+
+            // #113. Every call activity is resolved to the child definition that
+            // exists RIGHT NOW and pinned to it by id.
+            //
+            // Flowable resolves a calledElement key at run time, to the latest
+            // version — verified: an unchanged, already-deployed parent picked up
+            // a child version published after it. A running process must not
+            // change behaviour underneath its owner, so publish pins instead.
+            //
+            // A key resolving to nothing is refused here rather than deployed.
+            // Flowable accepts such a diagram happily and fails only when an
+            // instance reaches the call, by which time it is someone else's
+            // problem at the worst moment.
+            var callTargets = WorkflowBpmnXml.ExtractCallActivityTargets(model.BpmnXml);
+            var definitionIdsByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+            var unresolved = new List<string>();
+            foreach (var (elementId, calledKey) in callTargets)
+            {
+                if (definitionIdsByKey.ContainsKey(calledKey)) continue;
+
+                var child = await flowable.GetLatestProcessDefinitionAsync(calledKey, cancellationToken);
+                if (child is null || string.IsNullOrWhiteSpace(child.Id))
+                {
+                    unresolved.Add(
+                        $"The step '{elementId}' calls a workflow with key '{calledKey}', and no " +
+                        "published workflow has that key. Publish that workflow first, or pick a " +
+                        "different one — published as-is, this process fails when it reaches that " +
+                        "step rather than now.");
+                    continue;
+                }
+
+                definitionIdsByKey[calledKey] = child.Id;
+            }
+
+            if (unresolved.Count > 0)
+            {
+                return Results.BadRequest(new { errors = unresolved });
+            }
+
+            // #112. Expanded at DEPLOY, not at save. Flowable rejects an
+            // intermediate throw (Message) outright and silently ignores a message
+            // end event, so the deployed copy carries service tasks on the
+            // behaviour bridge instead — while the stored model keeps the diagram
+            // the author drew, which is what the send behaviour reads its message
+            // name and target back from.
+            //
+            // Here rather than in the prepare step because prepare's output is
+            // what the studio saves, and because a caller that publishes without
+            // preparing must not be able to deploy something the engine refuses.
+            var deployable = model with
+            {
+                BpmnXml = WorkflowBpmnXml.StampCallbackBaseUrl(
+                    WorkflowBpmnXml.PinCallActivityTargets(
+                        WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml),
+                        definitionIdsByKey),
+                    // #223. Unset in production; nothing is stamped and the engine
+                    // uses its own configured callback URL.
+                    behaviorOptions.Value.CallbackBaseUrlOverride)
+            };
+
+            var deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
             var published = await store.PublishAsync(model, deployment, cancellationToken);
             // A fresh deployment is always active in Flowable — null out any
             // stale suspended flag so the SPA shows "Pause" rather than "Resume".

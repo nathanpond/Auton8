@@ -133,6 +133,42 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(new WorkflowExecutionDiagramDetail());
     }
 
+    // #218. Settable so a test can supply a mapping; empty by default, which is
+    // what every existing test assumes.
+    public IReadOnlyDictionary<string, string> ExpansionSourceMap { get; set; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    // #163
+    public List<AdhocSubProcessState> AdhocSubProcesses { get; } = [];
+
+    public Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocList:{processInstanceId}");
+        return Task.FromResult<IReadOnlyList<AdhocSubProcessState>>(AdhocSubProcesses);
+    }
+
+    public Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocStart:{executionId}:{activityId}");
+        return Task.CompletedTask;
+    }
+
+    public Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocComplete:{executionId}");
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ExpansionMap:{processInstanceId}");
+        return Task.FromResult(ExpansionSourceMap);
+    }
+
     // Tests can seed this to drive the history endpoint response. Defaults to
     // an empty list when not set.
     public Dictionary<string, List<WorkflowExecutionHistoryEvent>> HistoryByInstance { get; } = new();
@@ -326,6 +362,80 @@ internal sealed class StubFlowableClient : IFlowableClient
     public Dictionary<string, IReadOnlyList<string>> WaitingExecutionsBySignal { get; } =
         new(StringComparer.Ordinal);
 
+    // #112. Keyed by the addressable name — the message name for a message
+    // event, the element id for a receive task, which is how the correlator
+    // names them too.
+    public Dictionary<string, IReadOnlyList<string>> WaitingExecutionsByMessage { get; } = new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ListExecutionsAwaitingMessage:{processDefinitionKey}:{messageName}:{correlationKey}={correlationValue}");
+        return Task.FromResult(WaitingExecutionsByMessage.TryGetValue(messageName, out var ids)
+            ? ids
+            : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ListExecutionsAwaitingReceiveTask:{processDefinitionKey}:{activityId}:{correlationKey}={correlationValue}");
+        return Task.FromResult(WaitingExecutionsByMessage.TryGetValue(activityId, out var ids)
+            ? ids
+            : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
+    public Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"DeliverMessageToExecution:{executionId}:{messageName}");
+        return Task.CompletedTask;
+    }
+
+    public Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"TriggerExecution:{executionId}");
+        return Task.CompletedTask;
+    }
+
+    public string StartedByMessageInstanceId { get; set; } = "started-by-message";
+
+    public Dictionary<string, IReadOnlyList<FlowableProcessInstanceSummary>> ChildInstances { get; } =
+        new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"GetChildProcessInstances:{parentProcessInstanceId}");
+        return Task.FromResult(ChildInstances.TryGetValue(parentProcessInstanceId, out var children)
+            ? children
+            : (IReadOnlyList<FlowableProcessInstanceSummary>)Array.Empty<FlowableProcessInstanceSummary>());
+    }
+
+    public Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"StartProcessInstanceByMessage:{messageName}");
+        return Task.FromResult(StartedByMessageInstanceId);
+    }
+
     public Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
         CancellationToken cancellationToken = default)
@@ -334,6 +444,18 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(WaitingExecutionsBySignal.TryGetValue(signalName, out var ids)
             ? ids
             : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
+    // #158. Recorded rather than ignored: the tests that matter here assert this
+    // was called AFTER a variable write, because Flowable does not re-evaluate
+    // conditional events on its own and a process parked on an already-true
+    // condition is indistinguishable from a broken feature.
+    public Task EvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"EvaluateConditionalEvents:{processInstanceId}");
+        return Task.CompletedTask;
     }
 
     public Task UpdateProcessVariablesAsync(
@@ -353,12 +475,19 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     public Dictionary<string, List<ProcessVariableUpdate>> VariableAdditionsByInstance { get; } = new();
 
+    /// <summary>#226. When set, AddProcessVariablesAsync throws it.</summary>
+    public Exception? AddVariablesFailure { get; set; }
+
     public Task AddProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> additions,
         CancellationToken cancellationToken = default)
     {
         Calls.Add($"AddVariables:{processInstanceId}");
+        // #226. Lets a test stand in for Flowable answering 409 for a variable
+        // that already exists, so the endpoint's status mapping is exercised
+        // without needing the engine.
+        if (AddVariablesFailure is not null) throw AddVariablesFailure;
         if (!VariableAdditionsByInstance.TryGetValue(processInstanceId, out var list))
         {
             list = new List<ProcessVariableUpdate>();

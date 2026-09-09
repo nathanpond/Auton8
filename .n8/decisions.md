@@ -2301,3 +2301,1793 @@ rather than taken on trust:
 **Left deliberately:** seven ACs reading "handled in a defined, documented way",
 which any behaviour satisfies. Owner's call — they concern engine behaviour
 nobody has established yet.
+
+## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation
+
+**Change:** #160 ("Jump between points in a diagram with link events") cannot be
+executed as written. Spike #217 created and #160 sequenced behind it.
+
+**Why:** Executing #103's inventory — which exists to gate exactly this — deployed
+all 68 palette entries to Flowable 8.0.0 and started each. Link events fail
+deployment:
+
+    Problem: 'flowable-intermediate-catch-event-no-eventdefinition' : No event definition
+
+and the jar confirms it independently: `Link.*ActivityBehavior` returns nothing,
+while the intermediate-catch family is Conditional, EventRegistry, Message,
+Signal, Timer and VariableListener.
+
+**This makes the "no engine implementation" group five, not three.** #103's own
+acceptance criterion expected three and said "a fourth would be a finding worth
+surfacing": ComplexGateway, intermediate throw Message, the event-subprocess
+compensation start (descoped 2026-09-07), and now both link events.
+
+**Why a spike rather than a decision now (owner's call).** Link events differ from
+ComplexGateway in a way that changes the remedy: the rejection comes from
+`flowable-process-validation`, *before* `ActivityBehaviorFactory` is consulted. A
+custom behaviour may therefore be unable to help at all. And a link pair is a GOTO
+to a node no sequence flow reaches — neither `AutoNateBehaviorDelegate` nor M3's
+`ExecutorScriptTaskActivityBehavior` exercises that shape.
+
+**Resolved by spike #217, same day.** Verdict: **descope**. The binding
+constraint turned out not to be the missing behaviour or the validator — it is
+that `flowable-bpmn-model-8.0.0.jar` contains **no link event type at all**, so
+the XML converter cannot represent one and the parsed model has nowhere to put
+it. Implementing link events would mean a model type, a converter, a parse
+handler, a replacement validator, a behaviour, and a token transfer to a node no
+sequence flow reaches — six layers, versus ComplexGateway's one custom behaviour
+through an existing factory.
+
+The capability lost is diagram aesthetics: BPMN 2.0 defines link events as a
+GOTO for visual tidiness, adding no execution semantics a sequence flow lacks.
+
+#160 was **rewritten rather than closed** — it becomes the removal-and-refusal
+work, so the palette stops advertising them and a hand-authored link event is
+refused at publish rather than silently discarded by the converter. No issue was
+closed on my initiative.
+
+**Affects:** #160 (rewritten), the milestone
+map (2 items move to the spike's outcome), #103's findings section (49 of 54 have a
+behaviour, not the 52 it claimed).
+
+**Also corrected while here, from the same probe:** two raw failures were my
+fixtures rather than engine gaps — Call Activity executes given a real callee, and
+cancel events are implemented (`BoundaryCancelEventActivityBehavior`,
+`CancelEndEventActivityBehavior`) but my minimal transaction completed before the
+cancel could apply. Separated in the #103 write-up rather than reported as gaps.
+Conditional Start Event is legal only inside an event subprocess, not at process
+level, though the palette offers it as a process start — relevant to #158 and #162.
+
+## /n8-exec M4 — #107, 2026-09-07 — one manifest, two axes
+
+- **Decision:** The support manifest carries **two independent fields**, `studio`
+  (`supported` | `coming-soon` | `withdrawn`) and `engine` (`executes` |
+  `annotation` | `cannot-execute`), rather than the single `supported` flag the
+  first cut had.
+  **Why:** The flag conflated two different questions and would have rebuilt the
+  bug. #103 established that Flowable runs 59 of the 68 entries while the studio
+  advertises only 14 as supported — so "unsupported" means *"we have not written a
+  property editor"* in one breath and *"the engine will not run it"* in the next.
+  Keying publish validation off the studio axis would refuse 45 elements the engine
+  runs, which is the old deny-list bug with the sign flipped; keying the panel off
+  the engine axis would advertise 59 elements as ready when they have no editor.
+  The manifest states the invariant `studio=supported ⟹ engine≠cannot-execute` and a
+  test enforces it.
+  **Issue:** #107
+
+- **Decision:** The manifest lives at `src/shared/bpmn-support.json`, imported by the
+  SPA through a new `@shared` Vite/tsconfig alias and embedded by
+  `AutoNate.Web.csproj` as `AutoNate.Web.bpmn-support.json`.
+  **Why:** The story left the mechanism to discretion and asked only for one edit
+  plus a failing test on drift. A generated TS module would have added a build step
+  and a second artifact to keep in step. Both consumers now read the same bytes, and
+  `The_embedded_manifest_is_the_shared_file_byte_for_byte` fails if they stop.
+  Cost: the SPA needed `server.fs.allow` for a path above its root, which is
+  otherwise a confusing dev-only 403.
+  **Issue:** #107
+
+- **Decision:** `BpmnSupportManifest` is an instance type with a static `Default`,
+  and `ValidateProcess` takes an optional manifest.
+  **Why:** The acceptance criterion asks for a test that flips one element and shows
+  the consumers follow. Against a static class that test cannot be written — only
+  read and believed. The seam lets the flip test drive the real validation path with
+  a perturbed manifest, and asserts afterwards that the embedded one is untouched.
+  **Issue:** #107
+
+- **Decision:** `Match` returns every manifest entry describing a node, not the
+  first.
+  **Why:** Found while writing it: a business rule task carrying a multi-instance
+  marker has two descriptions, and a first-match lookup in manifest order answers
+  "Multi-Instance (Parallel), executes" and lets it deploy. Covered by
+  `An_activity_carrying_a_marker_is_still_judged_on_the_activity`.
+  **Issue:** #107
+
+- **Decision (deviation from my own plan comment):** #107 removes **only** the
+  Compensation Start Event from what users are shown. The plan comment said both
+  link events would leave in the same edit.
+  **Why:** #160 was rewritten on 2026-09-07 to *be* the link-event removal and
+  refusal, and its acceptance criteria name those two removals explicitly. Doing
+  them here would have left #160 with nothing to close honestly. #107 builds the
+  `withdrawn` mechanism; #160 applies it, which is now a one-line manifest edit plus
+  the raw-XML refusal its own AC requires.
+  **Issue:** #107, #160
+
+- **Rule 1 (fix + regression test):** `ToFriendlyElementName` in `WorkflowBpmnXml.cs`
+  was orphaned by removing the deny-lists — 24 lines of switch with no caller.
+  Deleted.
+  **Issue:** #107
+
+- **Rule 2 (missing critical functionality):** the button opening the panel used a
+  native `title` attribute, which screen readers do not reliably announce; the
+  project rule is Mantine `Tooltip`. Replaced. Its label also changed from
+  "Supported BPMN Types" to "BPMN element support", because the panel now also
+  states what is coming, what cannot run, and what never executes by design.
+  **Issue:** #107
+
+- **Note:** the `add-bpmn-element` skill's step 1, its worked example's step 1, and
+  the manifest checks in `scripts/verify-symbols.sh` were rewritten in this same
+  change. The script had already gone red on `BuildUnsupportedRuntimeWarnings` and
+  `UnsupportedRuntimeControlElementNames` before the skill was touched, which is the
+  drift check working as intended.
+  **Issue:** #107, #174
+
+## /n8-exec M4 — #160, 2026-09-07 — link events withdrawn
+
+- **Decision:** #160 was a manifest edit plus its tests, not new validation code.
+  **Why:** #107 landed the `withdrawn` status and the refusal path, so both link
+  events needed `studio: "withdrawn"` and a `reason` naming the sequence-flow
+  alternative. The story's own Discretion note anticipated exactly this ("#107 lands
+  first and may make this a list entry rather than new code").
+  **Issue:** #160
+
+- **Decision:** AC2's "the refusal fires on the raw XML, not a parsed model" is
+  asserted by a test in the engine-free backend suite, with the reasoning written
+  into the test rather than left implied.
+  **Why:** `ValidateProcess` reads the submitted string with `XDocument` and has no
+  Flowable dependency; the class boots no engine. A refusal there could not have come
+  from a parsed model, because there is none. The alternative — round-tripping
+  through Flowable's converter to show the element disappears — would need a live
+  engine to prove a negative.
+  **Issue:** #160
+
+- **Rule 1 (fix + regression test), against work committed earlier this run:** the
+  manifest's `engine` axis claims to be #103's measurement, and nothing enforced it.
+  Cross-checking by hand found seven apparent disagreements with the probe results;
+  six are principled and already carried written `evidence`, but the check existed
+  only in my head. `The_engine_axis_agrees_with_the_inventory_or_declares_why_not`
+  now reads `tests/fixtures/bpmn-inventory/rows.json` and fails on any undeclared
+  departure. Verified by flipping Timer Boundary and watching it fail.
+  **Issue:** #107
+
+- **Finding filed, not fixed:** Conditional Start Event is rejected by Flowable at
+  process level (`flowable-start-event-invalid-event-definition`) and is legal only
+  inside an event subprocess — yet the studio offers it as a process start. This
+  makes #158's AC1 unsatisfiable as written. Recorded on #158 with two options and a
+  recommendation (refuse the invalid placement with a reason now; leave the working
+  event-subprocess case to #162). Not fixed inline: it is #158/#162 territory, not
+  #160's.
+  **Issue:** #158, #162, #107
+
+## /n8-exec M4 — #158, 2026-09-07 — conditional events, and the trigger Flowable does not provide
+
+- **Finding (established by running it, not by reading docs):** Flowable 8.0.0 does
+  **not** re-evaluate conditional events when a variable changes. A catch on
+  `${approved == true}` stays parked after `approved` is set true. Something must
+  call `POST /runtime/process-instances/{id}/evaluate-conditions` — POST, not PUT;
+  PUT answers 500 with "Request method 'PUT' is not supported", which reads like an
+  engine fault rather than a wrong verb. My own plan comment on the issue said PUT
+  and was wrong.
+  **Why it matters:** this is the story's key link. Without it conditional events
+  deploy, wait forever, and are indistinguishable from a broken feature — the exact
+  silent no-op #40 exists to end.
+  **Issue:** #158
+
+- **Decision:** `EvaluateConditionalEventsAsync` is called after every variable
+  write, after every task completion, and after starting an instance.
+  **Why:** those are the three moments a token can arrive somewhere it could already
+  leave. Variable writes alone would have satisfied the AC's demo while leaving two
+  ways to strand a process permanently.
+  **Issue:** #158
+
+- **Decision (AC3):** "A condition already true when reached is handled in a defined,
+  documented way rather than hanging" — Flowable's own answer is that it hangs. It
+  parks at the catch regardless and waits to be asked. That is not a defined
+  behaviour, so it was closed rather than documented, with an E2E proving a process
+  started with its condition already satisfied passes straight through.
+  **Issue:** #158
+
+- **Decision:** both the pre-completion task lookup and the conditional-event nudge
+  are **best-effort**, logged and swallowed.
+  **Why:** found by the full suite — my first cut made `CompleteTaskAsync` throw when
+  the lookup failed, so a lookup hiccup would have started failing task completions.
+  The completion is the user's action; the nudge is our housekeeping. Trading a rare
+  silent hang for a common loud failure is a worse bug than the one being fixed.
+  Three tests pin it: the nudge fires, a failing nudge still completes, and an
+  unreadable task still completes.
+  **Issue:** #158
+
+- **Rule 1 (efficiency defect in my own new code):** the pre-flight lookup first used
+  `GetTaskAsync`, which backfills the instance's display name with a *second* round
+  trip nothing here reads — two extra calls on the task-completion path, not one.
+  Replaced with a minimal read of the task's `processInstanceId`.
+  **Issue:** #158
+
+- **Decision (AC1, conditional start):** a conditional start event at process level
+  is refused at publish with a sentence naming the constraint, and the working
+  event-subprocess case is left to #162. Taken from the two options recorded on the
+  issue; the owner did not respond, and this is the option deliverable now that
+  turns a raw `flowable-start-event-invalid-event-definition` into something an
+  author can act on. #162 is blocked by #158, so waiting would have deadlocked both.
+  **Issue:** #158, #162
+
+- **Decision:** `WorkflowConditionValidation` is a shared check with a public
+  `Check(Site, assigned)` entry point, and the reuse is asserted by comparing the
+  *message text* the sequence-flow path and the conditional-event path produce for
+  the same mistake.
+  **Why:** AC8 asks that reuse cannot silently become a copy. Two implementations
+  drift in wording long before they drift in behaviour, so wording is the sensitive
+  detector.
+  **Issue:** #158, #159, #163
+
+- **Decision:** the unset-variable tracer is deliberately generous — script bodies,
+  service task result variables, data objects, multi-instance element variables,
+  call activity output targets.
+  **Why:** AC9 makes the false-positive guard the binding constraint. Every source
+  missed becomes a warning on a correct diagram, and a few of those are all it takes
+  for authors to stop reading warnings — at which point the real one is invisible
+  too. Cost of being generous is a missed warning; cost of being strict is a useless
+  feature.
+  **Issue:** #158
+
+- **Ratchet lowered 104 → 103.** The conditional-event modal used `Radio`, which was
+  imported and unused. The project rule is that the budget tracks reality downward
+  only, so `package.json` and the skill's quoted number moved together (the verify
+  script cross-checks them).
+  **Issue:** #158
+
+- **Skill:** `add-bpmn-element` gained load-bearing fact 5 — *a behaviour class is
+  not the same as a trigger*. #103's inventory says conditional events execute, and
+  they do; they just never fire on their own. The inventory structurally cannot catch
+  this, because a process parked forever looks identical to one correctly waiting.
+  **Issue:** #158, #174
+
+## /n8-exec M4 — #155, 2026-09-07 — complex gateway: no seam exists
+
+- **Blocker:** Spike #155 closes **blocked**. Flowable 8.0.0 has no extension point
+  that can attach a behaviour to `bpmn:complexGateway`, so #165's premise — a custom
+  `ActivityBehavior` registered through the existing factory — cannot be built.
+  **Evidence, all from the running engine:** `ActivityBehaviorFactory` has no
+  `createComplexGatewayActivityBehavior` hook (gateway hooks are Exclusive,
+  Inclusive, Parallel, EventBased). Both parse-handler routes were tried and neither
+  fires; the control — the same handler registered for `ComplexGateway` *and*
+  `UserTask`, deployed in one diagram — fired for the user task and never for the
+  gateway, which is what makes it conclusive rather than suggestive. The element
+  deploys 201 and is walked past: with `${count >= 2}` and `count = 0` the token
+  still proceeded, so the activation condition is not evaluated at all.
+  **Question for the owner:** withdraw it (one manifest edit, #107's mechanism,
+  recommended), fork the parse layer, or emulate with an inclusive gateway (loses the
+  activation condition; rejected in planning).
+  **Holds up:** #165. Marked `blocked` + `needs-owner-action`.
+  **Issue:** #155, #165
+
+- **Note:** unlike the link events of #217, the complex gateway's *model* layer is
+  complete — the type and its XML converter exist and the converter is registered.
+  That is why it warranted a spike where link events did not, and it is also why the
+  failure is subtler: the element survives into the model and is then never
+  dispatched to any handler.
+  **Issue:** #155
+
+- **Environment:** the spike rebuilt the Flowable image twice with probe code and
+  once more to restore it. `flowable-extension/` is byte-identical to its committed
+  state, `mvn test` passes, and the probe deployments were deleted from the engine.
+  **Issue:** #155
+
+- **Observation for #191/#214 (filed as a comment there, not fixed here):** the
+  engine is holding 374 deployments, including leftovers from this session's own E2E
+  runs (`cond_catch_*`, `cond_bnd_*`). The suite leaks Flowable deployments as well
+  as databases, schemas and roles — worth folding into "everything the suite
+  creates".
+  **Issue:** #191, #214
+
+## /n8-plan M4 (re-plan) — 2026-09-07, mid-execution
+
+Run while M4 was being executed, so the slate was live. Deltas only.
+
+- **Decision (owner):** the complex gateway is delivered as a **composed capability**,
+  not as an element. The author drops a `bpmn:ComplexGateway` from bpmn-js's own
+  replace menu and configures it through the existing context-menu path; at publish it
+  is expanded into a script task plus an exclusive gateway, and the routing decision is
+  author code in the M3 sandbox.
+  **Why:** spike #155 proved no extension point reaches the element. The owner
+  proposed offloading the decision to the executor sidecar, which works — but only if
+  the element is replaced by nodes Flowable runs, since nothing of ours ever executes
+  at the gateway.
+  **Issue:** #218, closes #165
+
+- **Correction to my own framing, mid-question.** I put "where does expansion happen"
+  and "how is it offered" as independent choices and pushed toward a custom bpmn-js
+  module. The owner asked what they were missing; they were right. bpmn-js already
+  offers `complex-gateway` (5 occurrences in the vendored bundle) and
+  `RequestConfigureElement` describes whatever node is selected, so authoring needs no
+  new machinery — and the single-node experience *entails* publish-time expansion.
+  **Issue:** #218
+
+- **Consequence the owner accepted:** the execution view must render the **stored
+  published version's** BPMN, version-pinned, rather than Flowable's deployed
+  resource. The second executor simulation found that mapping activity ids cannot work
+  otherwise — after expansion the deployed XML contains no `complexGateway`, so there
+  is no shape to highlight. This is the largest piece of work in #218 and was not in
+  #165 at all.
+  **Issue:** #218
+
+- **Consequence:** a hand-authored complex gateway is **no longer refused** — it is
+  expanded and runs. The manifest row moves to `studio: supported` / `engine:
+  executes`, which keeps #107's `studio=supported ⟹ engine≠cannot-execute` invariant
+  intact without restating it. The owner's "just offer it" answer for the types panel
+  therefore needed no compromise.
+  **Issue:** #218, #107
+
+- **Decision:** the accumulating join is a **spike**, not a story. Per-branch identity
+  needs one accumulator per incoming flow, and per-iteration scoping needs a
+  `setVariableLocal` the sandbox wire protocol cannot express — both need running code
+  rather than a decision. M4 therefore commits to a complex gateway that routes but
+  does not accumulate.
+  **Why:** #155 already showed once that this element punishes assumptions.
+  **Issue:** #219
+
+- **Decision (owner):** where a story says an edge case is "handled in a defined,
+  documented way", a hang, silent no-op or vanished instance is a defect to fix, not a
+  behaviour to document. Added as an epic-level AC and as clauses on #114, #157, #159,
+  #161, #163.
+  **Why:** #158 hit one of these and the engine's answer was an indefinite park.
+  **Issue:** #40
+
+- **Systemic coverage hole, found by the checker:** 13 of 16 element stories had no
+  acceptance criterion moving their manifest row, so each could have closed with the
+  element working and the milestone's own coverage instrument unmoved. #167's AC is
+  now in all of them.
+  **Issue:** #112, #113, #114, #115, #156, #157, #159, #161, #162, #163, #164, #220
+
+- **Four items were mapped to stories that did not build them** — `Loop Marker`
+  (#159), `Compensation End` and `Compensation Marker` (#115), `Intermediate Catch
+  (Message)` (#112). ACs added to each. `Call Activity` was missing from the map
+  entirely; the rows totalled 46, not 47.
+  **Issue:** #159, #115, #112, #113
+
+- **Decision (owner):** data store references become typed process-variable
+  declarations, not annotations. #166's AC contradicted #107's ticked AC and the
+  manifest's `engine: executes`, making it a silent fourth descope inside the
+  milestone that exists to end offered-but-does-nothing.
+  **Issue:** #166, #107
+
+- **Split:** #115 carried 7 items on 8 ACs, only 4 naming an element — the worst
+  density in the set, and where two of the four misses above occurred. Transaction,
+  Cancel Boundary and Cancel End became #220.
+  **Issue:** #115, #220
+
+- **Coverage claim repointed.** Its locator was `const COMING_SOON_BPMN_TYPES` in
+  `WorkflowStudio.tsx`, which #107 deleted. Same item names and count, so it was
+  repointed to `src/shared/bpmn-support.json` rather than re-enumerated.
+  **Issue:** #107
+
+- **Triage:** #187 (docx-editor line deprecated) moved to M7 and relabelled `spike` —
+  it closes with a decision about the publisher's intent, not code. It had been
+  sitting unmilestoned since 2026-09-06.
+  **Issue:** #187
+
+- **Housekeeping:** all five project invariants in CLAUDE.md carry `test-enforced:`
+  annotations, so no guard stories were needed.
+
+## /n8-exec M4 — #157, 2026-09-07 — timer boundary events
+
+- **Finding (established by running it):** a timer boundary event does **not** require
+  `flowable:async` on the activity it guards. Four such timers on plain user tasks
+  with no async anywhere all fired correctly against Flowable 8.0.0. The AC asked for
+  this "documented rather than left as folklore"; the answer is that there is no trap,
+  so the studio sets nothing.
+  **Issue:** #157
+
+- **Finding:** `R3/PT1S` fires exactly three times and stops; completing the guarded
+  activity removes the timer *job* rather than merely not firing it; deleting the
+  instance removes pending timers. All three asserted on the observable consequence
+  one step further out than the AC's wording required, because "nothing happened yet"
+  is true of any duration long enough.
+  **Issue:** #157
+
+- **Decision (owner's fix-hangs policy):** a timer boundary with **no time set** and
+  one setting **two kinds** are both refused at publish rather than documented. The
+  first deploys, produces no job, and leaves the guarded activity waiting forever; the
+  second is rejected by Flowable with a parse error naming the definition rather than
+  the event, which an author cannot act on.
+  **Issue:** #157, #40
+
+- **Decision:** three new snapshot fields (`BoundaryTimerDuration`,
+  `BoundaryTimerDate`, `BoundaryTimerCycle`) rather than reusing the existing timer
+  fields.
+  **Why:** `describeBusinessObject`'s output *is* the snapshot wire format and the
+  studio routes on `$type` plus key presence, so reusing them would send a timer
+  boundary to whichever of the start-event or intermediate-catch editors matched
+  first. This is the skill's worked example's own advice, followed.
+  **Issue:** #157
+
+- **Method note:** my first probe read said the timers had not fired after 6 seconds.
+  That was wrong — I queried before the job executor's poll cycle, and the `PT30S` job
+  I inspected was not due. Re-reading a moment later showed all three had fired.
+  "Timers do not work" would have been an expensive conclusion to act on, and the only
+  thing that caught it was re-reading rather than reporting the first observation.
+  **Issue:** #157
+
+- **Skill:** the worked example is written for this story and needed two corrections —
+  step 5 said to append `bool? CancelActivity`, which #158 had already added, and the
+  N×N clearing count moved 12 → 14. SKILL.md's load-bearing fact 5 gained the contrast
+  that matters: conditional events have a behaviour class and never fire on their own,
+  while **timers wake themselves** through the job executor. "What makes it wake up?"
+  has two different answers.
+  **Issue:** #157, #174
+
+## /n8-exec M4 — #161, 2026-09-07 — embedded subprocesses
+
+- **AC premise was wrong on both halves, and the story was NOT implemented as
+  written.** The criterion said "an empty subprocess, or one with no end event, is
+  refused at publish — both deploy today and hang". Measured against Flowable 8.0.0:
+  - An **empty subprocess** deploys and then fails at *start* with a 500, "No initial
+    activity found for subprocess <id>". Not a hang. The remedy still holds — the
+    failure lands on whoever ran the process rather than the author who published it
+    — but the real rule is about the **start event**, which is what the engine's own
+    message names. So the check also catches a subprocess with activities and no
+    start event, which an emptiness rule would miss.
+  - A subprocess with **no end event works correctly.** Flowable completes it once no
+    tokens remain inside; a run finished normally. **Implementing this half would
+    have refused diagrams that run today**, so it was deliberately not implemented,
+    and both a unit test and an E2E pin that it stays unrefused.
+  **Why not a blocker:** the AC's *intent* (no subprocess that cannot complete) is
+  better served by refusing only what actually fails. Implementing it literally would
+  have introduced a defect, which is a worse outcome than a corrected criterion.
+  **Issue:** #161
+
+- **Finding:** a subprocess reports its own activity instance in Flowable's history
+  (`outer`, `inner` as `subProcess`), so AC7's "an operator can see execution is
+  inside one" needs no id-mapping work. This was the difficulty I flagged in the plan
+  comment and it dissolved on inspection.
+  **Issue:** #161
+
+- **Finding:** variables cross the boundary in both directions, verified two levels
+  deep — a variable set inside the inner subprocess is visible at parent instance
+  scope after it completes.
+  **Issue:** #161
+
+- **Decision:** AC4 (multi-instance on a subprocess) is delivered as
+  **serialisation round-trip only**; the execution assertion belongs to #159, which
+  owns the marker and has not landed. Stated on the issue rather than silently
+  half-done.
+  **Issue:** #161, #159
+
+- **Skill:** gained load-bearing fact 6 — **not every element needs all nine steps.**
+  #161 added no describe helper, no `update*Properties`, no snapshot field and no
+  modal, because bpmn-js already authors subprocesses and the engine already runs
+  them; the only Auton8-side work was refusing the shapes that fail. The nine steps
+  are a checklist to answer, not a sequence to perform. Also clarified that a rule
+  applying at every depth is the ordinary flat `Descendants` case and needs none of
+  the scope-container machinery the validation section describes.
+  **Issue:** #161, #174
+
+## /n8-exec M4 — #167, 2026-09-07 — BLOCKER: a manual task does not wait
+
+- **Blocker:** three of #167's acceptance criteria describe a feature BPMN does not
+  have. A manual task is a **pass-through** — `ManualTaskActivityBehavior` is 488
+  bytes and the spec says a manual task is work performed outside the system with no
+  engine involvement. Verified by running one: the process went straight through the
+  manual task and the throw event to the user task beyond, creating no task and
+  pausing nowhere.
+  **Invalidates:** AC1 ("pauses until someone marks it done"), AC3 ("appears in the
+  task list... completing it advances the process"), AC6 ("completing is gated and
+  audited like a user task").
+  **Confirmed working:** AC4 — intermediate throw (none) passes straight through.
+  **Question for the owner:** (A) ship it as BPMN defines it, a documented
+  pass-through, dropping AC1/AC3/AC6 under the epic's "implemented or closed with the
+  reason it will not be" clause — my recommendation; (B) make manual tasks wait by
+  implementing them as something else under the hood, which delivers all six ACs and
+  **breaches epic #40's AC6**, "no BPMN execution semantics are implemented in
+  Auton8"; (C) withdraw Manual Task from scope and keep only the throw-none half.
+  **Why not decided alone:** unlike #161's correction — where the fix was to *not*
+  refuse something that works — the two ways forward here sit on opposite sides of an
+  invariant the epic states in writing. That is a conversation, not a judgment call.
+  **Holds up:** #167 only. Nothing in M4 depends on it.
+  **Not half-built:** the throw-none half was left unimplemented too, since both
+  elements map to this story and shipping one would leave the manifest half-moved.
+  **Issue:** #167, #40
+
+## /n8-plan M4 (2nd re-plan) — 2026-09-07 — manual tasks, and two planner errors
+
+- **Decision (owner):** Auton8 does not support manual tasks or generic tasks. An
+  author who reaches for either gets a **user task, converted in the studio at design
+  time**, with a notice. No Java behaviour, no publish-time rewrite, no diagram
+  divergence — the stored diagram already contains the user task.
+  **Why the owner changed direction:** the first answer was "make manual tasks wait"
+  via a custom `ActivityBehavior`. The executor simulation then found
+  `ActivityBehaviorFactory.createManualTaskActivityBehavior` is typed to return
+  `ManualTaskActivityBehavior` (extends `TaskActivityBehavior`, not
+  `UserTaskActivityBehavior`), so the cheap base class was unavailable and the work
+  meant reimplementing large parts of Flowable's task creation. Seeing that cost, the
+  owner chose conversion instead.
+  **Issue:** #167
+
+- **Planner error 1, corrected:** I told the owner that "make manual tasks wait" would
+  breach epic #40's AC6. It would not — that AC explicitly blesses *"a custom
+  `ActivityBehavior` registered into the engine"*, and `createManualTaskActivityBehavior`
+  exists with a parse handler that consults it. I had carried over the shape of #155's
+  no-seam verdict for the complex gateway without checking this element.
+  **Issue:** #167, #40
+
+- **Planner error 2, corrected by the coverage checker:** the owner said a *converted*
+  task needs "an assignee or a rule that determines assignee". I generalised that into
+  a publish refusal for **every** user task. 49 of the 50 `userTask` fixtures in the
+  repo carry no assignee — including two guards in `BpmnSupportManifestTests`, every
+  engine fixture in #157/#158/#161, and every downstream story's demo — and
+  `workflow.js` renders `(unassigned)` as a first-class execution state. Narrowed back
+  to the conversion.
+  **Issue:** #167
+
+- **Decision:** `Task (Generic)` is withdrawn too. It was marked `studio: supported`
+  with evidence "deployed and started" — true and misleading, since a plain
+  `bpmn:task` never waits either. Withdrawing it corrects a claim in shipped work; it
+  was one of the 14 baseline-supported, so it sits outside the 54 and outside the 47,
+  and the close-out arithmetic gains a row that was previously in no count at all.
+  **Issue:** #167, #103, #107
+
+- **Decision:** `Nothing_the_engine_runs_is_refused` (#107) is updated rather than
+  worked around. Manual and generic tasks keep `engine: executes` — the engine does
+  run them, into silence — so refusing them at publish trips that guard. Its rule
+  becomes "nothing the engine runs is refused **unless the studio withdrew it**".
+  Wording the refusal to dodge the substring would be evasion.
+  **Issue:** #167, #107
+
+- **Decision:** a **verify-first AC** on all twelve remaining element stories — confirm
+  what the element actually does against the running engine before implementing, and
+  say so if it differs. Four stories (#161, #167, #163, and #112 below) were found
+  resting on unverified behaviour; #103's inventory proved instantiation only and said
+  so in its own completion comment.
+  **Issue:** #112, #113, #114, #115, #156, #159, #162, #163, #164, #166, #218, #220
+
+- **Found by verify-first, immediately:** #163's artifacts said `IFlowableClient` would
+  list and execute ad-hoc activities, but **Flowable ships no REST endpoint for any of
+  it** — the engine has the commands, `flowable-rest-8.0.0.jar` exposes none. Buildable
+  via a custom `@RestController` in `flowable-extension` (M3's
+  `FlowableScriptTaskSupportController` precedent), but Java work the story never
+  mentioned. Added to its ACs and artifacts.
+  **Issue:** #163
+
+- **Found by the coverage checker:** #112 still prescribed the
+  `ActivityBehaviorFactory` seam that spike #155 disproved, for an element the manifest
+  records as *harder* than the complex gateway — Intermediate Throw (Message) fails at
+  deployment because its validator rejects the event definition. Rewritten to require
+  verification before committing to an approach.
+  **Issue:** #112, #155
+
+- **Found by the coverage checker:** #166 contradicted itself — its AC says a data
+  store reference is a typed process-variable declaration, its test plan said to assert
+  they "present as annotations". It was also the only element-owning story with no
+  manifest AC. Both fixed. #162 had four items and two dedicated ACs; `Escalation
+  Start` and `Conditional Start` now have their own. #218 must rebase
+  `A_refusal_names_the_offending_element_in_the_diagram`, which uses a complex gateway
+  as its refusal fixture and would pass while testing nothing once they publish.
+  **Issue:** #166, #162, #218
+
+- **Note:** the manifest rows for Manual Task and Task (Generic) were deliberately NOT
+  edited during planning. #167's own acceptance criterion moves them, and editing them
+  here would mark that criterion satisfied before the behaviour existed.
+  **Issue:** #167
+
+## /n8-exec M4 — #167, 2026-09-07 — manual and generic tasks converted away
+
+- **Verify-first, as the story's own new criterion requires:** a plain `bpmn:task`
+  passes straight through exactly as a manual task does. Deployed and started one; the
+  process reached the activity beyond, creating no task. That confirmed the second
+  half of the owner's decision on measured behaviour rather than by analogy.
+  **Issue:** #167
+
+- **Rule 1 (bug found + fixed, with the test that caught it):** the
+  `autonateConvertedFrom` marker was being **silently dropped** on save. It is written
+  as a `flowable:`-prefixed attribute, and bpmn-moddle discards an attribute whose
+  prefix the document never declares — Auton8's starter diagram declares
+  `xmlns:flowable`, but a diagram authored in another modeller does not, which is
+  precisely the population this conversion exists for. So the publish-time assignee
+  check would never have fired on imported diagrams. The converter now declares the
+  namespace on `definitions.$attrs` before writing.
+  **How it was caught:** my first E2E asserted only that the on-screen notice
+  appeared, and passed in one second. Strengthening it to read the saved XML failed
+  immediately. The lesson is the one this milestone keeps re-teaching — assert the
+  observable consequence one step further out.
+  **Issue:** #167
+
+- **Decision:** the final E2E asserts the **publish refusal** rather than reading the
+  XML back. The refusal fires only on tasks carrying the marker, so it proves three
+  things at once: the elements became user tasks, the marker was written, and it
+  survived serialisation.
+  **Also worth recording:** when the save step first failed, my instinct was that the
+  test was wrong. It was not — my own backstop was correctly refusing a diagram whose
+  converted tasks had nobody to do them. Reading the failure rather than assuming a
+  fixture problem is what produced the better assertion.
+  **Issue:** #167
+
+- **Decision (Discretion, planner):** the notice is an in-page `Alert`, not a toast.
+  CLAUDE.md's rule is that a toast is feedback on something the user just caused; a
+  diagram converted on *load* changed without the author doing anything, which is a
+  condition belonging to the page. One summary rather than one per element, and
+  conversions accumulate so a later drop does not erase the explanation for an
+  earlier import.
+  **Issue:** #167
+
+- **Decision:** `Nothing_the_engine_runs_is_refused` was widened rather than worked
+  around, and renamed to say what it now means. Manual and generic tasks keep
+  `engine: executes` — the engine really does run them, into silence — so the rule
+  became "nothing the engine runs is refused **unless the studio withdrew it**".
+  Wording the refusals to dodge the substring the test greps for would have been
+  evasion.
+  **Issue:** #167, #107
+
+- **Skill:** gained load-bearing fact 7 — **some elements are removed rather than
+  added**, by three different mechanisms depending on *why* they cannot work: no model
+  type at any layer (link events), no seam reaches it (complex gateway), or it runs
+  and does nothing useful (manual and generic tasks, converted at design time). The
+  namespace trap and the both-paths requirement are recorded with it, since neither is
+  discoverable before it bites.
+  **Issue:** #167, #174
+
+## /n8-exec M4 — #177, 2026-09-07 — cancelled vs completed in the execution diagram
+
+- **The story's stated mechanism does not exist.** #177 said the per-activity truth
+  "is available and already mapped: `DeleteReason` on `WorkflowExecutionHistoryEvent`
+  … simply not consulted". Consulting it changes nothing: **Flowable 8.0.0 does not
+  populate it** when a boundary event cancels an activity. Verified by firing a timer
+  boundary and reading the history —
+
+      work     type=userTask      end=19:38:17  deleteReason=None
+      timeout  type=boundaryEvent end=19:38:17  deleteReason=None
+
+  — the cancelled task is indistinguishable from a completed one by that field.
+  **How it was caught:** I implemented the specified fix, its unit tests passed
+  (because I had stubbed a `deleteReason` the engine never sends), and the E2E against
+  the real engine failed. The unit tests were asserting my assumption back at me.
+  **Issue:** #177
+
+- **Decision:** cancellation is derived from the **diagram**, which the method already
+  loads — an activity is cancelled when an *interrupting* boundary event attached to
+  it has ended. `cancelActivity="false"` is excluded deliberately: a non-interrupting
+  boundary fires alongside its activity and cancels nothing, so treating one as a
+  cancellation would render a healthy running task as killed, which is a worse error
+  than the bug. A test pins that complement.
+  **Why a correction rather than a blocker:** the AC's intent — an operator can tell a
+  timed-out task from a finished one — is unchanged, no invariant is in tension, and
+  the alternative was to implement something that provably does nothing. AC2 and the
+  Evidence section were corrected in place on the issue.
+  **Issue:** #177
+
+- **Decision:** the instance-level path keeps its 5-second `cancelWindow` fallback and
+  the two sources are unioned rather than swapped. AC3 protects whole-instance
+  cancellation as a regression risk, and that heuristic covers Flowable versions whose
+  REST history omits the field on a torn-down process.
+  **Issue:** #177
+
+- **Skill:** `references/testing-bpmn-elements.md` gains the rule this cost a false
+  green to learn — do not assert on a history row's `DeleteReason`; assert on
+  `CancelledActivityIds`, **with the instance still running**, and assert the
+  complement, because `CompletedActivityIds` is built by excluding the cancelled set
+  so an activity wrongly missing from one silently appears in the other.
+  **Issue:** #177, #174
+
+## /n8-exec M4 — #191, 2026-09-07 — the test-database leak
+
+- **The backlog was real and larger than the story knew: 1,680** leaked
+  `autonate_test_*` databases in the shared Postgres. Now 0.
+  **Issue:** #191
+
+- **Root cause (Rule 1):** `AutoNateWebApplicationFactory.DisposeAsync` called
+  `await base.DisposeAsync()` and *then* dropped the database, with nothing between
+  them — so anything the host threw on teardown stranded it, invisibly. Now
+  try/finally, with a test that forces a double disposal and asserts the database is
+  gone regardless.
+  **Issue:** #191
+
+- **Decision:** liveness is decided by a **creation timestamp stamped as a database
+  comment** at create. Postgres records no creation time, and AC3 is explicit that a
+  sweep which cannot tell live from stranded is worse than the leak — it would drop a
+  database out from under a running class and the failure would look like a random
+  flake elsewhere. A database with **no** comment predates this change and cannot
+  belong to a live run, which is exactly how the 1,680 cleared on first contact.
+  Candidates are additionally required to have no active connections, and an
+  unparseable stamp is treated as live rather than as garbage: being wrong that way
+  costs disk, the other way costs a running test.
+  **Issue:** #191
+
+- **Bug I introduced and fixed before shipping:** the first version ran the sweep from
+  a `[ModuleInitializer]`. That **hung the test run** — a module initializer executes
+  while the assembly loads, during xunit discovery, and blocking there on async I/O
+  deadlocks before a single test reports. Caught because the verification run timed
+  out at ten minutes with the planted databases untouched, rather than because
+  anything failed. Replaced with a gate on the first database creation, which runs in
+  a normal async context and which every leak-capable test passes through by
+  definition.
+  **Then the threading analyzer rejected my second attempt too** — `Lazy<Task>.Value`
+  (VSTHRD011) is the same deadlock class. Replaced with a `SemaphoreSlim` gate.
+  **Issue:** #191
+
+## /n8-exec M4 — #214, 2026-09-07 — sweeping roles, schemas, directories, deployments
+
+- **Decision:** a `plg_*` role is swept only when **no live database holds a schema of
+  that name**. `PluginSchemaProvisioner.RoleNameFor` is production code, so a test's
+  plugin role and a real one are identical by name — and "the code looks randomly
+  generated" is exactly the heuristic that eventually deletes a developer's working
+  plugin. The structural signal is that a plugin role exists to own a schema; no
+  schema, nothing served. Verified against the dev cluster: 1 matched, 405 orphaned.
+  **Issue:** #214
+
+- **Finding:** Postgres provides a second backstop for free — `DROP ROLE` fails while
+  the role owns anything. `plg_readers` on this cluster owns 99 objects in `AutoNate`
+  and 92 in `AutoNate_E2E`, and the sweep correctly skipped it even though no schema
+  carries its name. Asserted in a test rather than relied on silently, so a future
+  `CASCADE` or reassign-owned step trips a test before it trips a developer's data.
+  **Issue:** #214
+
+- **Decision:** schemas are swept only inside databases the suite owns
+  (`autonate_test_*`, `AutoNate_E2E`) — never `AutoNate` or `autonate_datastores`,
+  where a developer's installed plugins live. Most of this class is already handled by
+  #191 dropping the database the schema lives in.
+  **Issue:** #214, #191
+
+- **Decision:** the Flowable sweep keys on the **`e2e-` prefix** `TestNames.Prefixed`
+  produces. The shared engine held 388 deployments — 303 from the suite, the rest
+  named `autonate`, `default`, `car`, `account`: a developer's real work, which a
+  looser rule would have deleted.
+  **Rule 1 (my own leak, fixed):** the E2E fixtures I wrote for #157/#158/#161/#167
+  named their workflow models with raw process keys (`tb_both_…`, `cond_catch_…`), so
+  they fell outside the convention and leaked. Now `TestNames.Prefixed(key)`, computed
+  **once** per publish — a second call would have generated a different suffix and
+  silently renamed the model between create and publish.
+  **Issue:** #214
+
+- **Discovered and filed, not fixed:** #221 —
+  `AssignedWorkflowTask_CompleteFromMyTasks_RemovesItFromTheTable` fails on a clean
+  tree (verified by stashing every working change). Pre-existing, outside this story,
+  and invisible to CI because its class carries `RequiresService=Flowable`, which CI
+  excludes by trait.
+  **Issue:** #214, #221
+
+- **Decision:** all three flaky classes were diagnosed separately, and they had
+  **three different causes** — which is why the story insisted on it.
+  1. `SystemIssueEndpointsTests` — the process-global `BackgroundExceptionTrap`,
+     as the story predicted. Fixed in test wiring only.
+  2. `NotesQueryEndpointTests` — **not** the trap. `ContentAuthorizer` memoizes
+     `GetAllowedIdsAsync` in a plain `Dictionary` on the scoped instance, on a
+     premise its own comment stated: "endpoint flow is sequential await — no
+     `Task.WhenAll` across this service". `NotesQueryEntity` broke that premise,
+     issuing five or six of those calls under one `Task.WhenAll`. Concurrent
+     writes corrupted the Dictionary; the AQL endpoint catches everything and
+     returns 400, so the only visible symptom was `Expected: OK / Actual:
+     BadRequest`. A **production** bug, not a test artifact.
+  3. `SystemIssueRemediationTests` — neither of the above. The eligibility query
+     compared `next_remediation_after_utc` (written from the client clock)
+     against Postgres's `NOW()`. Two clocks; the VM's drifts under host CPU
+     pressure, so a zero-backoff row read as a few milliseconds in the future
+     and the tick skipped it. The test counts three ticks and got two.
+  **Why:** the story's warning was right — the trap is a real cause for exactly
+  one of the three, and had I let it explain all three, two genuine defects
+  (one of them shipping) would have been closed as fixed.
+  **Issue:** #215
+
+- **Decision:** `ContentAuthorizer`'s memo now stores the in-flight `Task` behind
+  a lock rather than the computed value.
+  **Why:** guarding only the writes would stop the corruption but let N
+  simultaneous callers each run the computation the memo exists to avoid. The
+  lock covers lookup-and-store only — `ComputeAllowedIdsAsync` is async, so
+  nothing is awaited while it is held.
+  **Rejected:** `ConcurrentDictionary.GetOrAdd`, whose factory can run more than
+  once; the losing task still executes and, if it faults, becomes an unobserved
+  task exception — which is what #215's other cause is about.
+  **Issue:** #215
+
+- **Decision:** `SystemIssueRemediationDispatcher` took an optional
+  `TimeProvider` (defaulting to `TimeProvider.System`, so production is
+  unchanged), and its eligibility query now compares against that clock.
+  **Why:** without a clock seam the fix is untestable — a test that runs the
+  dispatcher at real "now" cannot distinguish a client-clock comparison from a
+  server-clock one, and the guard would have been a source-grep assertion. With
+  it, two tests move the clock an hour either way and fail against the old
+  implementation in both directions. Verified by reverting the SQL and watching
+  them fail 2/6, then restoring.
+  **Issue:** #215
+
+- **Method note:** every regression test here was run against the pre-fix state
+  first, and the first two versions of `ContentAuthorizerConcurrencyTests`
+  **passed** pre-fix — they were vacuous. The principal was built from
+  `LocalUser.Id` (a `long`) rather than `LocalUser.UserId` (the `Guid` the
+  identity claim carries), so every call short-circuited to the
+  `ContentAccessSet.Empty` singleton before reaching the memo. A barrier alone
+  was also not enough: on a warm connection the computation completes without
+  yielding, so callers never overlap. The test now asserts the actor resolves,
+  and wraps the DbContext factory to force a real yield.
+  **Why recorded:** a concurrency test that passes before the fix is worse than
+  none — it certifies the bug as fixed.
+  **Issue:** #215
+
+- **Discovered during verification: a fourth flaky class — and my first
+  diagnosis of it was wrong.**
+  `TestResourceSweepTests.An_orphaned_plugin_role_is_removed` (from #214) failed
+  in two of the first three full runs with "The sweep reported dropping no
+  roles." I first blamed the once-per-process startup sweep in
+  `PostgresTestDatabase.CreateAsync` racing the test's plant, and made the test
+  drain it. The next three runs failed the same way — and the timestamps said
+  why: the failure lands about **eleven minutes** into a run, nowhere near
+  startup.
+  **The real cause is a defect in the sweep itself.**
+  `SweepOrphanedPluginRolesAsync` lists `pg_database`, connects to each name, and
+  treated **any** failure as "cannot see this database's schemas, so assume every
+  role is in use" — `return 0`, having examined nothing. The suite creates and
+  drops a database per test class in parallel with the sweep, so a name that was
+  listed and has since vanished is the *normal* case. Under load the cluster-wide
+  sweep silently did nothing and reported zero, which is worse than the flake it
+  surfaced as: #214's sweep was not sweeping.
+  **Fix:** a vanished database (`3D000`) is skipped — it holds no schemas, so it
+  constrains nothing and skipping it is exact. A database that exists but cannot
+  be read keeps the conservative bail-out, since its schemas might be what keeps
+  a role alive. Both halves are asserted.
+  **Testability:** the timing cannot be reproduced from outside, so the database
+  list is injectable and the test supplies a name that is not there. Verified by
+  restoring the single broad `catch` and watching the vanished-database test fail.
+  **The drain added by the wrong diagnosis was kept** — it closes a real if
+  narrower window (the count assertion assumes no other sweeper is running) — but
+  it was not the cause, and this entry says so rather than leaving it looking like
+  the fix.
+  **Rule 1** (bug in code this story touches, fixed with the story).
+  **Issue:** #215, #214
+
+## /n8-exec M4 (continued) — 2026-09-08
+
+- **Decision (#168):** the retry point is offered on **service tasks** (toggle) and
+  shown as **fixed on** for script tasks, which `ForceAsyncScriptTasks` already
+  forces at publish. No other activity type offers it. Discretion the story
+  delegated; the set is the two activities with real property editors and the two
+  where the failure a retry point exists for actually happens.
+  **Issue:** #168
+
+- **Verify-first paid for itself three times on #168.** Two probe processes against
+  Flowable 8.0.0, identical but for `flowable:async`:
+  1. It established the semantics before any code — unmarked, a failing step rolls
+     the whole start back and **no instance survives**; marked, preceding steps stay
+     recorded and the failure dead-letters with its exception. That is the
+     assert-both-ways pair the test plan demanded, and it is visible in *history*,
+     which is a better instrument than the job tables.
+  2. Asserting a live job with `retries > 0` would have been a **race** — Flowable
+     burns the default three attempts in under a second. The deterministic state is
+     the dead-letter row at `retries=0`.
+  3. `/management/deadletter-jobs` **ignores** a `processInstanceId` query
+     parameter and returns everything. A test trusting it would have asserted over
+     other tests' leftovers.
+  **Issue:** #168
+
+- **My own error, caught by mutation testing (#168):** the unmarked-case test
+  asserts `!completed.Ok`, and my first version used the wrong route — a **405**
+  satisfies that vacuously, so it passed while testing nothing. Fixed the route,
+  then mutated the attribute in both directions (mark both / mark neither, in both
+  the C# and the JS write path) and confirmed each mutation is caught by the
+  correct test. A negative assertion is the easiest kind to pass by accident.
+  **Issue:** #168
+
+- **Second instance of the same mistake, same story:** the studio test polled the
+  saved diagram until it "contained ServiceTask_1" — which the **seeded** XML
+  already satisfied, so it read the pre-save document and both studio tests failed
+  against a correct implementation. The poll now takes its condition from the
+  caller. A poll predicate that is already true before the event is not a wait.
+  **Issue:** #168
+
+- **Discovered and filed, not fixed:** #222 — `WorkflowExecutionErrorRecorder`
+  records only `job.execution.failed`, so a **synchronous** step failure can never
+  reach the executions error surface. Today, marking a step as a retry point is
+  also what makes its failure visible, which is a coupling no author is choosing
+  knowingly. Outside #168 (whose AC asks only that the job is produced and the
+  existing path is not regressed) and real input for M5's job-surface story.
+  **Issue:** #168, #222
+
+- **A fifth flaky class, found by #168's regression run and fixed under #215.**
+  `EntityEdgeWriterTests` failed a full run with `57P01: terminating connection due
+  to administrator command`. Cause: `SweepAbandonedDatabasesAsync` treated a
+  database with no comment as garbage — "predates #191, so it cannot be from a live
+  run". `InitializeAsync` creates a database and stamps it in **two separate
+  statements**, so in between it exists, has no connections, and has no stamp: it
+  passes the liveness filter *and* the missing-stamp rule, and `drop database …
+  with (force)` takes it out from under the test about to open it.
+  **Fix:** an unstamped database is treated as live — the same direction this
+  method already takes for an unparseable stamp, and for the reason stated there
+  ("being wrong in that direction costs disk; the other direction drops a database
+  out from under a running test"). The pre-#191 backlog that rule existed to clear
+  is empty on the cluster, so it was buying nothing and costing that.
+  **A test was changed, deliberately:** `A_database_with_no_stamp_is_treated_as_
+  abandoned` pinned the buggy behaviour and its comment stated the false premise
+  verbatim. It is now `A_database_with_no_stamp_is_left_alone`, with a companion
+  asserting a stamped-and-stale database is still swept so the rule cannot decay
+  into "the sweep spares everything".
+  **Third false premise found in this story's territory**, after ContentAuthorizer's
+  "no Task.WhenAll across this service" and the sweep's "any failure means assume
+  every role is in use". The pattern is a comment that was true when written and
+  became load-bearing after it stopped being true.
+  **Issue:** #215
+
+- **Decision (#112, user-approved):** the intermediate throw (Message) and the
+  message end event are **expanded at publish** into a service task on the send
+  behaviour, rather than withdrawn. The issue named both as live options and the
+  user approved expansion.
+  **Why the pair needed a decision at all:** the issue assumed "the two share
+  their send path". They do not. Verified against Flowable 8.0.0 —
+  the intermediate throw is REJECTED at deployment
+  (`flowable-throw-event-invalid-eventdefinition`), while the message end event
+  **deploys, ends the process cleanly, and sends nothing**: a catcher on the same
+  message sat at one instance before and after a full run. One fails loudly, the
+  other is silent decoration that looks like it works.
+  **Issue:** #112
+
+- **Decision (#112):** the expansion runs on the **deploy** path, not in
+  `ApplyProcessMetadata`.
+  **Why:** prepare's output is what the studio SAVES. Expanding there would
+  replace the author's message events with service tasks in their own diagram —
+  losing the shape they drew, and losing the configuration the send behaviour
+  reads back by activity id at run time. Putting it at deploy also means a caller
+  that publishes without preparing cannot deploy something the engine refuses.
+  Caught because the first version put it in `ApplyProcessMetadata` and the E2E
+  publish still failed with the validator error: publish does not call prepare.
+  **Issue:** #112
+
+- **Decision (#112):** one `SendMessageBehavior` for the send task and both
+  expanded throw elements, resolving its configuration from the AUTHORED diagram
+  by activity id.
+  **Why:** it makes "the throw side and the receive side agree on one correlation
+  model" true by construction rather than by inspection. A send that reaches
+  nobody returns Ok with a `sendMessageResult` variable rather than failing the
+  activity — failing would dead-letter a job because someone else's process was
+  not ready, which is not this process's error.
+  **Issue:** #112
+
+- **Rule 3 blocker fixed (#112): `make app-container` has been broken since
+  #107.** The Dockerfile never copied `src/shared/`, so `@shared/bpmn-support.json`
+  could not resolve and the SPA stage failed with TS2307. It builds on a
+  developer's machine, where `../shared` really is there, which is why nobody
+  noticed. Found because the E2E behaviour callback needed a rebuilt container.
+  **Issue:** #112, #107
+
+- **Discovered and filed, not fixed:** #223 — **no E2E test can verify a workflow
+  behaviour end to end.** Flowable's callback reaches the app in the
+  `autonate-web` container (database `AutoNate`); the E2E fixture runs its own app
+  against `AutoNate_E2E`. A behaviour invoked by a workflow an E2E test published
+  executes where that workflow does not exist. #112's send behaviour reported it
+  honestly as `senderNotFound`.
+  **How #112 works around it:** the expansion tests assert that the element now
+  DEPLOYS (it was rejected), that the expanded service task actually ran the
+  behaviour (it writes its outcome variable whatever the outcome), and that the
+  process continues or ends as authored. Delivery is proved separately by seven
+  tests driving the same correlator through the endpoint. Honest, but a
+  workaround — and #218's scripted gateway will hit the same wall.
+  **Issue:** #112, #223
+
+- **Manifest:** seven rows move to `studio: supported` (Message Start,
+  Intermediate Catch, Message Boundary, Message End, Intermediate Throw, Send
+  Task, Receive Task). `Message Flow` stays `coming-soon` — it is M5's, and #112's
+  obligation was only to make the mechanism reusable and say so, which is recorded
+  in `WorkflowMessageCorrelator`'s header.
+  **One engine-axis departure declared**, for Intermediate Throw (Message):
+  `rows.json` records "fails at deployment" and is right about the raw element;
+  the departure is that publish no longer deploys the raw element. Noted in the
+  guard as the one departure of its kind — a verdict overturned by changing what
+  we deploy rather than by the engine changing.
+  **Issue:** #112
+
+- **A sixth load-dependent flake, found by #112's regression run and fixed under
+  #215's remit.** `TestDatabaseSweepTests.The_sweep_leaves_a_database_a_live_run_
+  is_using` created a database, swept everything "older than a minute", and
+  asserted the new one survived. Under full-suite load the test's own
+  `CreateAsync` — migrations, seeding, and its turn through the connection pool —
+  ran for **six minutes nineteen seconds**, so by the time the sweep executed the
+  database genuinely was older than the threshold. The test failed honestly; its
+  premise was wrong.
+  **Fix:** an hour, which this test cannot reach on any machine. Nothing is lost —
+  what stops it passing against a sweep that has given up entirely is the
+  complement (`A_stamped_database_is_still_swept_when_it_is_old_enough`), not the
+  size of the number.
+  **Pattern, now six for six:** every flake in this suite has been a premise that
+  was true when written and quietly stopped being true — "no Task.WhenAll across
+  this service", "any failure means assume every role is in use", "no stamp means
+  it predates #191", and now "this test finishes in under a minute".
+  **Issue:** #215, #112
+
+- **My own error, recorded because it cost a 22-minute run:** I ran the #221 E2E
+  re-checks concurrently with the full backend suite, and the two builds clobbered
+  `AutoNate.Web.staticwebassets.endpoints.json` — 592 failures, all of them either
+  "static resources manifest not found" or a host that could not boot without it.
+  This hazard had already bitten once earlier in the milestone and I knew about
+  it. Nothing else builds while the backend suite runs.
+  **Issue:** #112
+
+## /n8-exec M4 (resumed) — 2026-09-08
+
+- **BLOCKER (#156): the story contradicts itself on what `process` scope means,
+  and the two readings differ by an order of magnitude in cost.**
+  - *Decisions taken in planning*: "`process` (only instances of the same process
+    **definition**)".
+  - *Test plan*: "a process-scoped throw wakes only the **same-definition**
+    instance".
+  - *Demo*: "Start two instances… **the other instance is untouched**" — which is
+    **instance** scope.
+  **Engine evidence (probed, then cleaned up):** every signal element deploys and
+  executes, including the intermediate throw that its message counterpart cannot.
+  A default signal thrown in instance A woke instance B's catch AND boundary;
+  `flowable:scope="processInstance"` left B untouched. Flowable's native scope is
+  instance-level — it has nothing meaning "same definition".
+  **Why not a judgement call:** instance scope is one native attribute; definition
+  scope needs the throw expanded at publish into app-side dispatch (#112's
+  pattern), which this story does not budget for and which makes the Demo fail as
+  written. Wrong either way is expensive and user-visible.
+  **Options put to the user:** same instance / same definition / all three.
+  **Holds up:** nothing hard, but #162 and #164 both catch signals and may inherit
+  the answer, so their scope semantics are being left unpinned.
+  **Issue:** #156
+
+- **Rule 1 defect fix (#114): an uncaught error code destroys the whole instance,
+  and this is now refused at publish.** Verified against Flowable 8.0.0: an error
+  end event whose code no boundary catches answers the start call with **500** and
+  leaves no instance, no history and nothing on the error surface. The issue
+  pre-decided that an instance disappearing is a defect rather than a behaviour to
+  document. It is fully detectable from the XML, so the diagram is refused while
+  the author still has it open.
+  **Escalation deliberately excluded:** an uncaught escalation is not an error in
+  BPMN — it is a notification nobody subscribed to, the engine carries on, and
+  refusing it would block a legitimate diagram. Asserted so the two are not
+  quietly unified.
+  **Issue:** #114
+
+- **Decision (#114): only the uncaught-error rule was promoted to the publish
+  path, not the whole validation set.** `ValidateProcess` runs on `/prepare`,
+  which the studio calls; `/publish` is what deploys and ran none of it. Promoting
+  every rule would change what publish accepts for every diagram already in
+  flight — a contract change deserving its own decision, not a side effect of this
+  story. This one rule was promoted because its failure mode is an instance
+  destroyed with no diagnostics.
+  **Filed:** #225, which puts the broader question to the user.
+  **Issue:** #114, #225
+
+- **Decision (#114): business errors are opt-in and enforced by the host.**
+  `BehaviorResult.BusinessError(code, …)` becomes a `BpmnError` the engine routes
+  to a matching boundary event; anything the behaviour did not declare in
+  `CatchableErrorCodes` is stripped, logged, and left an ordinary retryable
+  failure. Enforced in the endpoint rather than trusted from the result, so a
+  behaviour cannot make an arbitrary failure routable.
+  **Why the asymmetry:** if every failure became catchable, "the database was
+  briefly unreachable" would travel down the "payment declined" branch.
+  **ABI care (invariant 2):** `BusinessErrorCode` is an init-only PROPERTY, not a
+  positional record parameter — adding a parameter changes the primary
+  constructor's signature and a plugin compiled against the pinned 1.0.0.0 ABI
+  calling `new BehaviorResult(...)` would fail at run time.
+  `CatchableErrorCodes` is a DEFAULT interface member, so existing plugins keep
+  compiling and loading and simply declare nothing. `PluginAbiVersionTests` and
+  `DoNotRenameGuardTests` pass.
+  **Issue:** #114
+
+- **My own near-miss, recorded because it nearly became a false verification.**
+  Mutation-checking the Java bridge, I removed the `throw new BpmnError(...)` and
+  read `rc=1` / `BUILD FAILURE` as "the mutation was caught". It was not — Maven
+  had run from the repo root, where there is no POM, and failed before running a
+  single test. Re-run with `-f flowable-extension/pom.xml` it genuinely failed
+  1 test in `AutoNateBehaviorDelegateTests`, which is the real evidence.
+  **The rule this breaks:** a non-zero exit is not evidence of the failure you
+  expected; read what actually failed. Same class as the static-assets clobber.
+  **Issue:** #114
+
+- **Decision (#113): call activities are pinned to a definition id at publish.**
+  Flowable resolves a `calledElement` KEY at run time to the latest version —
+  verified: an unchanged, already-deployed parent picked up a child version
+  published after it. The issue decided the opposite ("a running process never
+  changes behaviour underneath its owner"), so publish resolves the author's key
+  to the definition id existing at that moment and writes
+  `flowable:calledElementType="id"` on the DEPLOYED copy only. The stored diagram
+  keeps the key, which is what the studio shows.
+  **One mechanism, three criteria:** picking-not-typing becomes meaningful because
+  the key is resolved; a key resolving to nothing is refused at publish rather
+  than failing when an instance reaches the call; and the version is bound at
+  parent-deployment time.
+  **Recursion falls out of it.** A parent can only pin to a definition that
+  already exists, so every call points strictly backwards in deployment order and
+  the chain terminates. A first version calling itself has nothing to resolve and
+  is refused. Asserted rather than assumed.
+  **Issue:** #113
+
+- **Deliberately not probed (#113):** unbounded recursion against the shared
+  Flowable. Running it would be a denial of service against a service the rest of
+  this milestone depends on, and the outcome is not in doubt. The bound is
+  structural (above) and tested at publish instead. Recording the decision rather
+  than the experiment.
+  **Issue:** #113
+
+- **Rule 3 (#113): `moddle.create("flowable:In", …)` throws — the studio loads no
+  Flowable moddle extension.** The in/out mappings are written with
+  `moddle.createAny(name, nsUri, …)`, which serialises under the qualified name
+  without needing a registered type. Same root constraint as #168's
+  `flowable:async`, but the fix differs because these are child ELEMENTS rather
+  than attributes.
+  **How it was found:** the studio test failed as "the Save button is not
+  clickable" — Apply was throwing, so the modal stayed open over Save. The test
+  now waits for the modal to close as Apply's success signal, which is what turned
+  a misleading symptom into the actual cause.
+  **Issue:** #113
+
+- **AC5 (#113) — reported as not done, then done.** I flagged that the child
+  execution was not visible from the parent, rather than ticking it, and then
+  implemented it: `GET /api/executions/{id}/children` over the engine's
+  `superProcessInstanceId` relationship, plus a "Called Workflows (n)" tab that
+  opens the child. The tab appears only when there IS a child, so a process
+  without a call activity does not carry an empty tab implying otherwise.
+  **Why it mattered more than it sounds:** the engine probe showed a waiting
+  parent's own task list is EMPTY. Without this, a call activity is
+  indistinguishable from a hung process from the parent — the exact complaint the
+  issue opens with, and the story's stated truth ("when a call activity is stuck,
+  a user can open the child and see why") would have been false.
+  **A slip the E2E caught:** my link pointed at `/workflow-executions/{id}`; the
+  real route is `executions/:id`. A component test would have asserted the same
+  wrong string I had just written. Only navigating for real finds this class of
+  bug.
+  **Issue:** #113
+
+- **Two criteria corrected in #164 on engine evidence.**
+  1. The issue says to refuse "anything other than intermediate catch events **or
+     receive tasks**" after an event-based gateway. **Flowable refuses the receive
+     task itself** — `flowable-event-gateway-only-connected-to-intermediate-events`.
+     BPMN permits it; this engine does not. Implementing the criterion as written
+     would have let through a diagram that fails at deploy with a parse error an
+     author cannot act on, so the validation refuses receive tasks too and says
+     why.
+  2. A gateway with **one** outgoing flow **deploys cleanly** (verified), so that
+     rule is genuinely ours and is not redundant with the engine's own check. The
+     bad-target rule IS partly redundant — kept because ours fires earlier and in
+     the author's terms — and that is recorded so nobody later removes it as
+     duplicated.
+  **Issue:** #164
+
+- **Decision: the publish-time rules are now a named set with a membership
+  criterion**, `WorkflowBpmnXml.ValidateStructureForPublish`, rather than
+  individually promoted one-offs. The criterion: *the engine either destroys
+  something or accepts a diagram that cannot work, and the author gets no usable
+  diagnosis.* Members are #114's uncaught error and #164's unresolvable gateway.
+  **Why the change of shape:** this was the third story written assuming publish
+  is a gate, and promoting rules one at a time would arrive at "the whole
+  validation set" by habit rather than by decision. The criterion exists to stop
+  that. Everything else stays advisory until #225 is answered.
+  **Issue:** #164, #114, #225
+
+- **#164 is NOT blocked by #156.** Its last criterion asks that alternatives reuse
+  "signal scope from the signals story", and #156 is blocked on what `process`
+  scope means. Nothing here pins signal-scope semantics: a signal alternative
+  catches a signal, and whatever #156 decides about who receives one applies
+  unchanged.
+  **Issue:** #164, #156
+
+- **Defect found in #112's SHIPPED code by #162's test, fixed here.**
+  `ExtractMessageDeclarations` classified every message-carrying `startEvent` as a
+  process start. A start event inside an **event subprocess** starts a handler
+  within an already-running instance — it is a catch. Classifying it as a start
+  made the correlator call `StartProcessInstanceByMessage`, which Flowable refuses
+  ("no subscription to message with name '…' found") because no process-level
+  start event carries it. The symptom was a 500 on a send that should simply have
+  been delivered.
+  **Why #112's own tests missed it:** every diagram in them put the message start
+  at process level, which is the case that works. The shape only exists once event
+  subprocesses do. Recorded on #112 as well, so the gap is on that issue's record
+  and not only in the story that tripped over it.
+  **Issue:** #162, #112
+
+- **Rule 2 (#162): a non-interrupting ERROR start event is refused at publish.**
+  BPMN does not allow one — an error always interrupts the scope it escapes — and
+  the engine interrupts regardless, verified. So the diagram promises something
+  the engine will not honour, silently. My own first test asserted the opposite
+  and failed, which is how this surfaced.
+  **Issue:** #162
+
+- **Discovered and filed, not fixed:** #226 — the execution variable endpoints
+  answer **500** for a body with no `variables` (a raw `NullReferenceException`),
+  for an add that conflicts (Flowable says 409), and for a type mismatch (Flowable
+  says 400). This is the surface #112 points operators at for unsticking a
+  process, so a 500 there is the wrong signal and pages someone. Outside #162's
+  scope; filed rather than fixed.
+  **Issue:** #162, #226
+
+- **#162's conditional handler confirms #158's wiring is genuinely reused.**
+  Flowable allows a conditional start ONLY inside an event subprocess, which is
+  why #158 could refuse the process-level placement but not deliver the working
+  one. The test sets the variable through the app's own update path and the
+  handler fires — which only works because that path calls
+  `EvaluateConditionalEventsAsync`, as #158 established the engine requires.
+  **Issue:** #162, #158
+
+- **I over-claimed completion on five stories, and corrected it.** ACs were ticked
+  with a script replacing every `- [ ]` with `- [x]`, which cannot distinguish
+  "done" from "listed". Nine criteria across #112, #113, #114, #162 and #168 were
+  not met. All nine unticked, corrections posted on each issue, and the work
+  finished where it could be.
+  **Why this is worse than a wrong sentence in a report:** a completion comment is
+  prose someone reads; a ticked box is what `/n8-verify` and a reviewer trust at a
+  glance. Three of the nine were limitations I had *already documented elsewhere*
+  and then ticked anyway — documenting a constraint and marking the criterion done
+  is a contradiction I should have caught.
+  **Issue:** #112, #113, #114, #162, #168
+
+- **The over-claim hid a real defect (#112).** "A send task performs its send
+  through the behaviour mechanism service tasks already use" was ticked on the
+  strength of `SendMessageBehavior` existing. When a test finally deployed a
+  `sendTask`, Flowable refused it: `flowable-sendtask-invalid-implementation` —
+  "one of the attributes 'type' or 'operation' is mandatory on sendTask". The
+  criterion was unreachable as written. Send tasks are now expanded at publish onto
+  the behaviour bridge, the same route the message throw and end events take, so
+  the author still configures one the way they configure a service task.
+  **Issue:** #112
+
+- **Two criteria stay unticked, with reasons, rather than being marked done.**
+  #114's "a behaviour's declared error is caught by an error boundary event" — the
+  bridge is built and unit-tested on both the C# and Java sides, but the catch
+  cannot be demonstrated end to end while #223 stands. #168's "…and the execution's
+  error surface reports it" — dead-lettering is asserted; the error-surface half is
+  exactly what #222 says does not happen.
+  **Issue:** #114, #168, #222, #223
+
+- **Two near-miss false negatives in #162, both from reading the wrong thing.**
+  An interrupting event subprocess "did not interrupt" (wrong diagram shape — the
+  canonical one works), and an event subprocess was "drawn solid" (bpmn-js sets
+  `stroke-dasharray` inline as CSS, so the attribute query returned null on a
+  border that was already correct). Both would have been confident, wrong bug
+  reports.
+  **Issue:** #162
+
+- **Third instance this session of a non-zero exit meaning something other than
+  the expected failure:** Maven's missing POM read as a caught mutation; the
+  static-assets clobber read as 592 real failures; and `MSB1009: Project file does
+  not exist` when a backgrounded shell inherited a `cd` into the SPA directory and
+  the relative project path stopped resolving. In each case the fix was reading
+  WHAT failed rather than THAT it failed.
+  **Issue:** #113
+
+- **Decision (#156, user's call): signal scope is INSTANCE, not definition.**
+  The story defined `process` scope three incompatible ways; the owner chose
+  option 1. Scopes are `instance` (default for a new signal) and `global`; there
+  is no "same definition" scope. The Demo, which described instance scope, is now
+  correct as written; the Decisions section and Test plan, which said definition,
+  are superseded and recorded as such on the issue.
+  **Issue:** #156
+
+- **Divergence from a criterion, deliberately (#156):** the issue asks that scope
+  be serialised in the autonate namespace. Instead the DEPLOYED copy carries
+  Flowable's own `flowable:scope="processInstance"`, so **the engine enforces the
+  scope** rather than Auton8 filtering a broadcast afterwards. That touches no
+  do-not-rename identifier — it adds nothing to the autonate namespace rather than
+  changing its shape. The criterion existed because the definition-scope reading
+  had no native support; the instance reading does.
+  **Issue:** #156
+
+- **Verified before building on it (#156):** `flowable:scope="processInstance"`
+  does NOT break a signal START event — a broadcast still starts an instance.
+  Scope constrains catching within a running instance and is ignored for starting
+  one, which is what makes "an existing signal-start workflow keeps working" safe
+  rather than hopeful.
+  **Issue:** #156
+
+- **Three attempts to write one attribute, recorded because the failure was
+  silent (#156).** The scope had to reach the saved diagram from the studio:
+  1. `created.$attrs = …` on a freshly created `bpmn:Signal` root — threw
+     *"Cannot set property $attrs of #<Base> which has only a getter"*.
+  2. `writeFlowableAttribute` on the EVENT — silently did nothing, because an
+     element parsed without any extension attribute has no `$attrs` either.
+  3. A namespaced key through `modeling.updateProperties` — also did not
+     serialise.
+  Settled on an extension ELEMENT via `moddle.createAny`, the mechanism this file
+  already uses for the call activity's in/out mappings, with publish moving it
+  onto the signal root. Only the first attempt failed loudly; the other two looked
+  like success and produced a diagram missing the setting.
+  **Issue:** #156
+
+- **Rule 1 defect in my own #156 publish step, found by the full suite.**
+  `ApplySignalScopes` treated "the event says nothing" as "the event says global"
+  and CLEARED `flowable:scope`, silently widening an instance-scoped signal into a
+  broadcast. Any diagram carrying Flowable's own scope — hand-written or from
+  another modeller — would have lost it on publish. It now distinguishes three
+  states: `instance` scopes, `global` unscopes, **absent leaves the diagram exactly
+  as authored**.
+  **The test that should have caught it was green.** It asserted the other instance
+  was untouched immediately after the signal, and in isolation that instance had
+  simply not reacted yet — the assertion measured scheduling, not scope. Only the
+  full run, where load shifted the timing, exposed it.
+  **Fixed in the test too:** it now waits for the raising run to handle the signal
+  on BOTH its paths, then re-checks the other instance after a settle, and authors
+  the diagram the way the studio does rather than hand-writing the attribute
+  publish is meant to produce. Mutation-checked.
+  **Third instance this session of the same shape** — a negative assertion that
+  runs too early is indistinguishable from the feature working, like the 405 that
+  satisfied `!completed.Ok` and the poll predicate that was true before the save.
+  **Issue:** #156
+
+- **A SIGNAL END EVENT RAISES NOTHING — found only because I refused to tick its
+  criterion without a test.** Verified against Flowable 8.0.0: a catcher waiting
+  on the name was untouched after a signal end event ran, while an intermediate
+  throw of that same signal fired it instantly. It deploys and ends the process,
+  which is why #103's inventory recorded "executes" — the element runs, it just
+  does not do the one thing it exists for.
+  **This is the second element in this milestone with that shape**, after #112's
+  message end event, and both are now declared departures in
+  `BpmnSupportManifestTests` rather than silent manifest edits.
+  **Fix:** publish rewrites it into an intermediate throw plus a terminal end
+  event — simpler than the message case, which needed the behaviour bridge,
+  because the signal throw is natively supported.
+  **The process point:** I had ALREADY moved `Signal End` to `supported` and would
+  have ticked the criterion on the strength of the inventory. The over-claim audit
+  is what forced a test, and the test is what found it.
+  **Issue:** #156, #112, #103
+
+- **A test shape that said nothing, corrected (#156).** The first signal-end test
+  put the catcher on a parallel branch of the SAME instance; the end event
+  finished the instance before that branch could react, and the tasks came back
+  empty — a failure that was about my diagram, not the feature. Restructured
+  across two instances with a global signal, where B hearing it proves the signal
+  left A. Same class as #162's interrupting-event-subprocess probe.
+  **Issue:** #156
+
+## /n8-plan M4 (re-plan to clear blockers) — 2026-09-08
+
+- **#220 descoped on engine evidence (user's call).** A transaction subprocess
+  with a cancel end event and a cancel boundary — the BPMN rollback idiom —
+  **fails at runtime on Flowable 8.0.0**, with two distinct errors: "No execution
+  found for sub process of boundary cancel event", and a Postgres **foreign-key
+  violation inside `act_ru_execution`**. The diagram is valid BPMN; the failure is
+  in the engine's own execution-tree bookkeeping.
+  **Withdrawn:** `Cancel Boundary`, `Cancel End`, and `Transaction` — the last
+  deliberately, because the container works but offering it would promise rollback
+  it cannot do. Departure declared in `BpmnSupportManifestTests`, not edited in
+  quietly.
+  **Tracked in #228** so the defect outlives the story.
+  **Compensation is NOT withdrawn.** Probed separately and it works: the handler
+  ran and execution continued. #115 stands on its own. Recorded explicitly because
+  the two are usually described together and withdrawing both by association would
+  have removed a working feature.
+  **Issue:** #220, #228, #115
+
+- **#163's missing piece is a REST surface, not engine support (user's call: build
+  it).** An ad-hoc subprocess deploys, runs, and parks correctly with no tasks —
+  the engine supports choosing an activity internally. What does not exist is any
+  HTTP way to enumerate or start one: `enabled-activities` returns **500** on both
+  the execution and process-instance routes. Added scope: two endpoints in
+  `flowable-extension/`, which is where engine gaps belong and already ships in the
+  Flowable image with its own Java tests.
+  **Issue:** #163
+
+- **#225: publish will run the FULL validation set (user's call).** Every rule was
+  written as a gate and has only ever been advisory; three consecutive stories were
+  built assuming publish gates. The hand-curated
+  `ValidateStructureForPublish` subset goes away.
+  **The care this needs:** it can reject diagrams that publish today, so the story
+  requires counting how many stored models would now be refused as *evidence*
+  rather than discovering it on someone's next save.
+  **#226 folded into it** — same species one endpoint over: a caller error answered
+  as 500 rather than 4xx.
+  **Issue:** #225, #226
+
+- **#223 fixed BEFORE #218 and #219 (user's call).** #112 and #114 both shipped
+  with the workaround, and #114 still carries an unticked criterion because of it.
+  A third and fourth story doing the same would make the workaround the norm.
+  #218 and #219 are now labelled blocked and sequenced behind it. Its definition of
+  done includes #114's blocked criterion becoming demonstrable — a fix that does
+  not enable that has not solved the problem.
+  **Issue:** #223, #218, #219, #114
+
+- **Triage of the rest:** #222 → not an M4 story, input to M5's operator-visibility
+  work (it is why #168's last criterion stays unticked, and the coupling it
+  describes — marking a retry point is also what makes a failure visible — is worth
+  M5 seeing). #227 → left open for the pages/menus area, deliberately not closed as
+  "flaky" given that all four of #215's flakes had distinct real causes. #221 →
+  closed on consistent passing, with the stale-container explanation recorded as
+  correlation rather than proven cause.
+  **Issue:** #222, #226, #227, #221
+
+- **#162's open question carried out as #229** so it survives that story closing:
+  an interrupting event subprocess beside the error end event in the SAME scope
+  left a parallel sibling running, while the canonical shape cancels correctly.
+  Not filed as a defect — filed as a difference an author can draw without knowing
+  it exists, needing a decision either way.
+  **Issue:** #229, #162
+
+- **#223: the deployed diagram names its own callback URL.** The fixture published
+  a workflow into the shared Flowable, and Flowable then called back to
+  `autonate-web:8080` — the container's app, a different database, where that
+  workflow did not exist. Every behaviour invoked from an E2E-published workflow
+  404'd. The fix follows M4's established pattern: stamp
+  `flowable:autonateCallbackBaseUrl` onto the deployed copy at publish
+  (`StampCallbackBaseUrl`), leave the authored diagram untouched, and have the Java
+  delegate prefer that attribute over its configured default. The fixture binds a
+  free port and passes `host.docker.internal:<port>`.
+  **Rule 1 (two wrong comments found in this code and fixed).**
+  `EnforceDeclaredBusinessError`'s log said an undeclared code "stays retryable",
+  and `BehaviorResult`'s doc said it "stays an unhandled failure". It does neither:
+  `BusinessError` sets `Failed=true`, the bridge does not throw on `Failed`, so the
+  process **continues down its normal outgoing flow**. Verified against the engine —
+  the historic trace of an undeclared run is `charge -> f1 -> ok`, never the
+  boundary's flow. A workflow relying on a boundary event for an undeclared code
+  silently takes the SUCCESS path; both comments now say so, because that is the
+  hardest version of this to diagnose from the outside.
+  **Two diagnostic behaviours added, Development-only** (`autonate.always-declines`,
+  `autonate.always-fails-undeclared`). A behaviour that always fails does not belong
+  in a production catalogue, and there was no other way to exercise the contract end
+  to end. They double as the worked example #114's author documentation describes.
+  **Evidence:** the declared-error test FAILED before the Flowable image was rebuilt
+  (timed out with no boundary reached) and passed after; mutating the declaration
+  check to `if (true) return result;` fails exactly
+  `An_error_code_the_behaviour_never_declared_is_not_catchable` and nothing else.
+  ABI invariant 2 intact — `BusinessErrorCode` is an init-only property, and
+  `PluginAbiVersionTests` passes.
+  **Issue:** #223, #114
+
+- **#218: the complex gateway is expanded, not replaced — and the engine's real
+  behaviour changed the design.** Probed 8.0.0 before implementing: a
+  `complexGateway` is recorded as activityType **exclusiveGateway**, evaluates
+  `conditionExpression`, honours `default`, and with two conditions true takes the
+  first match. #103's "DEPLOYS BUT DOES NOTHING" and the story's "silently walked
+  past" are both wrong — it is not inert, it silently picks a branch, and only
+  publish-time refusal has kept that from biting an imported diagram. The
+  inventory's claim holds only for the element's own `activationCondition`.
+  **Consequence:** the AC's "script task **plus an exclusive gateway**" generates a
+  node the engine does not need. The expansion inserts ONE script task in front of
+  the author's gateway and conditions the gateway's own outgoing flows. Fewer
+  generated nodes, a native default flow, and the gateway keeps its id — so
+  Flowable's history names an element that exists in the stored diagram. Declared
+  as a departure here rather than edited into the AC silently.
+  **Rule 2 (privilege escalation this story would have introduced).**
+  `ScriptTaskIdentity.DeclaresSystemIdentity` scanned only `scriptTask`. Since the
+  expansion copies the gateway's `runAs` onto a generated script task, an author
+  without the permission could have reached `runAs="system"` by putting it on a
+  gateway — the gate still present, still passing, no longer covering the way in.
+  Both methods now scan script-BEARING elements, with a test for each direction.
+  **Two engine facts found only by deploying**, each a 500 at publish rather than a
+  degradation: a bare `resultVariable` is refused on `bpmn:scriptTask`
+  (`flowable:resultVariable` deploys), and `scriptFormat`/`<script>` are refused on
+  `bpmn:complexGateway` — so the expansion strips the gateway's authoring
+  properties once they have moved to the generated task. Both now have unit tests
+  that need no engine.
+  **#223's fix extended to script tasks.** It stamped only the behaviour bridge, so
+  a script task in an E2E-published workflow still called the container's app.
+  **Filed, not fixed: #230** — `ApplyScriptTaskSnapshot` writes the same bare
+  `resultVariable`, so an author-drawn script task with a result variable cannot
+  publish today. Out of this story's scope; proof is on the issue.
+  **Still open on #218:** the studio property editor, and whether bpmn-js
+  round-trips a scripted complex gateway at all. bpmn-js is vendored as a browser
+  bundle with no Flowable moddle extension, so that question needs a browser, not
+  reasoning — and guessing it wrong silently loses an author's script, which is the
+  exact failure this milestone exists to end.
+  **Issue:** #218, #230, #103, #223
+
+- **#218 (studio): the routing script is an attribute, because bpmn-js drops the
+  child — proven, not reasoned.** The obvious storage is a `<bpmn:script>` child on
+  the gateway. bpmn-js is vendored as a browser bundle with no Flowable moddle
+  extension, and its moddle has no `script` property on `ComplexGateway`, so it
+  DROPS the child when it re-serialises. The first version of
+  `ComplexGatewayStudioRoundTripTests` seeded one, saved in the studio, and the
+  script came back gone — an author would have lost their code on their next save
+  with nothing to say so. The script now lives in `autonate:routeScript`, the
+  `$attrs` route `runAs` already uses, and newlines survive (escaped `&#xA;`). A
+  hand-authored `<bpmn:script>` child is still READ, so an imported diagram written
+  the obvious way works; it is normalised onto the attribute on first save.
+  **Rule 1 — a latent bug in `writeAutoNateAttribute`.** It did
+  `businessObject.$attrs = businessObject.$attrs ?? {}`. moddle defines `$attrs` on
+  `Base` with only a getter, so that assignment throws *"Cannot set property $attrs
+  of #<Base> which has only a getter"*. Every element it had been used on happened
+  to have a writable own property; a complex gateway does not. The symptom was
+  silent — Apply failed, the panel stayed open over the Save button, and the
+  console was clean because the error went to a toast. It now mutates `$attrs`
+  rather than assigning it, which also fixes it for any future element.
+  **The panel is reused, not duplicated.** A complex gateway routes to the existing
+  script panel: same fields, retitled, with the result variable hidden because a
+  gateway's is generated and bound to the flow conditions. Every editor added to
+  `WorkflowStudio.tsx` must be cleared by every other branch, and that list is the
+  most fragile thing in the file.
+  **Issue:** #218
+
+- **#225: publish runs the full validation set (user's call), measured before
+  making it.** `ValidateProcess` ran only on `/prepare`. The studio calls prepare
+  first; a direct API caller need not, so every rule written as a gate was
+  advisory and reached the engine unchecked. Publish now runs the whole set and
+  answers 400.
+  **The impact, as evidence rather than a guess:** running the full set against
+  every stored model in the dev database and subtracting what publish already
+  enforced, **4 of 11 models are newly refused** — every one for the script API
+  #147 removed (which #195 already warns about) or #153's unresolvable identity.
+  Those models already fail at run time; the change converts a silent runtime
+  failure into a loud publish-time one. It is still a contract change, and the
+  number is a dev-database order of magnitude, not a production figure. **No
+  migration written** — the models still open and save, and the errors name the
+  exact script and fix; flagged on the issue rather than decided quietly.
+  Validation runs on the STORED xml, before expansion, so an author hears about
+  the element they drew and not one publish generated.
+  **#226 folded in.** `variables` missing from the body deserialised to null and
+  was dereferenced — a malformed request answered as a 500 NullReferenceException.
+  And every Flowable failure became a bare `InvalidOperationException`, so a 409
+  ("already present") or a 400 ("Converter can only convert booleans") reached the
+  client as a 500 with a stack trace, on the very surface #112 points operators at
+  for unsticking a process. `FlowableRequestException` now carries the upstream
+  status and the endpoints pass a 4xx through; a 5xx is deliberately NOT passed
+  through, because that one is a real fault and should still page someone.
+  **Unexpected consequence worth recording:** the new type derives from
+  `InvalidOperationException` so production catches are unaffected, but xUnit's
+  `Assert.ThrowsAsync<T>` is an EXACT type match, so 7 existing client tests
+  failed. They now name the new type and pin the carried status, which is
+  stronger than what they asserted before.
+  **Issue:** #225, #226
+
+- **#115: compensation mostly works; two engine defects and one regression I
+  caused.** Probed before implementing, with a recorded trail rather than
+  timestamps (the first probe's handlers shared a millisecond, so the "ordering"
+  evidence was really list order). Six of this story's criteria were already true
+  of the engine: boundary + association + `isForCompensation` runs, reverse order,
+  only completed activities compensate, the throw waits, and a handler failure
+  propagates.
+  **Defect 1 — the compensation END event compensates nothing.** It ends the
+  process with an empty handler trail. The THIRD element in this milestone with
+  that exact shape, after Message End (#112) and Signal End (#156). Same remedy:
+  expand at publish into an intermediate throw plus a none end event.
+  **Defect 2 — a WAIT-STATE handler crashes the engine, so it is refused.** This
+  began as a warning about ordering and turned out to be far worse: when
+  compensation is triggered during a user task's completion and a handler is
+  itself a wait state, Flowable fails its own transaction with
+  `act_fk_exe_parent`, and the task can never be completed. Reproduced against a
+  bare Flowable with no Auton8 involved, then isolated by elimination — removing
+  the unreached activity's boundary still fails, removing the gateway still fails,
+  and making the handlers AUTOMATIC is the only change that fixes it. Epic #40
+  says a shape that leaves an instance unable to complete is a defect to refuse,
+  not document, so publish refuses it and the message says what to do instead.
+  **Documented, not fixed: no variable snapshot.** The spec says a handler sees
+  the values in scope when its activity completed; Flowable gives it the current
+  ones (`paymentId` was 'A', overwritten to 'B', handler saw 'B'). It does not
+  hang or no-op, so per the story's own AC this is documented — in the terms that
+  matter, which is that a refund handler cannot rely on the payment id it was
+  given.
+  **Rule 1 — an artifact-ordering bug in EVERY expansion.** Generated nodes were
+  appended with `process.Add`, which puts them after the diagram's associations.
+  The strict BPMN schema requires artifacts last, so Flowable refused the whole
+  deployment. Compensation is simply the first expansion to meet a diagram with an
+  association; all three now insert before the first artifact.
+  **A regression I introduced in #225, caught here.** Pointing publish at
+  `ValidateProcess` silently dropped the three promoted structure rules, because
+  `ValidateProcess` never contained them — including #114's uncaught error code,
+  whose runtime consequence is Flowable destroying the instance with a 500 and no
+  history. Nothing failed; the rules just stopped running. There is now ONE set,
+  shared by both entry points, and a test asserting they agree rather than listing
+  the rules, so the next rule added to either cannot diverge.
+  **Narrowed, per the story's own acceptance-critical note:** `Transaction`,
+  `Cancel Boundary` and `Cancel End` are already withdrawn, so this is
+  compensation by explicit throw, not transaction rollback.
+  **Issue:** #115, #225, #114
+
+- **#163: the story's prescribed precedent does not work, so the endpoints are
+  actuator endpoints.** It said to follow `FlowableScriptTaskSupportController` —
+  a `@RestController` under `/service/autonate/`. That half of the precedent
+  registers as a bean and its route is **never mapped**: Flowable's REST
+  application does not include the extension package in its handler mapping, and
+  the endpoint answers *"No endpoint GET
+  /flowable-rest/service/autonate/script-task-support"*. The half that works is
+  the actuator `@Endpoint` beside it, which is exactly why `FlowableClient` probes
+  `actuator/scriptTaskSupport` FIRST and treats `/service/` as a fallback.
+  Following the written precedent would have shipped an endpoint nothing could
+  reach.
+  **`-parameters` is now on, and that is load-bearing.** Spring reads an actuator
+  `@Selector`'s name from the compiled parameter name; without it the Flowable
+  container **does not start at all** — not a warning, not a 500 on one endpoint.
+  It went unnoticed because the only actuator endpoint here took no parameters. I
+  broke the local container discovering this and rebuilt it.
+  **Verified before building:** the subprocess is active with nothing auto-started,
+  enabled activities come back with their names, and starting one **twice**
+  produces two live instances of it — the repeatability that distinguishes ad-hoc
+  from a parallel subprocess, and the thing a naive implementation removes.
+  **Refused at publish: an ad-hoc subprocess with no completion condition.** It
+  deploys happily and then never finishes, with the parent unable to continue —
+  epic #40's hang, not a feature.
+  **Not delivered, and left unticked rather than glossed:** the studio controls
+  for authoring the completion condition and the `ordering` attribute. Running a
+  case works end to end; authoring one still needs the XML.
+  **Issue:** #163
+
+- **#166: a data object is a real declaration, and NEITHER BPMN spelling of its
+  type works.** Verified against 8.0.0 first: a `<dataObject>` creates a genuine
+  process variable with its declared type (`amount = 42.5, type=double`) and a
+  gateway condition reads it — so the re-planned premise (declarations, not
+  annotations) holds.
+  **The type is the problem, and the two options are mutually exclusive:**
+  `itemSubjectRef="xsd:double"` types the variable correctly but **bpmn-js drops
+  it** (moddle resolves `itemSubjectRef` as a reference, and a bare QName names
+  nothing in the document); `itemSubjectRef="ItemDouble"` pointing at a real
+  `<itemDefinition>` **survives the modeller** but the **engine ignores the
+  indirection** and every declared variable comes back `string`. Both measured.
+  So the type is stored as `autonate:dataType` — the `$attrs` route that survives —
+  and publish rewrites the deployed copy to the bare QName, the same split #112,
+  #156, #115 and #218 already use. The rewrite must also DECLARE the `xsd` prefix,
+  or the deployment is refused (`UndeclaredPrefix: Cannot resolve 'xsd:double' as
+  a QName`) — a studio diagram carries no `xmlns:xsd` and nothing in the modeller
+  would add one.
+  **Documented, not enforced: the declared type means nothing at run time.**
+  Assigning a string to an `xsd:double` variable replaces both the value and the
+  type silently — the engine neither coerces nor fails, which is a third outcome
+  the AC did not anticipate. The declaration is a design-time contract: it seeds
+  the variable and names it for the validator and the author, and guarantees
+  nothing about what is stored later. Enforcing it would have to be Auton8's job
+  and is a bigger decision than this story.
+  **Reference integrity reads as already satisfied.** "Deleting a data object a
+  condition references is warned about, naming what references it" is exactly the
+  existing unset-variable warning: remove the declaration and the condition's
+  variable is warned about by name. Both directions are now tested. Building a
+  second mechanism for it would duplicate the first.
+  **Not delivered:** declared variables offered in condition editors,
+  multi-instance collection selection and script help; and call-activity mapping
+  driven by the child's declarations. There is NO variable-suggestion machinery in
+  the SPA to wire into — those are a feature to build, not a wiring job, and
+  half-building UI at the tail of a long run is how a story reports done with a
+  placeholder inside it.
+  **Issue:** #166
+
+- **#219 spike: ADOPT, and the protocol must change.** All seven questions
+  answered against the running engine; no code written and `flowable-extension/`
+  left byte-identical.
+  **Branch identity is cheap:** one accumulator per incoming flow, each stamping
+  its own flow id. Three branches completed out of order produced `b1;`,
+  `b1;b3;`, `b1;b3;b2;` — each node fires only for its own branch, and N nodes
+  converging on one exclusive gateway work (it is a merge, not a join). No field
+  extension, no protocol change for this half.
+  **Name mangling does NOT suffice, which is what sizes the follow-up.** A
+  sequential multi-instance body appending to one variable produced
+  `'"x";"y";"z";'` — every iteration wrote the same instance-level slot and saw
+  the previous one's value, so an accumulating gateway inside one starts its
+  second pass already satisfied. Mangling by gateway id cannot fix it (iterations
+  share the id) and mangling by iteration needs `loopCounter` inside the variable
+  NAME, which `resultVariable` cannot express. Either way the Java behaviour
+  changes, so `setVariableLocal` is the honest fix rather than encoding scope into
+  a string. **This touches M3's shipped script host** and is called out
+  prominently on the follow-up.
+  **A defect in the obvious shape:** once the threshold is met, the next arriving
+  branch fires the join AGAIN — two live tokens down one path. Arrival state alone
+  is not enough; a generated `fired` flag is needed, and clearing belongs to the
+  generated side (the author's script decides *whether*, generated code guarantees
+  *once*), which stays on the right side of epic #40's line.
+  **One AC cannot be written as asked:** "every branch arrived and no route was
+  chosen" is not detectable — an upstream exclusive split means a branch can
+  legitimately never arrive, and nothing in the arrival state distinguishes "still
+  coming" from "never coming". Options are an author-set timeout or nothing; both
+  are decisions, neither is a detection rule.
+  **Issue:** #219, #231, #218
+
+- **#174: the consolidation pass, and the finding that the skill went unused.**
+  `verify-symbols.sh` caught its own load-bearing fact 4 as rotted — and the rot was
+  mine: #225 gave `ValidateProcess` a second call site, so the skill's "`/publish`
+  does not validate" now states the opposite of the truth, along with its advice to
+  write validation tests against `/prepare`. Corrected, with the reversal recorded
+  rather than overwritten, and the check strengthened to assert **2** call sites plus
+  the shared `BuildStructureErrors` so the two validation sets cannot silently
+  diverge again.
+  **Two whole failure classes added**, both classes the skill never mentioned and
+  both hit repeatedly this milestone: *bpmn-js drops what its moddle does not model*
+  (three instances, each silent, none establishable by reading) and *Flowable
+  validates the deployed XML against the strict BPMN schema* (four instances, each a
+  500 at publish rather than a degradation). Ten weak-vs-real assertion pairs added
+  to the testing reference, plus the two traps that cost real time — tied timestamps
+  masquerading as ordering evidence, and negative assertions that run before the
+  process has moved.
+  **The honest finding: M4's later element stories did not use this skill.** #218,
+  #115, #163 and #166 were all built without opening it. Recorded in the skill
+  itself, with the diagnosis — the work starts with an engine probe the step list
+  does not have, four of those elements needed a publish-time expansion the step list
+  does not cover, and at 432 lines it is past where a reader skims. **The remedy is
+  structural and was NOT attempted here** — filed as #232 for M5, because a
+  restructure done carelessly at the tail of a long run is worse than the skim it is
+  meant to fix.
+  **Issue:** #174, #232, #225
+
+- **#159: multi-instance works completely; the LOOP MARKER does nothing, and the
+  inventory said it did.** This story was still unstarted when the rest of M4 was
+  finished — it had no comments and no `blocked` label, and I nearly opened the
+  milestone PR without noticing.
+  **Multi-instance: every criterion was already true of the engine**, verified
+  rather than assumed — sequential over a collection (`'"x";"y";"z";'`), parallel,
+  parallel really concurrent (3 live user tasks) vs sequential really one at a
+  time (1), `loopCardinality`, a completion condition ending the set early, and an
+  **empty collection completing immediately** rather than hanging.
+  **`standardLoopCharacteristics` never repeats the activity.** Every spelling ran
+  it ONCE — `loopCondition ${true}` with `loopMaximum=3`, `${loopCounter < 3}`,
+  `flowable:testBefore` — while the CONTROL, `multiInstanceLoopCharacteristics`
+  cardinality 3 on the same task, ran it three times. The control is what makes
+  this a finding rather than a mis-set marker. `rows.json` records Loop Marker as
+  `executes`; it does not, and the manifest row is flipped to `cannot-execute`
+  with the departure declared in `BpmnSupportManifestTests` — a **downward**
+  departure, which is rarer and worth naming: the inventory credited the engine
+  with a capability it lacks.
+  **Two acceptance criteria were wrong and were corrected, not quietly satisfied.**
+  "A standard loop actually loops" cannot be implemented. And "an unbounded loop
+  is a hang" is false — it runs once and the process ends, so the remedy (refuse
+  at publish) is right for the opposite reason: a silent no-op, not a runaway.
+  **Rule 1 — I first added two bespoke checks and both were duplicates.** The loop
+  refusal duplicated #107's manifest mechanism (two errors for one problem) and the
+  multi-instance completion-condition check duplicated
+  `WorkflowConditionValidation`. Both deleted; the collection expression and the
+  completion condition are now SITES in the shared collector, so the unset-variable
+  warning covers a collection nothing sets — which is what the AC asked for
+  ("reusing that check") rather than a second implementation.
+  **Not delivered:** the studio property editor for collection / elementVariable /
+  completion condition. The markers themselves come from stock bpmn-js; the fields
+  behind them do not, and this is the same authoring gap as #163 and #166.
+  **Issue:** #159, #103, #107
+
+- **The three authoring panels (#159, #163, #166), and the refactor they forced.**
+  Adding three editors to `WorkflowStudio.tsx` meant adding them to every branch's
+  clear-list — 195 such lines already, 148 of them inside `onRequestConfigure`,
+  growing quadratically with each editor. Replaced by one `clearEditors()` called
+  at the top of the callback: same behaviour, and adding an editor is now a
+  one-line change instead of a seventeen-line one. Verified by the 18 studio E2E
+  tests before anything was built on it.
+  **One panel, three shapes**, discriminated by `kind`, for the same reason.
+  **Rule 1 — three real bugs found by making the panels persist**, none of which a
+  unit test could have caught:
+  1. **`modeling.updateProperties` routes an unknown prefixed key into `$attrs`;
+     `updateModdleProperties` does not** — it sets a plain property the writer
+     never serialises. The nested `loopCharacteristics` therefore needs a direct
+     `$attrs` write plus a separate command.
+  2. **An imported diagram declares no `xmlns:autonate`**, and without the
+     declaration moddle cannot serialise an `autonate:` attribute at all — the
+     panel works, Apply reports success, and the value is absent from the export.
+     Auton8's own starter diagram has always declared it, which is why this only
+     bites diagrams authored elsewhere. Now declared on the prepare path beside
+     the flowable one.
+  3. **The studio writes the data type on the `dataObjectReference`** (the shape an
+     author selects) while the engine reads it off the `dataObject` behind it. The
+     publish expansion now resolves `dataObjectRef` onto its target.
+  **Filed, not fixed: #234.** Prepare's errors block SAVE, not just publish, so an
+  author cannot save a work-in-progress diagram containing any refusable element —
+  an ad-hoc subprocess before its completion condition is set, for instance. #225
+  widened that set, so every rule promoted to a publish refusal silently became a
+  save refusal too. The same shape as the problem #225 fixed, one surface over.
+  **The lint ratchet went DOWN, 103 → 100.** Four dead imports removed rather than
+  raising the budget; the skill's quoted number follows.
+  **Issue:** #159, #163, #166, #234
+
+- **#166 (mapping): a call activity now offers the child's declared names.**
+  `WorkflowBpmnXml.ExtractDataDeclarations` reads a process's data objects,
+  stores, inputs and outputs — in BOTH spellings, the studio's `autonate:dataType`
+  and an imported diagram's `itemSubjectRef` — and a gated
+  `GET /api/workflows/{processKey}/declarations` serves them. A data object and
+  the reference pointing at it collapse to ONE entry, because offering an author
+  `amount` twice is a bug rather than detail.
+  **Autocomplete, not Select.** The declarations are a suggestion, not a closed
+  set: a parent may legitimately map into a variable the child sets in a script
+  and never declared, and a closed list would make that unauthorable. A child that
+  declares nothing falls back to exactly the free text it had before.
+  **Rule 1 — the mapping rows were raw `<input className="form-control">`.**
+  ColorAdmin is long gone, so those were unstyled inputs in a Mantine app. Now
+  Mantine controls. **36 more `form-control` occurrences remain in
+  WorkflowStudio.tsx** — out of this story's scope, filed rather than swept.
+  **Rule 1 — my own clearEditors refactor left an empty `else {}`.** The last
+  branch's body was nothing but clear-calls; removing them left the block behind,
+  and it was the one warning that pushed the lint ratchet over. Removed, and the
+  ratchet holds at 100.
+  **One existing test retargeted, deliberately:** an Autocomplete renders its
+  listbox with the same accessible name as its input, so `GetByLabel` became
+  ambiguous. `CallActivityStudioTests` now names the combobox by role — a more
+  precise locator for a control that genuinely changed type, not a loosened one.
+  **Issue:** #166
+
+- **Rule 1 (CI red on the milestone PR): two sweep tests depended on the
+  developer's own database.** `TestResourceSweepTests.A_role_backing_an_installed_plugin_survives`
+  and `A_role_that_still_owns_objects_is_never_dropped` created their fixture schema
+  and table in **`AutoNate`** — the local dev database. It exists on a developer's
+  cluster and not in CI, so both passed on a laptop and failed on the first run
+  without dev data:
+  `Npgsql.PostgresException : 3D000: database "AutoNate" does not exist`.
+  They have been environment-dependent since #214; the milestone PR is simply the
+  first time CI ran them. Nothing they assert needs a *particular* database, only
+  one the sweep leaves alone — `IsSuiteOwnedDatabase` matches `autonate_test_*` and
+  `AutoNate_E2E` — so each test now creates `autonate_sweepfix_<guid>` and drops it,
+  pools cleared first because Postgres refuses to drop a database with an open
+  connection. `FlowableRoleIsolationTests` names `AutoNate` too but already skips
+  when it is absent, so it needed nothing.
+  **Issue:** #214, #236

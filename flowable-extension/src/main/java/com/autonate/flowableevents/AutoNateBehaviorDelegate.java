@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.flowable.bpmn.model.BaseElement;
 import org.flowable.common.engine.api.FlowableException;
+import org.flowable.engine.delegate.BpmnError;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.flowable.engine.delegate.JavaDelegate;
 import org.slf4j.Logger;
@@ -117,7 +118,31 @@ public class AutoNateBehaviorDelegate implements JavaDelegate {
                 "' is missing required attribute 'flowable:behaviorKey'.");
         }
 
+        // #223. A diagram may name its own callback base URL, and it wins.
+        //
+        // The configured value is a single global one, which is correct in
+        // production and impossible for an E2E test: Flowable's callback reaches
+        // the app in the autonate-web container, while the test fixture runs its
+        // own app against a different database. A behaviour invoked by a workflow
+        // the test published executed where that workflow did not exist, so no
+        // behaviour could be verified end to end.
+        //
+        // Stamped by publish only when an override is configured, so every
+        // production diagram carries nothing here and falls through to the
+        // configured value unchanged.
         var callbackBase = properties.getCallbackBaseUrl();
+        var override = readFlowableAttribute(baseElement, "autonateCallbackBaseUrl");
+        if (override != null && !override.isBlank()) {
+            try {
+                callbackBase = URI.create(override.trim());
+            } catch (IllegalArgumentException exception) {
+                throw new FlowableException(
+                    "Service task '" + execution.getCurrentActivityId() +
+                    "' carries an unusable flowable:autonateCallbackBaseUrl '" + override + "'.",
+                    exception);
+            }
+        }
+
         var sharedSecret = properties.getCallbackSharedSecret();
         if (callbackBase == null) {
             throw new FlowableException(
@@ -177,6 +202,27 @@ public class AutoNateBehaviorDelegate implements JavaDelegate {
         }
 
         applyVariableUpdates(execution, parsed.get("variableUpdates"));
+
+        // #114. A DECLARED business error becomes a BPMN error the engine routes
+        // to a matching error boundary event.
+        //
+        // BpmnError, not FlowableException. FlowableException is an operational
+        // fault: the job executor retries it and eventually dead-letters it, which
+        // is right for "the database was briefly unreachable" and wrong for
+        // "payment declined" — retrying a declined payment three times helps
+        // nobody. BpmnError is not retried; it propagates to whichever boundary
+        // event carries the code, exactly like an error end event.
+        //
+        // The host decides what is declared. This only forwards what it sent, so a
+        // behaviour cannot make an arbitrary failure routable by returning the
+        // field itself.
+        String businessErrorCode = parsed.path("businessErrorCode").asText("");
+        if (!businessErrorCode.isEmpty()) {
+            Logger.info(
+                "Workflow behavior '{}' raised declared business error '{}' for process {} (correlationId {}).",
+                resolvedKey, businessErrorCode, execution.getProcessInstanceId(), correlationId);
+            throw new BpmnError(businessErrorCode);
+        }
 
         if (parsed.path("failed").asBoolean(false)) {
             // Predictable failure: the behavior chose to set a status

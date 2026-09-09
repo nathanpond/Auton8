@@ -47,6 +47,13 @@ export function useBpmnModeler({ xml, callbacks }: UseBpmnModelerOptions): UseBp
           created?.dispose?.();
           return;
         }
+        // #167: report anything the import converted. Done here rather than inside
+        // createModeler because the conversion happens during importXML, before the
+        // handle exists for the caller to have wired anything to.
+        const converted = workflow.takeConvertedTasks();
+        if (converted.length > 0) {
+          await dotNetLike.invokeMethodAsync("NotifyTasksConverted", converted);
+        }
         localHandle = created;
         setHandle(created);
       } catch (err) {

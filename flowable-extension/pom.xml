@@ -113,6 +113,20 @@
                 <version>${maven.compiler.plugin.version}</version>
                 <configuration>
                     <release>${maven.compiler.release}</release>
+                    <!--
+                      #163. Spring reads an actuator @Selector's name from the
+                      compiled parameter name. Without -parameters the whole
+                      application fails to start:
+
+                        Failed to extract parameter names for
+                        ...AdhocSubProcessEndpoint.enabledActivities(java.lang.String)
+
+                      Not a warning and not a 500 on that one endpoint — the
+                      Flowable container does not come up at all. It went
+                      unnoticed until now because the only actuator endpoint here
+                      took no parameters.
+                    -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
             <plugin>

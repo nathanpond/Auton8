@@ -49,13 +49,11 @@ check_symbol "updateTimerIntermediateCatchEventProperties" 1 "$SPA/lib/bpmn/work
 check_symbol "createModeler"                 1 "$SPA/lib/bpmn/workflow.js"
 check_symbol "onRequestConfigure"            2 "$SPA/pages/workflow/WorkflowStudio.tsx"
 check_symbol "ElementSelection"              1 "$SPA/pages/workflow/WorkflowStudio.tsx"
-check_symbol "SUPPORTED_BPMN_TYPES"          2 "$SPA/pages/workflow/WorkflowStudio.tsx"
-check_symbol "COMING_SOON_BPMN_TYPES"        2 "$SPA/pages/workflow/WorkflowStudio.tsx"
 check_symbol "TimerIntermediateCatchEventModal" 1 "$SPA/pages/workflow/WorkflowStudio.tsx"
 check_symbol "ApplyElementSnapshots"         1 "$WEB/Services/Workflow/WorkflowBpmnXml.cs"
-check_symbol "BuildUnsupportedRuntimeWarnings" 2 "$WEB/Services/Workflow/WorkflowBpmnXml.cs"
+check_symbol "BuildUnsupportedElementErrors"  2 "$WEB/Services/Workflow/WorkflowBpmnXml.cs"
 check_symbol "ValidateProcess"               2 "$WEB/Services/Workflow/WorkflowBpmnXml.cs"
-check_symbol "UnsupportedRuntimeControlElementNames" 2 "$WEB/Services/Workflow/WorkflowBpmnXml.cs"
+check_symbol "BpmnSupportManifest"           2 "$WEB/Services/Workflow/BpmnSupportManifest.cs"
 
 echo "Claims:"
 # BPMN_MENU_ENTRIES must stay dead — if it gains a consumer, step 2 needs rewriting.
@@ -63,10 +61,21 @@ n=$(grep -rho "BPMN_MENU_ENTRIES" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -eq 1 ] && ok "BPMN_MENU_ENTRIES still dead (1 occurrence)" \
   || bad "BPMN_MENU_ENTRIES" "now $n occurrences — step 2's premise has changed"
 
-# ValidateProcess must still have exactly one call site outside its own file.
+# ValidateProcess runs at BOTH /prepare and /publish since #225. Two call sites is
+# the correct state; one means publish stopped validating and fact 4 is stale in the
+# other direction — which is the regression #225 itself caused once, silently.
 n=$(grep -rho "WorkflowBpmnXml.ValidateProcess" "$WEB" 2>/dev/null | wc -l | tr -d ' ')
-[ "$n" -eq 1 ] && ok "ValidateProcess has 1 external call site (/prepare only)" \
-  || bad "ValidateProcess call sites" "now $n — load-bearing fact 4 may be stale"
+[ "$n" -eq 2 ] && ok "ValidateProcess has 2 call sites (/prepare and /publish)" \
+  || bad "ValidateProcess call sites" "now $n, expected 2 — load-bearing fact 4 may be stale"
+
+# The two validation sets must not drift apart again. #225 pointed publish at
+# ValidateProcess, which did not contain the promoted structure rules, and three
+# stopped running with nothing to say so.
+if grep -q "BuildStructureErrors" "$WEB/Services/Workflow/WorkflowBpmnXml.cs" 2>/dev/null; then
+  ok "the promoted structure rules are shared (BuildStructureErrors)"
+else
+  bad "shared structure rules" "BuildStructureErrors is gone — the two validation sets can diverge again"
+fi
 
 # The lint ratchet, matched in context rather than as a bare substring — a bare
 # grep for the number matches a line number or an issue number and passes on a stale skill.
@@ -82,10 +91,33 @@ n=$(grep -rho "MENU_GROUP_ORDER" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -eq 1 ] && ok "MENU_GROUP_ORDER still dead (1 occurrence)" \
   || bad "MENU_GROUP_ORDER" "now $n occurrences — step 2's premise has changed"
 
-# The 68-entry manifest count the skill quotes.
-sup=$(grep -c '^      "' "$SPA/pages/workflow/WorkflowStudio.tsx" 2>/dev/null || echo 0)
-[ "$sup" -gt 0 ] && ok "manifest entries present ($sup quoted strings; verify 68 by hand)" \
-  || bad "manifest" "could not find the type lists"
+# The support manifest is one file with 68 entries, and both sides read it (#107).
+# Counted from the JSON rather than eyeballed, which is what the old check asked for.
+MANIFEST=src/shared/bpmn-support.json
+if [ -f "$MANIFEST" ]; then
+  n=$(grep -c '"localName":' "$MANIFEST")
+  [ "$n" -eq 68 ] && ok "support manifest has 68 entries" \
+    || bad "support manifest" "has $n entries, not the 68 SKILL.md quotes"
+else
+  bad "support manifest" "src/shared/bpmn-support.json is gone — step 1 no longer applies"
+fi
+
+# Step 1's whole premise: the studio derives its list and does not keep one.
+# Matched as a declaration, not a substring: the file's comments name the old
+# constants when explaining what replaced them, and a bare grep flags that prose.
+if grep -qE '^(const|let|var) (SUPPORTED|COMING_SOON)_BPMN_TYPES' "$SPA/pages/workflow/WorkflowStudio.tsx"; then
+  bad "one source of truth" "WorkflowStudio.tsx declares a BPMN type list again — step 1 is stale"
+else
+  ok "WorkflowStudio.tsx keeps no BPMN type list of its own"
+fi
+
+# Both consumers read the same file: the SPA by import, the backend by embedding.
+grep -q '@shared/bpmn-support.json' "$SPA/lib/bpmn/support.ts" 2>/dev/null \
+  && ok "SPA imports the shared manifest" \
+  || bad "SPA manifest import" "src/lib/bpmn/support.ts does not import @shared/bpmn-support.json"
+grep -q 'shared.bpmn-support.json' "$WEB/AutoNate.Web.csproj" \
+  && ok "AutoNate.Web embeds the shared manifest" \
+  || bad "backend manifest embed" "AutoNate.Web.csproj no longer embeds src/shared/bpmn-support.json"
 
 echo
 [ "$fail" -eq 0 ] && echo "All claims resolve." || echo "Some claims have rotted — fix the skill."

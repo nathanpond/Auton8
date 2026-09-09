@@ -43,7 +43,8 @@ public static class WorkflowBehaviorEndpoints
             // unhandled exceptions propagate to surface as a 500 so the
             // Flowable bridge can throw and the engine can retry the activity.
             var result = await behavior.ExecuteAsync(context, cancellationToken);
-            return Results.Ok(result);
+
+            return Results.Ok(EnforceDeclaredBusinessError(result, behavior, key, log));
         })
         .DisableAntiforgery()
         .AddEndpointFilter<SharedSecretEndpointFilter>();
@@ -66,5 +67,37 @@ public static class WorkflowBehaviorEndpoints
         }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.Edit);
 
         return app;
+    }
+
+    /// <summary>
+    /// A business error is catchable only if the behaviour declared it (#114).
+    /// </summary>
+    /// <remarks>
+    /// Enforced here rather than trusted from the result, so a behaviour cannot
+    /// make an arbitrary failure routable — including one that reached
+    /// BusinessErrorCode by accident. Undeclared codes are stripped, which leaves
+    /// the failure exactly what it was: unhandled, surfaced, and retryable.
+    ///
+    /// That asymmetry is the point. If every failure became a catchable BPMN
+    /// error, "the database was briefly unreachable" would travel down the
+    /// "payment declined" branch, and the process would look like it handled
+    /// something it never understood.
+    /// </remarks>
+    internal static BehaviorResult EnforceDeclaredBusinessError(
+        BehaviorResult result, IWorkflowBehavior behavior, string key, ILogger log)
+    {
+        if (result.BusinessErrorCode is not { Length: > 0 } code) return result;
+        if (behavior.CatchableErrorCodes.Contains(code, StringComparer.Ordinal)) return result;
+
+        log.LogWarning(
+            "Behavior '{Key}' returned business error '{Code}' without declaring it in "
+                + "CatchableErrorCodes; the code is stripped, so no error boundary event can "
+                + "catch it. The result keeps Failed=true, which the bridge does NOT throw on - "
+                + "the process continues down its normal outgoing flow and the author is expected "
+                + "to branch on the result variable. A workflow relying on a boundary event for "
+                + "this code will silently take the success path until the code is declared.",
+            key, code);
+
+        return result with { BusinessErrorCode = null };
     }
 }

@@ -16,4 +16,18 @@ public sealed class WorkflowBehaviorOptions
     public const string SectionName = "WorkflowBehaviors";
 
     public string? CallbackSharedSecret { get; set; }
+
+    // #223. Where the ENGINE should call back to, when that differs from the
+    // engine's own configuration.
+    //
+    // Unset in production, and nothing is stamped — every diagram falls through
+    // to the callback URL Flowable is configured with. It exists for the E2E
+    // suite, where Flowable's configured URL reaches the app in the autonate-web
+    // container while the tests drive their own app against a different database:
+    // a behaviour invoked by a workflow the test published executed somewhere that
+    // workflow did not exist, so no behaviour could be verified end to end.
+    //
+    // Stamped onto the DEPLOYED copy only, like #112's expansion and #113's
+    // version pinning; the stored diagram never carries it.
+    public string? CallbackBaseUrlOverride { get; set; }
 }

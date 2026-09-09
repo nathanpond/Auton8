@@ -1,5 +1,19 @@
 # Worked example: timer boundary events (#157)
 
+> **Reconciled against the shipped #157 on 2026-09-09 (#174).** The four snapshot
+> fields this example names — `boundaryTimerDuration`, `boundaryTimerDate`,
+> `boundaryTimerCycle` and `cancelActivity` — exist on `WorkflowElementSnapshot`
+> with those exact names, `ApplyTimerBoundaryEventSnapshot` exists and is
+> dispatched on `boundaryEvent` **plus** a timer definition, and the
+> mutual-exclusion discipline the example describes is what the code does. The
+> example is **verified**, not predicted.
+>
+> One caveat it does not cover, learned after it was written: this element is
+> authorable **as drawn**. Four of M4's later elements were not, and needed a
+> publish-time expansion instead — see load-bearing facts 8 and 9 in `SKILL.md`,
+> and #232.
+
+
 The element: `bpmn:BoundaryEvent` carrying a `bpmn:TimerEventDefinition`, in both
 interrupting and non-interrupting form. Chosen as the example because it reuses an
 existing editor (timer definitions already work on start events) while adding a new
@@ -11,35 +25,40 @@ Verify each path before following it. These were accurate on 2026-09-05.
 
 ## 1. Support manifest
 
-`WorkflowStudio.tsx` — move `"Timer Boundary"` out of `COMING_SOON_BPMN_TYPES`
-(category `Boundary Events`) into `SUPPORTED_BPMN_TYPES`.
+**Rewritten 2026-09-07, when #107 landed.** The three carve-out sites this section
+used to walk through are gone; what follows is what replaced them, and the shape of
+the old advice is kept at the end because the reason it was wrong is the point.
 
-`WorkflowBpmnXml.cs` — `boundaryEvent` sits in `UnsupportedRuntimeControlElementNames`.
-It cannot simply be removed: that set covers *all* boundary events, and the others
-are not supported yet. Narrow it the way `intermediateCatchEvent` already is —
-that entry has a carve-out for the timer flavour:
+One edit, to `src/shared/bpmn-support.json`:
 
-```csharp
-// Timer intermediate catch events are first-class — only warn for
-// the message/signal/conditional flavors that aren't wired up yet.
-if (localName.Equals("intermediateCatchEvent", StringComparison.Ordinal) &&
-    element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+```json
 {
-    continue;
+  "name": "Timer Boundary",
+  "category": "Boundary Events",
+  "studio": "coming-soon",     ← change this to "supported"
+  "engine": "executes",        ← leave alone; #103 measured it
+  "localName": "boundaryEvent",
+  "eventDefinition": "timer",
+  ...
 }
 ```
 
-Add the same shape for `boundaryEvent`. **This is the pattern for any element whose
-support arrives one event-definition at a time**, and most of M4 is that shape.
+The SPA's types panel and the backend's publish validation both derive from this
+file, so nothing else needs touching and `BpmnSupportManifestTests` fails if a
+consumer stops deriving.
 
-⚠️ **This is not sufficient on its own.** `BuildUnsupportedRuntimeWarnings` has a
-*second* block further down, matching `localName.EndsWith("EventDefinition")`, whose
-carve-outs whitelist by definition type **and parent element type** — currently
-`signalEventDefinition`/`timerEventDefinition` on a `startEvent`, and
-`timerEventDefinition` on an `intermediateCatchEvent`. A timer *boundary* event needs
-a third carve-out there, or it works and still emits a "timer events" warning. An
-earlier draft of this example stopped at the first block and would have shipped #157
-half-fixed.
+Note the entry is keyed `("boundaryEvent", "timer")`, not `"boundaryEvent"`. That is
+the whole reason the old advice was long: the deny-list keyed on `localName` alone,
+so it covered all eight boundary variants at once, and supporting one meant adding a
+hand-written carve-out — *and then a second carve-out* in a separate
+`localName.EndsWith("EventDefinition")` block further down, or the element worked and
+still emitted a "timer events" warning. An earlier draft of this example stopped at
+the first block and would have shipped #157 half-fixed.
+
+**That trap no longer exists**, because the key distinguishes variants structurally
+rather than by exception. If you find yourself writing a carve-out for a BPMN element
+anywhere in `WorkflowBpmnXml.cs`, stop: it means something is keyed too coarsely, and
+that is the bug this milestone spent #103 and #107 removing.
 
 ## 2. Authoring affordance — zero code
 
@@ -99,14 +118,23 @@ they also push a `name` update.
 
 ## 5. Snapshot fields
 
-`WorkflowElementSnapshot.cs` — the timer fields exist already (`TimerCycleCron`,
-`TimerEndDate`, `TimerDuration`, `TimerDate`). Append one:
+**Corrected 2026-09-07, when #157 shipped.** `bool? CancelActivity` was already
+appended by #158 for conditional boundary events — do not add it again.
+
+The timer fields that exist (`TimerCycleCron`, `TimerEndDate`, `TimerDuration`,
+`TimerDate`) are **not** reusable here, for the same reason the describe helpers are
+not: `describeBusinessObject`'s output *is* the snapshot wire format, and the studio
+routes on `$type` plus key presence. Reusing them would send a timer boundary to
+whichever of the start-event or intermediate-catch editors matched first. #157
+appended three of its own:
 
 ```csharp
-bool? CancelActivity = null);
+string? BoundaryTimerDuration = null,
+string? BoundaryTimerDate = null,
+string? BoundaryTimerCycle = null);
 ```
 
-Append only — the record is positional.
+Append only — the record is positional, and existing callers bind by position.
 
 ## 6. Apply
 
@@ -178,3 +206,27 @@ if #103 has not landed you are creating that directory.
 
 **This example was written from reading the code, not from doing the work.** #157
 carries an AC to correct it against what was actually required; #174 consolidates.
+
+---
+
+## What #157 actually found (2026-09-07)
+
+**A timer boundary does NOT require `flowable:async` on the activity it guards.**
+This was the story's open question and the answer is measured, not assumed: four
+timer boundary events on plain user tasks with no `async` anywhere all fired
+correctly against Flowable 8.0.0. Nothing in the studio sets it, and there is no trap
+to document.
+
+That is worth contrasting with SKILL.md's load-bearing fact 5. Conditional events
+have a behaviour class and still never fire on their own; **timers wake themselves**,
+because the engine's job executor polls for due jobs. So "what makes it wake up?" has
+two different answers depending on whether the element schedules a job or waits to be
+asked — check which before assuming either.
+
+**A timer boundary with no time set is a hang**, so #157 refuses it at publish rather
+than documenting it, per epic #40's rule. Same for one setting two kinds, which
+Flowable rejects at deployment with a parse error that names the definition rather
+than the event.
+
+**The N×N clearing count is now 14**, not the 12 SKILL.md quoted when it was written.
+It moves with every editor added; grep and match, never trust the number.

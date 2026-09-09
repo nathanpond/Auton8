@@ -45,18 +45,31 @@ public static class ScriptTaskIdentity
         _ => value,
     };
 
-    /// <summary>Does any script task in this document ask to run as the system?</summary>
+    // #218. Every element that CARRIES a script, not every element that IS a
+    // script task.
+    //
+    // A complex gateway holds a routing script which the publish-time expansion
+    // copies onto a generated script task, `runAs` included. Scanning only
+    // `scriptTask` here would let `autonate:runAs="system"` on a gateway reach
+    // the engine without the permission check that exists to gate exactly that —
+    // the gate would still be present, still pass, and no longer cover the way in.
+    private static IEnumerable<XElement> ScriptBearingElements(XDocument document) =>
+        document.Descendants()
+            .Where(e => e.Name.Namespace == Bpmn
+                        && e.Name.LocalName is "scriptTask" or "complexGateway");
+
+    /// <summary>Does any script-bearing element ask to run as the system?</summary>
     /// <remarks>
     /// Drives the server-side permission check on publish. The studio hides the
     /// option from an author who lacks the permission, but a hidden control is
     /// not a gate — the check has to happen where the XML arrives.
     /// </remarks>
     public static bool DeclaresSystemIdentity(XDocument document) =>
-        document.Descendants(Bpmn + "scriptTask").Any(t => ReadRunAs(t) == System);
+        ScriptBearingElements(document).Any(t => ReadRunAs(t) == System);
 
-    /// <summary>Every script task's declared identity, keyed by element id.</summary>
+    /// <summary>Every script-bearing element's declared identity, keyed by id.</summary>
     public static IReadOnlyDictionary<string, string> DeclaredIdentities(XDocument document) =>
-        document.Descendants(Bpmn + "scriptTask")
+        ScriptBearingElements(document)
             .Where(t => t.Attribute("id") is not null && ReadRunAs(t) is not null)
             .ToDictionary(t => t.Attribute("id")!.Value, t => ReadRunAs(t)!, StringComparer.Ordinal);
 

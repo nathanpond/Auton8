@@ -548,3 +548,21 @@
     max-height: 18rem;
     overflow: auto;
 }
+
+/* #163. The ad-hoc activity picker. A real list so screen readers announce the
+   number of choices; the marker is removed because the row already reads as a
+   choice from its button. */
+.workflow-adhoc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workflow-adhoc-list > li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.workflow-adhoc-list > li:last-child {
+  border-bottom: none;
+}

@@ -14,6 +14,7 @@ public static partial class WorkflowBpmnXml
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
     private static readonly XNamespace XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
     private static readonly XNamespace FlowableNamespace = "http://flowable.org/bpmn";
+    private static readonly XNamespace DcNamespace = "http://www.omg.org/spec/DD/20100524/DC";
 
     // Default Dapr topic for signal start events when the user doesn't override
     // it on the signal in the modeler. External producers publish to this topic
@@ -29,32 +30,6 @@ public static partial class WorkflowBpmnXml
         "sendTask",
         "receiveTask",
         "manualTask"
-    ];
-    private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
-    [
-        "businessRuleTask",
-        "sendTask",
-        "receiveTask",
-        "manualTask"
-    ];
-    private static readonly HashSet<string> UnsupportedRuntimeControlElementNames =
-    [
-        "eventBasedGateway",
-        "complexGateway",
-        "boundaryEvent",
-        "callActivity",
-        "subProcess",
-        "transaction",
-        "adHocSubProcess",
-        "intermediateCatchEvent",
-        "intermediateThrowEvent"
-    ];
-    private static readonly HashSet<string> UnsupportedRuntimeCollaborationElementNames =
-    [
-        "collaboration",
-        "participant",
-        "lane",
-        "messageFlow"
     ];
 
     public static string CreateStarterDiagram(string processKey, string workflowName)
@@ -113,6 +88,7 @@ public static partial class WorkflowBpmnXml
             ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
 
         EnsureFlowableNamespaceDeclared(document);
+        EnsureAutoNateNamespaceDeclared(document);
         PruneOrphanSignalRoots(document);
 
         var oldProcessKey = processElement.Attribute("id")?.Value;
@@ -151,6 +127,887 @@ public static partial class WorkflowBpmnXml
         {
             scriptTask.SetAttributeValue(FlowableNamespace + "async", "true");
         }
+    }
+
+    // #112. Flowable 8.0.0 executes neither message-throwing event as written:
+    //
+    //   * intermediateThrowEvent + messageEventDefinition is REJECTED by the
+    //     deploy validator — "flowable-throw-event-invalid-eventdefinition:
+    //     Unsupported intermediate throw event type".
+    //   * endEvent + messageEventDefinition is worse. It deploys, ends the
+    //     process cleanly, and sends nothing. A catcher on the same message name
+    //     sat at one instance before and after a full run. Silent decoration that
+    //     looks like it works.
+    //
+    // Both are rewritten at publish into a service task on the AutoNate behaviour
+    // bridge — the same route a send task takes, so the throw side and the
+    // receive side share one correlation model instead of growing a second.
+    //
+    // Only the PUBLISHED copy is rewritten. The authored diagram keeps its
+    // message events, which is what lets the behaviour resolve its own message
+    // name and target by activity id at run time, and what lets the studio keep
+    // showing the author the shape they drew.
+    /// <summary>
+    /// The published copy, rewritten for an engine that cannot run what was
+    /// drawn (#112). Applied at DEPLOY, never at save.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not part of ApplyProcessMetadata. That runs on the prepare
+    /// path, and the studio saves what prepare returns — so expanding there would
+    /// replace the author's message events with service tasks in their own
+    /// diagram, losing the shape they drew and the configuration this expansion's
+    /// behaviour reads back at run time.
+    /// </remarks>
+    public static string ExpandForDeployment(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return xml;
+
+        var document = XDocument.Parse(xml);
+        ExpandMessageSendEvents(document);
+        ExpandSignalEndEvents(document);
+        ExpandCompensationEndEvents(document);
+        ExpandDataObjectTypes(document);
+        ExpandCompletionConditions(document);
+        ExpandComplexGateways(document);
+        ApplySignalScopes(document);
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    private static void ExpandMessageSendEvents(XDocument document)
+    {
+        foreach (var element in document.Descendants().ToList())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var localName = element.Name.LocalName;
+
+            // #112 (completed later, when a test finally exercised the element).
+            // A sendTask cannot carry the behaviour bridge either: Flowable
+            // refuses it outright —
+            //   'flowable-sendtask-invalid-implementation': One of the attributes
+            //   'type' or 'operation' is mandatory on sendTask
+            // — so the criterion "a send task sends through the behaviour
+            // mechanism service tasks already use" is unreachable as written. It
+            // is reachable by the same route the throw events take: the author
+            // draws a send task and configures it like a service task, and publish
+            // turns it into one.
+            var isSendTask = localName == "sendTask"
+                && string.Equals(
+                    element.Attribute(FlowableNamespace + "behaviorKey")?.Value,
+                    SendMessageBehaviorKey, StringComparison.Ordinal);
+
+            if (localName is not ("intermediateThrowEvent" or "endEvent") && !isSendTask) continue;
+
+            var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+            if (definition is null && !isSendTask) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var endsProcess = localName == "endEvent";
+
+            // The service task keeps the ORIGINAL id, so every sequence flow and
+            // every BPMNShape that references it stays valid without rewriting a
+            // single one.
+            definition?.Remove();
+            element.Name = BpmnNamespace + "serviceTask";
+            element.SetAttributeValue(FlowableNamespace + "delegateExpression", AutoNateBehaviorDelegateExpression);
+            element.SetAttributeValue(FlowableNamespace + "autonateServiceKind", ServiceTaskBehaviorKind);
+            element.SetAttributeValue(FlowableNamespace + "behaviorKey", SendMessageBehaviorKey);
+            // Sending reaches out of the process, so it is its own transaction
+            // boundary: a failure retries the send rather than redoing the work
+            // in front of it. Same reasoning as #168's retry point.
+            element.SetAttributeValue(FlowableNamespace + "async", "true");
+
+            if (!endsProcess) continue;
+
+            // A message end event has to still END. The service task took its id
+            // and its incoming flows, so a terminal end event is appended after
+            // it.
+            var process = element.Parent;
+            if (process is null) continue;
+
+            var endId = $"{elementId}_end";
+            var flowId = $"{elementId}_end_flow";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == endId))
+            {
+                // Publishing twice must not append a second one.
+                continue;
+            }
+
+            process.Add(new XElement(BpmnNamespace + "endEvent", new XAttribute("id", endId)));
+            process.Add(new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", flowId),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", endId)));
+
+            AddShapeBeside(document, elementId, endId);
+        }
+    }
+
+    // #156. A signal END event raises nothing.
+    //
+    // Verified against Flowable 8.0.0, and it is the message end event's problem
+    // exactly (#112): it deploys, ends the process cleanly, and sends no signal —
+    // a catcher waiting on the same name sat untouched. An intermediate throw of
+    // that same signal fired it instantly, which is what makes this a defect in
+    // the element rather than in the signal.
+    //
+    // So the end event is rewritten into the thing that works: an intermediate
+    // throw carrying the signal, followed by a plain end event. Simpler than the
+    // message case, which needed the behaviour bridge, because the signal throw is
+    // natively supported.
+    //
+    // Applied to the DEPLOYED copy only; the authored diagram keeps the end event
+    // the author drew.
+    private static void ExpandSignalEndEvents(XDocument document)
+    {
+        foreach (var endEvent in document.Descendants(BpmnNamespace + "endEvent").ToList())
+        {
+            var definition = endEvent.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var elementId = endEvent.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var process = endEvent.Parent;
+            if (process is null) continue;
+
+            var terminalId = $"{elementId}_end";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == terminalId))
+            {
+                // Publishing twice must not append a second terminal event.
+                continue;
+            }
+
+            // Keeps the original id, so every sequence flow and diagram shape
+            // pointing at it stays valid without rewriting one.
+            endEvent.Name = BpmnNamespace + "intermediateThrowEvent";
+
+            AddFlowElement(process, new XElement(BpmnNamespace + "endEvent",
+                new XAttribute("id", terminalId)));
+            AddFlowElement(process, new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{elementId}_end_flow"),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", terminalId)));
+
+            AddShapeBeside(document, elementId, terminalId);
+        }
+    }
+
+    // #166. A data object's declared type, rewritten into the form the engine
+    // reads.
+    //
+    // Two findings that do not overlap forced this, both verified against 8.0.0
+    // and bpmn-js:
+    //
+    //   itemSubjectRef="xsd:double"  the engine types the variable `double`, but
+    //                                bpmn-js DROPS the attribute on save —
+    //                                moddle resolves itemSubjectRef as a
+    //                                reference and a bare QName names nothing in
+    //                                the document.
+    //   itemSubjectRef="ItemDouble"  bpmn-js keeps it (the reference resolves),
+    //                                but the engine IGNORES the indirection —
+    //                                every declared variable came back `string`.
+    //
+    // So no single BPMN spelling both survives the modeller and types the
+    // variable. The authored diagram keeps `autonate:dataType`, which survives,
+    // and the DEPLOYED copy gets the bare QName, which works — the same split
+    // #112, #156, #115 and #218 already use.
+    private static void ExpandDataObjectTypes(XDocument document)
+    {
+        // The author selects the REFERENCE on the canvas — a dataObjectReference is
+        // the shape, and the dataObject behind it is invisible — so the studio
+        // writes the type there. The engine reads it off the dataObject, so the
+        // reference's declaration is resolved onto its target here.
+        var typeByDataObjectId = document.Descendants(BpmnNamespace + "dataObjectReference")
+            .Select(reference => (
+                Target: Trimmed(reference.Attribute("dataObjectRef")?.Value),
+                Type: Trimmed(reference.Attribute(
+                    ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value)))
+            .Where(pair => pair.Target is not null && pair.Type is not null)
+            .GroupBy(pair => pair.Target!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Type!, StringComparer.Ordinal);
+
+        foreach (var dataObject in document.Descendants(BpmnNamespace + "dataObject"))
+        {
+            var declaredType = Trimmed(
+                dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value);
+
+            if (declaredType is null
+                && Trimmed(dataObject.Attribute("id")?.Value) is { } objectId
+                && typeByDataObjectId.TryGetValue(objectId, out var fromReference))
+            {
+                declaredType = fromReference;
+            }
+
+            if (declaredType is null) continue;
+
+            // An author who hand-wrote itemSubjectRef meant it; do not overwrite.
+            if (dataObject.Attribute("itemSubjectRef") is null)
+            {
+                dataObject.SetAttributeValue("itemSubjectRef", declaredType);
+                EnsureTypePrefixDeclared(document, declaredType);
+            }
+
+            // Stripped from the deployed copy: it has done its job, and the
+            // engine has no use for it.
+            dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Remove();
+        }
+    }
+
+    // #159/#163. A completion condition an author typed in the studio, rewritten
+    // into the child element the engine reads.
+    //
+    // Stored as an autonate: ATTRIBUTE for the same reason a data object's type
+    // is (load-bearing fact 8): a `<bpmn:completionCondition>` child is a moddle
+    // property on some element types and not others, and anything the modeller
+    // does not model it drops on save — silently, taking the author's condition
+    // with it. The attribute survives; this puts the child back on the way out.
+    //
+    // Order matters. In `adHocSubProcess` the completion condition must come
+    // AFTER every flow element, or the deployment is refused:
+    //   cvc-complex-type.2.4.d: Invalid content was found starting with element
+    //   'completionCondition'
+    // which is how the first hand-written probe of that element failed.
+    private static void ExpandCompletionConditions(XDocument document)
+    {
+        var owners = document.Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace
+                        && e.Name.LocalName is "adHocSubProcess" or "multiInstanceLoopCharacteristics")
+            .ToList();
+
+        foreach (var owner in owners)
+        {
+            var declared = Trimmed(
+                owner.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Value);
+            if (declared is null) continue;
+
+            owner.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Remove();
+
+            // An author who hand-wrote the child meant it.
+            if (owner.Element(BpmnNamespace + "completionCondition") is not null) continue;
+
+            owner.Add(new XElement(
+                BpmnNamespace + "completionCondition",
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                declared));
+        }
+    }
+
+    /// <summary>Where an authored completion condition lives in the stored diagram (#159/#163).</summary>
+    internal const string CompletionConditionAttribute = "completionCondition";
+
+    /// <summary>
+    /// The data a process declares: its data objects, stores, inputs and outputs
+    /// with their declared types (#166).
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a call activity's mapping concrete rather than
+    /// free-text — a parent offers the child's declarations as targets instead of
+    /// asking an author to remember them. It reads the STORED spelling
+    /// (`autonate:dataType`) as well as the deployed one (`itemSubjectRef`), so it
+    /// works whether the child was authored here or imported.
+    /// </remarks>
+    public static IReadOnlyList<WorkflowDataDeclaration> ExtractDataDeclarations(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return [];
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return [];
+        }
+
+        var byName = new Dictionary<string, WorkflowDataDeclaration>(StringComparer.Ordinal);
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+            if (element.Name.LocalName is not ("dataObject" or "dataObjectReference"
+                or "dataStoreReference" or "dataInput" or "dataOutput"))
+            {
+                continue;
+            }
+
+            // A reference carries the author's name; the object behind it carries
+            // the same one. Keyed by name so the pair collapses to one entry
+            // rather than offering an author the same variable twice.
+            var name = Trimmed(element.Attribute("name")?.Value)
+                       ?? Trimmed(element.Attribute("id")?.Value);
+            if (name is null) continue;
+
+            var declaredType =
+                Trimmed(element.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value)
+                ?? Trimmed(element.Attribute("itemSubjectRef")?.Value);
+
+            var kind = element.Name.LocalName switch
+            {
+                "dataInput" => "input",
+                "dataOutput" => "output",
+                _ => "variable"
+            };
+
+            if (byName.TryGetValue(name, out var existing))
+            {
+                // Keep whichever spelling actually declared a type.
+                if (existing.Type is null && declaredType is not null)
+                {
+                    byName[name] = existing with { Type = declaredType };
+                }
+                continue;
+            }
+
+            byName[name] = new WorkflowDataDeclaration(name, declaredType, kind);
+        }
+
+        return byName.Values.OrderBy(d => d.Name, StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>Where a data object's declared type lives in the stored diagram (#166).</summary>
+    internal const string DataObjectTypeAttribute = "dataType";
+
+    private static readonly XNamespace XsdNamespace = "http://www.w3.org/2001/XMLSchema";
+
+    // itemSubjectRef holds a QName, so its prefix has to be DECLARED on the
+    // deployed document or the deployment is refused outright:
+    //   UndeclaredPrefix: Cannot resolve 'xsd:double' as a QName: the prefix
+    //   'xsd' is not declared.
+    // A studio-authored diagram carries no xmlns:xsd — nothing in the modeller
+    // has any reason to add one — so writing the type without this makes every
+    // diagram with a typed data object fail at publish.
+    private static void EnsureTypePrefixDeclared(XDocument document, string declaredType)
+    {
+        if (!declaredType.StartsWith("xsd:", StringComparison.Ordinal)) return;
+
+        var definitions = document.Root;
+        if (definitions is null) return;
+        if (definitions.Attribute(XNamespace.Xmlns + "xsd") is not null) return;
+
+        definitions.SetAttributeValue(XNamespace.Xmlns + "xsd", XsdNamespace.NamespaceName);
+    }
+
+    // #115. A compensation END event ends the process and compensates NOTHING.
+    //
+    // Verified against Flowable 8.0.0: a process whose only compensation trigger
+    // was `endEvent + compensateEventDefinition` ended cleanly with an empty
+    // handler trail — no handler ran. The intermediate throw form works
+    // correctly, waits for the handlers, and runs them in reverse order.
+    //
+    // This is the THIRD element in this milestone with that exact shape, after
+    // Message End (#112) and Signal End (#156): it deploys, it looks like it
+    // works, and it does nothing it exists for. The remedy is the one those two
+    // established — rewrite the deployed copy into the form the engine runs,
+    // and leave the authored diagram alone.
+    private static void ExpandCompensationEndEvents(XDocument document)
+    {
+        foreach (var endEvent in document.Descendants(BpmnNamespace + "endEvent").ToList())
+        {
+            if (endEvent.Elements(BpmnNamespace + "compensateEventDefinition").FirstOrDefault() is null)
+            {
+                continue;
+            }
+
+            var elementId = endEvent.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var process = endEvent.Parent;
+            if (process is null) continue;
+
+            var terminalId = $"{elementId}_end";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == terminalId))
+            {
+                // Publishing twice must not append a second terminal event.
+                continue;
+            }
+
+            // Keeps the original id, so every sequence flow and diagram shape
+            // pointing at it stays valid without rewriting one.
+            endEvent.Name = BpmnNamespace + "intermediateThrowEvent";
+
+            AddFlowElement(process, new XElement(BpmnNamespace + "endEvent",
+                new XAttribute("id", terminalId)));
+            AddFlowElement(process, new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{elementId}_end_flow"),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", terminalId)));
+
+            AddShapeBeside(document, elementId, terminalId);
+        }
+    }
+
+    // #223. Points every behaviour service task at a specific callback URL.
+    //
+    // Applied to the deployed copy only, and only when an override is configured —
+    // which it is not in production, so nothing is stamped and every diagram uses
+    // the engine's own configured URL exactly as before.
+    // #218. A complex gateway's routing decision is author script, so the deployed
+    // copy gains a script task in front of the gateway and conditions on the
+    // gateway's own outgoing flows.
+    //
+    // VERIFIED AGAINST FLOWABLE 8.0.0 BEFORE THIS WAS WRITTEN, and the result
+    // contradicts both #103's inventory ("DEPLOYS BUT DOES NOTHING") and this
+    // story's original premise ("silently walked past"):
+    //
+    //   * `complexGateway` is recorded in history as activityType
+    //     **exclusiveGateway**;
+    //   * it evaluates `conditionExpression` on its outgoing flows;
+    //   * it honours `default`;
+    //   * with two conditions both true it takes ONE flow — first match wins.
+    //
+    // So the engine already routes. That is why this expansion generates ONE node
+    // and not two: the story's "script task plus an exclusive gateway" would add a
+    // second gateway to do what the author's own gateway does. Keeping the
+    // author's element also means Flowable's history names an id that exists in
+    // the stored diagram.
+    //
+    // It also means an imported diagram containing a complex gateway does not
+    // stall where someone would notice — it silently takes a branch. Refusing the
+    // element at publish is the only reason that has not bitten anyone.
+    //
+    // Only the PUBLISHED copy is rewritten. The stored model keeps the single
+    // gateway the author drew.
+    private static void ExpandComplexGateways(XDocument document)
+    {
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .GroupBy(flow => flow.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(group => !string.IsNullOrEmpty(group.Key))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "complexGateway").ToList())
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+            if (gateway.Parent is null) continue;
+
+            // Idempotent: a re-published document already carrying its generated
+            // script task is left alone rather than gaining a second one.
+            var scriptTaskId = ComplexGatewayScriptTaskId(gatewayId);
+            if (document.Descendants(BpmnNamespace + "scriptTask")
+                .Any(t => t.Attribute("id")?.Value == scriptTaskId))
+            {
+                continue;
+            }
+
+            if (!flowsBySource.TryGetValue(gatewayId, out var outgoing) || outgoing.Count == 0)
+            {
+                // Validation refuses this at publish; expansion simply declines to
+                // invent a route out of a gateway that has none.
+                continue;
+            }
+
+            // The default flow, if the author set one, never gets a condition —
+            // BPMN forbids it, and it is the gateway's fallback by definition.
+            var defaultFlowId = Trimmed(gateway.Attribute("default")?.Value);
+
+            var routeIds = outgoing
+                .Select(flow => flow.Attribute("id")?.Value)
+                .Where(id => !string.IsNullOrWhiteSpace(id) && id != defaultFlowId)
+                .Select(id => id!)
+                .ToList();
+            if (routeIds.Count == 0) continue;
+
+            var resultVariable = ComplexGatewayRouteVariable(gatewayId);
+
+            // Rewire every flow INTO the gateway so it lands on the script task
+            // instead, then flow the script task into the gateway.
+            foreach (var inbound in document.Descendants(BpmnNamespace + "sequenceFlow")
+                         .Where(flow => flow.Attribute("targetRef")?.Value == gatewayId))
+            {
+                inbound.SetAttributeValue("targetRef", scriptTaskId);
+            }
+
+            var scriptTask = new XElement(
+                BpmnNamespace + "scriptTask",
+                new XAttribute("id", scriptTaskId),
+                // Named so the two history rows for one gateway are tellable
+                // apart: the routing script ran, then the gateway routed. Both
+                // map onto the same shape in the diagram, and an operator
+                // reading the history needs to know which one failed.
+                new XAttribute("name", ComplexGatewayScriptTaskName(gateway.Attribute("name")?.Value)),
+                new XAttribute("scriptFormat", ReadComplexGatewayScriptFormat(gateway) ?? "javascript"),
+                // flowable:, NOT the bare attribute. Flowable validates the
+                // deployed XML against the strict BPMN schema, which has no
+                // `resultVariable` on bpmn:scriptTask — a bare one is refused
+                // with "Attribute 'resultVariable' is not allowed to appear in
+                // element 'bpmn:scriptTask'". Verified both spellings against
+                // 8.0.0: bare is REFUSED, flowable: DEPLOYS.
+                new XAttribute(FlowableNamespace + "resultVariable", resultVariable),
+                // ForceAsyncScriptTasks runs on the PREPARE path, which this
+                // element never passed through, so async is set here explicitly.
+                new XAttribute(FlowableNamespace + "async", "true"),
+                // The mapping back to the author's gateway, recoverable from the
+                // deployed XML alone — that is what lets the execution view show
+                // the gateway when Flowable reports the script task.
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId),
+                // What the script is allowed to return. The Java behaviour reads
+                // this to hand the routes to the sandbox and to enforce the
+                // contract on the way back.
+                new XAttribute(FlowableNamespace + ComplexGatewayRoutesAttribute, string.Join(",", routeIds)),
+                new XElement(BpmnNamespace + "script",
+                    Trimmed(ReadComplexGatewayScript(gateway)) ?? DefaultRouteScript(routeIds[0])));
+
+            var runAs = ScriptTaskIdentity.ReadRunAs(gateway);
+            if (!string.IsNullOrWhiteSpace(runAs))
+            {
+                scriptTask.SetAttributeValue(
+                    ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute, runAs);
+            }
+
+            // The authoring data has moved to the generated task, and Flowable
+            // validates the DEPLOYED xml against the strict BPMN schema — where
+            // bpmn:complexGateway has no scriptFormat and no script child.
+            // Leaving them refuses the whole deployment:
+            //   cvc-complex-type.3.2.2: Attribute 'scriptFormat' is not allowed
+            //   to appear in element 'bpmn:complexGateway'.
+            // Stripping them here is also just correct: they describe how the
+            // author configured the element, which the stored model keeps and
+            // the engine has no use for.
+            gateway.Attribute("scriptFormat")?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute)?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.RunAsAttribute)?.Remove();
+            gateway.Element(BpmnNamespace + "script")?.Remove();
+
+            gateway.AddBeforeSelf(scriptTask);
+            AddFlowElement(gateway.Parent, new XElement(
+                BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{scriptTaskId}__flow"),
+                new XAttribute("sourceRef", scriptTaskId),
+                new XAttribute("targetRef", gatewayId),
+                // Tagged like the script task. Flowable records a traversed
+                // sequence flow as an activity, so an untagged generated flow
+                // arrives in completedActivityIds as an id the author's diagram
+                // has never heard of — the same defect as the node, one edge over.
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId)));
+
+            AddShapeBeside(document, gatewayId, scriptTaskId);
+
+            // Conditions on the author's own outgoing flows. An author-written
+            // condition is left alone, exactly as ApplyAutoNateGatewayConditions
+            // does — the script chooses among the routes it was given, and an
+            // author who has already written a condition meant it.
+            foreach (var flow in outgoing)
+            {
+                var flowId = flow.Attribute("id")?.Value;
+                if (string.IsNullOrWhiteSpace(flowId) || flowId == defaultFlowId) continue;
+                if (flow.Element(BpmnNamespace + "conditionExpression") is not null) continue;
+
+                flow.Add(new XElement(
+                    BpmnNamespace + "conditionExpression",
+                    new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                    $"${{{resultVariable} == '{flowId}'}}"));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generated element id -> the author's element it came from, read from a
+    /// DEPLOYED document (#218).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately keyed off the attribute rather than the id's shape. A naming
+    /// convention is not a contract, and an id-suffix rule would silently map any
+    /// author element unlucky enough to end in the same characters.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> BuildExpansionSourceMap(string? deployedXml)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(deployedXml)) return map;
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(deployedXml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return map;
+        }
+
+        foreach (var element in document.Descendants())
+        {
+            var source = Trimmed(element.Attribute(FlowableNamespace + ComplexGatewaySourceAttribute)?.Value);
+            var id = Trimmed(element.Attribute("id")?.Value);
+            if (source is null || id is null) continue;
+            map[id] = source;
+        }
+
+        return map;
+    }
+
+    /// <summary>The generated routing task's name for a complex gateway (#218).</summary>
+    internal static string ComplexGatewayScriptTaskName(string? gatewayName)
+    {
+        var name = Trimmed(gatewayName);
+        return name is null ? "Routing script" : $"{name} (routing script)";
+    }
+
+    /// <summary>The generated script task's id for a complex gateway (#218).</summary>
+    internal static string ComplexGatewayScriptTaskId(string gatewayId) =>
+        $"{gatewayId}__autonateRoute";
+
+    /// <summary>The variable the routing script's chosen route id lands in (#218).</summary>
+    internal static string ComplexGatewayRouteVariable(string gatewayId) =>
+        $"__autonateRoute_{gatewayId}";
+
+    // Marks a generated node as belonging to an author's element, so the
+    // execution view can map Flowable's activity ids back onto the diagram the
+    // author actually drew.
+    internal const string ComplexGatewaySourceAttribute = "autonateExpandedFrom";
+
+    // The routes the script may return, as a comma-separated list of flow ids.
+    internal const string ComplexGatewayRoutesAttribute = "autonateAllowedRoutes";
+
+    // The routing script lives in an autonate: ATTRIBUTE, not a <bpmn:script>
+    // child, and that is a browser fact rather than a preference.
+    //
+    // bpmn-js is vendored with no Flowable moddle extension, and its moddle has
+    // no script property on ComplexGateway — so it DROPS a <bpmn:script> child
+    // when it re-serialises the diagram. Proven, not assumed: seeding one and
+    // saving in the studio came back with the script gone
+    // (ComplexGatewayStudioRoundTripTests). An author would have lost their code
+    // on their next save, with nothing to say so.
+    //
+    // Attributes in the autonate namespace survive through $attrs, which is the
+    // mechanism runAs already uses, and the serialiser escapes the newlines.
+    internal const string ComplexGatewayScriptAttribute = "routeScript";
+    internal const string ComplexGatewayScriptFormatAttribute = "scriptFormat";
+
+    /// <summary>An author's routing script, stored on the gateway itself.</summary>
+    /// <remarks>
+    /// The child element is still read, so a hand-authored or imported diagram
+    /// written the obvious way works. Only the studio's own round trip needs the
+    /// attribute.
+    /// </remarks>
+    private static string? ReadComplexGatewayScript(XElement gateway) =>
+        Trimmed(gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Value)
+        ?? gateway.Element(BpmnNamespace + "script")?.Value;
+
+    private static string? ReadComplexGatewayScriptFormat(XElement gateway) =>
+        Trimmed(gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Value)
+        ?? Trimmed(gateway.Attribute("scriptFormat")?.Value);
+
+    // A freshly dropped gateway has no script yet, and publishing must not fail
+    // on that — it takes the first route, which is visible and wrong rather than
+    // invisible and wrong.
+    private static string DefaultRouteScript(string firstRouteId) =>
+        $"// Return the id of the route to take.\nreturn '{firstRouteId}';";
+
+    public static string StampCallbackBaseUrl(string xml, string? callbackBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(xml) || string.IsNullOrWhiteSpace(callbackBaseUrl))
+        {
+            return xml;
+        }
+
+        XDocument document;
+        try { document = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return xml; }
+
+        var stamped = 0;
+        foreach (var task in document.Descendants(BpmnNamespace + "serviceTask"))
+        {
+            // Only tasks on the behaviour bridge — a service task wired to
+            // something else has no callback to redirect.
+            if (task.Attribute(FlowableNamespace + "delegateExpression")?.Value
+                != AutoNateBehaviorDelegateExpression)
+            {
+                continue;
+            }
+
+            task.SetAttributeValue(FlowableNamespace + "autonateCallbackBaseUrl", callbackBaseUrl);
+            stamped++;
+        }
+
+        // #218. Script tasks call back too, and had the same defect one element
+        // over: the engine sent every script to the container's app regardless of
+        // which app published the workflow. #223 fixed it for the behaviour
+        // bridge only, so a routing script — or any script task — reached the
+        // wrong host in E2E.
+        foreach (var task in document.Descendants(BpmnNamespace + "scriptTask"))
+        {
+            task.SetAttributeValue(FlowableNamespace + "autonateCallbackBaseUrl", callbackBaseUrl);
+            stamped++;
+        }
+
+        if (stamped == 0) return xml;
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    // #156. The author's signal scope, moved onto the signal the engine reads.
+    //
+    // Scope is recorded on the EVENT in the authored diagram
+    // (flowable:autonateSignalScope) because moddle refuses to attach an
+    // attribute to a freshly created root element in the studio. Here it becomes
+    // Flowable's own flowable:scope on the <bpmn:signal>, so the ENGINE enforces
+    // the scope rather than Auton8 filtering a broadcast afterwards.
+    //
+    // Instance scope is the owner's decision (option 1): `instance` and `global`,
+    // no "same definition" scope — Flowable has no such thing natively, and
+    // building one would have meant intercepting a throw that fires inside the
+    // engine.
+    //
+    // Two events sharing a name but not a scope are genuinely different
+    // subscriptions, so a second signal element is created for the minority
+    // scope rather than one of them silently winning.
+    // The studio records the scope as an extension ELEMENT on the event, because
+    // moddle would not let it write an attribute onto an event parsed without one.
+    private static string? ReadSignalScope(XElement element) =>
+        element.Element(BpmnNamespace + "extensionElements")?
+            .Elements()
+            .FirstOrDefault(child => child.Name.LocalName == "autonateSignalScope")?
+            .Attribute("value")?.Value;
+
+    private static void ApplySignalScopes(XDocument document)
+    {
+        var root = document.Root;
+        if (root is null) return;
+
+        var signalsById = root.Elements(BpmnNamespace + "signal")
+            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
+            .ToDictionary(signal => signal.Attribute("id")!.Value, signal => signal, StringComparer.Ordinal);
+        if (signalsById.Count == 0) return;
+
+        // One signal element per (name, scope) actually used. The FIRST scope seen
+        // for a name reuses the original element; a second scope for the same name
+        // gets its own, because two events that agree on a name but not on who
+        // hears it are genuinely different subscriptions and cannot share one.
+        var byNameAndScope = new Dictionary<(string Name, bool Scoped), XElement>();
+
+        foreach (var element in document.Descendants().ToList())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            var signalRef = definition?.Attribute("signalRef")?.Value;
+            if (definition is null
+                || string.IsNullOrWhiteSpace(signalRef)
+                || !signalsById.TryGetValue(signalRef!, out var original))
+            {
+                continue;
+            }
+
+            var name = original.Attribute("name")?.Value ?? signalRef!;
+
+            // Three states, not two. An event that says nothing is NOT the same as
+            // one that says "global":
+            //
+            //   "instance" — scope the signal.
+            //   "global"   — unscope it.
+            //   absent     — leave the signal exactly as authored.
+            //
+            // The third case matters because a diagram may already carry
+            // Flowable's own flowable:scope, written by hand or by another
+            // modeller. Treating absent as "global" stripped it, silently widening
+            // a signal its author had deliberately narrowed. That is how this was
+            // found: a test wrote flowable:scope directly, publish removed it, and
+            // the instance-scoped assertion failed only under load — in isolation
+            // the check ran before the other instance had reacted, so it passed
+            // for the wrong reason.
+            var declared = ReadSignalScope(element);
+            if (string.IsNullOrWhiteSpace(declared)) continue;
+
+            var wantScoped = string.Equals(declared, "instance", StringComparison.OrdinalIgnoreCase);
+
+            var key = (name, wantScoped);
+            if (!byNameAndScope.TryGetValue(key, out var target))
+            {
+                var nameTaken = byNameAndScope.Keys.Any(k => k.Name == name);
+                if (nameTaken)
+                {
+                    target = new XElement(original);
+                    target.SetAttributeValue("id", $"{signalRef}_{(wantScoped ? "scoped" : "global")}");
+                    original.AddAfterSelf(target);
+                }
+                else
+                {
+                    target = original;
+                }
+
+                target.SetAttributeValue(
+                    FlowableNamespace + "scope", wantScoped ? "processInstance" : null);
+                byNameAndScope[key] = target;
+            }
+
+            definition.SetAttributeValue("signalRef", target.Attribute("id")?.Value);
+        }
+    }
+
+    // The execution diagram renders from the DEPLOYED definition, so an element
+    // with no BPMNShape would be invisible there. Cloned from the element it
+    // follows and nudged along, which is close enough to be legible and cannot
+    // fail on a diagram that never had DI in the first place.
+    // #115. Artifacts — associations, text annotations, groups — must come AFTER
+    // every flow element in the strict BPMN schema, and Flowable validates the
+    // deployed XML against it.
+    //
+    // Appending a generated node with `process.Add` therefore puts it in the
+    // wrong place the moment a diagram has an association, and the whole
+    // deployment is refused:
+    //   cvc-complex-type.2.4.a: Invalid content was found starting with element
+    //   'endEvent'. One of '{artifact, resourceRole, ...}' is expected.
+    //
+    // Compensation is the first expansion to meet this, because the association
+    // IS how a boundary event reaches its handler — but every expansion appends,
+    // so all of them route through here.
+    private static void AddFlowElement(XElement process, XElement flowElement)
+    {
+        var firstArtifact = process.Elements()
+            .FirstOrDefault(e => e.Name.Namespace == BpmnNamespace
+                                 && e.Name.LocalName is "association" or "textAnnotation" or "group");
+
+        if (firstArtifact is null)
+        {
+            process.Add(flowElement);
+            return;
+        }
+
+        firstArtifact.AddBeforeSelf(flowElement);
+    }
+
+    private static void AddShapeBeside(XDocument document, string existingElementId, string newElementId)
+    {
+        var source = document.Descendants(BpmndiNamespace + "BPMNShape")
+            .FirstOrDefault(shape => shape.Attribute("bpmnElement")?.Value == existingElementId);
+        if (source?.Parent is null) return;
+
+        var clone = new XElement(source);
+        clone.SetAttributeValue("id", $"Shape_{newElementId}");
+        clone.SetAttributeValue("bpmnElement", newElementId);
+
+        var bounds = clone.Element(DcNamespace + "Bounds");
+        if (bounds is not null)
+        {
+            if (double.TryParse(bounds.Attribute("x")?.Value, out var x))
+            {
+                bounds.SetAttributeValue("x", (x + 160).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            bounds.SetAttributeValue("width", "36");
+            bounds.SetAttributeValue("height", "36");
+        }
+
+        source.Parent.Add(clone);
     }
 
     // For every default-mode user task that flows directly into an exclusive
@@ -331,7 +1188,14 @@ public static partial class WorkflowBpmnXml
         return string.IsNullOrWhiteSpace(text) ? null : text!.Trim();
     }
 
-    public static WorkflowBpmnValidationResult ValidateProcess(string xml)
+    /// <param name="support">
+    /// The BPMN support manifest to validate against. Defaults to the embedded one;
+    /// tests pass a perturbed manifest to prove validation follows the manifest
+    /// rather than a list of its own.
+    /// </param>
+    public static WorkflowBpmnValidationResult ValidateProcess(
+        string xml,
+        BpmnSupportManifest? support = null)
     {
         try
         {
@@ -364,10 +1228,48 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
             errors.AddRange(BuildServiceTaskValidationErrors(document));
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
+            // #107: silence becomes a refusal with a reason.
+            errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
+            // #158: a conditional start event is legal only inside an event
+            // subprocess. Flowable rejects it anywhere else with a parse error an
+            // author cannot act on, so say what the constraint is instead.
+            errors.AddRange(BuildConditionalStartPlacementErrors(document));
+            // #157: a timer boundary with no time set never fires.
+            errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
+            // #161: a subprocess the engine cannot enter.
+            errors.AddRange(BuildSubProcessValidationErrors(document));
+
+            // #115. The rules that used to live ONLY in ValidateStructureForPublish.
+            //
+            // #225 pointed publish at ValidateProcess, and because these were not
+            // in it, that switch silently dropped three rules — including #114's
+            // uncaught error code, whose failure mode is Flowable destroying the
+            // whole instance with a 500 and no history. Nothing failed; the
+            // promoted rules simply stopped running.
+            //
+            // One set now, so "the validation set" means one thing. Prepare gains
+            // them too, which is where an author would rather meet them anyway.
+            errors.AddRange(BuildAdhocSubProcessErrors(document));
+            errors.AddRange(BuildStructureErrors(document));
+            // #167: elements the studio converts away, and converted tasks nobody can do.
+            errors.AddRange(BuildNonWaitingTaskErrors(document));
+            errors.AddRange(BuildUncaughtThrownCodeErrors(document));
+            // #164: a gateway that cannot be a choice, or points somewhere the
+            // engine will not follow.
+            errors.AddRange(BuildEventBasedGatewayErrors(document));
+            // #162: an event subprocess that can never trigger.
+            errors.AddRange(BuildEventSubProcessErrors(document));
+
+            // #158: every condition in the diagram, through the one shared check.
+            // Sequence flows included, so exclusive and inclusive gateways benefit
+            // here rather than in a story of their own.
+            var conditions = WorkflowConditionValidation.CheckDocument(document);
+            errors.AddRange(conditions.Errors);
 
             var warnings = new List<string>();
-            warnings.AddRange(BuildUnsupportedRuntimeWarnings(document));
+            warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
+
 
             return new WorkflowBpmnValidationResult(errors, warnings);
         }
@@ -614,6 +1516,79 @@ public static partial class WorkflowBpmnXml
             {
                 ApplyServiceTaskSnapshot(element, snapshot);
             }
+
+            // #218. The routing script lives on the gateway the author drew, in
+            // the same shape a script task uses, so the expansion has one place
+            // to read it from and the stored diagram stays the author's.
+            if (string.Equals(element.Name.LocalName, "complexGateway", StringComparison.Ordinal))
+            {
+                ApplyComplexGatewaySnapshot(element, snapshot);
+            }
+
+            // #158. Not `else if` — a boundary event is both a conditional event
+            // and, potentially, something else the chain above handled.
+            if (element.Element(BpmnNamespace + "conditionalEventDefinition") is not null)
+            {
+                ApplyConditionalEventSnapshot(element, snapshot);
+            }
+
+            // #157: a timer boundary event. Matched on boundaryEvent PLUS a timer
+            // definition so it cannot claim the conditional boundary events above,
+            // nor the timer start and intermediate catch handlers earlier.
+            if (string.Equals(element.Name.LocalName, "boundaryEvent", StringComparison.Ordinal) &&
+                element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+            {
+                ApplyTimerBoundaryEventSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    // #158: the condition an author wrote, plus whether a boundary event
+    // interrupts.
+    //
+    // One handler for all three placements — intermediate catch, boundary, and the
+    // event-subprocess start (#162) — because the condition is the same element in
+    // each and BPMN spells it the same way. `cancelActivity` is meaningful only on
+    // a boundary event; writing it elsewhere would be noise in the XML.
+    private static void ApplyConditionalEventSnapshot(XElement eventElement, WorkflowElementSnapshot snapshot)
+    {
+        var definition = eventElement.Element(BpmnNamespace + "conditionalEventDefinition");
+        if (definition is null)
+        {
+            return;
+        }
+
+        if (snapshot.ConditionExpression is not null)
+        {
+            var condition = definition.Element(BpmnNamespace + "condition");
+            if (string.IsNullOrWhiteSpace(snapshot.ConditionExpression))
+            {
+                // An empty condition is refused at publish rather than written as
+                // an empty element that never evaluates.
+                condition?.Remove();
+            }
+            else
+            {
+                if (condition is null)
+                {
+                    condition = new XElement(BpmnNamespace + "condition");
+                    definition.Add(condition);
+                }
+
+                // Flowable reads the condition body; the xsi:type is what marks it
+                // a formal expression, exactly as sequence flow conditions do.
+                condition.SetAttributeValue(XsiNamespace + "type", "bpmn:tFormalExpression");
+                condition.Value = snapshot.ConditionExpression;
+            }
+        }
+
+        if (snapshot.CancelActivity is { } cancelActivity
+            && string.Equals(eventElement.Name.LocalName, "boundaryEvent", StringComparison.Ordinal))
+        {
+            // Written explicitly in both directions. BPMN defaults cancelActivity
+            // to true when absent, so leaving it off to mean "interrupting" would
+            // make a non-interrupting event impossible to turn back.
+            eventElement.SetAttributeValue("cancelActivity", cancelActivity ? "true" : "false");
         }
     }
 
@@ -627,6 +1602,12 @@ public static partial class WorkflowBpmnXml
     // service-task types (HTTP webhook, etc.) so adding them later doesn't
     // require an XML migration on existing models.
     private const string AutoNateBehaviorDelegateExpression = "${autonateBehaviorDelegate}";
+
+    // #112. The built-in behaviour every expanded message-throwing element is
+    // wired to. Kept as a literal here rather than referencing the behaviour type,
+    // so this file stays free of a dependency on the behaviours namespace; a test
+    // pins the two together.
+    private const string SendMessageBehaviorKey = "autonate.send-message";
     private const string ServiceTaskBehaviorKind = "behavior";
 
     private static void ApplyServiceTaskSnapshot(XElement serviceTaskElement, WorkflowElementSnapshot snapshot)
@@ -663,6 +1644,23 @@ public static partial class WorkflowBpmnXml
         else
         {
             serviceTaskElement.SetAttributeValue(FlowableNamespace + "behaviorKey", trimmedKey);
+        }
+
+        // #168. The retry point. flowable:async makes the step its own
+        // transaction boundary: the engine commits before running it, so a
+        // failure produces a retryable job for that step alone instead of
+        // rolling back to the last checkpoint. Verified against Flowable 8.0.0
+        // — unmarked, a failing step rolls the whole start back and no instance
+        // survives; marked, the preceding steps stay recorded and the failure
+        // lands in the dead-letter table with its exception.
+        //
+        // Only written when the studio said so. A null RetryPoint means the
+        // snapshot came from a build that does not know about the setting, and
+        // leaving the attribute untouched keeps that build from clearing it.
+        if (snapshot.RetryPoint is { } retryPoint)
+        {
+            serviceTaskElement.SetAttributeValue(
+                FlowableNamespace + "async", retryPoint ? "true" : null);
         }
 
         // Sweep any leftover field-injection children from the previous
@@ -896,6 +1894,262 @@ public static partial class WorkflowBpmnXml
     // Throws System.Xml.XmlException on malformed XML. Callers that iterate
     // many workflows should catch per-workflow so one bad model doesn't sink
     // the rest of the index (see EfCoreWorkflowSignalRegistry.RefreshAsync).
+    // #112. The correlation key lives on the element, in the flowable namespace
+    // under an autonate name — the same shape as autonateServiceKind and
+    // autonateConvertedFrom, and for the reason #167 found the hard way: a diagram
+    // reliably declares xmlns:flowable, and bpmn-moddle silently discards an
+    // attribute whose prefix is undeclared.
+    internal const string CorrelationKeyAttribute = "autonateCorrelationKey";
+
+    internal const string CalledElementTypeAttribute = "calledElementType";
+
+    /// <summary>
+    /// The process keys this diagram's call activities target (#113).
+    /// </summary>
+    /// <remarks>
+    /// Keys only — a diagram already carrying pinned definition ids (because it
+    /// was round-tripped from a deployed copy) is left alone, since re-pinning it
+    /// would silently move it to a newer child.
+    /// </remarks>
+    public static IReadOnlyList<(string ElementId, string CalledKey)> ExtractCallActivityTargets(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<(string, string)>();
+
+        XDocument document;
+        try { document = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return Array.Empty<(string, string)>(); }
+
+        var targets = new List<(string, string)>();
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            var elementId = call.Attribute("id")?.Value;
+            var calledElement = call.Attribute("calledElement")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId) || string.IsNullOrWhiteSpace(calledElement)) continue;
+
+            // Already pinned by a previous publish; not a key to resolve again.
+            if (string.Equals(
+                    call.Attribute(FlowableNamespace + CalledElementTypeAttribute)?.Value,
+                    "id", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            targets.Add((elementId!, calledElement!.Trim()));
+        }
+
+        return targets;
+    }
+
+    /// <summary>
+    /// Rewrites each call activity to the exact child definition that exists now
+    /// (#113), so republishing the child cannot change what an already-deployed
+    /// parent calls.
+    /// </summary>
+    /// <remarks>
+    /// Flowable resolves a `calledElement` KEY at run time, to the latest version
+    /// — verified: an unchanged parent picked up a child version deployed after
+    /// it. This issue decided the opposite, because a running process must not
+    /// change behaviour underneath its owner.
+    ///
+    /// Pinning also bounds recursion by construction. A parent can only pin to a
+    /// definition that already exists, so every call points strictly backwards in
+    /// deployment order and the chain must terminate. A process whose first
+    /// version calls itself has nothing to resolve and is refused; a later version
+    /// pins to the earlier one, which is finite.
+    ///
+    /// Applied to the DEPLOYED copy only. The stored diagram keeps the key the
+    /// author picked, which is what the studio shows them.
+    /// </remarks>
+    public static string PinCallActivityTargets(
+        string xml, IReadOnlyDictionary<string, string> definitionIdsByKey)
+    {
+        if (string.IsNullOrWhiteSpace(xml) || definitionIdsByKey.Count == 0) return xml;
+
+        var document = XDocument.Parse(xml);
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            var calledElement = call.Attribute("calledElement")?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(calledElement)) continue;
+            if (string.Equals(
+                    call.Attribute(FlowableNamespace + CalledElementTypeAttribute)?.Value,
+                    "id", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!definitionIdsByKey.TryGetValue(calledElement!, out var definitionId)) continue;
+
+            call.SetAttributeValue("calledElement", definitionId);
+            call.SetAttributeValue(FlowableNamespace + CalledElementTypeAttribute, "id");
+        }
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    internal const string TargetProcessKeyAttribute = "autonateTargetProcessKey";
+
+    /// <summary>
+    /// Every point in a definition that sends a message (#112).
+    /// </summary>
+    public static IReadOnlyList<WorkflowMessageSendDeclaration> ExtractMessageSendDeclarations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageSendDeclaration>();
+        }
+
+        var document = XDocument.Parse(xml);
+        var messageNamesById = MessageNamesById(document);
+        var declarations = new List<WorkflowMessageSendDeclaration>();
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var localName = element.Name.LocalName;
+            var isThrow = localName is "intermediateThrowEvent" or "endEvent";
+            var isSendTask = localName == "sendTask";
+            if (!isThrow && !isSendTask) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            // A throw event only counts when it actually carries a message
+            // definition — a plain end event is not a send, and #167 already
+            // established that a bare throw-none passes straight through.
+            string messageName;
+            if (isThrow)
+            {
+                var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+                if (definition is null) continue;
+
+                var messageRef = definition.Attribute("messageRef")?.Value;
+                messageName = messageRef is not null && messageNamesById.TryGetValue(messageRef, out var resolved)
+                    ? resolved
+                    : string.Empty;
+            }
+            else
+            {
+                // A send task names its message on the element, since it has no
+                // event definition to hang one on.
+                messageName = element.Attribute(FlowableNamespace + "autonateMessageName")?.Value ?? string.Empty;
+            }
+
+            declarations.Add(new WorkflowMessageSendDeclaration(
+                elementId,
+                messageName.Trim(),
+                Trimmed(element.Attribute(FlowableNamespace + TargetProcessKeyAttribute)?.Value),
+                Trimmed(element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value),
+                EndsProcess: localName == "endEvent"));
+        }
+
+        return declarations;
+    }
+
+    private static bool IsInsideEventSubProcess(XElement element) =>
+        element.Ancestors(BpmnNamespace + "subProcess")
+            .Any(sp => string.Equals(
+                sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase));
+
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static Dictionary<string, string> MessageNamesById(XDocument document) =>
+        document.Root?
+            .Elements(BpmnNamespace + "message")
+            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
+            .ToDictionary(
+                message => message.Attribute("id")!.Value,
+                message => message.Attribute("name")?.Value ?? string.Empty,
+                StringComparer.Ordinal)
+        ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every point in a published definition that can be advanced from outside,
+    /// with the variable that addresses it (#112).
+    /// </summary>
+    public static IReadOnlyList<WorkflowMessageDeclaration> ExtractMessageDeclarations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageDeclaration>();
+        }
+
+        var document = XDocument.Parse(xml);
+
+        // <bpmn:message id="…" name="…"> lives at definitions level; the events
+        // reference it by id. The name is what the engine subscribes under, so a
+        // messageRef pointing at nothing is not addressable and is skipped rather
+        // than guessed at.
+        var messageNamesById = MessageNamesById(document);
+
+        var declarations = new List<WorkflowMessageDeclaration>();
+
+        foreach (var element in document.Descendants())
+        {
+            var localName = element.Name.LocalName;
+            var kind = localName switch
+            {
+                // #162. A start event inside an EVENT SUBPROCESS starts that
+                // handler within an already-running instance — it is a catch, not
+                // a way to start a process. Classifying it as Start made the
+                // correlator try to start a brand-new instance by message, which
+                // Flowable refuses ("no subscription to message with name …")
+                // because no process-level start event carries it. Found by #162's
+                // message-handler test; a defect in #112 as shipped.
+                "startEvent" when IsInsideEventSubProcess(element) => WorkflowMessageTargetKind.Catch,
+                "startEvent" => WorkflowMessageTargetKind.Start,
+                "intermediateCatchEvent" or "boundaryEvent" => WorkflowMessageTargetKind.Catch,
+                "receiveTask" => WorkflowMessageTargetKind.ReceiveTask,
+                _ => (WorkflowMessageTargetKind?)null
+            };
+            if (kind is null || element.Name.Namespace != BpmnNamespace) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var correlationKey = element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value;
+            correlationKey = string.IsNullOrWhiteSpace(correlationKey) ? null : correlationKey.Trim();
+
+            if (kind == WorkflowMessageTargetKind.ReceiveTask)
+            {
+                // A receive task has no message element. It is still addressable,
+                // by its own id, so it belongs in this list — leaving it out is how
+                // "a receive task is a process that stops forever" happens.
+                declarations.Add(new WorkflowMessageDeclaration(
+                    elementId, kind.Value, string.Empty, correlationKey));
+                continue;
+            }
+
+            var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var messageRef = definition.Attribute("messageRef")?.Value;
+            if (string.IsNullOrWhiteSpace(messageRef)
+                || !messageNamesById.TryGetValue(messageRef, out var messageName)
+                || string.IsNullOrWhiteSpace(messageName))
+            {
+                continue;
+            }
+
+            declarations.Add(new WorkflowMessageDeclaration(
+                elementId,
+                kind.Value,
+                messageName,
+                // A start event has nothing to correlate to — no instance exists
+                // yet — so any key written on one is ignored rather than honoured,
+                // which would otherwise look like a filter that silently matches
+                // everything.
+                kind == WorkflowMessageTargetKind.Start ? null : correlationKey));
+        }
+
+        return declarations;
+    }
+
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml))
@@ -1018,6 +2272,31 @@ public static partial class WorkflowBpmnXml
         }
     }
 
+    // #218. Reuses Script/ScriptFormat rather than adding snapshot fields: it is
+    // the same concept in the same shape, and the studio routes on $type, so a
+    // script task's snapshot and a gateway's cannot be confused.
+    private static void ApplyComplexGatewaySnapshot(XElement element, WorkflowElementSnapshot snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(snapshot.ScriptFormat))
+        {
+            element.SetAttributeValue(
+                ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute,
+                snapshot.ScriptFormat);
+        }
+
+        // Null means the studio did not send one, which must not clear a script
+        // someone already has — the same distinction RetryPoint draws.
+        if (snapshot.Script is null) return;
+
+        element.SetAttributeValue(
+            ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute,
+            string.IsNullOrWhiteSpace(snapshot.Script) ? null : snapshot.Script);
+
+        // A diagram imported with the child form is normalised onto the
+        // attribute, because the child will not survive the author's next save.
+        element.Element(BpmnNamespace + "script")?.Remove();
+    }
+
     private static void ApplyUserTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
     {
         SetOrRemoveFlowableAttribute(element, "assignee", snapshot.Assignee);
@@ -1061,6 +2340,28 @@ public static partial class WorkflowBpmnXml
         }
 
         return string.Join(",", trimmed);
+    }
+
+    // #159/#163/#166. An IMPORTED diagram declares no autonate namespace, and
+    // without the declaration moddle cannot serialise an `autonate:` attribute at
+    // all — the studio's panels appear to work, Apply reports success, and the
+    // value is gone from the saved XML.
+    //
+    // Auton8's own starter diagram has always declared it, which is why this only
+    // bites a diagram authored somewhere else. Declared on the prepare path, the
+    // same place the flowable namespace is.
+    private static void EnsureAutoNateNamespaceDeclared(XDocument document)
+    {
+        var definitions = document.Root;
+        if (definitions is null) return;
+
+        var alreadyDeclared = definitions.Attributes()
+            .Any(a => a.IsNamespaceDeclaration
+                      && a.Value == ScriptTaskIdentity.AutoNateNamespace.NamespaceName);
+        if (alreadyDeclared) return;
+
+        definitions.SetAttributeValue(
+            XNamespace.Xmlns + "autonate", ScriptTaskIdentity.AutoNateNamespace.NamespaceName);
     }
 
     private static void EnsureFlowableNamespaceDeclared(XDocument document)
@@ -1503,98 +2804,786 @@ public static partial class WorkflowBpmnXml
             }
         }
 
+        errors.AddRange(BuildComplexGatewayValidationErrors(document));
         return errors;
     }
 
-    private static IReadOnlyList<string> BuildUnsupportedRuntimeWarnings(XDocument document)
+    // #218. A complex gateway's routing script becomes a real script task at
+    // publish, so it is held to the same rules as one the author drew.
+    //
+    // Validated on the AUTHORED document rather than the expanded one, because
+    // the author has to be told which gateway is wrong — after expansion the
+    // offending element is a generated node whose id means nothing to them.
+    private static IReadOnlyList<string> BuildComplexGatewayValidationErrors(XDocument document)
     {
-        var taskElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var controlElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var collaborationElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var eventDrivenBehaviors = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var errors = new List<string>();
+
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .GroupBy(flow => flow.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(group => !string.IsNullOrEmpty(group.Key))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "complexGateway"))
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            var label = gateway.Attribute("name")?.Value ?? gatewayId ?? "Unnamed complex gateway";
+
+            var scriptFormat = ReadComplexGatewayScriptFormat(gateway);
+            // Unset is fine — the expansion defaults it to javascript. Set to
+            // something the sandbox cannot run is not.
+            if (!string.IsNullOrWhiteSpace(scriptFormat)
+                && !ScriptSurfaceRules.IsSupportedScriptFormat(scriptFormat))
+            {
+                var supported = string.Join(
+                    " or ",
+                    ScriptSurfaceRules.SupportedScriptFormats.Select(f => $"\"{f}\""));
+                errors.Add($"Complex gateway '{label}' must use scriptFormat={supported}.");
+            }
+
+            // The same sandbox, so the same surface rules. Skipping this would
+            // leave one script in the product that can still reach for the JVM
+            // binding, found at run time by whoever starts the process.
+            var scriptBody = ReadComplexGatewayScript(gateway);
+            if (!string.IsNullOrWhiteSpace(scriptBody))
+            {
+                foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))
+                {
+                    errors.Add($"Complex gateway '{label}': {rejection}");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+
+            var outgoing = flowsBySource.TryGetValue(gatewayId, out var flows) ? flows : [];
+            var defaultFlowId = Trimmed(gateway.Attribute("default")?.Value);
+            var routeCount = outgoing.Count(flow =>
+                !string.IsNullOrWhiteSpace(flow.Attribute("id")?.Value)
+                && flow.Attribute("id")!.Value != defaultFlowId);
+
+            if (routeCount == 0)
+            {
+                // Flowable deploys this happily and the instance then fails at
+                // the gateway with an engine-level message. Refusing it here
+                // names the gateway while the author still has it open.
+                errors.Add(
+                    $"Complex gateway '{label}' needs at least one outgoing route for its script to choose. " +
+                    "A gateway with only a default flow has nothing to route.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #107: elements the manifest marks unsupported are a DEPLOYMENT ERROR, not a
+    // warning.
+    //
+    // `BuildUnsupportedRuntimeWarnings` fed `warnings`, so an element the engine
+    // cannot run deployed cleanly and then did nothing — the founding complaint of
+    // #40, and the current default rather than a theoretical risk. #103 confirmed
+    // it mechanically: Complex Gateway deploys, an instance starts, and the token
+    // passes straight through with no activation condition evaluated.
+    //
+    // Keyed by variant through the manifest, so this reports the one boundary
+    // event that cannot run rather than all eight. Note it keys on the manifest's
+    // ENGINE axis, not its studio axis: an element Flowable runs deploys even while
+    // the studio still lists it as coming soon, because "we have not built the
+    // property editor yet" is not a reason to reject a hand-authored diagram.
+    private static IReadOnlyList<string> BuildUnsupportedElementErrors(
+        XDocument document,
+        BpmnSupportManifest support)
+    {
+        var errors = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var node in document.Descendants())
+        {
+            if (node.Name.Namespace != BpmnNamespace) continue;
+
+            foreach (var match in support.Match(node))
+            {
+                if (!match.CannotExecute) continue;
+                if (!seen.Add(match.Name)) continue;
+
+                var label = node.Attribute("name")?.Value ?? node.Attribute("id")?.Value;
+                var where = label is null ? "" : $" ('{label}')";
+                errors.Add(
+                    $"{match.Name}{where} cannot be deployed: {match.Reason} " +
+                    "Remove it from the diagram, or replace it with an element that executes.");
+            }
+        }
+
+        return errors;
+    }
+
+
+    // #158: `EventSubProcessConditionalStartEventActivityBehavior` is the only
+    // conditional start behaviour Flowable 8.0.0 ships, and its own validator
+    // rejects a process-level conditional start with
+    // `flowable-start-event-invalid-event-definition` — a message that tells an
+    // author nothing about what to do.
+    //
+    // The element is fine; where the studio lets you put it is the problem. So this
+    // refuses the invalid placement and names the constraint, rather than marking
+    // the element unrunnable in the manifest — which would be wrong in the other
+    // direction and would block #162's event-subprocess work.
+    // #157: the three timer kinds a boundary event can carry, plus whether it
+    // interrupts.
+    //
+    // Established against a live engine rather than assumed: a timer boundary does
+    // NOT require `flowable:async` on the activity it is attached to. Four such
+    // timers fired correctly on plain user tasks with no async anywhere, so nothing
+    // here sets it.
+    private static void ApplyTimerBoundaryEventSnapshot(XElement boundaryElement, WorkflowElementSnapshot snapshot)
+    {
+        var timer = boundaryElement.Element(BpmnNamespace + "timerEventDefinition");
+        if (timer is null)
+        {
+            return;
+        }
+
+        var duration = NullIfBlank(snapshot.BoundaryTimerDuration);
+        var date = NullIfBlank(snapshot.BoundaryTimerDate);
+        var cycle = NullIfBlank(snapshot.BoundaryTimerCycle);
+
+        // Only rewrite when the snapshot actually carries one. A snapshot with all
+        // three absent describes some other element and must not blank this one.
+        if (duration is not null || date is not null || cycle is not null)
+        {
+            // Clear every kind first. Flowable rejects a definition carrying two,
+            // and a stale timeCycle beside a new timeDuration is a valid-looking
+            // diagram that behaves unpredictably.
+            timer.Element(BpmnNamespace + "timeDuration")?.Remove();
+            timer.Element(BpmnNamespace + "timeDate")?.Remove();
+            timer.Element(BpmnNamespace + "timeCycle")?.Remove();
+
+            var (name, value) = duration is not null
+                ? ("timeDuration", duration)
+                : date is not null
+                    ? ("timeDate", date)
+                    : ("timeCycle", cycle!);
+
+            timer.Add(new XElement(
+                BpmnNamespace + name,
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                value));
+        }
+
+        if (snapshot.CancelActivity is { } cancelActivity)
+        {
+            // Written explicitly in both directions: BPMN defaults an absent
+            // cancelActivity to true, so leaving it off to mean "interrupting"
+            // would make a non-interrupting timer impossible to turn back.
+            boundaryElement.SetAttributeValue("cancelActivity", cancelActivity ? "true" : "false");
+        }
+    }
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // #157: a timer boundary event carrying no time is a hang.
+    //
+    // It deploys cleanly, produces no job, and simply never fires — so the author
+    // sees an activity that waits forever with nothing to show why. Epic #40's rule
+    // is that a hang is a defect rather than a documented behaviour, so this is
+    // refused at publish.
+    // #161: an embedded subprocess with no start event cannot be entered.
+    //
+    // It deploys cleanly and then fails when the process reaches it, with a 500 and
+    // "No initial activity found for subprocess <id>" — a failure that lands on
+    // whoever *ran* the process rather than on the author who published it.
+    // Established by deploying one; the story's premise said it hangs, and it does
+    // not, but the remedy is the same because the person who sees the failure is the
+    // wrong person.
+    //
+    // Deliberately NOT a rule about missing end events. A subprocess whose inner
+    // flow simply stops **works correctly** — Flowable completes it once no tokens
+    // remain inside, verified by running one. Refusing that would break diagrams
+    // that run today.
+    //
+    // Event subprocesses are excluded: they are triggered rather than entered, and
+    // #162 owns their own start-event rule.
+    // #167: a manual task and a plain task both deploy and pass straight through.
+    //
+    // Verified by running both against Flowable 8.0.0: the process reached the
+    // activity beyond without creating a task or pausing anywhere.
+    // `ManualTaskActivityBehavior` is 488 bytes, and BPMN specifies a manual task as
+    // work done outside the system with no engine involvement; a plain `bpmn:task`
+    // is the same. So a process containing either reaches its end having done
+    // nothing a person was meant to do.
+    //
+    // The studio converts both to user tasks at design time. This is the backstop
+    // for diagrams the studio never touched — a hand-edited file, or one imported
+    // straight to the API.
+    // Written by the studio when it converts a manual or generic task, so the
+    // unassignable rule below applies to exactly those and to nothing else.
+    // `flowable:` because bpmn-js loads no moddle extension for our own namespace —
+    // raw prefixed attributes in $attrs are the only round-trip-safe shape.
+    internal const string ConvertedFromAttribute = "autonateConvertedFrom";
+
+    private static readonly HashSet<string> NonWaitingTaskElementNames =
+    [
+        "manualTask",
+        "task"
+    ];
+
+    private static IReadOnlyList<string> BuildNonWaitingTaskErrors(XDocument document)
+    {
+        var errors = new List<string>();
 
         foreach (var element in document.Descendants())
         {
-            if (element.Name.Namespace != BpmnNamespace)
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            if (NonWaitingTaskElementNames.Contains(element.Name.LocalName))
+            {
+                var kind = element.Name.LocalName == "manualTask" ? "Manual task" : "Task";
+                errors.Add(
+                    $"{kind} '{LabelOf(element)}' cannot be deployed: it looks like a step " +
+                    "somebody performs, but the engine passes straight through it without " +
+                    "waiting for anyone. Auton8 runs work through user tasks — the studio " +
+                    "converts these automatically, so this diagram was authored elsewhere.");
+                continue;
+            }
+
+            // A converted task nobody can do. Scoped to user tasks, and deliberately
+            // NOT applied to every user task in the product: an unassigned task is a
+            // first-class state elsewhere (the execution view renders "(unassigned)"),
+            // and a blanket rule would refuse workflows that run today.
+            //
+            // The marker is what the studio writes when it converts, so this catches
+            // exactly the tasks this story created and nothing else.
+            var convertedFrom = element.Attribute(FlowableNamespace + ConvertedFromAttribute)?.Value;
+            if (element.Name.LocalName == "userTask"
+                && !string.IsNullOrWhiteSpace(convertedFrom)
+                && !HasSomeoneToDoIt(element))
+            {
+                errors.Add(
+                    $"User task '{LabelOf(element)}' has nobody to do it. It was converted " +
+                    "from a task the engine cannot wait on, so it needs an assignee or " +
+                    "candidate users or groups before it can be published.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static bool HasSomeoneToDoIt(XElement userTask) =>
+        new[] { "assignee", "candidateUsers", "candidateGroups" }
+            .Any(name => !string.IsNullOrWhiteSpace(userTask.Attribute(FlowableNamespace + name)?.Value));
+
+    private static IReadOnlyList<string> BuildSubProcessValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+        var containers = new[] { "subProcess", "transaction", "adHocSubProcess" };
+
+        foreach (var container in document.Descendants()
+                     .Where(e => e.Name.Namespace == BpmnNamespace
+                                 && containers.Contains(e.Name.LocalName, StringComparer.Ordinal)))
+        {
+            if (string.Equals(container.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var localName = element.Name.LocalName;
-
-            if (UnsupportedRuntimeTaskElementNames.Contains(localName))
+            // An ad-hoc subprocess has no sequence flows by design — its activities
+            // are chosen at runtime — so it is exempt from needing a start event.
+            if (string.Equals(container.Name.LocalName, "adHocSubProcess", StringComparison.Ordinal))
             {
-                taskElements.Add(ToFriendlyElementName(localName));
+                if (!container.Elements().Any(child => child.Name.Namespace == BpmnNamespace))
+                {
+                    errors.Add(BuildEmptyMessage(container, "ad-hoc subprocess"));
+                }
+                continue;
             }
 
-            if (UnsupportedRuntimeControlElementNames.Contains(localName))
+            if (container.Element(BpmnNamespace + "startEvent") is null)
             {
-                if (localName.Equals("subProcess", StringComparison.Ordinal) &&
-                    string.Equals(element.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
-                {
-                    eventDrivenBehaviors.Add("event subprocesses");
-                    continue;
-                }
-
-                // Timer intermediate catch events are first-class — only warn for
-                // the message/signal/conditional flavors that aren't wired up yet.
-                if (localName.Equals("intermediateCatchEvent", StringComparison.Ordinal) &&
-                    element.Element(BpmnNamespace + "timerEventDefinition") is not null)
-                {
-                    continue;
-                }
-
-                controlElements.Add(ToFriendlyElementName(localName));
-            }
-
-            if (UnsupportedRuntimeCollaborationElementNames.Contains(localName))
-            {
-                collaborationElements.Add(ToFriendlyElementName(localName));
-            }
-
-            if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
-                !localName.Equals("terminateEventDefinition", StringComparison.Ordinal))
-            {
-                // Signal and timer start events are now first-class — only warn
-                // for event definitions that are NOT on a start event (boundary,
-                // intermediate, end events still trigger the warning).
-                if ((localName.Equals("signalEventDefinition", StringComparison.Ordinal) ||
-                     localName.Equals("timerEventDefinition", StringComparison.Ordinal)) &&
-                    element.Parent?.Name == BpmnNamespace + "startEvent")
-                {
-                    continue;
-                }
-
-                if (localName.Equals("timerEventDefinition", StringComparison.Ordinal) &&
-                    element.Parent?.Name == BpmnNamespace + "intermediateCatchEvent")
-                {
-                    continue;
-                }
-
-                eventDrivenBehaviors.Add(ToFriendlyElementName(localName));
+                var label = LabelOf(container);
+                var kind = container.Name.LocalName == "transaction" ? "Transaction" : "Subprocess";
+                errors.Add(
+                    $"{kind} '{label}' has no start event, so the engine cannot enter it. " +
+                    "Add a start event inside it — without one the process fails when it " +
+                    "reaches this subprocess, and the failure lands on whoever ran it rather " +
+                    "than on you.");
             }
         }
 
+        return errors;
+    }
+
+    // #114. An error thrown with a code no boundary event catches does not hang and
+    // does not continue quietly — Flowable takes the WHOLE INSTANCE down:
+    //
+    //   POST /runtime/process-instances -> 500
+    //   "No catching boundary event found for error with errorCode 'X',
+    //    neither in same process nor in parent process"
+    //
+    // No instance, no history, nothing on the execution error surface, and the
+    // failure lands on whoever started it. The issue pre-decided that an instance
+    // disappearing is a defect to fix rather than a behaviour to document.
+    //
+    // It is fully detectable from the XML, so it is refused at publish. That turns
+    // a vanished production instance into a sentence an author reads while they
+    // still have the diagram open — which is the same argument the rest of this
+    // story makes about codes having to match.
+    //
+    // Escalation is deliberately NOT included. An uncaught escalation is not an
+    // error in BPMN: it is a notification nobody subscribed to, the engine carries
+    // on, and refusing it would block a legitimate diagram.
+    /// <summary>
+    /// The rules enforced at PUBLISH, not merely at prepare.
+    /// </summary>
+    /// <remarks>
+    /// `ValidateProcess` runs on /prepare, which the studio calls before saving.
+    /// /publish is what actually deploys, and a caller that publishes without
+    /// preparing reaches the engine unchecked — so every rule in that set is
+    /// advisory (#225 puts the general question to the user).
+    ///
+    /// This is the deliberately small set promoted to the publish path. The
+    /// criterion for membership, so it does not grow by habit: **the engine either
+    /// destroys something or accepts a diagram that cannot work, and the author
+    /// gets no usable diagnosis.**
+    ///
+    ///   #114 — an error nobody catches. Flowable answers the start call with 500
+    ///          and the instance never exists: no history, nothing on the error
+    ///          surface, and the failure lands on whoever ran it.
+    ///   #164 — an event-based gateway that cannot resolve. A single-path gateway
+    ///          deploys cleanly and then waits forever; a bad target is refused by
+    ///          the engine, but as a parse error naming a line and column.
+    ///
+    /// Everything else stays on prepare until #225 is decided. Moving the whole
+    /// set changes what publish accepts for every diagram already in flight, which
+    /// is a contract change and not a side effect of whichever story noticed it.
+    /// </remarks>
+    public static IReadOnlyList<string> ValidateStructureForPublish(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<string>();
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            // Malformed XML is the deploy path's problem to report; these checks
+            // have nothing to say about it and must not mask it.
+            return Array.Empty<string>();
+        }
+
+        return BuildStructureErrors(document);
+    }
+
+    /// <summary>
+    /// The rules whose failure mode is severe enough that they must run wherever
+    /// validation runs at all.
+    /// </summary>
+    /// <remarks>
+    /// Shared by <see cref="ValidateProcess"/> and
+    /// <see cref="ValidateStructureForPublish"/> rather than duplicated, because
+    /// they diverged once already: #225 pointed publish at ValidateProcess, which
+    /// did not contain these, and three rules stopped running with nothing to say
+    /// so.
+    /// </remarks>
+    private static IReadOnlyList<string> BuildStructureErrors(XDocument document) =>
+        [
+            .. BuildUncaughtThrownCodeErrors(document),
+            .. BuildEventBasedGatewayErrors(document),
+            // #162 — an event subprocess that can never trigger, or one promising
+            // not to interrupt when the engine will interrupt anyway. Both deploy
+            // cleanly and neither tells the author anything.
+            .. BuildEventSubProcessErrors(document),
+            // #115 — a compensation handler that waits. Not a style question:
+            // it crashes the engine mid-completion. See BuildCompensationErrors.
+            .. BuildCompensationErrors(document)
+        ];
+
+    private static IReadOnlyList<string> BuildUncaughtThrownCodeErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var process in document.Descendants(BpmnNamespace + "process"))
+        {
+            // Codes catchable anywhere in this process, at any depth. BPMN
+            // propagates an error outward to enclosing scopes, so a boundary event
+            // anywhere up the chain catches it — which is why the whole process is
+            // one pool rather than each subprocess being checked in isolation.
+            var caught = process
+                .Descendants(BpmnNamespace + "boundaryEvent")
+                .Elements(BpmnNamespace + "errorEventDefinition")
+                .Select(definition => definition.Attribute("errorRef")?.Value)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .ToHashSet(StringComparer.Ordinal);
+
+            // An error start event inside an event subprocess catches too (#162's
+            // territory). Counted here so this validation does not reject a
+            // diagram that handles its error that way.
+            foreach (var eventSubProcess in process.Descendants(BpmnNamespace + "subProcess")
+                         .Where(sp => string.Equals(
+                             sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                foreach (var definition in eventSubProcess
+                             .Descendants(BpmnNamespace + "startEvent")
+                             .Elements(BpmnNamespace + "errorEventDefinition"))
+                {
+                    var code = definition.Attribute("errorRef")?.Value;
+                    // An error start event with no errorRef catches ANY error, so
+                    // once one exists nothing in this process is uncatchable.
+                    if (string.IsNullOrWhiteSpace(code)) { caught.Clear(); caught.Add("*"); }
+                    else caught.Add(code);
+                }
+            }
+
+            if (caught.Contains("*")) continue;
+
+            foreach (var throwing in process.Descendants(BpmnNamespace + "endEvent")
+                         .Where(e => e.Elements(BpmnNamespace + "errorEventDefinition").Any()))
+            {
+                var code = throwing.Elements(BpmnNamespace + "errorEventDefinition")
+                    .Select(d => d.Attribute("errorRef")?.Value)
+                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+
+                if (string.IsNullOrWhiteSpace(code) || caught.Contains(code!)) continue;
+
+                errors.Add(
+                    $"The error end event '{LabelOf(throwing)}' raises '{code}', and nothing in " +
+                    $"'{LabelOf(process)}' catches it. Add an error boundary event carrying the " +
+                    "same code to the activity it should interrupt. Published as-is, reaching " +
+                    "this event destroys the whole process instance — there is no history to " +
+                    "look at afterwards and the failure lands on whoever started it.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #164. Two rules, and only one of them duplicates the engine.
+    //
+    // Flowable rejects a bad TARGET itself
+    // ('flowable-event-gateway-only-connected-to-intermediate-events'), but as a
+    // parse error at deploy, which names a line and column rather than telling an
+    // author what to do. Ours says it earlier and in their terms.
+    //
+    // Flowable does NOT object to a gateway with one outgoing flow — verified,
+    // that deploys cleanly. A choice between one thing is a diagram that waits
+    // forever on a single event while looking like it offers alternatives, so
+    // that rule is genuinely ours.
+    //
+    // Receive tasks are refused DESPITE BPMN allowing them after an event-based
+    // gateway, because this engine does not: verified, `flowable:` rejects the
+    // deployment. Saying so here is better than letting the author discover it as
+    // a parse error.
+    private static IReadOnlyList<string> BuildEventBasedGatewayErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .Where(flow => !string.IsNullOrWhiteSpace(flow.Attribute("sourceRef")?.Value))
+            .GroupBy(flow => flow.Attribute("sourceRef")!.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        var elementsById = document
+            .Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace
+                        && !string.IsNullOrWhiteSpace(e.Attribute("id")?.Value))
+            .GroupBy(e => e.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "eventBasedGateway"))
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+
+            var label = LabelOf(gateway);
+            var outgoing = flowsBySource.TryGetValue(gatewayId!, out var flows)
+                ? flows
+                : new List<XElement>();
+
+            if (outgoing.Count < 2)
+            {
+                errors.Add(
+                    $"The event-based gateway '{label}' has {outgoing.Count} outgoing " +
+                    (outgoing.Count == 1 ? "path" : "paths") +
+                    ", so there is nothing for it to choose between. Give it at least two " +
+                    "events to wait for, or use a plain intermediate catch event instead — as " +
+                    "drawn, the process waits on one event while the diagram suggests it is " +
+                    "waiting on several.");
+            }
+
+            foreach (var flow in outgoing)
+            {
+                var targetId = flow.Attribute("targetRef")?.Value;
+                if (string.IsNullOrWhiteSpace(targetId)
+                    || !elementsById.TryGetValue(targetId!, out var target))
+                {
+                    continue;
+                }
+
+                if (string.Equals(target.Name.LocalName, "intermediateCatchEvent", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var targetLabel = LabelOf(target);
+                errors.Add(string.Equals(target.Name.LocalName, "receiveTask", StringComparison.Ordinal)
+                    ? $"The event-based gateway '{label}' leads to the receive task " +
+                      $"'{targetLabel}'. BPMN allows that, but this engine does not — it accepts " +
+                      "only intermediate catch events after an event-based gateway, and refuses " +
+                      "the whole deployment otherwise. Use a message intermediate catch event " +
+                      "instead."
+                    : $"The event-based gateway '{label}' leads to '{targetLabel}', which is not " +
+                      "an event. Every path out of an event-based gateway must start with an " +
+                      "intermediate catch event — that is what it waits on. As drawn, this " +
+                      "diagram cannot be deployed.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #162. An event subprocess starts when its own start event triggers, never by
+    // a sequence flow. Two shapes deploy cleanly and can never trigger, so the
+    // engine will not catch either:
+    //
+    //   * no start event at all — nothing to trigger on;
+    //   * a plain NONE start event — the shape a normal subprocess uses, which
+    //     inside triggeredByEvent="true" means "starts on nothing".
+    //
+    // Both look reasonable in the diagram, which is what makes them worth
+    // refusing: an event subprocess that silently never runs is indistinguishable
+    // from one whose event never happened.
+    private static IReadOnlyList<string> BuildEventSubProcessErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var eventSubProcess in document.Descendants(BpmnNamespace + "subProcess")
+                     .Where(sp => string.Equals(
+                         sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase)))
+        {
+            var label = LabelOf(eventSubProcess);
+
+            // Direct children only. A start event nested inside a subprocess
+            // WITHIN this handler starts that inner scope, not this one, and
+            // counting it would accept a handler that still cannot trigger.
+            var startEvents = eventSubProcess.Elements(BpmnNamespace + "startEvent").ToList();
+
+            if (startEvents.Count == 0)
+            {
+                errors.Add(
+                    $"The event subprocess '{label}' has no start event, so nothing can ever " +
+                    "trigger it. Give it a start event of the type it should react to — an " +
+                    "error, message, timer, signal, escalation or condition. As drawn it " +
+                    "deploys and never runs, which looks the same as its event never happening.");
+                continue;
+            }
+
+            foreach (var startEvent in startEvents)
+            {
+                var hasDefinition = startEvent.Elements()
+                    .Any(child => child.Name.Namespace == BpmnNamespace
+                                  && child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal));
+
+                var isError = startEvent.Elements(BpmnNamespace + "errorEventDefinition").Any();
+                if (isError && string.Equals(
+                        startEvent.Attribute("isInterrupting")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add(
+                        $"The event subprocess '{label}' catches an error and is marked as not " +
+                        "interrupting, which BPMN does not allow — an error always interrupts " +
+                        "the scope it escapes from. Verified: the engine interrupts regardless, " +
+                        "so as drawn the diagram promises something it does not do. Remove the " +
+                        "setting, or catch an escalation instead if the work should carry on.");
+                }
+
+                if (hasDefinition) continue;
+
+                errors.Add(
+                    $"The event subprocess '{label}' starts with a plain start event, which " +
+                    "means it starts on nothing. An event subprocess is entered by its event, " +
+                    "never by a sequence flow — give the start event an error, message, timer, " +
+                    "signal, escalation or condition definition, or make this an ordinary " +
+                    "subprocess.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static string BuildEmptyMessage(XElement container, string kind) =>
+        $"The {kind} '{LabelOf(container)}' is empty. Put at least one activity inside it, " +
+        "or remove it — an empty one cannot do anything when the process reaches it.";
+
+    private static string LabelOf(XElement element) =>
+        element.Attribute("name")?.Value is { Length: > 0 } name
+            ? name
+            : element.Attribute("id")?.Value ?? "(unnamed)";
+
+    private static IReadOnlyList<string> BuildTimerBoundaryEventValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var boundary in document.Descendants(BpmnNamespace + "boundaryEvent"))
+        {
+            var timer = boundary.Element(BpmnNamespace + "timerEventDefinition");
+            if (timer is null) continue;
+
+            var kinds = new[] { "timeDuration", "timeDate", "timeCycle" }
+                .Select(name => timer.Element(BpmnNamespace + name))
+                .Where(element => element is not null && !string.IsNullOrWhiteSpace(element.Value))
+                .ToArray();
+
+            var label = boundary.Attribute("name")?.Value ?? boundary.Attribute("id")?.Value ?? "(unnamed)";
+
+            if (kinds.Length == 0)
+            {
+                errors.Add(
+                    $"Timer boundary event '{label}' has no time set. Give it a duration " +
+                    "(PT15M), a date (2026-12-31T09:00:00) or a repeating cycle (R3/PT1H) — " +
+                    "without one it deploys, never fires, and the activity it guards waits forever.");
+            }
+            else if (kinds.Length > 1)
+            {
+                // Flowable rejects this at deployment with a parse error that names
+                // the definition rather than the event, which is not actionable.
+                errors.Add(
+                    $"Timer boundary event '{label}' sets more than one kind of time. " +
+                    "Choose a duration, a date or a cycle — not several.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static IReadOnlyList<string> BuildConditionalStartPlacementErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var definition in document.Descendants(BpmnNamespace + "conditionalEventDefinition"))
+        {
+            var start = definition.Parent;
+            if (start is null || start.Name != BpmnNamespace + "startEvent") continue;
+
+            // An event subprocess is a subProcess carrying triggeredByEvent, which
+            // is the one container where this start event is legal.
+            var container = start.Parent;
+            var inEventSubProcess = container is not null
+                && container.Name == BpmnNamespace + "subProcess"
+                && string.Equals(
+                    container.Attribute("triggeredByEvent")?.Value,
+                    "true",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (inEventSubProcess) continue;
+
+            var label = start.Attribute("name")?.Value ?? start.Attribute("id")?.Value ?? "(unnamed)";
+            errors.Add(
+                $"Conditional start event '{label}' cannot start a process. BPMN allows a " +
+                "conditional start event only inside an event subprocess, where it reacts to a " +
+                "condition becoming true while the process is already running. To start a " +
+                "process when a condition holds, start it another way and wait on an " +
+                "intermediate catch conditional event instead.");
+        }
+
+        return errors;
+    }
+
+    // #163. An ad-hoc subprocess with no completion condition can never finish.
+    //
+    // Flowable deploys it happily and the instance then sits in the subprocess
+    // forever, with the parent unable to continue — a hang, not a feature, which
+    // is the line epic #40 draws.
+    private static IReadOnlyList<string> BuildAdhocSubProcessErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var adhoc in document.Descendants(BpmnNamespace + "adHocSubProcess"))
+        {
+            var label = Trimmed(adhoc.Attribute("name")?.Value)
+                        ?? Trimmed(adhoc.Attribute("id")?.Value)
+                        ?? "Unnamed ad-hoc subprocess";
+
+            var condition = Trimmed(
+                adhoc.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Value)
+                ?? Trimmed(adhoc.Element(BpmnNamespace + "completionCondition")?.Value);
+            if (condition is null)
+            {
+                errors.Add(
+                    $"The ad-hoc subprocess '{label}' has no completion condition. Without one it can " +
+                    "never finish and the process stops there — set a condition that becomes true when " +
+                    "the case is done.");
+                continue;
+            }
+
+            // The same expression check every other condition in the diagram
+            // gets. A completion condition that cannot parse is the same hang one
+            // step further along — the subprocess simply never completes.
+            var problem = WorkflowConditionValidation.DescribeSyntaxProblem(condition);
+            if (problem is not null)
+            {
+                errors.Add($"The ad-hoc subprocess '{label}' has a completion condition that " +
+                           $"cannot be evaluated: {problem}");
+            }
+        }
+
+        return errors;
+    }
+
+    // #115. A compensation handler that WAITS is refused, because Flowable
+    // 8.0.0 cannot run one.
+    //
+    // This started as a warning about ordering — with automatic handlers the
+    // throw waits for compensation (recorded trail `h3;h1;after;`), with user
+    // task handlers it does not. Probing further found something much worse.
+    //
+    // When compensation is triggered during the completion of a USER TASK and a
+    // handler is itself a wait state, the engine fails the transaction outright:
+    //
+    //   ERROR: update or delete on table "act_ru_execution" violates foreign key
+    //   constraint "act_fk_exe_parent"
+    //
+    // Reproduced against a bare Flowable with no Auton8 in the picture, and
+    // isolated by elimination: removing the unreached activity's boundary event
+    // still fails, removing the gateway still fails, and making the handlers
+    // AUTOMATIC is the only change that fixes it. The task cannot be completed at
+    // all — it stays open and the instance cannot move.
+    //
+    // Epic #40 draws the line here: a shape that leaves an instance unable to
+    // complete is a defect to refuse, not a behaviour to document. Refusing at
+    // publish turns an unrecoverable runtime crash into a sentence while the
+    // author still has the diagram open.
+    private static IReadOnlyList<string> BuildCompensationErrors(XDocument document)
+    {
         var warnings = new List<string>();
 
-        if (taskElements.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these non-user task elements in Workflow Studio/runtime yet: {string.Join(", ", taskElements)}.");
-        }
+        var handlerIds = document
+            .Descendants(BpmnNamespace + "association")
+            .Select(association => Trimmed(association.Attribute("targetRef")?.Value))
+            .Where(id => id is not null)
+            .ToHashSet(StringComparer.Ordinal);
+        if (handlerIds.Count == 0) return warnings;
 
-        if (controlElements.Count > 0)
+        foreach (var element in document.Descendants())
         {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these orchestration/control constructs in Workflow Studio/runtime yet: {string.Join(", ", controlElements)}.");
-        }
+            if (element.Name.Namespace != BpmnNamespace) continue;
 
-        if (eventDrivenBehaviors.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these event-driven behaviors in Workflow Studio/runtime yet: {string.Join(", ", eventDrivenBehaviors)}.");
-        }
+            var id = Trimmed(element.Attribute("id")?.Value);
+            if (id is null || !handlerIds.Contains(id)) continue;
 
-        if (collaborationElements.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these pool/lane/collaboration constructs in Workflow Studio/runtime yet: {string.Join(", ", collaborationElements)}.");
+            // Only elements that actually wait. An ordinary task, a service task
+            // or a script task all complete within the compensation.
+            if (element.Name.LocalName is not ("userTask" or "receiveTask")) continue;
+
+            var label = Trimmed(element.Attribute("name")?.Value) ?? id;
+            warnings.Add(
+                $"The compensation handler '{label}' waits for a person or a message, and Flowable " +
+                "cannot run one. When compensation is triggered while a user task is being " +
+                "completed, a waiting handler fails the engine's own transaction and the task can " +
+                "never be completed — the process stops there for good. Make the handler an " +
+                "automatic step (a service or script task). If a person must confirm the undo, " +
+                "have the handler start that work rather than be it.");
         }
 
         return warnings;
@@ -1703,44 +3692,6 @@ public static partial class WorkflowBpmnXml
         }
 
         return gateway.Attribute("id")?.Value ?? "(unnamed)";
-    }
-
-    private static string ToFriendlyElementName(string localName)
-    {
-        return localName switch
-        {
-            "serviceTask" => "service tasks",
-            "scriptTask" => "script tasks",
-            "businessRuleTask" => "business rule tasks",
-            "sendTask" => "send tasks",
-            "receiveTask" => "receive tasks",
-            "manualTask" => "manual tasks",
-            "inclusiveGateway" => "inclusive gateways",
-            "parallelGateway" => "parallel gateways",
-            "eventBasedGateway" => "event-based gateways",
-            "complexGateway" => "complex gateways",
-            "boundaryEvent" => "boundary events",
-            "callActivity" => "call activities",
-            "subProcess" => "sub-processes",
-            "transaction" => "transactions",
-            "adHocSubProcess" => "ad-hoc sub-processes",
-            "intermediateCatchEvent" => "intermediate catch events",
-            "intermediateThrowEvent" => "intermediate throw events",
-            "collaboration" => "collaborations",
-            "participant" => "participants",
-            "lane" => "lanes",
-            "messageFlow" => "message flows",
-            "messageEventDefinition" => "message events",
-            "timerEventDefinition" => "timer events",
-            "conditionalEventDefinition" => "conditional events",
-            "signalEventDefinition" => "signal events",
-            "escalationEventDefinition" => "escalation events",
-            "errorEventDefinition" => "error events",
-            "cancelEventDefinition" => "cancel events",
-            "compensateEventDefinition" => "compensation events",
-            "linkEventDefinition" => "link events",
-            _ => localName
-        };
     }
 }
 

@@ -156,6 +156,19 @@ public sealed record class WorkflowExecutionDiagramDetail
         = new Dictionary<string, string>(StringComparer.Ordinal);
 
     public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
+
+    // #218. The definition this instance is actually running, so the diagram can
+    // be pinned to the version it followed rather than the latest stored draft.
+    public string ProcessDefinitionId { get; init; } = string.Empty;
+
+    // #218. Generated activity id -> the author's element it was expanded from,
+    // read out of the DEPLOYED XML's flowable:autonateExpandedFrom attributes.
+    //
+    // Publish-time expansion puts nodes in the deployed diagram that exist in no
+    // stored one. Without this map their ids highlight nothing, and the gateway
+    // the author drew looks like the process never reached it.
+    public IReadOnlyDictionary<string, string> ExpansionSourceIds { get; init; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
 }
 
 public sealed record class FlowableProcessVariable
@@ -324,4 +337,27 @@ public sealed record class ProcessVariableUpdate
     public object? Value { get; init; }
 
     public string? Type { get; init; }
+}
+
+// #163. One ad-hoc subprocess inside a running instance, and what a person may
+// start in it.
+//
+// ExecutionId, not the activity id, is what the engine's ad-hoc commands take —
+// there can be more than one live instance of the same ad-hoc subprocess, and
+// they have separate enabled sets.
+public sealed record class AdhocSubProcessState
+{
+    public string ExecutionId { get; init; } = string.Empty;
+
+    public string ActivityId { get; init; } = string.Empty;
+
+    public IReadOnlyList<AdhocActivity> EnabledActivities { get; init; } = [];
+}
+
+/// <summary>One activity a person may start in an ad-hoc subprocess (#163).</summary>
+public sealed record class AdhocActivity
+{
+    public string Id { get; init; } = string.Empty;
+
+    public string? Name { get; init; }
 }

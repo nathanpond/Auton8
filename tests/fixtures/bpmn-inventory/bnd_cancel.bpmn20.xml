@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<process id="bnd_cancel" name="bnd_cancel" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="tx"/>
+  <transaction id="tx">
+    <startEvent id="ts"/>
+    <sequenceFlow id="tf" sourceRef="ts" targetRef="te"/>
+    <endEvent id="te"><cancelEventDefinition/></endEvent>
+  </transaction>
+  <sequenceFlow id="f2" sourceRef="tx" targetRef="e"/>
+  <endEvent id="e"/>
+  <boundaryEvent id="m" attachedToRef="tx"><cancelEventDefinition/></boundaryEvent>
+  <sequenceFlow id="f3" sourceRef="m" targetRef="e2"/>
+  <endEvent id="e2"/>
+</process>
+</definitions>

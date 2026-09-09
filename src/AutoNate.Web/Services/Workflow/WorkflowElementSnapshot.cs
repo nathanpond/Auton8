@@ -20,7 +20,31 @@ public sealed record class WorkflowElementSnapshot(
     string? TimerDuration = null,
     string? TimerDate = null,
     string? ServiceTaskKind = null,
-    string? BehaviorKey = null);
+    string? BehaviorKey = null,
+    // #158. Appended, never inserted — this is a positional record and existing
+    // callers bind by position.
+    //
+    // ConditionExpression above is reused for a conditional event's condition
+    // rather than a new field: it is the same concept, and the studio routes on
+    // $type plus key presence, so a sequence flow and an intermediate catch event
+    // cannot be confused.
+    bool? CancelActivity = null,
+    // #157. Appended, never inserted — positional record.
+    //
+    // Separate from TimerDuration/TimerDate/TimerCycleCron rather than reusing them:
+    // describeBusinessObject's output IS the snapshot wire format, and the studio
+    // routes on $type PLUS key presence. Reusing the start-event and
+    // intermediate-catch keys would send a timer boundary to whichever of those
+    // editors matched first.
+    string? BoundaryTimerDuration = null,
+    string? BoundaryTimerDate = null,
+    string? BoundaryTimerCycle = null,
+    // #168. Appended, never inserted — positional record.
+    //
+    // Nullable rather than bool so "the studio did not send this" and "the
+    // author turned it off" stay distinguishable: a snapshot from an older SPA
+    // build must not silently clear a retry point someone set.
+    bool? RetryPoint = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr
@@ -33,3 +57,72 @@ public sealed record class WorkflowSignalRegistration(
     string Topic,
     string ProcessDefinitionKey,
     IReadOnlySet<string> RecordTypeShortCodes);
+
+// #112. One message-catching point in a published definition: which message it
+// listens for, and which process variable addresses the instance waiting on it.
+//
+// Kind is what decides HOW it is advanced, and the two are genuinely different
+// engine calls: a message event carries a subscription and takes
+// `messageEventReceived`, while a receive task has no subscription at all and is
+// found by activity id and taken with `trigger`. Verified against Flowable 8.0.0
+// before this type existed — see #112's verification comment.
+public enum WorkflowMessageTargetKind
+{
+    // startEvent with a messageEventDefinition: no instance exists yet.
+    Start,
+
+    // intermediateCatchEvent or boundaryEvent with a messageEventDefinition.
+    Catch,
+
+    // receiveTask: triggered by activity, not by message name.
+    ReceiveTask
+}
+
+public sealed record class WorkflowMessageDeclaration(
+    string ElementId,
+    WorkflowMessageTargetKind Kind,
+    // The <bpmn:message> name the engine subscribes under. Empty for a receive
+    // task, which has no message of its own — the element id addresses it.
+    string MessageName,
+    // The process variable whose value picks out the one waiting instance.
+    // Null on a Start declaration: nothing is waiting, so nothing is correlated.
+    string? CorrelationKey);
+
+
+// #112. A point in a published definition that SENDS a message: an intermediate
+// throw event, a message end event, or a send task.
+//
+// Flowable 8.0.0 executes none of these as written — the intermediate throw is
+// rejected outright by the deploy validator
+// ("flowable-throw-event-invalid-eventdefinition"), and the message end event is
+// worse: it deploys, ends the process cleanly, and sends nothing at all. Both are
+// therefore expanded at publish into a service task carrying the AutoNate
+// behaviour bridge, which is the same route a send task takes. That keeps one
+// correlation model across the throw side and the receive side rather than two.
+//
+// The authored diagram keeps its original shape; only the published copy is
+// rewritten. That is what lets the behaviour resolve its own configuration from
+// the stored diagram by activity id at run time.
+public sealed record class WorkflowMessageSendDeclaration(
+    string ElementId,
+    // The <bpmn:message> name to deliver. Empty is a modelling error, reported
+    // rather than guessed at.
+    string MessageName,
+    // Which published workflow to address. Broadcast is deliberately not a
+    // feature, so a send with no target goes nowhere and says so.
+    string? TargetProcessKey,
+    // The variable in THIS process whose value addresses the instance over
+    // there. Null means "no narrowing", which only succeeds when exactly one
+    // instance is waiting.
+    string? CorrelationKey,
+    // True for a message end event, which must still end the process after the
+    // send. Drives the shape of the expansion, not the send itself.
+    bool EndsProcess);
+
+// #166. One piece of data a process declares — a data object, store, input or
+// output — with the type its author gave it.
+//
+// `Kind` distinguishes an activity's in/out contract from a plain process
+// variable, so a call activity's mapping UI can offer the child's inputs as
+// targets and its outputs as sources rather than one undifferentiated list.
+public sealed record class WorkflowDataDeclaration(string Name, string? Type, string Kind);

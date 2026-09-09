@@ -49,10 +49,17 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     // CreateAsync_KeysAreSequentialUnderConcurrency, which opens twenty at
     // once, but the cause was suite-wide rather than anything about that test.
     //
-    // Ten is comfortably above what any single class needs concurrently; the
-    // twenty-way test simply queues for a free connection instead of opening a
+    // Ten is above what any single class needs concurrently; the twenty-way
+    // test simply queues for a free connection instead of opening a
     // twenty-first. The idle settings return connections to the server quickly
     // so a finished class stops holding any.
+    //
+    // #215: "comfortably" used to appear in that first line, and it was wrong —
+    // one `FROM Notes` request fans out more than ten contexts at once, so it
+    // queues. Queueing is fine in itself, but it makes the computations yield,
+    // and that is how a race in ContentAuthorizer's memo became visible only
+    // under load. Ten stays; the race is fixed at its source. Read a flake here
+    // as a hint to look for shared state, not as a reason to raise this number.
     private const string PoolTuning =
         "Maximum Pool Size=10;Connection Idle Lifetime=15;Connection Pruning Interval=5";
 
@@ -78,8 +85,87 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public const string SeededAdminUsername = "admin";
     public const string SeededAdminPassword = "admin";
 
+    // #191: sweep abandoned databases once per test process, before the first one
+    // is created.
+    //
+    // NOT a [ModuleInitializer] — that was the first attempt and it hung the run.
+    // A module initializer executes while the assembly is loading, during xunit's
+    // discovery, and blocking there on async I/O deadlocks the process before a
+    // single test reports. Hooking the first database creation instead runs in a
+    // normal async context, and every test that could leak a database goes through
+    // here by definition.
+    //
+    // A gate rather than Lazy<Task>: the threading analyzer rejects the latter
+    // (VSTHRD011, Lazy<Task>.Value can deadlock) and it is right to — this file has
+    // already produced one deadlock today.
+    private static readonly SemaphoreSlim SweepGate = new(1, 1);
+    private static bool _swept;
+
+    private static readonly TimeSpan AbandonedAfter = TimeSpan.FromHours(2);
+
+    private static async Task EnsureSweptAsync()
+    {
+        if (Volatile.Read(ref _swept)) return;
+
+        await SweepGate.WaitAsync();
+        try
+        {
+            if (_swept) return;
+            _swept = true;
+            await SweepAtStartupAsync();
+        }
+        finally
+        {
+            SweepGate.Release();
+        }
+    }
+
+    private static async Task SweepAtStartupAsync()
+    {
+        try
+        {
+            // Generous: the suite runs about eighteen minutes and two runs can
+            // overlap on one machine. Databases created before #191 carry no
+            // timestamp and are swept regardless of this, which is how an existing
+            // backlog clears on the first run.
+            var dropped = await SweepAbandonedDatabasesAsync(AbandonedAfter);
+            if (dropped > 0)
+            {
+                Console.WriteLine(
+                    $"[test-db-sweep] Dropped {dropped} abandoned test database(s) left by earlier runs.");
+            }
+
+            // #214: roles are cluster-wide and survive a dropped database, so they
+            // need their own pass. Counts are reported per class — one number for
+            // everything would let a category quietly stop working.
+            var resources = await Infrastructure.TestResourceSweep.SweepAsync(AbandonedAfter);
+            if (resources.Roles + resources.Schemas + resources.Directories > 0)
+            {
+                Console.WriteLine($"[test-db-sweep] Also removed {resources}.");
+            }
+        }
+        catch (Exception exception)
+        {
+            // Never fail a run over cleanup — a developer with no Postgres up should
+            // see the test failures they would have seen anyway. Reported rather
+            // than swallowed, because a sweep that has quietly stopped working looks
+            // exactly like a suite that no longer leaks.
+            Console.WriteLine($"[test-db-sweep] Skipped: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    // #215. TestResourceSweepTests plants an orphan role and asserts that its own
+    // SweepAsync call is what dropped it. The startup sweep runs once per process
+    // and, under load, can land between the plant and the assertion — it drops the
+    // role first, and the test's own sweep truthfully reports having dropped
+    // nothing. Draining the startup sweep before planting leaves that test as the
+    // only sweeper, which is the condition its assertion actually assumes.
+    internal static Task EnsureStartupSweepCompleteAsync() => EnsureSweptAsync();
+
     public static async Task<PostgresTestDatabase> CreateAsync(bool seedLocalAdmin = true)
     {
+        await EnsureSweptAsync();
+
         var database = new PostgresTestDatabase($"autonate_test_{Guid.NewGuid():N}");
         await database.InitializeAsync();
         if (seedLocalAdmin)
@@ -421,6 +507,105 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public AutoNateDbContext CreateDbContext() => CreateDbContextFactory().CreateDbContext();
 
+    /// <summary>
+    /// Drops test databases left behind by earlier runs. Returns how many went.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The suite creates one database per test class and drops it on disposal, but a
+    /// killed run, a crashed process or a throw inside disposal strands them. They
+    /// accumulate in a Postgres every developer and every run shares — there were
+    /// 1,680 when #191 was written.
+    /// </para>
+    /// <para>
+    /// **A database is only swept when it is provably not in use.** Its creation
+    /// timestamp comes from the comment stamped at create; anything younger than
+    /// <paramref name="olderThan"/> is left alone, because a run in progress owns it.
+    /// A database with no comment at all predates the stamping and cannot belong to a
+    /// live run of this code, so it goes.
+    /// </para>
+    /// </remarks>
+    internal static async Task<int> SweepAbandonedDatabasesAsync(TimeSpan olderThan)
+    {
+        await using var adminConnection = new NpgsqlConnection(AdminConnectionString("postgres"));
+        await adminConnection.OpenAsync();
+
+        var candidates = new List<string>();
+        await using (var listCommand = adminConnection.CreateCommand())
+        {
+            // shobj_description carries the COMMENT ON DATABASE text.
+            listCommand.CommandText =
+                """
+                select d.datname, shobj_description(d.oid, 'pg_database')
+                from pg_database d
+                where d.datname like 'autonate_test_%'
+                  and not exists (
+                    select 1 from pg_stat_activity a
+                    where a.datname = d.datname and a.pid <> pg_backend_pid()
+                  );
+                """;
+
+            await using var reader = await listCommand.ExecuteReaderAsync();
+            var cutoff = DateTimeOffset.UtcNow - olderThan;
+            while (await reader.ReadAsync())
+            {
+                var name = reader.GetString(0);
+                var stamp = await reader.IsDBNullAsync(1) ? null : reader.GetString(1);
+
+                // #215. A missing stamp used to mean "predates #191, so it cannot
+                // be from a live run" — and that was false in one direction that
+                // matters. InitializeAsync creates the database and stamps it in
+                // two separate statements, so between them the database exists,
+                // has no connections yet, and has no comment: it matches the
+                // liveness filter above AND this rule, and `drop database … with
+                // (force)` then terminates the connection the test is about to
+                // open. The symptom is a random class failing with
+                // "57P01: terminating connection due to administrator command".
+                //
+                // Treated as live now, which is the same direction this method
+                // already takes for an unparseable stamp, and for the reason given
+                // there: being wrong this way costs disk, the other way drops a
+                // database out from under a running test. The pre-#191 backlog
+                // this rule existed to clear is empty, so it was buying nothing.
+                //
+                // The residual is a database leaked by a run killed between the
+                // create and the stamp. It is never swept and must be dropped by
+                // hand, which is the cheaper of the two failures.
+                if (stamp is null)
+                {
+                    continue;
+                }
+
+                // An unparseable stamp is treated as live, not as garbage. Being
+                // wrong in that direction costs disk; the other direction drops a
+                // database out from under a running test.
+                if (DateTimeOffset.TryParse(stamp, out var created) && created < cutoff)
+                {
+                    candidates.Add(name);
+                }
+            }
+        }
+
+        var dropped = 0;
+        foreach (var name in candidates)
+        {
+            try
+            {
+                await using var dropCommand = adminConnection.CreateCommand();
+                dropCommand.CommandText = $"drop database if exists \"{name}\" with (force);";
+                await dropCommand.ExecuteNonQueryAsync();
+                dropped++;
+            }
+            catch (PostgresException)
+            {
+                // Another run grabbed it between the listing and the drop, or it is
+                // busy. Skipping is correct — the next sweep will get it.
+            }
+        }
+
+        return dropped;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await using var adminConnection = new NpgsqlConnection(AdminConnectionString("postgres"));
@@ -465,6 +650,20 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
                 await using var createDatabaseCommand = adminConnection.CreateCommand();
                 createDatabaseCommand.CommandText = $"create database \"{_databaseName}\";";
                 await createDatabaseCommand.ExecuteNonQueryAsync();
+
+                // #191: stamp when this database was made.
+                //
+                // Postgres records no creation time for a database, and without one
+                // a sweep cannot tell a database a parallel run is using from one
+                // stranded by a crashed run — and a sweep that cannot tell is worse
+                // than the leak it fixes. The comment is that timestamp.
+                //
+                // A database with NO comment predates this change and is therefore
+                // leaked by definition, which is how the existing backlog is cleared.
+                await using var stampCommand = adminConnection.CreateCommand();
+                stampCommand.CommandText =
+                    $"comment on database \"{_databaseName}\" is '{DateTimeOffset.UtcNow:O}';";
+                await stampCommand.ExecuteNonQueryAsync();
                 break;
             }
             catch (PostgresException ex) when (ex.SqlState == "23505" && attempt < 5)

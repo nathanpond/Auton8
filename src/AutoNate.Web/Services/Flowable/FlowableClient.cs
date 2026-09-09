@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Flowable;
@@ -14,7 +15,8 @@ namespace AutoNate.Web.Services.Flowable;
 public sealed class FlowableClient(
     HttpClient httpClient,
     IOptions<FlowableOptions> options,
-    IMemoryCache cache) : IFlowableClient
+    IMemoryCache cache,
+    ILogger<FlowableClient> logger) : IFlowableClient
 {
     private const int WorkflowExecutionQuerySize = 200;
     private const int WorkflowExecutionActivityQuerySize = 2000;
@@ -36,6 +38,7 @@ public sealed class FlowableClient(
     private readonly HttpClient _httpClient = httpClient;
     private readonly FlowableOptions _options = options.Value;
     private readonly IMemoryCache _cache = cache;
+    private readonly ILogger<FlowableClient> _logger = logger;
 
     public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
@@ -172,6 +175,22 @@ public sealed class FlowableClient(
         await EnsureSuccessAsync(response, "start the process instance");
 
         var responsePayload = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+
+        // #158: a process whose first wait is a conditional catch, started with the
+        // condition already satisfied, parks there and never moves — Flowable does
+        // not evaluate conditional events on its own at any point. This closes the
+        // one remaining way to strand an instance the moment it begins.
+        //
+        // Skipped when the instance already finished, which is the common case for
+        // a process with no wait states at all.
+        // Best-effort for the same reason as above: the instance has started, and
+        // reporting a start failure for a successful start would be worse than a
+        // conditional event waiting one beat longer.
+        if (!string.IsNullOrWhiteSpace(responsePayload.Id) && responsePayload.Ended != true)
+        {
+            await TryEvaluateConditionalEventsAsync(responsePayload.Id, cancellationToken);
+        }
+
         return new FlowableProcessInstanceSummary
         {
             Id = responsePayload.Id ?? string.Empty,
@@ -498,7 +517,42 @@ public sealed class FlowableClient(
         var isCancelled = !string.IsNullOrWhiteSpace(processInstance.DeleteReason);
         var cancelWindow = TimeSpan.FromSeconds(5);
 
-        var cancelledActivityIds = isCancelled
+        // #177: an activity cancelled by an interrupting boundary event was rendering
+        // as COMPLETED, so an operator saw a timed-out task exactly as if somebody
+        // had finished it.
+        //
+        // The cancelled set used to be gated on the *instance* having a DeleteReason,
+        // and a boundary event cancels one activity inside a process that keeps
+        // running. The activity then fell through into `completedActivityIds` below,
+        // which is built by excluding this set.
+        //
+        // **The story specified reading each activity's own DeleteReason. Flowable
+        // 8.0.0 does not populate it for this case** — verified by firing a timer
+        // boundary and reading the history: the cancelled `userTask` carries an
+        // EndTime and `deleteReason: null`, indistinguishable by that field from one
+        // completed normally.
+        //
+        // What does distinguish it is the diagram, which this method already has:
+        // an interrupting boundary event that fired. Its own history row ends at the
+        // same moment it tore down the activity it was attached to, so an activity
+        // is cancelled when an INTERRUPTING boundary event attached to it has ended.
+        // `cancelActivity="false"` is excluded deliberately — a non-interrupting
+        // boundary fires alongside the activity and cancels nothing.
+        var interruptingBoundaryTargets = BuildInterruptingBoundaryMap(bpmnXml);
+        var endedActivityIds = activitiesPayload.Data
+            .Where(activity => activity.EndTime is not null && !string.IsNullOrWhiteSpace(activity.ActivityId))
+            .Select(activity => activity.ActivityId!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var perActivityCancelled = interruptingBoundaryTargets
+            .Where(pair => endedActivityIds.Contains(pair.Key))
+            .Select(pair => pair.Value)
+            .Concat(activitiesPayload.Data
+                .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
+                                && !string.IsNullOrWhiteSpace(activity.DeleteReason))
+                .Select(activity => activity.ActivityId!));
+
+        var instanceCancelled = isCancelled
             ? activitiesPayload.Data
                 .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
                                 && (
@@ -508,9 +562,12 @@ public sealed class FlowableClient(
                                         && (processInstance.EndTime.Value - activity.EndTime.Value).Duration() <= cancelWindow)
                                 ))
                 .Select(activity => activity.ActivityId!)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray()
-            : Array.Empty<string>();
+            : Enumerable.Empty<string>();
+
+        var cancelledActivityIds = perActivityCancelled
+            .Concat(instanceCancelled)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         var cancelledSet = new HashSet<string>(cancelledActivityIds, StringComparer.Ordinal);
 
@@ -557,11 +614,99 @@ public sealed class FlowableClient(
             ExecutionId = processInstanceId,
             Name = string.IsNullOrWhiteSpace(processInstance.Name) ? null : processInstance.Name,
             BpmnXml = bpmnXml,
+            ProcessDefinitionId = processInstance.ProcessDefinitionId,
+            // Read from the deployed XML, which is the only place the expansion's
+            // provenance survives. The endpoint applies it to every id surface.
+            ExpansionSourceIds = AutoNate.Web.Services.Workflow.WorkflowBpmnXml
+                .BuildExpansionSourceMap(bpmnXml),
             CompletedActivityIds = completedActivityIds,
             CurrentActivityIds = currentActivityIds,
             CancelledActivityIds = cancelledActivityIds,
             Variables = variables
         };
+    }
+
+    // #163. The ad-hoc surface lives on the extension's ACTUATOR endpoints, not
+    // under service/. Flowable's REST application never maps a @RestController
+    // from the extension package — the same reason the script-task capability
+    // probe tries actuator/ first.
+    public async Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"actuator/adhocActivities/{Uri.EscapeDataString(processInstanceId)}", cancellationToken);
+        await EnsureSuccessAsync(response, "list the ad-hoc subprocess activities");
+
+        return await DeserializeAsync<AdhocSubProcessState[]>(response, cancellationToken);
+    }
+
+    public async Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default)
+    {
+        // An actuator write operation is a POST with a JSON body, even when every
+        // argument is in the path.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"actuator/adhocExecute/{Uri.EscapeDataString(executionId)}/{Uri.EscapeDataString(activityId)}")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, $"start the ad-hoc activity '{activityId}'");
+    }
+
+    public async Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default)
+    {
+        // "complete" is a reserved activity id on the extension's write endpoint;
+        // an actuator endpoint has one write operation, so completing rides the
+        // same selector shape as starting.
+        await StartAdhocActivityAsync(executionId, "complete", cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var instanceResponse = await _httpClient.GetAsync(
+            $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}",
+            cancellationToken);
+        if (!instanceResponse.IsSuccessStatusCode)
+        {
+            // A mapping we cannot build is not worth failing a history view for.
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var instance = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(
+            instanceResponse, cancellationToken);
+        var definitionId = instance.ProcessDefinitionId;
+        if (string.IsNullOrWhiteSpace(definitionId))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        // Keyed on the definition, which is immutable once deployed, so this is
+        // fetched once per definition rather than once per history view.
+        var cacheKey = $"autonate:expansion-map:{definitionId}";
+        if (_cache.TryGetValue<IReadOnlyDictionary<string, string>>(cacheKey, out var cached)
+            && cached is not null)
+        {
+            return cached;
+        }
+
+        using var modelResponse = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata",
+            cancellationToken);
+        if (!modelResponse.IsSuccessStatusCode)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var map = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.BuildExpansionSourceMap(
+            await modelResponse.Content.ReadAsStringAsync(cancellationToken));
+
+        _cache.Set(cacheKey, map, TimeSpan.FromHours(1));
+        return map;
     }
 
     public async Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -1093,6 +1238,16 @@ public sealed class FlowableClient(
 
     public async Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
     {
+        // #158: read the task before completing it, so we still know which instance
+        // it belonged to — completing removes the runtime task, so afterwards there
+        // is nothing left to ask.
+        //
+        // Best-effort, and that is the important part. This lookup exists only to
+        // enable the conditional-event nudge below; it must never be the reason a
+        // completion fails. Making the user's action depend on our housekeeping
+        // would trade a rare silent hang for a common loud failure.
+        var processInstanceId = await TryReadProcessInstanceIdAsync(taskId, cancellationToken);
+
         using var response = await _httpClient.PostAsJsonAsync(
             $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}",
             new
@@ -1103,6 +1258,78 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, "complete the user task");
+
+        // Completing moves the token, which may land it on a conditional catch whose
+        // condition is ALREADY true. Flowable parks there regardless and waits to be
+        // asked — verified against 8.0.0 — so ask.
+        //
+        // Also best-effort: the task IS complete by now, and throwing here would
+        // report failure for work that succeeded.
+        if (!string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            await TryEvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Which instance a runtime task belongs to, or null if that cannot be learned.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="GetTaskAsync"/>, which backfills the instance's
+    /// display name with a second round trip. Nothing here reads that name, and
+    /// this sits on the task-completion path — one call, not two.
+    /// </remarks>
+    private async Task<string?> TryReadProcessInstanceIdAsync(
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}",
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var task = await DeserializeAsync<FlowableTaskResponse>(response, cancellationToken);
+            return string.IsNullOrWhiteSpace(task?.ProcessInstanceId) ? null : task.ProcessInstanceId;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(
+                exception,
+                "Could not read task {TaskId} before completing it; conditional events will not be re-evaluated for its process.",
+                taskId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Nudges the engine to re-check conditional events, swallowing failure.
+    /// </summary>
+    /// <remarks>
+    /// Used where the caller's real work has already succeeded. The cost of a
+    /// missed nudge is a process that waits until the next variable write; the cost
+    /// of throwing is telling the caller their completed action failed.
+    /// </remarks>
+    private async Task TryEvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Could not re-evaluate conditional events for process instance {ProcessInstanceId}. A conditional event waiting on an already-true condition will stay parked until the next variable change.",
+                processInstanceId);
+        }
     }
 
     public async Task UpdateTaskAssigneeAsync(string taskId, string? assignee, CancellationToken cancellationToken = default)
@@ -1186,6 +1413,21 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, "create the process variables");
+    }
+
+    // #158. POST, not PUT — the resource rejects PUT with "Request method 'PUT' is
+    // not supported", which is a 500 rather than a 405 and so reads like an engine
+    // fault rather than a wrong verb. Verified against Flowable 8.0.0.
+    public async Task EvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/evaluate-conditions",
+            new { },
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, "evaluate the conditional events");
     }
 
     public async Task MoveWorkflowExecutionStateAsync(
@@ -1306,6 +1548,202 @@ public sealed class FlowableClient(
             .Where(item => !string.IsNullOrWhiteSpace(item.Id))
             .Select(item => item.Id!)
             .ToArray();
+    }
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(messageName))
+        {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var query = new Dictionary<string, object?>
+        {
+            ["messageEventSubscriptionName"] = messageName
+        };
+        AddIfPresent(query, "processDefinitionKey", processDefinitionKey);
+        AddCorrelationFilter(query, correlationKey, correlationValue);
+
+        return QueryExecutionsAsync(
+            query, $"list executions awaiting message '{messageName}'", cancellationToken);
+    }
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(activityId))
+        {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var query = new Dictionary<string, object?>
+        {
+            ["activityId"] = activityId
+        };
+        AddIfPresent(query, "processDefinitionKey", processDefinitionKey);
+        AddCorrelationFilter(query, correlationKey, correlationValue);
+
+        return QueryExecutionsAsync(
+            query, $"list executions awaiting receive task '{activityId}'", cancellationToken);
+    }
+
+    // A missing key or value means "do not narrow". That is only ever reached for
+    // a declaration with no correlation key, where every waiting instance is a
+    // genuine match and the multi-match rule is what protects the caller.
+    private static void AddCorrelationFilter(
+        Dictionary<string, object?> query, string? correlationKey, string? correlationValue)
+    {
+        if (string.IsNullOrWhiteSpace(correlationKey) || correlationValue is null)
+        {
+            return;
+        }
+
+        query["processInstanceVariables"] = new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["name"] = correlationKey,
+                ["value"] = correlationValue,
+                ["operation"] = "equals",
+                ["type"] = "string"
+            }
+        };
+    }
+
+    private static void AddIfPresent(Dictionary<string, object?> query, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) query[name] = value;
+    }
+
+    private async Task<IReadOnlyList<string>> QueryExecutionsAsync(
+        Dictionary<string, object?> query, string what, CancellationToken cancellationToken)
+    {
+        // POST /query/executions rather than the GET form: the GET cannot express
+        // a process-variable filter, and doing that filtering here would mean
+        // paging every waiting instance back and counting locally, which makes the
+        // multi-match count depend on the page size.
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/executions", query, cancellationToken);
+        await EnsureSuccessAsync(response, what);
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => item.Id!)
+            .ToArray();
+    }
+
+    public async Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["action"] = "messageEventReceived",
+            ["messageName"] = messageName,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/runtime/executions/{Uri.EscapeDataString(executionId)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"deliver message '{messageName}' to execution {executionId}");
+    }
+
+    public async Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["action"] = "trigger",
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/runtime/executions/{Uri.EscapeDataString(executionId)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"trigger execution {executionId}");
+    }
+
+    public async Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parentProcessInstanceId))
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        // POST /query, because the GET form does not expose superProcessInstanceId.
+        var query = new Dictionary<string, object?>
+        {
+            ["superProcessInstanceId"] = parentProcessInstanceId
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/process-instances", query, cancellationToken);
+        await EnsureSuccessAsync(response, $"list child instances of {parentProcessInstanceId}");
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(
+            response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => new FlowableProcessInstanceSummary
+            {
+                Id = item.Id ?? string.Empty,
+                Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                ActivityId = item.ActivityId,
+                Suspended = item.Suspended,
+                StartUserId = item.StartUserId
+            })
+            .ToArray();
+    }
+
+    public async Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["message"] = messageName,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/runtime/process-instances", payload, cancellationToken);
+        await EnsureSuccessAsync(response, $"start a process instance by message '{messageName}'");
+
+        var created = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+        return created.Id ?? string.Empty;
     }
 
     public async Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
@@ -1527,6 +1965,50 @@ public sealed class FlowableClient(
         return max;
     }
 
+    /// <summary>
+    /// Interrupting boundary event id → the activity id it is attached to.
+    /// </summary>
+    /// <remarks>
+    /// #177. Non-interrupting boundary events are excluded: they fire alongside the
+    /// activity and cancel nothing, so treating one as a cancellation would render a
+    /// perfectly healthy task as killed — the opposite error.
+    /// </remarks>
+    private static Dictionary<string, string> BuildInterruptingBoundaryMap(string bpmnXml)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(bpmnXml)) return map;
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(bpmnXml);
+        }
+        catch
+        {
+            // The diagram is rendered from this same string, so a parse failure is
+            // already visible to the caller. Losing the cancellation highlight is
+            // not worth throwing over.
+            return map;
+        }
+
+        foreach (var boundary in document.Descendants(BpmnNamespace + "boundaryEvent"))
+        {
+            var id = boundary.Attribute("id")?.Value;
+            var attachedTo = boundary.Attribute("attachedToRef")?.Value;
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(attachedTo)) continue;
+
+            // BPMN defaults cancelActivity to true when the attribute is absent.
+            if (string.Equals(boundary.Attribute("cancelActivity")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            map[id] = attachedTo;
+        }
+
+        return map;
+    }
+
     private static void EnsureDiagramXmlPresent(string bpmnXml, string processInstanceId, FlowableProcessDefinitionResponse processDefinition)
     {
         if (string.IsNullOrWhiteSpace(bpmnXml))
@@ -1554,7 +2036,15 @@ public sealed class FlowableClient(
 
         var body = await response.Content.ReadAsStringAsync();
         var details = string.IsNullOrWhiteSpace(body) ? "No response body was returned." : body;
-        throw new InvalidOperationException($"Flowable could not {operation}. HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
+
+        // #226. Carries the status Flowable answered with, so a caller error it
+        // already classified can be passed through as that same class instead of
+        // becoming a 500. FlowableRequestException derives from
+        // InvalidOperationException, so every existing catch is unaffected.
+        throw new FlowableRequestException(
+            response.StatusCode,
+            operation,
+            $"Flowable could not {operation}. HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
     }
 
     private static async Task<T> DeserializeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -1624,6 +2114,11 @@ public sealed class FlowableClient(
         public bool Suspended { get; init; }
 
         public string? StartUserId { get; init; }
+
+        // #158: Flowable reports whether the instance finished during the start
+        // call. A process with no wait states ends immediately, and asking it to
+        // evaluate conditional events afterwards is a wasted round trip at best.
+        public bool? Ended { get; init; }
     }
 
     // Trimmed-down execution row for the runtime executions listing — only

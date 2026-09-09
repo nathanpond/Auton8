@@ -22,6 +22,15 @@ Assert the **observable consequence**, one step further out than feels necessary
 | Compensation | the handler ran | handlers ran in **reverse order**, and only for **completed** activities |
 | Manual task | completing returned 200 | the **next activity** became active |
 | Job retry | retry returned 200 | the **process advanced past** the failed step |
+| Complex gateway | the route the script chose was taken | **both** routes asserted — one-way passes for a gateway that always takes the first flow, which is what this element does unexpanded |
+| Complex gateway, bad route | the activity failed | the message names **both** what came back and what was allowed |
+| Publish-time refusal | a 4xx came back | 4xx **and** the engine was never called (`Assert.DoesNotContain("Deploy:<key>", …)`) — otherwise "deploy first, complain after" passes |
+| Any publish gate | the invalid diagram is refused | plus a **valid** diagram still publishes — a gate that refuses everything passes the first half |
+| Compensation ordering | the handlers ran | the recorded **trail** is `h2;h1;` — see below, timestamps tie |
+| Ad-hoc subprocess | the chosen activity started | it started, the **other did not**, and starting it **again runs it again** |
+| Data object type | the variable exists | its **type** is `double` — the wrong form deploys happily and yields `string` |
+| Execution-view mapping | the gateway is highlighted | **no generated id** leaks into the highlight set (`__autonateRoute…`), including generated **sequence flows** |
+| Version pinning | the diagram renders | republish with a change, then assert the running instance still renders **v1** |
 
 The pattern: a test that only checks the positive half usually passes against an
 implementation that does the thing unconditionally. The negative half — what should
@@ -36,6 +45,21 @@ invent one. For BPMN work the reliable techniques:
 - **False-positive guards** — the paired test that must still publish. For a validator warning on unset variables, publish a condition referencing a variable a preceding script *does* set and assert **no** warning. A validator that cries wolf gets ignored, and only this test catches that.
 - **Before/after on the same diagram** — for `#168` (retry points), run the same failing two-step process with and without the marking; the *difference* is the feature. Asserting only the marked case passes against a no-op attribute.
 - **Regression by reverting** — for a security or silent-no-op fix, run the new test against the pre-change build and watch it pass. If it does not pass before your change, it is not testing what you think.
+- **Mutate the check, not the fixture** — the cheapest sensitivity test is to break the production line the test exists for (`if (true) return result;`, `if (false)` on a guard, delete one call from the expansion pipeline) and confirm **exactly** the intended tests fail and no others. This catches the test that passes for the wrong reason, which reverting does not: in M4 an "undeclared error is not catchable" test kept passing with the declaration check deleted, because its fixture 404'd before that code ever ran.
+
+## Two traps that cost real time in M4
+
+**Timestamps tie, so never assert order by sorting them.** Compensation handlers all
+completed inside the same millisecond; sorting `historic-activity-instances` by
+`startTime` returned them in an order that *looked* like proof and was really just
+list order. Have each step **append to one variable** and assert the string
+(`trail == "h2;h1;"`). The same applies to anything that runs in one transaction.
+
+**A negative assertion that runs too early is indistinguishable from success.**
+"The boundary did not fire", "the other route was not taken", "no handler ran" are
+all true of a process that has not started yet. Wait for a **positive** signal first,
+then assert the negative alongside it — and prefer waiting on the thing that proves
+the process got where you think it did.
 
 ## Traits and the CI contract
 
@@ -83,3 +107,26 @@ For validation assertions, post to **`/api/workflows/prepare`** and read `errors
 invalid diagram posted there returns 200 and deploys. A test written against
 `/publish` to prove "misconfiguration is refused" passes while proving nothing, which
 is the failure this whole skill is about.
+
+---
+
+## Asserting that an activity was cancelled (#177)
+
+**Do not assert on a history row's `DeleteReason`.** Flowable 8.0.0 does not populate
+it when a boundary event cancels an activity — the cancelled row carries an `endTime`
+and a null `deleteReason`, which is indistinguishable from one that completed:
+
+```
+work       type=userTask      end=19:38:17  deleteReason=None
+timeout    type=boundaryEvent end=19:38:17  deleteReason=None
+```
+
+`CancelledActivityIds` on the diagram detail **is** correct as of #177, so assert on
+that. It derives cancellation from the diagram — an activity is cancelled when an
+*interrupting* boundary event attached to it has ended — rather than from a field the
+engine leaves empty.
+
+Two traps worth knowing:
+
+- **Assert with the instance still RUNNING.** Cancellation used to be read from the *process instance's* `DeleteReason`, so a test on a cancelled instance passed for two years while a boundary-cancelled activity rendered as completed. A test that tears the process down cannot see the bug.
+- **Assert the complement.** `CompletedActivityIds` is built by *excluding* the cancelled set, so an activity wrongly absent from one silently appears in the other. Assert both: in cancelled, and **not** in completed.

@@ -196,3 +196,26 @@ internal static class ActorOutboundUserEdges
                 StringComparer.Ordinal);
     }
 }
+
+// #112. Messages are addressed by process key plus a correlation value, never by
+// instance id, so the endpoint gates with RequireKindPermission and no instance
+// check is reached on the normal path.
+//
+// This exists anyway, and denies. Authorizer.cs:131 returns "no instance handler
+// for kind" when one is missing, which denies everyone except super-admins — and
+// under Authorization:DryRun=true it ALLOWS everyone and merely logs. So the
+// absence of a handler is not a safe default in both configurations, and five
+// kinds have already shipped that way (see the note in Program.cs). Registering a
+// deliberate deny makes "there is no such thing as an instance-level message
+// grant" a decision rather than an omission.
+public sealed class WorkflowMessageInstanceAuthorizer : IInstanceAuthorizer
+{
+    public string Kind => EntityKinds.WorkflowMessage;
+
+    public Task<bool> ExistsAndAuthorizedAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        string targetId,
+        CancellationToken cancellationToken) => Task.FromResult(false);
+}

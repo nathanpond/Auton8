@@ -1,6 +1,8 @@
+import AdhocActivities from "./AdhocActivities";
 import { toast } from "@/components/notifications/toast";
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   Alert,
@@ -28,7 +30,9 @@ import {
   useCancelExecution,
   useExecutionDiagram,
   useExecutionHistory,
+  useExecutionChildren,
   useExecutionTasks,
+  useAdhocSubProcesses,
   useExecutions,
   useDeleteAllExecutions,
   useDeleteExecution,
@@ -511,7 +515,7 @@ type ExecutionContentProps = {
   onError: (message: string) => void;
 };
 
-type ExecutionTab = "diagram" | "history" | "log";
+type ExecutionTab = "diagram" | "history" | "log" | "children" | "adhoc";
 
 export function ExecutionContent({
   processInstanceId,
@@ -522,10 +526,16 @@ export function ExecutionContent({
   const [tab, setTab] = useState<ExecutionTab>("diagram");
   const { data: detail, isLoading: detailLoading, error } = useExecutionDiagram(processInstanceId);
   const { data: tasks = [] } = useExecutionTasks(processInstanceId);
+  // #163.
+  const { data: adhocSubProcesses = [] } = useAdhocSubProcesses(processInstanceId);
   // Lifted from the History tab so the diagram-tab hover tooltip can show
   // assignees on user-task nodes that have already completed without waiting
   // for the user to click into History first.
   const { data: history = [] } = useExecutionHistory(processInstanceId);
+  // #113. A call activity's child runs as its own instance. While the parent
+  // waits, the parent's own task list is empty — so without this the operator
+  // sees a process that appears hung and has nothing to open.
+  const { data: children = [] } = useExecutionChildren(processInstanceId);
   const directory = useUserDirectory();
   const forceCompleteTask = useForceCompleteTask(processInstanceId);
   const reassignTask = useReassignTask(processInstanceId);
@@ -745,6 +755,15 @@ export function ExecutionContent({
           <Tabs.Tab value="diagram">Diagram</Tabs.Tab>
           <Tabs.Tab value="history">History</Tabs.Tab>
           <Tabs.Tab value="log">Execution Log</Tabs.Tab>
+          {/* Only shown when there is something to show: a process with no call
+              activity should not carry an empty tab suggesting otherwise. */}
+          {children.length > 0 && (
+            <Tabs.Tab value="children">Called Workflows ({children.length})</Tabs.Tab>
+          )}
+          {/* #163. Same rule as Called Workflows: only shown when there is
+              something to show. A process with no ad-hoc subprocess must not
+              carry an empty tab implying it has case work. */}
+          {adhocSubProcesses.length > 0 && <Tabs.Tab value="adhoc">Case Work</Tabs.Tab>}
         </Tabs.List>
 
         {/* Each panel stays mounted (`keepMounted`) so the BPMN viewer
@@ -811,12 +830,49 @@ export function ExecutionContent({
           ) : null}
         </Tabs.Panel>
 
+        <Tabs.Panel value="children" p="md">
+          {tab === "children" && (
+            <Stack gap="sm">
+              <Text size="sm" c="dimmed">
+                This execution started these workflows and is waiting for them. Open one to see
+                where it has got to &mdash; while it runs, the work is there rather than here.
+              </Text>
+              {children.map((child) => (
+                <Group key={child.id} justify="space-between" wrap="nowrap">
+                  <Box>
+                    <Text size="sm" fw={500}>
+                      {child.name ?? child.processDefinitionId.split(":")[0]}
+                    </Text>
+                    <Text size="xs" c="dimmed" ff="monospace">{child.id}</Text>
+                  </Box>
+                  <Button
+                    component={Link}
+                    to={`/executions/${encodeURIComponent(child.id)}`}
+                    variant="default"
+                    size="compact-sm"
+                  >
+                    Open
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          )}
+        </Tabs.Panel>
+
         <Tabs.Panel value="history" p="md">
           {tab === "history" && <ExecutionHistory processInstanceId={processInstanceId} />}
         </Tabs.Panel>
 
         <Tabs.Panel value="log" p="md">
           {tab === "log" && <ExecutionLog processInstanceId={processInstanceId} />}
+        </Tabs.Panel>
+        <Tabs.Panel value="adhoc" p="md" keepMounted>
+          <AdhocActivities
+            processInstanceId={processInstanceId}
+            subProcesses={adhocSubProcesses}
+            onError={onError}
+            onStarted={onTaskCompleted}
+          />
         </Tabs.Panel>
       </Tabs>
 

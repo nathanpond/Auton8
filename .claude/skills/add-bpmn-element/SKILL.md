@@ -15,9 +15,12 @@ recognisable half-wired failure:
 | Key merged unconditionally | Elements sharing that `$type` misroute to the wrong modal, silently |
 | `update*Properties` | Editor shows values, Apply appears to work, edit is lost on reload |
 | `Apply*Snapshot` | Field reaches the backend, never reaches the XML |
-| A carve-out site | Element works but still warns "deploys but does nothing" |
+| The manifest entry | Element works and the studio still calls it "coming soon" |
 | Validation | Misconfiguration fails at runtime, on whoever ran the process |
 | Fixture | #103's inventory has a verdict with no evidence behind it |
+| The wake-up trigger | Element deploys, waits correctly, and never resumes (load-bearing fact 5) |
+| A browser round-trip test | Author's configuration silently disappears on their next save (fact 8) |
+| Deploying the expansion once | Publish answers 500 on a schema violation the unit tests cannot see (fact 9) |
 
 **The silent no-op is the failure this epic exists to end.** An element that deploys
 and does nothing is worse than one that refuses, because nobody finds out until a
@@ -30,11 +33,80 @@ Every path and symbol below is a **claim that may have rotted**. Run
 plus the three load-bearing claims most likely to go stale, and exits non-zero when
 one has. When a code change invalidates a step here, **fix this skill in the
 same commit** — "later" does not happen. #174 is the scheduled consolidation pass;
-#157, #158, #160 and #161 each correct this skill in their own PR.
+#157, #158, #160 and #161 each correct this skill in their own PR. #107 rewrote
+step 1 and the manifest checks in `scripts/verify-symbols.sh`.
 
-Read the element's story and #103's inventory row first. If the inventory says
-Flowable has no behaviour for the element, stop — that is #155/#165 territory and
-needs a custom `ActivityBehavior`, not this skill.
+Read the element's story and #103's inventory row first, then ask the two questions
+**in this order** — asking them the other way round is what cost #217 a spike:
+
+1. **Does `flowable-bpmn-model-8.0.0.jar` have a type for this element at all?**
+   ```sh
+   unzip -l ~/.m2/.../flowable-bpmn-model-8.0.0.jar | grep -i '<ElementName>'
+   ```
+   If not, stop and say so on the story. Nothing downstream can help: the XML
+   converter has no type to build, so the element is **discarded before validation
+   or behaviour lookup ever runs**, and the diagram deploys with the element simply
+   gone. Link events are this case (#160, #217) — implementing them would mean a
+   model type, a converter, a parse handler, a replacement validator, a behaviour
+   *and* a token transfer, which is six layers rather than one.
+
+2. **Does it have an `ActivityBehavior`?** If the model type exists but the
+   behaviour does not, that is #155/#165 territory — a custom `ActivityBehavior`
+   through the existing factory, one layer, not this skill.
+
+The distinction matters because both present identically from the studio: you draw
+it, it deploys, nothing happens. Only the remedy differs, and the model-layer case
+has no proportionate remedy at all.
+
+## When a cold test is required — and what it costs to skip one
+
+**Correcting a skill by reading it is not sufficient.** On 2026-09-05 all ten project
+skills were cold-tested — an agent given only the skill and one realistic task, asked
+to plan and report what was wrong. Every skill came back with findings, including six
+of ten corrections that had been made hours earlier by reading the code carefully. Two
+skills had the blast radius of a permission failure exactly backwards; one claimed a
+trap that does not reproduce when measured; one worked example would have produced the
+silent no-op its own skill exists to prevent — and `verify-symbols.sh` was **green**
+against it, because a mechanical path check only ever reads `SKILL.md`.
+
+So the rule:
+
+- **A cold test is required** before a skill is relied on by work it has not yet been
+  used for, and after any change to its *steps* (as opposed to a path or a symbol).
+- **`verify-symbols.sh` is necessary and not sufficient.** It catches rot in claims;
+  it cannot catch a step that is coherent, followed, and wrong.
+- **A browser or engine check is required** for any claim about what bpmn-js preserves
+  or what Flowable accepts. Facts 8 and 9 below are both classes where reading the
+  code gives a confident wrong answer.
+
+## Honest record: this skill went largely unused in M4's later stories
+
+The M4 stories implemented after this skill was written — #218 (complex gateway),
+#115 (compensation), #163 (ad-hoc subprocess), #166 (data objects) — were built
+**without invoking it**. That is a finding about the skill, not about the work, and
+the story that scheduled this review named it as one: *"a skill nobody reaches for is
+a worse problem than an inaccurate one, and the remedy is different."*
+
+The diagnosis, from what those stories actually needed:
+
+- **They did not start at the element.** Each began with *"what does the engine
+  actually do with this?"* — a probe against a running Flowable — and the answer
+  reshaped the story before any of the nine steps applied. #218's expansion shape,
+  #115's refusal of waiting handlers and #166's storage decision were all settled by
+  probing, and none of them is a step in this skill.
+- **The nine steps assume the element is authorable as drawn.** Four of M4's later
+  elements needed a publish-time **expansion** instead, because the engine does not run
+  what the author draws. That path — rewrite the deployed copy, leave the authored
+  diagram alone — is now the milestone's dominant pattern and appears nowhere in the
+  step list.
+- **The skill is 380 lines.** It is at the length where a reader skims, which is its
+  own answer to why it was not opened.
+
+**The remedy is structural, not another correction**, and it is bigger than this pass:
+lead with the engine probe, make expansion a first-class path beside the nine steps,
+and cut what the first four stories never used. Raised as a finding here rather than
+attempted at the tail of a long run — a restructure done carelessly would be worse
+than the skim.
 
 ## The load-bearing facts
 
@@ -69,30 +141,167 @@ whose `$type` also matches that branch — e.g. an unconditional `timerDuration`
 message and signal intermediate catch events to the timer modal. Contained to one
 element type, not catastrophic, but silent and confusing.
 
-**4. `/publish` does not validate.** `WorkflowBpmnXml.ValidateProcess` has exactly one
-call site: `POST /api/workflows/prepare` (`WorkflowEndpoints.cs`). `POST
-/api/workflows/{id}/publish` goes straight to `DeployProcessAsync`. Validation blocks
-the **SPA flow**, because `prepareAndStore` declines when `errors.length > 0` — it
-does not block the API. A test that posts an invalid diagram to `/publish` and expects
-a 4xx **passes with a 200 deploy**, which is the exact silent-no-op-shaped test
-failure this skill exists to prevent. Write endpoint-level validation tests against
-`/prepare`.
+**4. `/publish` validates — since #225. It did not before, and the reversal matters.**
+`WorkflowBpmnXml.ValidateProcess` now has **two** call sites: `POST
+/api/workflows/prepare` and `POST /api/workflows/{id}/publish`, which answers 400 with
+the errors before deploying.
+
+*This entry used to say the opposite*, and it was right when written: publish went
+straight to `DeployProcessAsync`, so every rule written as a gate was advisory and a
+test posting an invalid diagram to `/publish` passed with a 200 deploy. Two
+consequences of the change:
+
+- **A validation test may now be written against `/publish`**, and asserting the 4xx
+  is no longer enough on its own — also assert the engine was never called
+  (`Assert.DoesNotContain("Deploy:<key>", factory.FlowableStub.Calls)`), or an
+  implementation that deploys first and complains after still passes.
+- **Publish is stricter than it was**, so a diagram that published last month may be
+  refused now. When #225 landed, 4 of 11 stored dev models were newly refused — all
+  for defects that already failed at run time.
+
+`ValidateProcess` and `ValidateStructureForPublish` are **one set**: the latter
+delegates to the shared `BuildStructureErrors`, and
+`ValidateProcess_IncludesEveryRulePromotedToPublish` asserts they agree. They diverged
+once — #225 pointed publish at `ValidateProcess`, which did not contain the promoted
+structure rules, and three of them silently stopped running. Add a new rule to the
+shared builder, not to one caller.
+
+**5. A behaviour class is not the same as a trigger.** #158 found this the hard
+way, and it is the newest way to ship a silent no-op. Flowable has
+`IntermediateCatchConditionalEventActivityBehavior` and
+`BoundaryConditionalEventActivityBehavior` — so #103's inventory says conditional
+events execute, and they do. They still never fire, because **Flowable does not
+re-evaluate conditional events when a variable changes.** Something has to call
+`POST /runtime/process-instances/{id}/evaluate-conditions` (POST, not PUT — PUT
+returns a 500 reading "Request method 'PUT' is not supported", which looks like an
+engine fault rather than a wrong verb).
+
+So for any element that *waits*, ask the third question: **what makes it wake up,
+and does Auton8 do that?** The inventory cannot answer it — deploying and starting
+proves instantiation, and a process parked forever looks identical to one that is
+correctly waiting. `IFlowableClient.EvaluateConditionalEventsAsync` is called after
+every variable write, after every task completion, and after starting an instance;
+those are the three moments a token can arrive somewhere it could already leave.
+
+The test that catches this is behavioural and cannot be faked: change the world from
+outside the process and assert it moved. See
+`tests/AutoNate.E2E.Tests/ConditionalEventExecutionTests.cs`.
+
+**Not every waiting element has this problem, so check rather than assume.** #157
+established that timers *wake themselves* — the job executor polls for due jobs, and a
+timer boundary fires with no `flowable:async` on the activity it guards. Conditional
+events sit at the other end: a behaviour class, and no trigger at all. Ask which kind
+your element is.
+
+**6. Not every element needs all nine steps — some need only validation.** #161
+(embedded subprocess) added no describe helper, no `update*Properties`, no snapshot
+field and no modal: bpmn-js already authors subprocesses and their expand/collapse
+(12 `sub-process` entries in the vendored bundle), the engine already executes them,
+and the only Auton8-side work was *refusing the shapes that fail*. Steps 3–6 and 8
+were correctly skipped.
+
+So read the nine steps as a checklist to answer, not a sequence to perform. The
+question each step asks is "does this element carry configuration the studio must
+round-trip?" — when the answer is no, the story is a validation story and the honest
+completion comment says which steps did not apply and why.
+
+**8. bpmn-js DROPS what its moddle does not model — and it does so silently.**
+Three separate times in M4, verified in a browser rather than reasoned about:
+
+| what was stored | what came back after a studio save |
+|---|---|
+| `<bpmn:script>` child on a `complexGateway` (#218) | **gone** — ComplexGateway has no `script` property |
+| `itemSubjectRef="xsd:double"` on a `dataObject` (#166) | **gone** — moddle resolves it as a *reference*, and a bare QName names nothing in the document |
+| `itemSubjectRef="ItemDouble"` → a real `<itemDefinition>` (#166) | survives, but **the engine then ignores the type** and every variable is `string` |
+
+So: **an author's configuration goes in an `autonate:` attribute via `$attrs`** — the
+route `runAs` already uses and the only one proven to survive — and publish rewrites
+the deployed copy into whatever the engine actually reads. Never store authoring data
+in a child element or a typed moddle property the modeller does not know about, and
+never conclude it round-trips without a browser test: this cannot be established by
+reading, because the vendored bundle is the authority.
+
+**`writeAutoNateAttribute` mutates `$attrs`; it must never assign it.** moddle defines
+`$attrs` on `Base` with only a getter, so `businessObject.$attrs = …` throws *"Cannot
+set property $attrs of #<Base> which has only a getter"*. Every element it had been
+used on happened to have a writable own property until a complex gateway came along;
+the symptom was Apply failing with a **clean console** (the error went to a toast) and
+the modal left sitting over the Save button.
+
+**9. Flowable validates the DEPLOYED XML against the strict BPMN schema, and a
+violation is a 500 at publish — not a degradation.** This is a whole class of failure
+the earlier version of this skill did not mention, and M4 hit four of them:
+
+| written | refused with |
+|---|---|
+| `resultVariable` on `bpmn:scriptTask` | `Attribute 'resultVariable' is not allowed…` — it is `flowable:resultVariable` (still open as #230 for author-drawn script tasks) |
+| `scriptFormat` / `<script>` left on a `bpmn:complexGateway` | same shape — strip authoring properties from the deployed copy once they have moved |
+| a generated node appended after an `<association>` | `cvc-complex-type.2.4.a: Invalid content was found starting with element 'endEvent'` — **artifacts must come after every flow element**, so insert generated nodes before the first artifact (`AddFlowElement`) |
+| `itemSubjectRef="xsd:double"` with no `xmlns:xsd` | `UndeclaredPrefix: Cannot resolve 'xsd:double' as a QName` — a QName's prefix must be declared, and no studio diagram carries one |
+
+None of these degrade gracefully. If an expansion writes anything into the deployed
+copy, deploy it once against a real engine before believing it.
+
+**7. Some elements are removed rather than added, and that is a real outcome.**
+Three ways so far, each with a different mechanism — pick by *why* it cannot work:
+
+| Why | Treatment | Example |
+|---|---|---|
+| No model type at any layer | `studio: withdrawn`, refused at publish | link events (#160, spike #217) |
+| No seam reaches it | delivered by composition instead | complex gateway (#218, spike #155) |
+| It runs, but does nothing useful | **converted at design time** to the element that does | manual task, generic task (#167) |
+
+The third is the newest and the least obvious: `bpmn:manualTask` and `bpmn:task` both
+deploy and pass straight through, so a diagram containing one finishes having skipped
+the step somebody was meant to perform. The studio replaces them with a user task on
+**drop and on load**, and publish refuses any that survive.
+
+⚠️ **Converting is not free, and the trap is namespaces.** A marker written with
+`writeFlowableAttribute` is `flowable:`-prefixed, and bpmn-moddle **silently drops an
+attribute whose prefix the document never declares**. Auton8's own starter diagram
+declares `xmlns:flowable`; a diagram authored in another modeller does not — which is
+exactly the diagram a conversion exists for. #167 lost its marker this way and only
+caught it because the test read the saved XML instead of trusting the on-screen
+notice. If you write an attribute during a conversion, declare the namespace on
+`definitions.$attrs` first.
+
+⚠️ **A conversion needs both paths.** Drop-only leaves every imported diagram
+untouched, which is the population that most needs converting. `loadXml` and the
+`importXML` inside `createModeler` are separate call sites; both need it.
 
 ## Steps in order
 
-### 1. Move it in the support manifest — three sites, not one
+### 1. Move it in the support manifest — one edit
 
-Until #107 lands, the truth is split and can disagree:
+**#107 landed.** `src/shared/bpmn-support.json` is the single source of truth. The
+SPA imports it (`src/AutoNate.Spa/src/lib/bpmn/support.ts`, via the `@shared` alias);
+`AutoNate.Web.csproj` embeds the same bytes as `AutoNate.Web.bpmn-support.json`. The
+old `SUPPORTED_BPMN_TYPES` / `COMING_SOON_BPMN_TYPES` arrays and the
+`UnsupportedRuntime*` deny-lists are gone, and `BpmnSupportManifestTests` fails if
+either comes back.
 
-- `SUPPORTED_BPMN_TYPES` / `COMING_SOON_BPMN_TYPES` — `src/AutoNate.Spa/src/pages/workflow/WorkflowStudio.tsx`. Note the two lists use **different category taxonomies** (`Events` vs `Start Events`/`Intermediate Events`/`Boundary Events`/`End Events`). #103's test plan asserts the **combined count is 68**, so any move must be strictly 1-for-1.
-- `BuildUnsupportedRuntimeWarnings` — `src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs`. **This method has two independent blocks** and your element may need a carve-out in both:
-  1. the `UnsupportedRuntime*` element-name sets, where `intermediateCatchEvent` already shows the carve-out pattern for a single event-definition flavour;
-  2. a separate `localName.EndsWith("EventDefinition")` block further down, whose carve-outs whitelist by **definition type *and* parent element type**.
+Each of the 68 entries carries **two independent axes**, and picking the wrong one is
+the mistake this step exists to prevent:
 
-  Missing the second is the standard trap: the element works, and still warns.
+- **`studio`** — `supported` | `coming-soon` | `withdrawn`. What the BPMN types panel
+  advertises. **This is the field your story moves**, from `coming-soon` to
+  `supported`, once the element is authorable, configurable and round-tripping.
+- **`engine`** — `executes` | `annotation` | `cannot-execute`. What Flowable does
+  with it, established by deploying it in #103. This drives publish validation. Do
+  not touch it unless you have re-run the element against a live engine; it is a
+  measurement, not a preference.
 
-⚠️ These feed **`warnings`**, not `errors` — which is why unsupported elements deploy
-today. #107 owns changing that; don't do it as a side effect.
+The invariant `studio=supported ⟹ engine≠cannot-execute` is enforced by test. If
+your element's `engine` is `cannot-execute`, moving `studio` to `supported` fails the
+suite — correctly: see the note under "Before you start" about #155/#165 territory.
+
+Entries are keyed on **`(localName, eventDefinition)`**, not on `localName`. That is
+what lets the manifest refuse one boundary variant while permitting the other seven.
+`localName: "*"` means an activity marker, keyed on the marker alone.
+
+⚠️ An element the manifest marks `cannot-execute` is now a **deployment error**
+carrying its `reason`, not a warning. So a `reason` is required on those entries and
+is user-facing text — write a sentence an author can act on.
 
 ### 2. Authoring affordance — usually no code
 
@@ -162,6 +371,12 @@ Every message must name the element (`name` attribute, falling back to `id`) —
 
 ⚠️ Per load-bearing fact 4, write endpoint tests against `/prepare`, never `/publish`.
 
+A rule that should apply at *every* depth — "every subprocess anywhere must have a
+start event" — is the ordinary flat `document.Descendants(...)` case and needs none of
+the machinery below. #161 is that shape, and its test asserts a nested subprocess is
+caught, because a check that walked only top-level children would pass a diagram that
+fails one level down.
+
 **If your rule is scope-sensitive** — link events matching per process level, for
 instance — note that **every existing validator uses flat `document.Descendants(...)`
 and there is no precedent to copy.** You need a helper that enumerates scope
@@ -181,7 +396,7 @@ forbids.
 **The state clearing is N×N, not 1×N.** Clear every other editor in your branch —
 *and* add `set<YourEditor>(null)` to every existing branch, including `selectWorkflow`.
 Grep for an existing `set*Editor(null)` and match its occurrence count exactly — it
-was 12 at the time of writing and it moves.
+was 12 when written, 14 after #157, and it moves with every editor added.
 
 Mantine v9 only. `Tooltip` from `@mantine/core`, never a native `title`. Toasts through
 `toast` from `@/components/notifications/toast` — importing `@mantine/notifications`
@@ -190,7 +405,7 @@ page; toast for transient feedback.
 
 ### 9. Fixture and tests
 
-- **Fixture** — a minimal `.bpmn` using the element. #103's must-haves name `tests/AutoNate.E2E.Tests/Bpmn/Fixtures/` (or equivalent); **that directory does not exist yet** and there are no `.bpmn` files in the repo. If #103 hasn't landed, you are creating it.
+- **Fixture** — a minimal `.bpmn` using the element. #103 landed these in `tests/fixtures/bpmn-inventory/`, one per manifest entry, generated and then deployed against a live engine. Yours almost certainly exists already; extend it rather than starting a new directory.
 - **`tests/AutoNate.Web.Tests/WorkflowBpmnXmlTests.cs`** — round-trip and every validation branch. No engine needed; these are where most per-element logic lives.
 - **E2E** — `RequiresService=Flowable` trait, or CI's exclusion stops holding and `ci.yml`'s shard reconciliation will notice.
 - **`tests/AutoNate.Web.Tests/Invariants/DoNotRenameGuardTests.cs`** must still pass if you touched the namespace.
@@ -204,9 +419,12 @@ that is where most of the value is.
 - [ ] Configuration round-trips through save and reload
 - [ ] Misconfiguration is refused at `/prepare`, naming the element
 - [ ] A fixture backs the inventory row
-- [ ] A test asserts behaviour, not deployment
+- [ ] A test asserts behaviour, not deployment — and for anything that waits, that it *resumes*
 - [ ] **This skill is corrected for anything it got wrong, in this PR** — and if it needed no change, the completion comment says so explicitly
-- [ ] `npm run lint` passes without raising `--max-warnings` (currently 104 — a ratchet)
+- [ ] `npm run lint` passes without raising `--max-warnings` (currently 100 — a
+      ratchet). If your story consumes a warning, **lower it to the new count in the
+      same commit**: the budget tracks reality downward only. #158 took it 104 → 103
+      by using an import that was sitting unused.
 - [ ] Full backend suite passes (`cd infra && docker compose -p infra up -d postgres nats nats-init redis`)
 
 ## Worked example
