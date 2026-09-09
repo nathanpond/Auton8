@@ -61,10 +61,21 @@ n=$(grep -rho "BPMN_MENU_ENTRIES" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -eq 1 ] && ok "BPMN_MENU_ENTRIES still dead (1 occurrence)" \
   || bad "BPMN_MENU_ENTRIES" "now $n occurrences — step 2's premise has changed"
 
-# ValidateProcess must still have exactly one call site outside its own file.
+# ValidateProcess runs at BOTH /prepare and /publish since #225. Two call sites is
+# the correct state; one means publish stopped validating and fact 4 is stale in the
+# other direction — which is the regression #225 itself caused once, silently.
 n=$(grep -rho "WorkflowBpmnXml.ValidateProcess" "$WEB" 2>/dev/null | wc -l | tr -d ' ')
-[ "$n" -eq 1 ] && ok "ValidateProcess has 1 external call site (/prepare only)" \
-  || bad "ValidateProcess call sites" "now $n — load-bearing fact 4 may be stale"
+[ "$n" -eq 2 ] && ok "ValidateProcess has 2 call sites (/prepare and /publish)" \
+  || bad "ValidateProcess call sites" "now $n, expected 2 — load-bearing fact 4 may be stale"
+
+# The two validation sets must not drift apart again. #225 pointed publish at
+# ValidateProcess, which did not contain the promoted structure rules, and three
+# stopped running with nothing to say so.
+if grep -q "BuildStructureErrors" "$WEB/Services/Workflow/WorkflowBpmnXml.cs" 2>/dev/null; then
+  ok "the promoted structure rules are shared (BuildStructureErrors)"
+else
+  bad "shared structure rules" "BuildStructureErrors is gone — the two validation sets can diverge again"
+fi
 
 # The lint ratchet, matched in context rather than as a bare substring — a bare
 # grep for the number matches a line number or an issue number and passes on a stale skill.

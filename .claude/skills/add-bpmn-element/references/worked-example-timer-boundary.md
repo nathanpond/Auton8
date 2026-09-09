@@ -1,5 +1,19 @@
 # Worked example: timer boundary events (#157)
 
+> **Reconciled against the shipped #157 on 2026-09-09 (#174).** The four snapshot
+> fields this example names — `boundaryTimerDuration`, `boundaryTimerDate`,
+> `boundaryTimerCycle` and `cancelActivity` — exist on `WorkflowElementSnapshot`
+> with those exact names, `ApplyTimerBoundaryEventSnapshot` exists and is
+> dispatched on `boundaryEvent` **plus** a timer definition, and the
+> mutual-exclusion discipline the example describes is what the code does. The
+> example is **verified**, not predicted.
+>
+> One caveat it does not cover, learned after it was written: this element is
+> authorable **as drawn**. Four of M4's later elements were not, and needed a
+> publish-time expansion instead — see load-bearing facts 8 and 9 in `SKILL.md`,
+> and #232.
+
+
 The element: `bpmn:BoundaryEvent` carrying a `bpmn:TimerEventDefinition`, in both
 interrupting and non-interrupting form. Chosen as the example because it reuses an
 existing editor (timer definitions already work on start events) while adding a new

@@ -3958,3 +3958,29 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   coming" from "never coming". Options are an author-set timeout or nothing; both
   are decisions, neither is a detection rule.
   **Issue:** #219, #231, #218
+
+- **#174: the consolidation pass, and the finding that the skill went unused.**
+  `verify-symbols.sh` caught its own load-bearing fact 4 as rotted — and the rot was
+  mine: #225 gave `ValidateProcess` a second call site, so the skill's "`/publish`
+  does not validate" now states the opposite of the truth, along with its advice to
+  write validation tests against `/prepare`. Corrected, with the reversal recorded
+  rather than overwritten, and the check strengthened to assert **2** call sites plus
+  the shared `BuildStructureErrors` so the two validation sets cannot silently
+  diverge again.
+  **Two whole failure classes added**, both classes the skill never mentioned and
+  both hit repeatedly this milestone: *bpmn-js drops what its moddle does not model*
+  (three instances, each silent, none establishable by reading) and *Flowable
+  validates the deployed XML against the strict BPMN schema* (four instances, each a
+  500 at publish rather than a degradation). Ten weak-vs-real assertion pairs added
+  to the testing reference, plus the two traps that cost real time — tied timestamps
+  masquerading as ordering evidence, and negative assertions that run before the
+  process has moved.
+  **The honest finding: M4's later element stories did not use this skill.** #218,
+  #115, #163 and #166 were all built without opening it. Recorded in the skill
+  itself, with the diagnosis — the work starts with an engine probe the step list
+  does not have, four of those elements needed a publish-time expansion the step list
+  does not cover, and at 432 lines it is past where a reader skims. **The remedy is
+  structural and was NOT attempted here** — filed as #232 for M5, because a
+  restructure done carelessly at the tail of a long run is worse than the skim it is
+  meant to fix.
+  **Issue:** #174, #232, #225

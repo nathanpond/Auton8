@@ -19,6 +19,8 @@ recognisable half-wired failure:
 | Validation | Misconfiguration fails at runtime, on whoever ran the process |
 | Fixture | #103's inventory has a verdict with no evidence behind it |
 | The wake-up trigger | Element deploys, waits correctly, and never resumes (load-bearing fact 5) |
+| A browser round-trip test | Author's configuration silently disappears on their next save (fact 8) |
+| Deploying the expansion once | Publish answers 500 on a schema violation the unit tests cannot see (fact 9) |
 
 **The silent no-op is the failure this epic exists to end.** An element that deploys
 and does nothing is worse than one that refuses, because nobody finds out until a
@@ -56,6 +58,56 @@ The distinction matters because both present identically from the studio: you dr
 it, it deploys, nothing happens. Only the remedy differs, and the model-layer case
 has no proportionate remedy at all.
 
+## When a cold test is required — and what it costs to skip one
+
+**Correcting a skill by reading it is not sufficient.** On 2026-09-05 all ten project
+skills were cold-tested — an agent given only the skill and one realistic task, asked
+to plan and report what was wrong. Every skill came back with findings, including six
+of ten corrections that had been made hours earlier by reading the code carefully. Two
+skills had the blast radius of a permission failure exactly backwards; one claimed a
+trap that does not reproduce when measured; one worked example would have produced the
+silent no-op its own skill exists to prevent — and `verify-symbols.sh` was **green**
+against it, because a mechanical path check only ever reads `SKILL.md`.
+
+So the rule:
+
+- **A cold test is required** before a skill is relied on by work it has not yet been
+  used for, and after any change to its *steps* (as opposed to a path or a symbol).
+- **`verify-symbols.sh` is necessary and not sufficient.** It catches rot in claims;
+  it cannot catch a step that is coherent, followed, and wrong.
+- **A browser or engine check is required** for any claim about what bpmn-js preserves
+  or what Flowable accepts. Facts 8 and 9 below are both classes where reading the
+  code gives a confident wrong answer.
+
+## Honest record: this skill went largely unused in M4's later stories
+
+The M4 stories implemented after this skill was written — #218 (complex gateway),
+#115 (compensation), #163 (ad-hoc subprocess), #166 (data objects) — were built
+**without invoking it**. That is a finding about the skill, not about the work, and
+the story that scheduled this review named it as one: *"a skill nobody reaches for is
+a worse problem than an inaccurate one, and the remedy is different."*
+
+The diagnosis, from what those stories actually needed:
+
+- **They did not start at the element.** Each began with *"what does the engine
+  actually do with this?"* — a probe against a running Flowable — and the answer
+  reshaped the story before any of the nine steps applied. #218's expansion shape,
+  #115's refusal of waiting handlers and #166's storage decision were all settled by
+  probing, and none of them is a step in this skill.
+- **The nine steps assume the element is authorable as drawn.** Four of M4's later
+  elements needed a publish-time **expansion** instead, because the engine does not run
+  what the author draws. That path — rewrite the deployed copy, leave the authored
+  diagram alone — is now the milestone's dominant pattern and appears nowhere in the
+  step list.
+- **The skill is 380 lines.** It is at the length where a reader skims, which is its
+  own answer to why it was not opened.
+
+**The remedy is structural, not another correction**, and it is bigger than this pass:
+lead with the engine probe, make expansion a first-class path beside the nine steps,
+and cut what the first four stories never used. Raised as a finding here rather than
+attempted at the tail of a long run — a restructure done carelessly would be worse
+than the skim.
+
 ## The load-bearing facts
 
 Read these before the steps. Each one is a trap that looks fine until it doesn't.
@@ -89,14 +141,30 @@ whose `$type` also matches that branch — e.g. an unconditional `timerDuration`
 message and signal intermediate catch events to the timer modal. Contained to one
 element type, not catastrophic, but silent and confusing.
 
-**4. `/publish` does not validate.** `WorkflowBpmnXml.ValidateProcess` has exactly one
-call site: `POST /api/workflows/prepare` (`WorkflowEndpoints.cs`). `POST
-/api/workflows/{id}/publish` goes straight to `DeployProcessAsync`. Validation blocks
-the **SPA flow**, because `prepareAndStore` declines when `errors.length > 0` — it
-does not block the API. A test that posts an invalid diagram to `/publish` and expects
-a 4xx **passes with a 200 deploy**, which is the exact silent-no-op-shaped test
-failure this skill exists to prevent. Write endpoint-level validation tests against
-`/prepare`.
+**4. `/publish` validates — since #225. It did not before, and the reversal matters.**
+`WorkflowBpmnXml.ValidateProcess` now has **two** call sites: `POST
+/api/workflows/prepare` and `POST /api/workflows/{id}/publish`, which answers 400 with
+the errors before deploying.
+
+*This entry used to say the opposite*, and it was right when written: publish went
+straight to `DeployProcessAsync`, so every rule written as a gate was advisory and a
+test posting an invalid diagram to `/publish` passed with a 200 deploy. Two
+consequences of the change:
+
+- **A validation test may now be written against `/publish`**, and asserting the 4xx
+  is no longer enough on its own — also assert the engine was never called
+  (`Assert.DoesNotContain("Deploy:<key>", factory.FlowableStub.Calls)`), or an
+  implementation that deploys first and complains after still passes.
+- **Publish is stricter than it was**, so a diagram that published last month may be
+  refused now. When #225 landed, 4 of 11 stored dev models were newly refused — all
+  for defects that already failed at run time.
+
+`ValidateProcess` and `ValidateStructureForPublish` are **one set**: the latter
+delegates to the shared `BuildStructureErrors`, and
+`ValidateProcess_IncludesEveryRulePromotedToPublish` asserts they agree. They diverged
+once — #225 pointed publish at `ValidateProcess`, which did not contain the promoted
+structure rules, and three of them silently stopped running. Add a new rule to the
+shared builder, not to one caller.
 
 **5. A behaviour class is not the same as a trigger.** #158 found this the hard
 way, and it is the newest way to ship a silent no-op. Flowable has
@@ -136,6 +204,43 @@ So read the nine steps as a checklist to answer, not a sequence to perform. The
 question each step asks is "does this element carry configuration the studio must
 round-trip?" — when the answer is no, the story is a validation story and the honest
 completion comment says which steps did not apply and why.
+
+**8. bpmn-js DROPS what its moddle does not model — and it does so silently.**
+Three separate times in M4, verified in a browser rather than reasoned about:
+
+| what was stored | what came back after a studio save |
+|---|---|
+| `<bpmn:script>` child on a `complexGateway` (#218) | **gone** — ComplexGateway has no `script` property |
+| `itemSubjectRef="xsd:double"` on a `dataObject` (#166) | **gone** — moddle resolves it as a *reference*, and a bare QName names nothing in the document |
+| `itemSubjectRef="ItemDouble"` → a real `<itemDefinition>` (#166) | survives, but **the engine then ignores the type** and every variable is `string` |
+
+So: **an author's configuration goes in an `autonate:` attribute via `$attrs`** — the
+route `runAs` already uses and the only one proven to survive — and publish rewrites
+the deployed copy into whatever the engine actually reads. Never store authoring data
+in a child element or a typed moddle property the modeller does not know about, and
+never conclude it round-trips without a browser test: this cannot be established by
+reading, because the vendored bundle is the authority.
+
+**`writeAutoNateAttribute` mutates `$attrs`; it must never assign it.** moddle defines
+`$attrs` on `Base` with only a getter, so `businessObject.$attrs = …` throws *"Cannot
+set property $attrs of #<Base> which has only a getter"*. Every element it had been
+used on happened to have a writable own property until a complex gateway came along;
+the symptom was Apply failing with a **clean console** (the error went to a toast) and
+the modal left sitting over the Save button.
+
+**9. Flowable validates the DEPLOYED XML against the strict BPMN schema, and a
+violation is a 500 at publish — not a degradation.** This is a whole class of failure
+the earlier version of this skill did not mention, and M4 hit four of them:
+
+| written | refused with |
+|---|---|
+| `resultVariable` on `bpmn:scriptTask` | `Attribute 'resultVariable' is not allowed…` — it is `flowable:resultVariable` (still open as #230 for author-drawn script tasks) |
+| `scriptFormat` / `<script>` left on a `bpmn:complexGateway` | same shape — strip authoring properties from the deployed copy once they have moved |
+| a generated node appended after an `<association>` | `cvc-complex-type.2.4.a: Invalid content was found starting with element 'endEvent'` — **artifacts must come after every flow element**, so insert generated nodes before the first artifact (`AddFlowElement`) |
+| `itemSubjectRef="xsd:double"` with no `xmlns:xsd` | `UndeclaredPrefix: Cannot resolve 'xsd:double' as a QName` — a QName's prefix must be declared, and no studio diagram carries one |
+
+None of these degrade gracefully. If an expansion writes anything into the deployed
+copy, deploy it once against a real engine before believing it.
 
 **7. Some elements are removed rather than added, and that is a real outcome.**
 Three ways so far, each with a different mechanism — pick by *why* it cannot work:
