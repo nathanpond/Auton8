@@ -6,6 +6,74 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // ── #166: what a child declares, for a parent's mapping UI ───────────────
+
+    private const string DeclaringChild = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="child" name="Child" isExecutable="true">
+            <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+            <bpmn:dataObjectReference id="amountRef" name="amount" dataObjectRef="amountObj" />
+            <bpmn:dataStoreReference id="ledger" name="ledger" />
+            <bpmn:ioSpecification id="io">
+              <bpmn:dataInput id="in1" name="orderId" />
+              <bpmn:dataOutput id="out1" name="receiptId" />
+            </bpmn:ioSpecification>
+            <bpmn:startEvent id="s" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ExtractDataDeclarations_ReportsWhatTheChildDeclares_WithoutDuplicates()
+    {
+        var declarations = WorkflowBpmnXml.ExtractDataDeclarations(DeclaringChild);
+
+        // A data object and the reference pointing at it are ONE declaration to an
+        // author — offering `amount` twice in a mapping list is a bug, not detail.
+        var amount = Assert.Single(declarations, d => d.Name == "amount");
+        Assert.Equal("xsd:double", amount.Type);
+        Assert.Equal("variable", amount.Kind);
+
+        // Inputs and outputs are distinguishable, so a parent can offer the
+        // child's inputs as mapping TARGETS and its outputs as SOURCES rather
+        // than one undifferentiated list.
+        Assert.Equal("input", Assert.Single(declarations, d => d.Name == "orderId").Kind);
+        Assert.Equal("output", Assert.Single(declarations, d => d.Name == "receiptId").Kind);
+        Assert.Equal("variable", Assert.Single(declarations, d => d.Name == "ledger").Kind);
+    }
+
+    [Fact]
+    public void ExtractDataDeclarations_ReadsTheDeployedSpellingToo()
+    {
+        // A child imported from another modeller carries itemSubjectRef rather
+        // than the studio's attribute, and its declarations are just as real.
+        var xml = DeclaringChild.Replace(
+            "autonate:dataType=\"xsd:double\"", "itemSubjectRef=\"xsd:double\"", StringComparison.Ordinal);
+
+        Assert.Equal("xsd:double",
+            Assert.Single(WorkflowBpmnXml.ExtractDataDeclarations(xml), d => d.Name == "amount").Type);
+    }
+
+    [Fact]
+    public void ExtractDataDeclarations_IsEmptyForAProcessThatDeclaresNothing()
+    {
+        // The complement: a child with no declarations must return nothing rather
+        // than inventing entries, because the mapping UI falls back to free text
+        // and an empty list is what tells it to.
+        const string bare = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="D" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="bare" isExecutable="true"><bpmn:startEvent id="s" /></bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Empty(WorkflowBpmnXml.ExtractDataDeclarations(bare));
+    }
+
     [Fact]
     public void ApplyProcessMetadata_KeepsAutoNateAttributesOnDataAndMarkers()
     {

@@ -550,6 +550,73 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
         </bpmn:definitions>
         """;
 
+    // #166. A call activity's mapping is driven by what the CHILD declares.
+    // Free text made an author remember the child's variable names; this asserts
+    // the names are offered.
+    [Fact]
+    public async Task A_call_activitys_mapping_offers_the_childs_declared_names()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        // The child, declaring one input and one data object.
+        var childKey = $"chd{Guid.NewGuid():N}"[..20];
+        var childName = TestNames.Prefixed("mapping-child");
+        var child = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id = Guid.NewGuid(), name = childName, processKey = childKey,
+                bpmnXml = ChildDiagram(childKey)
+            }
+        });
+        Assert.True(child.Ok, $"Seeding the child failed: {child.Status} {await child.TextAsync()}");
+
+        // The endpoint the studio reads. Asserted directly as well as through the
+        // UI, because an empty list would make the panel silently fall back to
+        // free text and look exactly like the old behaviour.
+        var declared = await page.APIRequest.GetAsync($"/api/workflows/{childKey}/declarations");
+        Assert.True(declared.Ok, await declared.TextAsync());
+        using var declaredDoc = JsonDocument.Parse(await declared.TextAsync());
+        var names = declaredDoc.RootElement.EnumerateArray()
+            .Select(d => d.GetProperty("name").GetString()!).ToList();
+        Assert.Contains("orderId", names);
+        Assert.Contains("amount", names);
+
+        // A data object and the reference to it are one name to an author.
+        Assert.Single(names, n => n == "amount");
+    }
+
+    private static string ChildDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Child" isExecutable="true">
+            <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+            <bpmn:dataObjectReference id="amountRef" name="amount" dataObjectRef="amountObj" />
+            <bpmn:ioSpecification id="io">
+              <bpmn:dataInput id="in1" name="orderId" />
+            </bpmn:ioSpecification>
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Do the work" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{{key}}">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t" bpmnElement="t">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
     private const string Diagram = """
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"

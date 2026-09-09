@@ -118,3 +118,11 @@ public sealed record class WorkflowMessageSendDeclaration(
     // True for a message end event, which must still end the process after the
     // send. Drives the shape of the expansion, not the send itself.
     bool EndsProcess);
+
+// #166. One piece of data a process declares — a data object, store, input or
+// output — with the type its author gave it.
+//
+// `Kind` distinguishes an activity's in/out contract from a plain process
+// variable, so a call activity's mapping UI can offer the child's inputs as
+// targets and its outputs as sources rather than one undifferentiated list.
+public sealed record class WorkflowDataDeclaration(string Name, string? Type, string Kind);

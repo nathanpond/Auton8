@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
 import {
   ActionIcon,
+  Autocomplete,
   Alert,
   Box,
   Button,
@@ -40,11 +41,13 @@ import {
   WORKFLOWS_QUERY_KEY
 } from "@/hooks/useWorkflows";
 import {
+  type WorkflowDataDeclaration,
   PrepareWorkflowResponse,
   WorkflowElementSnapshot,
   markWorkflowViewed,
   prepareWorkflow,
-  saveWorkflow
+  saveWorkflow,
+  getWorkflowDeclarations
 } from "@/api/workflows";
 import {
   WorkflowDefaultVariable,
@@ -912,8 +915,10 @@ export default function WorkflowStudio() {
         type: selection.type,
         name: selection.name ?? ""
       });
-    } else {
     }
+    // No trailing `else`: with nothing selected, clearEditors() at the top has
+    // already closed every panel. That branch used to hold nothing but the
+    // clear-calls, and removing them left an empty block behind.
   }, [clearEditors]);
 
   const onTasksConverted = useCallback(
@@ -4191,6 +4196,15 @@ function CallActivityModal({
   onApply: () => void;
   disabled: boolean;
 }) {
+  // #166. The child's declared data, so the mapping rows offer its real names.
+  // Falls back to free text when the child declares nothing — which is most
+  // children today, and must keep working exactly as it did.
+  const { data: childDeclarations = [] } = useQuery<WorkflowDataDeclaration[]>({
+    queryKey: ["workflow-declarations", editor.calledElement],
+    queryFn: ({ signal }) => getWorkflowDeclarations(editor.calledElement, signal),
+    enabled: editor.calledElement.length > 0
+  });
+
   const { data: workflows = [], isLoading } = useWorkflows();
 
   const choices = workflows.filter(
@@ -4200,11 +4214,23 @@ function CallActivityModal({
     editor.calledElement.length > 0 &&
     !choices.some((w) => w.processKey === editor.calledElement);
 
+  // The child's declarations, its own kind first so the useful names are at the
+  // top, then everything else it declares. De-duplicated because a data object
+  // and the reference to it are one name to an author.
+  const childNames = (preferred: "input" | "output") => [
+    ...new Set([
+      ...childDeclarations.filter((d) => d.kind === preferred).map((d) => d.name),
+      ...childDeclarations.filter((d) => d.kind === "variable").map((d) => d.name)
+    ])
+  ];
+
   const renderMappings = (
     label: string,
     hint: string,
     rows: VariableMapping[],
-    onRows: (next: VariableMapping[]) => void
+    onRows: (next: VariableMapping[]) => void,
+    sourceSuggestions: string[],
+    targetSuggestions: string[]
   ) => (
     <Box>
       <Text size="sm" fw={500}>{label}</Text>
@@ -4212,23 +4238,29 @@ function CallActivityModal({
       <Stack gap="xs">
         {rows.map((row, index) => (
           <Group key={index} gap="xs" wrap="nowrap">
-            <input
-              className="form-control"
+            {/* Autocomplete, not Select: the child's declarations are a
+                suggestion, not a closed set. A parent may legitimately map into
+                a variable the child sets in a script and never declared, and a
+                closed list would make that unauthorable. `form-control` was a
+                ColorAdmin leftover — that stylesheet is long gone, so these were
+                unstyled inputs in a Mantine app. */}
+            <Autocomplete
               aria-label={`${label} source ${index + 1}`}
               value={row.source}
+              data={sourceSuggestions}
               placeholder="from"
-              onChange={(e) =>
-                onRows(rows.map((r, i) => (i === index ? { ...r, source: e.target.value } : r)))
+              onChange={(value) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, source: value } : r)))
               }
             />
             <Text size="sm" c="dimmed">→</Text>
-            <input
-              className="form-control"
+            <Autocomplete
               aria-label={`${label} target ${index + 1}`}
               value={row.target}
+              data={targetSuggestions}
               placeholder="to"
-              onChange={(e) =>
-                onRows(rows.map((r, i) => (i === index ? { ...r, target: e.target.value } : r)))
+              onChange={(value) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, target: value } : r)))
               }
             />
             <Button
@@ -4324,18 +4356,26 @@ function CallActivityModal({
           )}
         </label>
 
+        {/* Sending IN, the target is a name inside the child: its declared inputs
+            first, then anything else it declares. Bringing BACK, the source is a
+            name inside the child — its outputs first — and the target is a name
+            here, which this diagram's own declarations can suggest. */}
         {renderMappings(
           "Send in",
           "Variables from this workflow, and the name each arrives under in the other one.",
           editor.inputs,
-          (inputs) => onChange({ ...editor, inputs })
+          (inputs) => onChange({ ...editor, inputs }),
+          [],
+          childNames("input")
         )}
 
         {renderMappings(
           "Bring back",
           "Variables from the other workflow, and the name each returns under here.",
           editor.outputs,
-          (outputs) => onChange({ ...editor, outputs })
+          (outputs) => onChange({ ...editor, outputs }),
+          childNames("output"),
+          []
         )}
 
         <Group justify="flex-end" gap="xs">

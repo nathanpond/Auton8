@@ -405,6 +405,76 @@ public static partial class WorkflowBpmnXml
     /// <summary>Where an authored completion condition lives in the stored diagram (#159/#163).</summary>
     internal const string CompletionConditionAttribute = "completionCondition";
 
+    /// <summary>
+    /// The data a process declares: its data objects, stores, inputs and outputs
+    /// with their declared types (#166).
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a call activity's mapping concrete rather than
+    /// free-text — a parent offers the child's declarations as targets instead of
+    /// asking an author to remember them. It reads the STORED spelling
+    /// (`autonate:dataType`) as well as the deployed one (`itemSubjectRef`), so it
+    /// works whether the child was authored here or imported.
+    /// </remarks>
+    public static IReadOnlyList<WorkflowDataDeclaration> ExtractDataDeclarations(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return [];
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return [];
+        }
+
+        var byName = new Dictionary<string, WorkflowDataDeclaration>(StringComparer.Ordinal);
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+            if (element.Name.LocalName is not ("dataObject" or "dataObjectReference"
+                or "dataStoreReference" or "dataInput" or "dataOutput"))
+            {
+                continue;
+            }
+
+            // A reference carries the author's name; the object behind it carries
+            // the same one. Keyed by name so the pair collapses to one entry
+            // rather than offering an author the same variable twice.
+            var name = Trimmed(element.Attribute("name")?.Value)
+                       ?? Trimmed(element.Attribute("id")?.Value);
+            if (name is null) continue;
+
+            var declaredType =
+                Trimmed(element.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value)
+                ?? Trimmed(element.Attribute("itemSubjectRef")?.Value);
+
+            var kind = element.Name.LocalName switch
+            {
+                "dataInput" => "input",
+                "dataOutput" => "output",
+                _ => "variable"
+            };
+
+            if (byName.TryGetValue(name, out var existing))
+            {
+                // Keep whichever spelling actually declared a type.
+                if (existing.Type is null && declaredType is not null)
+                {
+                    byName[name] = existing with { Type = declaredType };
+                }
+                continue;
+            }
+
+            byName[name] = new WorkflowDataDeclaration(name, declaredType, kind);
+        }
+
+        return byName.Values.OrderBy(d => d.Name, StringComparer.Ordinal).ToArray();
+    }
+
     /// <summary>Where a data object's declared type lives in the stored diagram (#166).</summary>
     internal const string DataObjectTypeAttribute = "dataType";
 

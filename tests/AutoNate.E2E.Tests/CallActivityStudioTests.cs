@@ -53,12 +53,17 @@ public sealed class CallActivityStudioTests : E2ETestBase
         await picker.SelectOptionAsync(new SelectOptionValue { Value = childKey });
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Add send in", Exact = false }).ClickAsync();
-        await page.GetByLabel("Send in source 1", new() { Exact = true }).FillAsync("orderId");
-        await page.GetByLabel("Send in target 1", new() { Exact = true }).FillAsync("childOrderId");
+        // #166 made these Autocompletes, offering the child's declared names. They
+        // are still free text — a parent may map into a variable the child sets in
+        // a script and never declared — so filling them works exactly as before,
+        // but the locator has to name the combobox: an Autocomplete's listbox
+        // carries the same accessible name as its input.
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Send in source 1", Exact = true }).FillAsync("orderId");
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Send in target 1", Exact = true }).FillAsync("childOrderId");
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Add bring back", Exact = false }).ClickAsync();
-        await page.GetByLabel("Bring back source 1", new() { Exact = true }).FillAsync("childOrderId");
-        await page.GetByLabel("Bring back target 1", new() { Exact = true }).FillAsync("returned");
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Bring back source 1", Exact = true }).FillAsync("childOrderId");
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Bring back target 1", Exact = true }).FillAsync("returned");
 
         await Assertions.Expect(picker).ToHaveValueAsync(childKey, new() { Timeout = 5_000 });
         await page.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
@@ -96,9 +101,9 @@ public sealed class CallActivityStudioTests : E2ETestBase
         await OpenConfigureAsync(page, "Call_1");
         await Assertions.Expect(page.GetByLabel("Workflow to run", new() { Exact = true }))
             .ToHaveValueAsync(childKey, new() { Timeout = 10_000 });
-        await Assertions.Expect(page.GetByLabel("Send in source 1", new() { Exact = true }))
+        await Assertions.Expect(page.GetByRole(AriaRole.Combobox, new() { Name = "Send in source 1", Exact = true }))
             .ToHaveValueAsync("orderId");
-        await Assertions.Expect(page.GetByLabel("Bring back target 1", new() { Exact = true }))
+        await Assertions.Expect(page.GetByRole(AriaRole.Combobox, new() { Name = "Bring back target 1", Exact = true }))
             .ToHaveValueAsync("returned");
     }
 

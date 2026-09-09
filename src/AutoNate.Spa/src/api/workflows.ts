@@ -153,3 +153,24 @@ function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response;
   return response?.status === 404;
 }
+
+// #166. What a child process declares, so a call activity's mapping offers real
+// targets instead of a free-text box the author must remember names for.
+export type WorkflowDataDeclaration = {
+  name: string;
+  type: string | null;
+  // "input" and "output" are an activity's contract; "variable" is a data object
+  // or store. A parent maps INTO the child's inputs and OUT OF its outputs.
+  kind: "input" | "output" | "variable";
+};
+
+export async function getWorkflowDeclarations(
+  processKey: string,
+  signal?: AbortSignal
+): Promise<WorkflowDataDeclaration[]> {
+  const { data } = await api.get<WorkflowDataDeclaration[]>(
+    `/api/workflows/${encodeURIComponent(processKey)}/declarations`,
+    { signal }
+  );
+  return data;
+}

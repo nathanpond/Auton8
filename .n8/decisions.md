@@ -4050,3 +4050,28 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   **The lint ratchet went DOWN, 103 → 100.** Four dead imports removed rather than
   raising the budget; the skill's quoted number follows.
   **Issue:** #159, #163, #166, #234
+
+- **#166 (mapping): a call activity now offers the child's declared names.**
+  `WorkflowBpmnXml.ExtractDataDeclarations` reads a process's data objects,
+  stores, inputs and outputs — in BOTH spellings, the studio's `autonate:dataType`
+  and an imported diagram's `itemSubjectRef` — and a gated
+  `GET /api/workflows/{processKey}/declarations` serves them. A data object and
+  the reference pointing at it collapse to ONE entry, because offering an author
+  `amount` twice is a bug rather than detail.
+  **Autocomplete, not Select.** The declarations are a suggestion, not a closed
+  set: a parent may legitimately map into a variable the child sets in a script
+  and never declared, and a closed list would make that unauthorable. A child that
+  declares nothing falls back to exactly the free text it had before.
+  **Rule 1 — the mapping rows were raw `<input className="form-control">`.**
+  ColorAdmin is long gone, so those were unstyled inputs in a Mantine app. Now
+  Mantine controls. **36 more `form-control` occurrences remain in
+  WorkflowStudio.tsx** — out of this story's scope, filed rather than swept.
+  **Rule 1 — my own clearEditors refactor left an empty `else {}`.** The last
+  branch's body was nothing but clear-calls; removing them left the block behind,
+  and it was the one warning that pushed the lint ratchet over. Removed, and the
+  ratchet holds at 100.
+  **One existing test retargeted, deliberately:** an Autocomplete renders its
+  listbox with the same accessible name as its input, so `GetByLabel` became
+  ambiguous. `CallActivityStudioTests` now names the combobox by role — a more
+  precise locator for a control that genuinely changed type, not a loosened one.
+  **Issue:** #166

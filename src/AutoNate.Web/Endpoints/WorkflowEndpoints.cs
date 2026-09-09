@@ -48,6 +48,25 @@ public static class WorkflowEndpoints
             return Results.Ok(augmented);
         }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
 
+        // #166. What a child process declares, so a parent's call activity can
+        // offer real mapping targets instead of a free-text box the author has to
+        // remember the child's variable names for.
+        group.MapGet("/{processKey}/declarations", async (
+            string processKey,
+            IWorkflowModelStore store,
+            CancellationToken cancellationToken) =>
+        {
+            var model = await store.GetByProcessKeyAsync(processKey, cancellationToken);
+            if (model is null)
+            {
+                // Not an error: a parent may name a child that is not published
+                // yet, and publish already refuses that with a better message.
+                return Results.Ok(Array.Empty<WorkflowDataDeclaration>());
+            }
+
+            return Results.Ok(WorkflowBpmnXml.ExtractDataDeclarations(model.BpmnXml));
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
+
         group.MapGet("/latest", async (
             IWorkflowModelStore store, IFlowableClient flowable,
             IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
