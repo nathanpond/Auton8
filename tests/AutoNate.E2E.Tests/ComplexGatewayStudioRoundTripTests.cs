@@ -272,6 +272,92 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
         </bpmn:definitions>
         """;
 
+    // #166. A data object declares a typed process variable — verified against
+    // the engine, which creates a real variable from it. The declaration is only
+    // worth anything if it survives the modeller, and bpmn-js drops what its
+    // moddle does not model, so this asserts rather than assumes.
+    [Fact]
+    public async Task A_data_object_declaration_and_its_type_survive_the_studio()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("data-object-round-trip");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "data_object_rt", bpmnXml = DataObjectDiagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        await Assertions.Expect(page.Locator("[data-element-id='s']"))
+            .ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(3_000);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        var parsed = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        // The declaration itself.
+        var dataObject = Assert.Single(parsed.Descendants(bpmn + "dataObject"));
+        Assert.Equal("amount", dataObject.Attribute("name")?.Value);
+
+        // And its TYPE, which is the half a modeller is most likely to drop —
+        // itemSubjectRef is what makes the declaration typed rather than a name.
+        // The type is stored in an autonate: attribute, and that is forced by two
+        // findings that do not overlap:
+        //
+        //   itemSubjectRef="xsd:double"   engine types it double, bpmn-js DROPS it
+        //                                 (moddle resolves it as a reference, and
+        //                                 a bare QName names nothing)
+        //   itemSubjectRef="ItemDouble"   bpmn-js keeps it, engine IGNORES the
+        //                                 type -- every variable came back string
+        //
+        // So neither BPMN spelling both survives the studio and types the
+        // variable. The attribute survives, and publish rewrites the deployed
+        // copy into the bare-QName form the engine understands.
+        System.Xml.Linq.XNamespace autonate = "http://autonate.dev/workflows";
+        Assert.Equal("xsd:double", dataObject.Attribute(autonate + "dataType")?.Value);
+    }
+
+    private const string DataObjectDiagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="data_object_rt" name="Amounts" isExecutable="true">
+            <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Check the amount" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="data_object_rt">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t1" bpmnElement="t1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
     private const string Diagram = """
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"

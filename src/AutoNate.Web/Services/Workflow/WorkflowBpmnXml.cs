@@ -165,6 +165,7 @@ public static partial class WorkflowBpmnXml
         ExpandMessageSendEvents(document);
         ExpandSignalEndEvents(document);
         ExpandCompensationEndEvents(document);
+        ExpandDataObjectTypes(document);
         ExpandComplexGateways(document);
         ApplySignalScopes(document);
 
@@ -297,6 +298,69 @@ public static partial class WorkflowBpmnXml
 
             AddShapeBeside(document, elementId, terminalId);
         }
+    }
+
+    // #166. A data object's declared type, rewritten into the form the engine
+    // reads.
+    //
+    // Two findings that do not overlap forced this, both verified against 8.0.0
+    // and bpmn-js:
+    //
+    //   itemSubjectRef="xsd:double"  the engine types the variable `double`, but
+    //                                bpmn-js DROPS the attribute on save —
+    //                                moddle resolves itemSubjectRef as a
+    //                                reference and a bare QName names nothing in
+    //                                the document.
+    //   itemSubjectRef="ItemDouble"  bpmn-js keeps it (the reference resolves),
+    //                                but the engine IGNORES the indirection —
+    //                                every declared variable came back `string`.
+    //
+    // So no single BPMN spelling both survives the modeller and types the
+    // variable. The authored diagram keeps `autonate:dataType`, which survives,
+    // and the DEPLOYED copy gets the bare QName, which works — the same split
+    // #112, #156, #115 and #218 already use.
+    private static void ExpandDataObjectTypes(XDocument document)
+    {
+        foreach (var dataObject in document.Descendants(BpmnNamespace + "dataObject"))
+        {
+            var declaredType = Trimmed(
+                dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value);
+            if (declaredType is null) continue;
+
+            // An author who hand-wrote itemSubjectRef meant it; do not overwrite.
+            if (dataObject.Attribute("itemSubjectRef") is null)
+            {
+                dataObject.SetAttributeValue("itemSubjectRef", declaredType);
+                EnsureTypePrefixDeclared(document, declaredType);
+            }
+
+            // Stripped from the deployed copy: it has done its job, and the
+            // engine has no use for it.
+            dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Remove();
+        }
+    }
+
+    /// <summary>Where a data object's declared type lives in the stored diagram (#166).</summary>
+    internal const string DataObjectTypeAttribute = "dataType";
+
+    private static readonly XNamespace XsdNamespace = "http://www.w3.org/2001/XMLSchema";
+
+    // itemSubjectRef holds a QName, so its prefix has to be DECLARED on the
+    // deployed document or the deployment is refused outright:
+    //   UndeclaredPrefix: Cannot resolve 'xsd:double' as a QName: the prefix
+    //   'xsd' is not declared.
+    // A studio-authored diagram carries no xmlns:xsd — nothing in the modeller
+    // has any reason to add one — so writing the type without this makes every
+    // diagram with a typed data object fail at publish.
+    private static void EnsureTypePrefixDeclared(XDocument document, string declaredType)
+    {
+        if (!declaredType.StartsWith("xsd:", StringComparison.Ordinal)) return;
+
+        var definitions = document.Root;
+        if (definitions is null) return;
+        if (definitions.Attribute(XNamespace.Xmlns + "xsd") is not null) return;
+
+        definitions.SetAttributeValue(XNamespace.Xmlns + "xsd", XsdNamespace.NamespaceName);
     }
 
     // #115. A compensation END event ends the process and compensates NOTHING.

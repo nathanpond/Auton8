@@ -6,6 +6,121 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    [Fact]
+    public void ExpandForDeployment_RewritesADataObjectsTypeIntoTheFormTheEngineReads()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="amounts" name="Amounts" isExecutable="true">
+                <bpmn:dataObject id="amountObj" name="amount" autonate:dataType="xsd:double" />
+                <bpmn:startEvent id="s" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var dataObject = document.Descendants(Bpmn218 + "dataObject").Single();
+
+        // The bare QName is the ONLY form the engine types the variable from —
+        // an itemDefinition indirection deploys and silently produces `string`.
+        Assert.Equal("xsd:double", dataObject.Attribute("itemSubjectRef")?.Value);
+
+        // And the authoring attribute is gone from the deployed copy, having
+        // done its job.
+        Assert.Null(dataObject.Attribute(Autonate218 + "dataType"));
+
+        // And the xsd prefix is DECLARED. itemSubjectRef holds a QName, so
+        // without this the deployment is refused outright —
+        //   UndeclaredPrefix: Cannot resolve 'xsd:double' as a QName
+        // — and a studio-authored diagram never carries xmlns:xsd of its own.
+        Assert.Equal("http://www.w3.org/2001/XMLSchema",
+            document.Root!.Attribute(XNamespace.Xmlns + "xsd")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_DoesNotOverwriteAHandWrittenItemSubjectRef()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="amounts" isExecutable="true">
+                <bpmn:dataObject id="a" name="amount"
+                                 itemSubjectRef="xsd:string" autonate:dataType="xsd:double" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+
+        // An imported diagram that already carries the engine's own spelling
+        // meant it. Overwriting would change what someone else's diagram does.
+        Assert.Equal("xsd:string",
+            document.Descendants(Bpmn218 + "dataObject").Single().Attribute("itemSubjectRef")?.Value);
+    }
+
+    // ── #166: data objects declare variables ─────────────────────────────────
+    //
+    // Verified against Flowable 8.0.0 before these were written: a <dataObject>
+    // creates a REAL process variable with its declared type (`amount = 42.5,
+    // type=double`), and a condition reads it. So these are declarations, not
+    // decoration — which is what the story turns on.
+
+    // Held apart from the interpolated literal: an EL expression is all braces,
+    // and escaping them inside a raw interpolated string is how this file first
+    // failed to compile.
+    private const string Condition166 = "${amount > 100}";
+
+    private static string WithDataObject(bool declared) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="amounts" name="Amounts" isExecutable="true">
+            {(declared
+              ? "<bpmn:dataObject id=\"amountObj\" name=\"amount\" itemSubjectRef=\"xsd:double\" />"
+              : "")}
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="g" />
+            <bpmn:exclusiveGateway id="g" default="fno" />
+            <bpmn:sequenceFlow id="fyes" sourceRef="g" targetRef="tyes">
+              <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">{Condition166}</bpmn:conditionExpression>
+            </bpmn:sequenceFlow>
+            <bpmn:sequenceFlow id="fno" sourceRef="g" targetRef="tno" />
+            <bpmn:userTask id="tyes" name="Big" />
+            <bpmn:userTask id="tno" name="Small" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void A_condition_reading_a_declared_data_object_is_not_warned_about()
+    {
+        // This is the link that makes a declaration worth making. Without it the
+        // data object is a drawable box, which is what it was.
+        var result = WorkflowBpmnXml.ValidateProcess(WithDataObject(declared: true));
+
+        Assert.DoesNotContain(result.Warnings, w =>
+            w.Contains("amount", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_same_condition_is_warned_about_when_the_declaration_is_removed()
+    {
+        // The complement, and the pair is what makes either half meaningful: a
+        // validator that never warns would satisfy the test above. Synthesising
+        // the failure is removing the declaration and nothing else.
+        var result = WorkflowBpmnXml.ValidateProcess(WithDataObject(declared: false));
+
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("amount", StringComparison.Ordinal));
+    }
+
     // ── #163: ad-hoc subprocess ──────────────────────────────────────────────
 
     private static string Adhoc(string? completionCondition) => $"""

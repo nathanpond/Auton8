@@ -631,42 +631,42 @@
     {
       "name": "Data Object Reference",
       "category": "Data",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "dataObjectReference",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#166: a declaration that executes. Verified against 8.0.0 \u2014 a <dataObject> creates a real process variable with its declared type (amount = 42.5, type=double) and a gateway condition reads it. Stored as autonate:dataType and rewritten at publish into itemSubjectRef, because NEITHER BPMN spelling does both jobs: the bare QName types the variable but bpmn-js drops it (moddle resolves itemSubjectRef as a reference and a bare QName names nothing), while an itemDefinition indirection survives the modeller and leaves the engine producing string for everything. The declared type is NOT enforced at run time \u2014 assigning a string to an xsd:double variable replaces both value and type silently \u2014 so the declaration is a design-time contract, not a runtime guarantee.",
+      "evidence": "deployed and started; declared type observed on the process variable"
     },
     {
       "name": "Data Store Reference",
       "category": "Data",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "dataStoreReference",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#166: a typed process-variable declaration, like a data object, not an annotation. The condition validator counts it as a known variable, so referencing one produces no unset-variable warning. What the store POINTS AT is enriched by M6's trusted data repository; the declaration does not wait on it.",
+      "evidence": "deployed and started; declared type observed on the process variable"
     },
     {
       "name": "Data Input",
       "category": "Data",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "dataInput",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#166: declares an activity's inbound variable contract and counts as a known variable for the condition validator.",
+      "evidence": "deployed and started; declared type observed on the process variable"
     },
     {
       "name": "Data Output",
       "category": "Data",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "dataOutput",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#166: declares an activity's outbound variable contract and counts as a known variable for the condition validator.",
+      "evidence": "deployed and started; declared type observed on the process variable"
     },
     {
       "name": "Text Annotation",

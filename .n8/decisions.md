@@ -3891,3 +3891,40 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   for authoring the completion condition and the `ordering` attribute. Running a
   case works end to end; authoring one still needs the XML.
   **Issue:** #163
+
+- **#166: a data object is a real declaration, and NEITHER BPMN spelling of its
+  type works.** Verified against 8.0.0 first: a `<dataObject>` creates a genuine
+  process variable with its declared type (`amount = 42.5, type=double`) and a
+  gateway condition reads it — so the re-planned premise (declarations, not
+  annotations) holds.
+  **The type is the problem, and the two options are mutually exclusive:**
+  `itemSubjectRef="xsd:double"` types the variable correctly but **bpmn-js drops
+  it** (moddle resolves `itemSubjectRef` as a reference, and a bare QName names
+  nothing in the document); `itemSubjectRef="ItemDouble"` pointing at a real
+  `<itemDefinition>` **survives the modeller** but the **engine ignores the
+  indirection** and every declared variable comes back `string`. Both measured.
+  So the type is stored as `autonate:dataType` — the `$attrs` route that survives —
+  and publish rewrites the deployed copy to the bare QName, the same split #112,
+  #156, #115 and #218 already use. The rewrite must also DECLARE the `xsd` prefix,
+  or the deployment is refused (`UndeclaredPrefix: Cannot resolve 'xsd:double' as
+  a QName`) — a studio diagram carries no `xmlns:xsd` and nothing in the modeller
+  would add one.
+  **Documented, not enforced: the declared type means nothing at run time.**
+  Assigning a string to an `xsd:double` variable replaces both the value and the
+  type silently — the engine neither coerces nor fails, which is a third outcome
+  the AC did not anticipate. The declaration is a design-time contract: it seeds
+  the variable and names it for the validator and the author, and guarantees
+  nothing about what is stored later. Enforcing it would have to be Auton8's job
+  and is a bigger decision than this story.
+  **Reference integrity reads as already satisfied.** "Deleting a data object a
+  condition references is warned about, naming what references it" is exactly the
+  existing unset-variable warning: remove the declaration and the condition's
+  variable is warned about by name. Both directions are now tested. Building a
+  second mechanism for it would duplicate the first.
+  **Not delivered:** declared variables offered in condition editors,
+  multi-instance collection selection and script help; and call-activity mapping
+  driven by the child's declarations. There is NO variable-suggestion machinery in
+  the SPA to wire into — those are a feature to build, not a wiring job, and
+  half-building UI at the tail of a long run is how a story reports done with a
+  placeholder inside it.
+  **Issue:** #166
