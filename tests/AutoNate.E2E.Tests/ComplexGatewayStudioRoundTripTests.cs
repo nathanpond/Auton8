@@ -179,6 +179,99 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
             document.RootElement.GetProperty("bpmnXml").GetString()!, StringComparison.Ordinal);
     }
 
+    // #115. Compensation is authored by drawing an ASSOCIATION from a
+    // compensation boundary event to its handler. If bpmn-js drops that on save
+    // — as it drops a <bpmn:script> child on a complex gateway — then the handler
+    // is unreachable and compensation silently does nothing, which is the exact
+    // failure #115 exists to fix. Asserted rather than assumed.
+    [Fact]
+    public async Task A_compensation_association_survives_the_studio()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed("compensation-round-trip");
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = "compensation_rt", bpmnXml = CompensationDiagram }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        await Assertions.Expect(page.Locator("[data-element-id='b1']"))
+            .ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.WaitForTimeoutAsync(3_000);
+
+        var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        using var document = JsonDocument.Parse(await stored.TextAsync());
+        var xml = document.RootElement.GetProperty("bpmnXml").GetString()!;
+
+        var parsed = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        // The association is the link. Without it the handler is a stray node.
+        var association = Assert.Single(parsed.Descendants(bpmn + "association"));
+        Assert.Equal("b1", association.Attribute("sourceRef")?.Value);
+        Assert.Equal("h1", association.Attribute("targetRef")?.Value);
+
+        // And the marker that makes the handler a handler rather than an
+        // unreachable step.
+        Assert.Equal("true", parsed.Descendants()
+            .Single(e => e.Attribute("id")?.Value == "h1")
+            .Attribute("isForCompensation")?.Value);
+    }
+
+    private const string CompensationDiagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="compensation_rt" name="Undo" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="done" />
+            <bpmn:endEvent id="done" name="Undo everything">
+              <bpmn:compensateEventDefinition />
+            </bpmn:endEvent>
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:serviceTask id="h1" name="Refund" isForCompensation="true" />
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="compensation_rt">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_t1" bpmnElement="t1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_b1" bpmnElement="b1">
+                <dc:Bounds x="280" y="142" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_h1" bpmnElement="h1">
+                <dc:Bounds x="260" y="220" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_done" bpmnElement="done">
+                <dc:Bounds x="380" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
+
     private const string Diagram = """
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"

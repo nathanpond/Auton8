@@ -6,6 +6,178 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // #115/#225. The guard for a regression that already happened once and that
+    // nothing caught: #225 pointed publish at ValidateProcess, which did not
+    // contain the promoted structure rules, so three of them silently stopped
+    // running — among them #114's uncaught error code, whose runtime consequence
+    // is Flowable destroying the instance with a 500 and no history.
+    //
+    // Asserting the two sets agree, rather than listing the rules, is what makes
+    // this survive the next rule being added to either one.
+    [Fact]
+    public void ValidateProcess_IncludesEveryRulePromotedToPublish()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:error id="Err_1" errorCode="NOBODY_CATCHES_THIS" name="Orphan" />
+              <bpmn:process id="orphan" name="Orphan" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="boom" />
+                <bpmn:endEvent id="boom" name="Give up">
+                  <bpmn:errorEventDefinition errorRef="Err_1" />
+                </bpmn:endEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var promoted = WorkflowBpmnXml.ValidateStructureForPublish(xml);
+        var full = WorkflowBpmnXml.ValidateProcess(xml).Errors;
+
+        // The fixture has to actually trip a promoted rule, or the assertion
+        // below is comparing two empty sets and proves nothing.
+        Assert.NotEmpty(promoted);
+        Assert.All(promoted, e => Assert.Contains(e, full));
+    }
+
+    // ── #115: compensation ───────────────────────────────────────────────────
+
+    private const string CompensationXml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="undo" name="Undo" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:task id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="done" />
+            <bpmn:endEvent id="done" name="Undo everything">
+              <bpmn:compensateEventDefinition />
+            </bpmn:endEvent>
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:task id="h1" name="Refund" isForCompensation="true" />
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ExpandForDeployment_TurnsACompensationEndEvent_IntoAThrowFollowedByAnEnd()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(CompensationXml));
+
+        // Verified against Flowable 8.0.0: the END form ends the process and runs
+        // NO handler — the recorded trail came back empty. The intermediate throw
+        // form works, waits, and compensates in reverse order. So the deployed
+        // copy carries the form the engine actually runs.
+        Assert.Empty(document.Descendants(Bpmn218 + "endEvent")
+            .Where(e => e.Elements(Bpmn218 + "compensateEventDefinition").Any()));
+
+        var thrown = Assert.Single(document.Descendants(Bpmn218 + "intermediateThrowEvent"));
+        // The ORIGINAL id survives, which is what keeps every inbound flow and
+        // diagram shape pointing at it valid.
+        Assert.Equal("done", thrown.Attribute("id")?.Value);
+        Assert.NotNull(thrown.Element(Bpmn218 + "compensateEventDefinition"));
+
+        // And the process still terminates, through a generated none end event.
+        var terminal = Assert.Single(document.Descendants(Bpmn218 + "endEvent"));
+        Assert.Equal("done_end", terminal.Attribute("id")?.Value);
+        Assert.Empty(terminal.Elements());
+
+        var flow = document.Descendants(Bpmn218 + "sequenceFlow")
+            .Single(f => f.Attribute("id")?.Value == "done_end_flow");
+        Assert.Equal("done", flow.Attribute("sourceRef")?.Value);
+        Assert.Equal("done_end", flow.Attribute("targetRef")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_PutsGeneratedNodesBeforeTheDiagramsArtifacts()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(CompensationXml));
+        var process = document.Descendants(Bpmn218 + "process").Single();
+
+        var children = process.Elements().Select(e => e.Name.LocalName).ToList();
+        var lastFlowElement = children.FindLastIndex(n => n != "association");
+        var firstArtifact = children.IndexOf("association");
+
+        // The strict BPMN schema puts artifacts after every flow element, and
+        // Flowable validates against it — appending the generated end event after
+        // the associations is refused outright:
+        //   cvc-complex-type.2.4.a: Invalid content was found starting with
+        //   element 'endEvent'. One of '{artifact, ...}' is expected.
+        // A 500 at publish for every diagram with a compensation association.
+        Assert.True(lastFlowElement < firstArtifact,
+            $"Generated nodes must precede artifacts; order was: {string.Join(", ", children)}");
+    }
+
+    [Fact]
+    public void ExpandForDeployment_IsIdempotent_ForCompensationEndEvents()
+    {
+        var twice = WorkflowBpmnXml.ExpandForDeployment(
+            WorkflowBpmnXml.ExpandForDeployment(CompensationXml));
+        var document = XDocument.Parse(twice);
+
+        // Publishing twice must not chain a second terminal event onto the first.
+        Assert.Single(document.Descendants(Bpmn218 + "endEvent"));
+        Assert.Single(document.Descendants(Bpmn218 + "intermediateThrowEvent"));
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesTheHandlerAndItsAssociationAlone()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(CompensationXml));
+
+        // The association IS the link from boundary event to handler. An
+        // expansion that dropped or rewired it would leave a handler nothing can
+        // reach, and the process would compensate silently nothing at all —
+        // which is the exact failure being fixed.
+        var association = Assert.Single(document.Descendants(Bpmn218 + "association"));
+        Assert.Equal("b1", association.Attribute("sourceRef")?.Value);
+        Assert.Equal("h1", association.Attribute("targetRef")?.Value);
+
+        var handler = document.Descendants(Bpmn218 + "task")
+            .Single(t => t.Attribute("id")?.Value == "h1");
+        Assert.Equal("true", handler.Attribute("isForCompensation")?.Value);
+    }
+
+    [Fact]
+    public void ValidateProcess_RefusesACompensationHandlerThatWaits()
+    {
+        // Refused, not warned. Flowable cannot run a waiting compensation
+        // handler: triggered during a user task's completion it fails the
+        // engine's own transaction with an act_fk_exe_parent violation, and the
+        // task can then never be completed. Reproduced against a bare Flowable
+        // and isolated — only making the handlers automatic fixes it.
+        var xml = CompensationXml.Replace(
+            "<bpmn:task id=\"h1\" name=\"Refund\" isForCompensation=\"true\" />",
+            "<bpmn:userTask id=\"h1\" name=\"Refund\" isForCompensation=\"true\" />",
+            StringComparison.Ordinal);
+        Assert.Contains("userTask", xml, StringComparison.Ordinal);
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        var error = Assert.Single(result.Errors, e => e.Contains("Refund", StringComparison.Ordinal));
+        // The message has to say what to do instead, because "not supported"
+        // leaves an author with a diagram and no way forward.
+        Assert.Contains("automatic step", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsAnAutomaticCompensationHandler()
+    {
+        // The complement, and the one that matters: a rule that refused every
+        // handler would satisfy the test above and make compensation unusable.
+        // Verified against the engine — automatic handlers run correctly, in
+        // reverse order, and the throw waits for them.
+        var result = WorkflowBpmnXml.ValidateProcess(CompensationXml);
+
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Contains("compensation handler", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ── #218: the complex gateway expansion ──────────────────────────────────
     //
     // CI excludes engine-backed specs, so these carry the expansion's guarantees

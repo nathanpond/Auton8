@@ -261,12 +261,12 @@
     {
       "name": "Intermediate Throw (Compensation)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "compensate",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#115: verified against 8.0.0. Compensation runs the handlers for activities that actually completed, in REVERSE order, and the throw waits for them before the process continues \u2014 measured with a recorded trail ('h3;h1;after;'), not by reading timestamps. A handler failure propagates rather than being swallowed.",
+      "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
       "name": "Intermediate Catch (Message)",
@@ -381,12 +381,12 @@
     {
       "name": "Compensation Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#115: the boundary event plus a <association> to an activity marked isForCompensation is what Flowable runs. Only activities that completed are compensated \u2014 an activity skipped by a gateway never had its handler run. A handler that WAITS (a user task or receive task) is refused at publish: Flowable fails its own transaction with an act_fk_exe_parent violation when such a handler is compensated during a task completion, and the task can then never be completed.",
+      "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
       "name": "Message End",
@@ -441,12 +441,12 @@
     {
       "name": "Compensation End",
       "category": "End Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "compensate",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#115: executes by publish-time expansion. The raw element ends the process and compensates NOTHING \u2014 verified, the handler trail came back empty \u2014 the same silent-decoration shape as Message End (#112) and Signal End (#156). Publish rewrites the deployed copy into an intermediate throw followed by a none end event; the authored diagram keeps the end event.",
+      "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
       "name": "Send Task",
@@ -591,12 +591,12 @@
     {
       "name": "Compensation Marker",
       "category": "Activity Markers",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "*",
       "eventDefinition": "isForCompensation",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#115: isForCompensation is what makes an activity a handler rather than a step nothing can reach. It survives the studio round trip untouched, along with the association \u2014 asserted, because bpmn-js drops what its moddle does not model.",
+      "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
       "name": "Pool / Participant",

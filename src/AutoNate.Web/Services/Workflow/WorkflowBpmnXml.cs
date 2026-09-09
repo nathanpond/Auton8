@@ -164,6 +164,7 @@ public static partial class WorkflowBpmnXml
         var document = XDocument.Parse(xml);
         ExpandMessageSendEvents(document);
         ExpandSignalEndEvents(document);
+        ExpandCompensationEndEvents(document);
         ExpandComplexGateways(document);
         ApplySignalScopes(document);
 
@@ -287,8 +288,59 @@ public static partial class WorkflowBpmnXml
             // pointing at it stays valid without rewriting one.
             endEvent.Name = BpmnNamespace + "intermediateThrowEvent";
 
-            process.Add(new XElement(BpmnNamespace + "endEvent", new XAttribute("id", terminalId)));
-            process.Add(new XElement(BpmnNamespace + "sequenceFlow",
+            AddFlowElement(process, new XElement(BpmnNamespace + "endEvent",
+                new XAttribute("id", terminalId)));
+            AddFlowElement(process, new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{elementId}_end_flow"),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", terminalId)));
+
+            AddShapeBeside(document, elementId, terminalId);
+        }
+    }
+
+    // #115. A compensation END event ends the process and compensates NOTHING.
+    //
+    // Verified against Flowable 8.0.0: a process whose only compensation trigger
+    // was `endEvent + compensateEventDefinition` ended cleanly with an empty
+    // handler trail — no handler ran. The intermediate throw form works
+    // correctly, waits for the handlers, and runs them in reverse order.
+    //
+    // This is the THIRD element in this milestone with that exact shape, after
+    // Message End (#112) and Signal End (#156): it deploys, it looks like it
+    // works, and it does nothing it exists for. The remedy is the one those two
+    // established — rewrite the deployed copy into the form the engine runs,
+    // and leave the authored diagram alone.
+    private static void ExpandCompensationEndEvents(XDocument document)
+    {
+        foreach (var endEvent in document.Descendants(BpmnNamespace + "endEvent").ToList())
+        {
+            if (endEvent.Elements(BpmnNamespace + "compensateEventDefinition").FirstOrDefault() is null)
+            {
+                continue;
+            }
+
+            var elementId = endEvent.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var process = endEvent.Parent;
+            if (process is null) continue;
+
+            var terminalId = $"{elementId}_end";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == terminalId))
+            {
+                // Publishing twice must not append a second terminal event.
+                continue;
+            }
+
+            // Keeps the original id, so every sequence flow and diagram shape
+            // pointing at it stays valid without rewriting one.
+            endEvent.Name = BpmnNamespace + "intermediateThrowEvent";
+
+            AddFlowElement(process, new XElement(BpmnNamespace + "endEvent",
+                new XAttribute("id", terminalId)));
+            AddFlowElement(process, new XElement(BpmnNamespace + "sequenceFlow",
                 new XAttribute("id", $"{elementId}_end_flow"),
                 new XAttribute("sourceRef", elementId),
                 new XAttribute("targetRef", terminalId)));
@@ -433,7 +485,7 @@ public static partial class WorkflowBpmnXml
             gateway.Element(BpmnNamespace + "script")?.Remove();
 
             gateway.AddBeforeSelf(scriptTask);
-            gateway.Parent.Add(new XElement(
+            AddFlowElement(gateway.Parent, new XElement(
                 BpmnNamespace + "sequenceFlow",
                 new XAttribute("id", $"{scriptTaskId}__flow"),
                 new XAttribute("sourceRef", scriptTaskId),
@@ -706,6 +758,34 @@ public static partial class WorkflowBpmnXml
     // with no BPMNShape would be invisible there. Cloned from the element it
     // follows and nudged along, which is close enough to be legible and cannot
     // fail on a diagram that never had DI in the first place.
+    // #115. Artifacts — associations, text annotations, groups — must come AFTER
+    // every flow element in the strict BPMN schema, and Flowable validates the
+    // deployed XML against it.
+    //
+    // Appending a generated node with `process.Add` therefore puts it in the
+    // wrong place the moment a diagram has an association, and the whole
+    // deployment is refused:
+    //   cvc-complex-type.2.4.a: Invalid content was found starting with element
+    //   'endEvent'. One of '{artifact, resourceRole, ...}' is expected.
+    //
+    // Compensation is the first expansion to meet this, because the association
+    // IS how a boundary event reaches its handler — but every expansion appends,
+    // so all of them route through here.
+    private static void AddFlowElement(XElement process, XElement flowElement)
+    {
+        var firstArtifact = process.Elements()
+            .FirstOrDefault(e => e.Name.Namespace == BpmnNamespace
+                                 && e.Name.LocalName is "association" or "textAnnotation" or "group");
+
+        if (firstArtifact is null)
+        {
+            process.Add(flowElement);
+            return;
+        }
+
+        firstArtifact.AddBeforeSelf(flowElement);
+    }
+
     private static void AddShapeBeside(XDocument document, string existingElementId, string newElementId)
     {
         var source = document.Descendants(BpmndiNamespace + "BPMNShape")
@@ -959,6 +1039,18 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
             errors.AddRange(BuildSubProcessValidationErrors(document));
+
+            // #115. The rules that used to live ONLY in ValidateStructureForPublish.
+            //
+            // #225 pointed publish at ValidateProcess, and because these were not
+            // in it, that switch silently dropped three rules — including #114's
+            // uncaught error code, whose failure mode is Flowable destroying the
+            // whole instance with a 500 and no history. Nothing failed; the
+            // promoted rules simply stopped running.
+            //
+            // One set now, so "the validation set" means one thing. Prepare gains
+            // them too, which is where an author would rather meet them anyway.
+            errors.AddRange(BuildStructureErrors(document));
             // #167: elements the studio converts away, and converted tasks nobody can do.
             errors.AddRange(BuildNonWaitingTaskErrors(document));
             errors.AddRange(BuildUncaughtThrownCodeErrors(document));
@@ -977,6 +1069,7 @@ public static partial class WorkflowBpmnXml
             var warnings = new List<string>();
             warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
+
 
             return new WorkflowBpmnValidationResult(errors, warnings);
         }
@@ -2857,16 +2950,32 @@ public static partial class WorkflowBpmnXml
             return Array.Empty<string>();
         }
 
-        return
+        return BuildStructureErrors(document);
+    }
+
+    /// <summary>
+    /// The rules whose failure mode is severe enough that they must run wherever
+    /// validation runs at all.
+    /// </summary>
+    /// <remarks>
+    /// Shared by <see cref="ValidateProcess"/> and
+    /// <see cref="ValidateStructureForPublish"/> rather than duplicated, because
+    /// they diverged once already: #225 pointed publish at ValidateProcess, which
+    /// did not contain these, and three rules stopped running with nothing to say
+    /// so.
+    /// </remarks>
+    private static IReadOnlyList<string> BuildStructureErrors(XDocument document) =>
         [
             .. BuildUncaughtThrownCodeErrors(document),
             .. BuildEventBasedGatewayErrors(document),
             // #162 — an event subprocess that can never trigger, or one promising
             // not to interrupt when the engine will interrupt anyway. Both deploy
             // cleanly and neither tells the author anything.
-            .. BuildEventSubProcessErrors(document)
+            .. BuildEventSubProcessErrors(document),
+            // #115 — a compensation handler that waits. Not a style question:
+            // it crashes the engine mid-completion. See BuildCompensationErrors.
+            .. BuildCompensationErrors(document)
         ];
-    }
 
     private static IReadOnlyList<string> BuildUncaughtThrownCodeErrors(XDocument document)
     {
@@ -3157,6 +3266,64 @@ public static partial class WorkflowBpmnXml
         }
 
         return errors;
+    }
+
+    // #115. A compensation handler that WAITS is refused, because Flowable
+    // 8.0.0 cannot run one.
+    //
+    // This started as a warning about ordering — with automatic handlers the
+    // throw waits for compensation (recorded trail `h3;h1;after;`), with user
+    // task handlers it does not. Probing further found something much worse.
+    //
+    // When compensation is triggered during the completion of a USER TASK and a
+    // handler is itself a wait state, the engine fails the transaction outright:
+    //
+    //   ERROR: update or delete on table "act_ru_execution" violates foreign key
+    //   constraint "act_fk_exe_parent"
+    //
+    // Reproduced against a bare Flowable with no Auton8 in the picture, and
+    // isolated by elimination: removing the unreached activity's boundary event
+    // still fails, removing the gateway still fails, and making the handlers
+    // AUTOMATIC is the only change that fixes it. The task cannot be completed at
+    // all — it stays open and the instance cannot move.
+    //
+    // Epic #40 draws the line here: a shape that leaves an instance unable to
+    // complete is a defect to refuse, not a behaviour to document. Refusing at
+    // publish turns an unrecoverable runtime crash into a sentence while the
+    // author still has the diagram open.
+    private static IReadOnlyList<string> BuildCompensationErrors(XDocument document)
+    {
+        var warnings = new List<string>();
+
+        var handlerIds = document
+            .Descendants(BpmnNamespace + "association")
+            .Select(association => Trimmed(association.Attribute("targetRef")?.Value))
+            .Where(id => id is not null)
+            .ToHashSet(StringComparer.Ordinal);
+        if (handlerIds.Count == 0) return warnings;
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var id = Trimmed(element.Attribute("id")?.Value);
+            if (id is null || !handlerIds.Contains(id)) continue;
+
+            // Only elements that actually wait. An ordinary task, a service task
+            // or a script task all complete within the compensation.
+            if (element.Name.LocalName is not ("userTask" or "receiveTask")) continue;
+
+            var label = Trimmed(element.Attribute("name")?.Value) ?? id;
+            warnings.Add(
+                $"The compensation handler '{label}' waits for a person or a message, and Flowable " +
+                "cannot run one. When compensation is triggered while a user task is being " +
+                "completed, a waiting handler fails the engine's own transaction and the task can " +
+                "never be completed — the process stops there for good. Make the handler an " +
+                "automatic step (a service or script task). If a person must confirm the undo, " +
+                "have the handler start that work rather than be it.");
+        }
+
+        return warnings;
     }
 
     private static IReadOnlyList<string> BuildGatewayWarnings(XDocument document)

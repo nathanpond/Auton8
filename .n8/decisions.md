@@ -3819,3 +3819,47 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   failed. They now name the new type and pin the carried status, which is
   stronger than what they asserted before.
   **Issue:** #225, #226
+
+- **#115: compensation mostly works; two engine defects and one regression I
+  caused.** Probed before implementing, with a recorded trail rather than
+  timestamps (the first probe's handlers shared a millisecond, so the "ordering"
+  evidence was really list order). Six of this story's criteria were already true
+  of the engine: boundary + association + `isForCompensation` runs, reverse order,
+  only completed activities compensate, the throw waits, and a handler failure
+  propagates.
+  **Defect 1 — the compensation END event compensates nothing.** It ends the
+  process with an empty handler trail. The THIRD element in this milestone with
+  that exact shape, after Message End (#112) and Signal End (#156). Same remedy:
+  expand at publish into an intermediate throw plus a none end event.
+  **Defect 2 — a WAIT-STATE handler crashes the engine, so it is refused.** This
+  began as a warning about ordering and turned out to be far worse: when
+  compensation is triggered during a user task's completion and a handler is
+  itself a wait state, Flowable fails its own transaction with
+  `act_fk_exe_parent`, and the task can never be completed. Reproduced against a
+  bare Flowable with no Auton8 involved, then isolated by elimination — removing
+  the unreached activity's boundary still fails, removing the gateway still fails,
+  and making the handlers AUTOMATIC is the only change that fixes it. Epic #40
+  says a shape that leaves an instance unable to complete is a defect to refuse,
+  not document, so publish refuses it and the message says what to do instead.
+  **Documented, not fixed: no variable snapshot.** The spec says a handler sees
+  the values in scope when its activity completed; Flowable gives it the current
+  ones (`paymentId` was 'A', overwritten to 'B', handler saw 'B'). It does not
+  hang or no-op, so per the story's own AC this is documented — in the terms that
+  matter, which is that a refund handler cannot rely on the payment id it was
+  given.
+  **Rule 1 — an artifact-ordering bug in EVERY expansion.** Generated nodes were
+  appended with `process.Add`, which puts them after the diagram's associations.
+  The strict BPMN schema requires artifacts last, so Flowable refused the whole
+  deployment. Compensation is simply the first expansion to meet a diagram with an
+  association; all three now insert before the first artifact.
+  **A regression I introduced in #225, caught here.** Pointing publish at
+  `ValidateProcess` silently dropped the three promoted structure rules, because
+  `ValidateProcess` never contained them — including #114's uncaught error code,
+  whose runtime consequence is Flowable destroying the instance with a 500 and no
+  history. Nothing failed; the rules just stopped running. There is now ONE set,
+  shared by both entry points, and a test asserting they agree rather than listing
+  the rules, so the next rule added to either cannot diverge.
+  **Narrowed, per the story's own acceptance-critical note:** `Transaction`,
+  `Cancel Boundary` and `Cancel End` are already withdrawn, so this is
+  compensation by explicit throw, not transaction rollback.
+  **Issue:** #115, #225, #114
