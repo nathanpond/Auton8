@@ -61,6 +61,74 @@ public sealed class CompensationExecutionTests : E2ETestBase
             "a step that never ran must not be compensated");
     }
 
+    [Fact]
+    public async Task Handlers_run_in_reverse_order_of_the_work_they_undo()
+    {
+        // The specification requires reverse order, and it is invisible with a
+        // single handler — which is why the test above cannot cover it. Each
+        // handler appends to one variable, so the assertion is on the true
+        // execution order rather than on timestamps: in the first probe of this
+        // every handler shared a millisecond, and sorting by start time was
+        // really just reporting list order.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cmo{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, OrderedDiagram(key));
+
+        var instance = await StartAsync(api, key);
+
+        await EventuallyAsync(api, instance, n => n.Contains("Take payment"), "the first step");
+        await CompleteFirstTaskAsync(api, instance, "Take payment");
+        await EventuallyAsync(api, instance, n => n.Contains("Reserve stock"), "the second step");
+        await CompleteFirstTaskAsync(api, instance, "Reserve stock");
+
+        var variables = await EventuallyVariablesAsync(api, instance,
+            v => v.TryGetValue("trail", out var t) && t.Contains("h1", StringComparison.Ordinal)
+                 && t.Contains("h2", StringComparison.Ordinal),
+            "both compensation handlers to run");
+
+        // Payment ran first, stock second — so stock is undone first.
+        Assert.Equal("h2;h1;", variables["trail"]);
+    }
+
+    private static string OrderedDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Undo in order" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="t2" />
+            <bpmn:userTask id="t2" name="Reserve stock" />
+            <bpmn:sequenceFlow id="f2" sourceRef="t2" targetRef="done" />
+            <bpmn:endEvent id="done" name="Undo everything">
+              <bpmn:compensateEventDefinition />
+            </bpmn:endEvent>
+
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:boundaryEvent id="b2" attachedToRef="t2">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:scriptTask id="h1" name="Refund payment" isForCompensation="true"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('trail', (variables.get('trail') || '') + 'h1;');</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:scriptTask id="h2" name="Release stock" isForCompensation="true"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('trail', (variables.get('trail') || '') + 'h2;');</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+            <bpmn:association id="a2" sourceRef="b2" targetRef="h2" associationDirection="One" />
+          </bpmn:process>
+          {{Di(key, "s", "t1", "t2", "done", "h1", "h2")}}
+        </bpmn:definitions>
+        """;
+
     private static string Diagram(string key) => $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
