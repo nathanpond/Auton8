@@ -76,7 +76,7 @@
              SonarAnalyzer ships frequent four-segment versions (Sonar's
              internal build numbers); pin to a real published one rather
              than a placeholder so NuGet doesn't emit NU1603 substitutions. -->
-        <PackageReference Include="SonarAnalyzer.CSharp" Version="10.25.0.139117">
+        <PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
