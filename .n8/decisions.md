@@ -3928,3 +3928,33 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   half-building UI at the tail of a long run is how a story reports done with a
   placeholder inside it.
   **Issue:** #166
+
+- **#219 spike: ADOPT, and the protocol must change.** All seven questions
+  answered against the running engine; no code written and `flowable-extension/`
+  left byte-identical.
+  **Branch identity is cheap:** one accumulator per incoming flow, each stamping
+  its own flow id. Three branches completed out of order produced `b1;`,
+  `b1;b3;`, `b1;b3;b2;` — each node fires only for its own branch, and N nodes
+  converging on one exclusive gateway work (it is a merge, not a join). No field
+  extension, no protocol change for this half.
+  **Name mangling does NOT suffice, which is what sizes the follow-up.** A
+  sequential multi-instance body appending to one variable produced
+  `'"x";"y";"z";'` — every iteration wrote the same instance-level slot and saw
+  the previous one's value, so an accumulating gateway inside one starts its
+  second pass already satisfied. Mangling by gateway id cannot fix it (iterations
+  share the id) and mangling by iteration needs `loopCounter` inside the variable
+  NAME, which `resultVariable` cannot express. Either way the Java behaviour
+  changes, so `setVariableLocal` is the honest fix rather than encoding scope into
+  a string. **This touches M3's shipped script host** and is called out
+  prominently on the follow-up.
+  **A defect in the obvious shape:** once the threshold is met, the next arriving
+  branch fires the join AGAIN — two live tokens down one path. Arrival state alone
+  is not enough; a generated `fired` flag is needed, and clearing belongs to the
+  generated side (the author's script decides *whether*, generated code guarantees
+  *once*), which stays on the right side of epic #40's line.
+  **One AC cannot be written as asked:** "every branch arrived and no route was
+  chosen" is not detectable — an upstream exclusive split means a branch can
+  legitimately never arrive, and nothing in the arrival state distinguishes "still
+  coming" from "never coming". Options are an author-set timeout or nothing; both
+  are decisions, neither is a detection rule.
+  **Issue:** #219, #231, #218
