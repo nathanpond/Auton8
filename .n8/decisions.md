@@ -4075,3 +4075,19 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   ambiguous. `CallActivityStudioTests` now names the combobox by role — a more
   precise locator for a control that genuinely changed type, not a loosened one.
   **Issue:** #166
+
+- **Rule 1 (CI red on the milestone PR): two sweep tests depended on the
+  developer's own database.** `TestResourceSweepTests.A_role_backing_an_installed_plugin_survives`
+  and `A_role_that_still_owns_objects_is_never_dropped` created their fixture schema
+  and table in **`AutoNate`** — the local dev database. It exists on a developer's
+  cluster and not in CI, so both passed on a laptop and failed on the first run
+  without dev data:
+  `Npgsql.PostgresException : 3D000: database "AutoNate" does not exist`.
+  They have been environment-dependent since #214; the milestone PR is simply the
+  first time CI ran them. Nothing they assert needs a *particular* database, only
+  one the sweep leaves alone — `IsSuiteOwnedDatabase` matches `autonate_test_*` and
+  `AutoNate_E2E` — so each test now creates `autonate_sweepfix_<guid>` and drops it,
+  pools cleared first because Postgres refuses to drop a database with an open
+  connection. `FlowableRoleIsolationTests` names `AutoNate` too but already skips
+  when it is absent, so it needed nothing.
+  **Issue:** #214, #236

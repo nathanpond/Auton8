@@ -117,8 +117,9 @@ public sealed class TestResourceSweepTests
         // an installed plugin looks like. Nothing here depends on the code looking
         // random or not.
         var code = $"plg_live{Guid.NewGuid():N}"[..20];
+        var database = await CreateUnownedDatabaseAsync();
         await ExecuteAsync("postgres", $"create role \"{code}\";");
-        await ExecuteAsync("AutoNate", $"create schema if not exists \"{code}\";");
+        await ExecuteAsync(database, $"create schema if not exists \"{code}\";");
 
         try
         {
@@ -126,12 +127,12 @@ public sealed class TestResourceSweepTests
 
             Assert.True(await RoleExistsAsync(code),
                 "The sweep dropped a role whose schema is live — this is the failure that breaks a developer's installed plugin.");
-            Assert.True(await SchemaExistsAsync("AutoNate", code),
+            Assert.True(await SchemaExistsAsync(database, code),
                 "The sweep dropped a schema in a database it does not own.");
         }
         finally
         {
-            await ExecuteAsync("AutoNate", $"drop schema if exists \"{code}\" cascade;");
+            await DropDatabaseAsync(database);
             await ExecuteAsync("postgres", $"drop role if exists \"{code}\";");
         }
     }
@@ -148,9 +149,10 @@ public sealed class TestResourceSweepTests
         // `DROP ROLE ... CASCADE` or a reassign-owned step, this is what would
         // notice before a developer's data did.
         var role = $"plg_owner{Guid.NewGuid():N}"[..20];
+        var database = await CreateUnownedDatabaseAsync();
         await ExecuteAsync("postgres", $"create role \"{role}\";");
-        await ExecuteAsync("AutoNate", $"create table if not exists owned_by_{role} (id int);");
-        await ExecuteAsync("AutoNate", $"alter table owned_by_{role} owner to \"{role}\";");
+        await ExecuteAsync(database, $"create table if not exists owned_by_{role} (id int);");
+        await ExecuteAsync(database, $"alter table owned_by_{role} owner to \"{role}\";");
 
         try
         {
@@ -159,7 +161,7 @@ public sealed class TestResourceSweepTests
         }
         finally
         {
-            await ExecuteAsync("AutoNate", $"drop table if exists owned_by_{role};");
+            await DropDatabaseAsync(database);
             await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
         }
     }
@@ -212,6 +214,34 @@ public sealed class TestResourceSweepTests
         command.CommandText = sql;
         command.Parameters.AddWithValue("n", name);
         return await command.ExecuteScalarAsync();
+    }
+
+    /// <summary>
+    /// A live database the sweep does NOT own, created for one test.
+    /// </summary>
+    /// <remarks>
+    /// These two tests used the developer's own `AutoNate` database, which is what
+    /// an installed plugin's schema really lives in — but it does not exist in CI,
+    /// so they passed on a laptop and failed on the first run that had no dev data
+    /// (`3D000: database "AutoNate" does not exist`). Nothing about what they
+    /// assert needs a *particular* database, only one the sweep will leave alone:
+    /// `IsSuiteOwnedDatabase` matches `autonate_test_*` and `AutoNate_E2E`, and
+    /// this name is neither.
+    /// </remarks>
+    private static async Task<string> CreateUnownedDatabaseAsync()
+    {
+        var database = $"autonate_sweepfix_{Guid.NewGuid():N}"[..28];
+        await ExecuteAsync("postgres", $"create database \"{database}\";");
+        return database;
+    }
+
+    private static async Task DropDatabaseAsync(string database)
+    {
+        // Npgsql pools per connection string, and Postgres refuses to drop a
+        // database with an open connection — including one this test left in the
+        // pool.
+        NpgsqlConnection.ClearAllPools();
+        await ExecuteAsync("postgres", $"drop database if exists \"{database}\" with (force);");
     }
 
     private static async Task ExecuteAsync(string database, string sql)
