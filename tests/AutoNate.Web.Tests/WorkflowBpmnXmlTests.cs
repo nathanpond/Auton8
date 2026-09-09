@@ -6,6 +6,91 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // ── #159: multi-instance and the loop marker ─────────────────────────────
+
+    private static string WithMarker(string marker) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="each" name="Each" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Approve">
+              {marker}
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="t" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ValidateProcess_RefusesTheLoopMarker_BecauseTheEngineIgnoresIt()
+    {
+        // Not a hang, which is what the story assumed — a SILENT NO-OP. Measured
+        // against a control on the same task: every standardLoopCharacteristics
+        // spelling ran the activity once, while multi-instance cardinality 3 ran
+        // it three times. The author marks a loop and gets one iteration.
+        var result = WorkflowBpmnXml.ValidateProcess(
+            WithMarker("<bpmn:standardLoopCharacteristics loopMaximum=\"3\" />"));
+
+        // Refused through #107's manifest mechanism rather than a rule of its own.
+        // The first version of this added a second check and produced TWO errors
+        // for one problem — the manifest already refuses anything the engine
+        // cannot run, and the row's reason is the message.
+        var error = Assert.Single(result.Errors, e => e.Contains("Approve", StringComparison.Ordinal));
+        Assert.Contains("Loop Marker", error, StringComparison.Ordinal);
+
+        // Refusing without saying what to use instead leaves an author stuck with
+        // a diagram and no way forward, so the row's reason names the remedy.
+        Assert.Contains("multi-instance", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsAMultiInstanceMarker()
+    {
+        // The complement, and the one that matters most here: the remedy the
+        // refusal above points at must actually publish. A rule that caught both
+        // markers would pass the test above and leave an author nowhere to go.
+        var result = WorkflowBpmnXml.ValidateProcess(WithMarker(
+            "<bpmn:multiInstanceLoopCharacteristics isSequential=\"true\" " +
+            "flowable:collection=\"${items}\" flowable:elementVariable=\"item\" />"));
+
+        Assert.DoesNotContain(result.Errors, e => e.Contains("Approve", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_ChecksAMultiInstanceCompletionConditionWithTheSharedRule()
+    {
+        var result = WorkflowBpmnXml.ValidateProcess(WithMarker(
+            "<bpmn:multiInstanceLoopCharacteristics isSequential=\"true\">" +
+            "<bpmn:completionCondition xsi:type=\"bpmn:tFormalExpression\">${nrOfCompletedInstances >=</bpmn:completionCondition>" +
+            "</bpmn:multiInstanceLoopCharacteristics>"));
+
+        // Through WorkflowConditionValidation's own site list, not a second
+        // expression parser — two implementations of "is this condition valid"
+        // drift apart, and the one nobody maintains is the one that lets a hang
+        // through.
+        Assert.Contains(result.Errors.Concat(result.Warnings), m =>
+            m.Contains("Approve", StringComparison.Ordinal)
+            && m.Contains("completion condition", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_WarnsWhenAMultiInstanceCollectionIsNeverSet()
+    {
+        // Reuses the existing unset-variable rule rather than adding a second
+        // one: a collection nothing sets produces no instances, silently.
+        var result = WorkflowBpmnXml.ValidateProcess(WithMarker(
+            "<bpmn:multiInstanceLoopCharacteristics isSequential=\"true\" " +
+            "flowable:collection=\"${nobodySetsThis}\" flowable:elementVariable=\"item\" />"));
+
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("nobodySetsThis", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ExpandForDeployment_RewritesADataObjectsTypeIntoTheFormTheEngineReads()
     {

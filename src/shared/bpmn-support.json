@@ -561,32 +561,32 @@
     {
       "name": "Loop Marker",
       "category": "Activity Markers",
-      "studio": "coming-soon",
-      "engine": "executes",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
       "localName": "*",
       "eventDefinition": "standardLoopCharacteristics",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#159: it does NOTHING. Measured against a control on the same task, every spelling of standardLoopCharacteristics ran the activity once \u2014 loopCondition ${true} with loopMaximum=3, ${loopCounter < 3}, and flowable:testBefore \u2014 while multiInstanceLoopCharacteristics with cardinality 3 on that same task ran it three times. So the marker is not mis-set and the measurement is not wrong: Flowable 8.0.0 has no standard loop. #103 recorded 'executes', which is wrong. Refused at publish, pointing at multi-instance, which does what an author reaching for a loop almost always wants.",
+      "evidence": "deployed and started; one iteration against a three-iteration control"
     },
     {
       "name": "Multi-Instance (Parallel)",
       "category": "Activity Markers",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
+      "evidence": "deployed and started; per-instance element values and live-task counts observed"
     },
     {
       "name": "Multi-Instance (Sequential)",
       "category": "Activity Markers",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
+      "evidence": "deployed and started; per-instance element values and live-task counts observed"
     },
     {
       "name": "Compensation Marker",

@@ -141,6 +141,28 @@ public static class WorkflowConditionValidation
                 "The condition",
                 condition?.Value ?? string.Empty);
         }
+
+        // #159. A multi-instance marker carries two expressions, and both fail the
+        // same silent way: a collection nothing ever sets produces NO instances
+        // and the activity is simply skipped, which looks exactly like a process
+        // that was not meant to do anything there.
+        foreach (var multiInstance in document.Descendants(Bpmn + "multiInstanceLoopCharacteristics"))
+        {
+            var owner = multiInstance.Parent;
+            var label = owner is null ? LabelOf(multiInstance) : LabelOf(owner);
+
+            var collection = multiInstance.Attribute(Flowable + "collection")?.Value;
+            if (!string.IsNullOrWhiteSpace(collection))
+            {
+                yield return new Site(label, "The collection", collection);
+            }
+
+            var completion = multiInstance.Element(Bpmn + "completionCondition");
+            if (completion is not null)
+            {
+                yield return new Site(label, "The completion condition", completion.Value);
+            }
+        }
     }
 
     /// <summary>

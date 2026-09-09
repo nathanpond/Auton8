@@ -243,6 +243,21 @@ public sealed class BpmnSupportManifestTests
             // done by expansion rather than by a behaviour.
             ["Complex Gateway"] = BpmnSupportManifest.EngineExecutes,
 
+            // #159. rows.json says "executes". It does not.
+            //
+            // Measured against a control on the same task: every spelling of
+            // standardLoopCharacteristics ran the activity ONCE — loopCondition
+            // ${true} with loopMaximum=3, ${loopCounter < 3}, and testBefore —
+            // while multiInstanceLoopCharacteristics with cardinality 3 on that
+            // same task ran it three times. The control is what makes this a
+            // finding rather than a mis-set marker.
+            //
+            // The departure is downward, which is rarer and worth stating
+            // plainly: the inventory credited the engine with a capability it
+            // does not have, and an author marking a task as a loop got one that
+            // runs once. Publish now refuses it.
+            ["Loop Marker"] = BpmnSupportManifest.EngineCannotExecute,
+
             // #103 probed this at process level, where Flowable rejects it
             // (flowable-start-event-invalid-event-definition). Inside an event
             // subprocess it runs — EventSubProcessConditionalStartEventActivityBehavior

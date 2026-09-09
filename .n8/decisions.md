@@ -3984,3 +3984,37 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   restructure done carelessly at the tail of a long run is worse than the skim it is
   meant to fix.
   **Issue:** #174, #232, #225
+
+- **#159: multi-instance works completely; the LOOP MARKER does nothing, and the
+  inventory said it did.** This story was still unstarted when the rest of M4 was
+  finished — it had no comments and no `blocked` label, and I nearly opened the
+  milestone PR without noticing.
+  **Multi-instance: every criterion was already true of the engine**, verified
+  rather than assumed — sequential over a collection (`'"x";"y";"z";'`), parallel,
+  parallel really concurrent (3 live user tasks) vs sequential really one at a
+  time (1), `loopCardinality`, a completion condition ending the set early, and an
+  **empty collection completing immediately** rather than hanging.
+  **`standardLoopCharacteristics` never repeats the activity.** Every spelling ran
+  it ONCE — `loopCondition ${true}` with `loopMaximum=3`, `${loopCounter < 3}`,
+  `flowable:testBefore` — while the CONTROL, `multiInstanceLoopCharacteristics`
+  cardinality 3 on the same task, ran it three times. The control is what makes
+  this a finding rather than a mis-set marker. `rows.json` records Loop Marker as
+  `executes`; it does not, and the manifest row is flipped to `cannot-execute`
+  with the departure declared in `BpmnSupportManifestTests` — a **downward**
+  departure, which is rarer and worth naming: the inventory credited the engine
+  with a capability it lacks.
+  **Two acceptance criteria were wrong and were corrected, not quietly satisfied.**
+  "A standard loop actually loops" cannot be implemented. And "an unbounded loop
+  is a hang" is false — it runs once and the process ends, so the remedy (refuse
+  at publish) is right for the opposite reason: a silent no-op, not a runaway.
+  **Rule 1 — I first added two bespoke checks and both were duplicates.** The loop
+  refusal duplicated #107's manifest mechanism (two errors for one problem) and the
+  multi-instance completion-condition check duplicated
+  `WorkflowConditionValidation`. Both deleted; the collection expression and the
+  completion condition are now SITES in the shared collector, so the unset-variable
+  warning covers a collection nothing sets — which is what the AC asked for
+  ("reusing that check") rather than a second implementation.
+  **Not delivered:** the studio property editor for collection / elementVariable /
+  completion condition. The markers themselves come from stock bpmn-js; the fields
+  behind them do not, and this is the same authoring gap as #163 and #166.
+  **Issue:** #159, #103, #107
