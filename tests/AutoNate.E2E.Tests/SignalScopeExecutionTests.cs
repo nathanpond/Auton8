@@ -193,6 +193,127 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
     }
 
     [Fact]
+    public async Task What_publish_emits_for_a_scoped_signal_actually_deploys()
+    {
+        // #270. The test this replaces the absence of.
+        //
+        // #244 made ApplySignalScopes clone the <bpmn:signal> root so a scoped
+        // catch would not narrow a start event sharing the name. The clone kept
+        // the NAME, which Flowable refuses:
+        //   [Problem: 'flowable-signal-duplicate-name'] -> HTTP 500
+        // The diagram that fix existed to support became unpublishable, and TWO
+        // unit tests stayed green through it because both asserted the XML tree
+        // and neither deployed what they built.
+        //
+        // So this one deploys. It is the only assertion that could have caught it,
+        // and the general lesson is why it is here rather than another tree
+        // comparison: an expansion is only correct if the engine accepts it.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"ss{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, ScopedCatchDiagram(key));
+
+        // Published means Flowable accepted the expanded copy. Prove the scope
+        // survived rather than being quietly dropped to make it deploy.
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var definitions = await client.GetStringAsync(
+            $"service/repository/process-definitions?key={Uri.EscapeDataString(key)}&latest=true");
+        using var document = System.Text.Json.JsonDocument.Parse(definitions);
+        var definitionId = document.RootElement.GetProperty("data")[0].GetProperty("id").GetString()!;
+
+        var deployed = await client.GetStringAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata");
+
+        Assert.Contains("flowable:scope=\"processInstance\"", deployed, StringComparison.Ordinal);
+
+        // Exactly one signal root — two sharing a name is what the engine refuses.
+        Assert.Equal(1, deployed.Split("<bpmn:signal ").Length - 1);
+    }
+
+    private static string ScopedCatchDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_1" name="{{key}}_scoped" />
+          <bpmn:process id="{{key}}" name="Scoped catch" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="c" />
+            <bpmn:intermediateCatchEvent id="c" name="Wait for it">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="instance" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="f1" sourceRef="c" targetRef="t" />
+            <bpmn:userTask id="t" name="After" />
+          </bpmn:process>
+          {{Di(key, "s", "c", "t")}}
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public async Task A_signal_start_sharing_a_name_with_a_scoped_catch_is_refused_at_publish()
+    {
+        // #270's complement, and the case #244 was written for. It cannot deploy
+        // at any engine — one signal name, one scope — so the author is told,
+        // rather than being handed a 500 from Flowable.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sd{Guid.NewGuid():N}"[..20];
+        var xml = $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="{{key}}_both" />
+              <bpmn:process id="{{key}}" name="Both" isExecutable="true">
+                <bpmn:startEvent id="s" name="On record created">
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:startEvent>
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="c" />
+                <bpmn:intermediateCatchEvent id="c" name="Wait for record">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="instance" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateCatchEvent>
+                <bpmn:sequenceFlow id="f1" sourceRef="c" targetRef="t" />
+                <bpmn:userTask id="t" name="After" />
+              </bpmn:process>
+              {{Di(key, "s", "c", "t")}}
+            </bpmn:definitions>
+            """;
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed(key);
+        var created = await api.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        Assert.True(created.Ok, await created.TextAsync());
+
+        var published = await api.PostAsync($"/api/workflows/{id}/publish", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        var body = await published.TextAsync();
+
+        // Refused by US, with a message, rather than by the engine with a 500.
+        Assert.False(published.Ok, $"Expected a refusal, got {published.Status}");
+        Assert.Contains("one scope per signal name", body, StringComparison.Ordinal);
+        Assert.Contains("Wait for record", body, StringComparison.Ordinal);
+        Assert.Contains("On record created", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("duplicate signal name", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Waking_a_waiting_execution_requires_the_signal_name()
     {
         // #262. The contract the whole external-signal path rests on, pinned

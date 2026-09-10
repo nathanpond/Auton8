@@ -114,13 +114,33 @@ Read these before the steps. Each one is a trap that looks fine until it doesn't
 
 **1. The modeller is stock, vendored bpmn-js.** `createModeler`
 (`src/AutoNate.Spa/src/lib/bpmn/workflow.js`) does `new window.BpmnJS({ container })`
-— no `additionalModules`, no custom palette provider. The bundle is a static asset at
+The bundle is a static asset at
 `src/AutoNate.Spa/public/vendor/bpmn-js/bpmn-modeler.development.js`, not an npm
-import. **`BPMN_MENU_ENTRIES` and `MENU_GROUP_ORDER` at the top of `workflow.js` are
-dead code** — each has exactly one occurrence, its own declaration. Editing them
-changes nothing on screen and nothing in any test. Authoring affordances come from
-bpmn-js's own palette, context pad and replace menu; grep the vendored bundle to find
-what it already offers for your element.
+import.
+
+**Rewritten 2026-09-10 (#241, #264).** This step used to say the studio had no
+palette of its own and that `BPMN_MENU_ENTRIES` was dead code to leave alone. That
+was true when it was written — the array was a 51-entry list nothing imported, so
+authors saw bpmn-js's stock palette — and it is not true now. **`BPMN_MENU_ENTRIES`
+and `MENU_GROUP_ORDER` no longer exist.**
+
+What to do instead:
+
+1. Set the element's row in **`src/shared/bpmn-support.json`** — `studio` decides
+   whether it is offered at all.
+2. Add a row to **`src/shared/bpmn-palette.json`** carrying its label, icon class,
+   group and the manifest row it claims. If the element is not a shape an author
+   drags — a marker, a connection, a process-level declaration — add it to
+   `notOnThePalette` **with a reason saying how the author reaches it instead**.
+3. Nothing else. `src/AutoNate.Spa/src/lib/bpmn/palette.js` derives the palette from
+   those two files, overrides bpmn-js's `paletteProvider`, and filters bpmn-js's
+   three popup menus (`bpmn-replace`, `bpmn-create`, `bpmn-append`) so a withdrawn
+   element is not reachable there either.
+
+`BpmnPaletteManifestTests` fails if a catalog row names a manifest element that does
+not exist, if a supported element is neither offered nor excused, or if a deny key
+does not occur in the vendored bundle. `WorkflowPaletteTests` opens the real palette
+and all three popups in a browser.
 
 **2. Custom attributes go in the `flowable:` namespace, not `autonate`.**
 `writeFlowableAttribute` writes `flowable:<name>` into `businessObject.$attrs`.
@@ -421,7 +441,7 @@ that is where most of the value is.
 - [ ] A fixture backs the inventory row
 - [ ] A test asserts behaviour, not deployment — and for anything that waits, that it *resumes*
 - [ ] **This skill is corrected for anything it got wrong, in this PR** — and if it needed no change, the completion comment says so explicitly
-- [ ] `npm run lint` passes without raising `--max-warnings` (currently 100 — a
+- [ ] `npm run lint` passes without raising `--max-warnings` (currently 98 — a
       ratchet). If your story consumes a warning, **lower it to the new count in the
       same commit**: the budget tracks reality downward only. #158 took it 104 → 103
       by using an import that was sitting unused.

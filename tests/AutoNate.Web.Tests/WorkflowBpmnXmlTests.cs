@@ -9,12 +9,24 @@ public sealed class WorkflowBpmnXmlTests
     // ── #244: a scoped catch must not narrow a signal start sharing its signal ──
 
     [Fact]
-    public void ExpandForDeployment_DoesNotScopeASignalAStartEventAlsoUses()
+    public void ValidateProcess_RefusesOneSignalNameAskedToCarryTwoScopes()
     {
-        // A signal start event declares no scope, so it is skipped — and the
-        // scoped catch used to write flowable:scope onto the SHARED root under
-        // it. A processInstance-scoped signal cannot start a new instance from an
-        // external event, so that silently changed what a deployed process does.
+        // #270. This replaces a test that asserted the XML TREE and never
+        // deployed it — and the tree it pinned does not deploy.
+        //
+        // #244 cloned the <bpmn:signal> root for the scoped catch so a signal
+        // start event sharing the name kept its global subscription. The clone
+        // carried the same NAME, and Flowable 8.0.0 refuses that outright:
+        //   [Problem: 'flowable-signal-duplicate-name'] : Duplicate signal name
+        //   found  -> HTTP 500
+        // So the diagram #244 existed to support became unpublishable, and the
+        // shape test stayed green because it compared elements instead of asking
+        // an engine.
+        //
+        // Scope lives on the root, so one name means one scope. A start event
+        // must be global to start instances from outside; an instance-scoped
+        // catch on the same name is a contradiction no engine can honour, and
+        // the author is the only one who can resolve it.
         const string xml = """
             <?xml version="1.0" encoding="UTF-8"?>
             <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -22,9 +34,9 @@ public sealed class WorkflowBpmnXmlTests
                               id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
               <bpmn:signal id="Sig_1" name="record.created" flowable:topic="record.events" />
               <bpmn:process id="both" name="Both" isExecutable="true">
-                <bpmn:startEvent id="s"><bpmn:signalEventDefinition signalRef="Sig_1" /></bpmn:startEvent>
+                <bpmn:startEvent id="s" name="On record created"><bpmn:signalEventDefinition signalRef="Sig_1" /></bpmn:startEvent>
                 <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="wait" />
-                <bpmn:intermediateCatchEvent id="wait">
+                <bpmn:intermediateCatchEvent id="wait" name="Wait for record">
                   <bpmn:extensionElements>
                     <flowable:autonateSignalScope value="instance" />
                   </bpmn:extensionElements>
@@ -34,28 +46,55 @@ public sealed class WorkflowBpmnXmlTests
             </bpmn:definitions>
             """;
 
-        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("record.created", StringComparison.Ordinal));
+
+        // Names BOTH events, because the author has to choose between them.
+        Assert.Contains("Wait for record", error, StringComparison.Ordinal);
+        Assert.Contains("On record created", error, StringComparison.Ordinal);
+        Assert.Contains("one scope per signal name", error, StringComparison.Ordinal);
+
+        // And the expansion emits nothing the engine would reject: exactly one
+        // <bpmn:signal> root survives, so even if validation were bypassed the
+        // deployment would not fail with a duplicate-name 500.
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var roots = expanded.Descendants(Bpmn218 + "signal").ToList();
+        Assert.Single(roots);
+        Assert.Equal("record.created", roots[0].Attribute("name")?.Value);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsOneSignalNameEveryEventScopesTheSameWay()
+    {
+        // The complement. Without it a rule that refused every scoped signal
+        // would pass the test above while breaking #156 entirely.
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="record.created" />
+              <bpmn:process id="scoped" name="Scoped" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="wait" />
+                <bpmn:intermediateCatchEvent id="wait" name="Wait for record">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="instance" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateCatchEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(xml).Errors);
+
+        // Still scoped, and still one root.
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
         XNamespace flowable = "http://flowable.org/bpmn";
-
-        var startRef = document.Descendants(Bpmn218 + "startEvent").Single()
-            .Element(Bpmn218 + "signalEventDefinition")!.Attribute("signalRef")!.Value;
-        var startSignal = document.Descendants(Bpmn218 + "signal")
-            .Single(sig => sig.Attribute("id")?.Value == startRef);
-
-        // The start event's signal stays unscoped — it must still be startable
-        // from outside.
-        Assert.Null(startSignal.Attribute(flowable + "scope"));
-        Assert.Equal("record.events", startSignal.Attribute(flowable + "topic")?.Value);
-
-        // ...and the catch event still gets its instance scope, on its own copy.
-        var catchRef = document.Descendants(Bpmn218 + "intermediateCatchEvent").Single()
-            .Element(Bpmn218 + "signalEventDefinition")!.Attribute("signalRef")!.Value;
-        var catchSignal = document.Descendants(Bpmn218 + "signal")
-            .Single(sig => sig.Attribute("id")?.Value == catchRef);
-
-        Assert.Equal("processInstance", catchSignal.Attribute(flowable + "scope")?.Value);
-        Assert.NotEqual(startRef, catchRef);
-        Assert.Equal("record.created", catchSignal.Attribute("name")?.Value);
+        var root = Assert.Single(expanded.Descendants(Bpmn218 + "signal"));
+        Assert.Equal("processInstance", root.Attribute(flowable + "scope")?.Value);
     }
 
     // ── #242: errors match by CODE, not by the id of their <bpmn:error> root ──
@@ -2961,26 +3000,28 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
-    public void ExpandForDeployment_SplitsASignalTwoEventsScopeDifferently()
+    public void ValidateProcess_RefusesTwoEventsScopingOneSignalNameDifferently()
     {
-        // Two events agreeing on a name but not on who hears it are genuinely
-        // different subscriptions. Sharing one signal element would make one of
-        // them silently win.
-        var document = XDocument.Parse(
+        // #270. This asserted a SPLIT: two <bpmn:signal> roots sharing a name,
+        // one scoped and one not. Flowable refuses that outright —
+        //   [Problem: 'flowable-signal-duplicate-name'] -> HTTP 500
+        // measured against 8.0.0 — so the split was never deployable and the
+        // test could not see it, because it compared elements instead of asking
+        // an engine.
+        //
+        // Two events agreeing on a name but not on who hears it ARE genuinely
+        // different subscriptions, which is exactly why they need different
+        // NAMES. The engine gives one scope per name; the author picks.
+        var result = WorkflowBpmnXml.ValidateProcess(SignalDiagram("instance", "global"));
+
+        var error = Assert.Single(result.Errors, e => e.Contains("approved", StringComparison.Ordinal));
+        Assert.Contains("one scope per signal name", error, StringComparison.Ordinal);
+
+        // Nothing undeployable is emitted on the way to that refusal.
+        var expanded = XDocument.Parse(
             WorkflowBpmnXml.ExpandForDeployment(SignalDiagram("instance", "global")));
         XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
-        XNamespace flowable = "http://flowable.org/bpmn";
-
-        var signals = document.Root!.Elements(bpmn + "signal").ToList();
-        Assert.Equal(2, signals.Count);
-        Assert.Single(signals, s => s.Attribute(flowable + "scope")?.Value == "processInstance");
-        Assert.Single(signals, s => s.Attribute(flowable + "scope") is null);
-
-        // And the two events point at different signals.
-        var refs = document.Descendants(bpmn + "signalEventDefinition")
-            .Select(d => d.Attribute("signalRef")?.Value)
-            .ToList();
-        Assert.Equal(2, refs.Distinct(StringComparer.Ordinal).Count());
+        Assert.Single(expanded.Root!.Elements(bpmn + "signal"));
     }
 
     private static string SignalDiagram(string? throwScope, string? catchScope)

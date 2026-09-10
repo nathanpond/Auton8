@@ -4430,3 +4430,76 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   asks the sweep to find it. Removing the fixture's prefix line makes it fail with
   "The app published as something other than 'e2e-…'".
   **Issue:** #262, #243, #263, #264, #257
+
+- **Round-three fix pass — the four blockers from the second re-verify
+  (#270, #243, #263, #264), plus findings F1–F3.**
+  The verification named one habit behind all of them: **shape-level tests
+  standing in for behaviour-level ones**, on a suite where 42% of the behaviour
+  tests never run in CI. Every fix below therefore ships with a test that deploys,
+  or opens a browser, or exercises the real client — not one that compares a tree.
+  **#270 — #244's fix could not deploy, and two tests were green over it.**
+  `ApplySignalScopes` cloned the `<bpmn:signal>` root for a scoped catch, keeping
+  the NAME and changing only the id. Flowable refuses that outright
+  (`flowable-signal-duplicate-name`, HTTP 500), so the diagram #244 existed to
+  support became **unpublishable**. Measured against 8.0.0: two roots with distinct
+  names deploy; two sharing a name do not. **Scope is a property of the signal
+  NAME** — one name, one scope — so a signal start event (necessarily global) and
+  an instance-scoped catch can never share one. The clone was never going to work.
+  Cloning removed; the contradiction is refused at publish naming BOTH events, so
+  the author gets a sentence instead of a 500. Two unit tests that asserted the
+  broken shape are replaced by refusal tests with their complement, and a new E2E
+  test **deploys what publish emits** and reads `flowable:scope` back out of the
+  deployed resource — the assertion that could have caught this and did not exist.
+  **#243 — the code was right and nothing could see it.** Both fixes shipped
+  untested: reverting either left the suite at 86/86. I reproduced that myself. The
+  four tests added with the fix sit at the dispatcher level against a stub whose
+  `IsSignalGlobalAsync` matches on NAME and ignores `activityId` — so they could
+  not observe either change. Three new tests exercise `FlowableClient` itself over
+  a stubbed transport: the definition resolved through `processInstanceId` from a
+  response shaped exactly as the engine's (no `processDefinitionId`), scope
+  resolved through the event rather than the name, and the fail-open fallback. The
+  same mutation now fails.
+  Also corrected: the fallback preferred the SCOPED root, i.e. failed **closed**,
+  contradicting every other guard on the path — and, after #270, guarding a case
+  that cannot exist. It fails open like its neighbours now.
+  **#263 — three of four paths.** `StartProcessInstanceByMessageAsync` did not
+  nudge conditional events while `StartProcessInstanceAsync` beside it did; a
+  process started by message whose first wait was conditional parked forever with
+  the condition already true. One line, plus its test.
+  **In-engine writes remain uncovered and are filed rather than faked** (#271): a
+  script task, a behaviour output, a call-activity out-mapping never round-trip
+  through Auton8, so no client-side nudge can reach them. That needs an engine-side
+  listener — new infrastructure in the Flowable extension, Rule 4 — so it is a
+  story, not something to improvise here. Outcome 10 stays qualified until then.
+  **#264 — the filter was correct and pointed at nothing.** Three deny keys were
+  classNames bpmn-js never emits (`bpmn-icon-business-rule-task`: **zero**
+  occurrences in the bundle; it is `bpmn-icon-business-rule`), so Business Rule
+  Task — which publish refuses — stayed one click away. And a third surface,
+  `bpmn-append` (the context pad's Append button, same option table as Create), was
+  never registered.
+  `menuClassNames` carries the bundle's spelling beside the palette's own, the menu
+  list covers all three, and **three guards make the failure mechanical**: every
+  withheld element must have at least one deny key that really occurs in the
+  vendored bundle; the filter must cover every element menu the bundle registers
+  (read out of the bundle, so a fourth in a future bpmn-js fails here); and a
+  browser test opens all three popups. Sensitivity proven by removing `bpmn-append`
+  again — the popup test names the seven elements that come back.
+  **F1 — the arithmetic.** `N=54, withdrawn=4, M4=46 delivered` → `withdrawn=8,
+  M4=42`; `covers: 47` → `42`. Recounted from the shipped manifest and
+  cross-checked: 68 − 54 = 14 baseline, −1 for Task (Generic) = 13, +42 = 55
+  supported, which is what the manifest holds.
+  **F2 — the stale palette premise**, corrected in the milestone description, in
+  epic #40's AC 4, and in the two `add-bpmn-element` skill files that still told an
+  author to skip a constant that no longer exists. `verify-symbols.sh` asserted
+  `BPMN_MENU_ENTRIES` stayed dead at exactly one occurrence; it now asserts the
+  opposite claim — that the derivation exists and the constant has not come back —
+  and gained checks for the palette provider and the menu filter. It also caught a
+  second drift I had not gone looking for: the skill quoted a lint ratchet of 100
+  where `package.json` says 98.
+  **F3 — the CI caveat** is stated in the description, beside the claim it
+  qualifies rather than in a comment thread. I first wrote it as "recorded at the
+  owner's direction" and corrected that before it landed: **the owner has directed
+  no such thing.** It states a fact about `ci.yml` and is not a decision. That is
+  the same false-attribution the last verification criticised in the descope lines,
+  and I nearly repeated it one paragraph later.
+  **Issue:** #270, #243, #263, #264
