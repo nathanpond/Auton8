@@ -138,6 +138,80 @@ public sealed class WorkflowSignalDispatcherTests
             stub.StartedProcesses.Select(s => s.ProcessDefinitionKey).OrderBy(k => k));
     }
 
+    // ── #243: the scope filter, which shipped with no test at all ───────────
+
+    [Fact]
+    public async Task HandleAsync_DoesNotWakeAnInstanceScopedCatchEvent()
+    {
+        // The whole point of #243, and it had no test — replacing the check with
+        // `if (false)` left the suite at 13/13, which is how a guard that never
+        // fired in production shipped green.
+        var (dispatcher, stub, _) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.AwaitingSignalExecutions.Add(("exec-scoped", "OrderFlow:1:aaa", "catchEvent"));
+        stub.InstanceScopedSignals.Add("OrderPlaced");
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        // An instance-scoped signal exists to be raised from inside its own run.
+        // Waking it from the bus wakes it in EVERY running instance, which is the
+        // cross-instance leak #156 exists to prevent.
+        Assert.DoesNotContain(stub.SignalledExecutions, s => s.ExecutionId == "exec-scoped");
+    }
+
+    [Fact]
+    public async Task HandleAsync_WakesAGlobalCatchEvent()
+    {
+        // The complement. Without it, a filter that refused everything would pass
+        // the test above while breaking every external signal there is.
+        var (dispatcher, stub, _) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.AwaitingSignalExecutions.Add(("exec-global", "OrderFlow:1:aaa", "catchEvent"));
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        Assert.Contains(stub.SignalledExecutions, s => s.ExecutionId == "exec-global");
+    }
+
+    [Fact]
+    public async Task HandleAsync_AsksAboutTheEventTheExecutionIsParkedAt()
+    {
+        // #243. Scope belongs to the signal an EVENT references, not to the name:
+        // after #244 one definition can carry two roots of the same name, one
+        // scoped and one not. Asking by name alone always found the unscoped one
+        // and judged the scoped catch global, so the two fixes defeated each
+        // other. The activity id is what makes the question exact.
+        var (dispatcher, stub, _) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.AwaitingSignalExecutions.Add(("exec-1", "OrderFlow:1:aaa", "theCatchEvent"));
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        Assert.Contains("SignalScope:OrderFlow:1:aaa:OrderPlaced:theCatchEvent", stub.Calls);
+    }
+
+    [Fact]
+    public async Task HandleAsync_PassesTheSignalNameToTheEngine()
+    {
+        // #262. The engine refuses a wake with no signal name, and the refusal was
+        // swallowed by the per-execution catch below.
+        var (dispatcher, stub, _) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.AwaitingSignalExecutions.Add(("exec-1", "OrderFlow:1:aaa", "catchEvent"));
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        Assert.Contains("SignalExecution:exec-1:OrderPlaced", stub.Calls);
+    }
+
     [Fact]
     public async Task HandleAsync_SignalsWaitingExecutions_WhenEventTypeMatches()
     {

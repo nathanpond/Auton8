@@ -193,6 +193,91 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
     }
 
     [Fact]
+    public async Task Waking_a_waiting_execution_requires_the_signal_name()
+    {
+        // #262. The contract the whole external-signal path rests on, pinned
+        // against the real engine.
+        //
+        // FlowableClient.SignalExecutionAsync omitted `signalName` for the whole
+        // of M4. Flowable answers 400 "Signal name is required", and
+        // WorkflowSignalDispatcher's per-execution catch logged it and moved on —
+        // so every signal arriving from the bus produced a log line and a process
+        // that never advanced. Nothing surfaced, and no test could see it: the
+        // client's own unit test asserted the payload against a stub that answers
+        // 200 to anything.
+        //
+        // This asserts BOTH halves against the engine, so the day Flowable stops
+        // requiring the name, or starts requiring something else, this fails
+        // rather than the feature going quiet again.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sw{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, CatchDiagram(key));
+        var instance = await StartAsync(api, key);
+
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var executionId = await AwaitingExecutionIdAsync(client, $"{key}_wake");
+        Assert.False(string.IsNullOrEmpty(executionId),
+            "Precondition: nothing is waiting on the signal, so neither assertion below would mean anything.");
+
+        // Without the name — what shipped.
+        using var nameless = await client.PutAsync(
+            $"service/runtime/executions/{executionId}",
+            new StringContent(
+                """{"action":"signalEventReceived","variables":[]}""",
+                System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, nameless.StatusCode);
+        Assert.Contains("Signal name is required", await nameless.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
+
+        // With it — what the fix sends.
+        using var named = await client.PutAsync(
+            $"service/runtime/executions/{executionId}",
+            new StringContent(
+                $$"""{"action":"signalEventReceived","signalName":"{{key}}_wake","variables":[]}""",
+                System.Text.Encoding.UTF8, "application/json"));
+        Assert.True(named.IsSuccessStatusCode,
+            $"Waking with the signal name failed: {named.StatusCode} {await named.Content.ReadAsStringAsync()}");
+
+        // And the process actually moved, rather than merely being accepted.
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("After the wake"), "the woken process to advance");
+        Assert.Contains("After the wake", names);
+    }
+
+    private static async Task<string?> AwaitingExecutionIdAsync(HttpClient client, string signalName)
+    {
+        var body = await client.GetStringAsync(
+            $"service/runtime/executions?signalEventSubscriptionName={Uri.EscapeDataString(signalName)}");
+        using var document = System.Text.Json.JsonDocument.Parse(body);
+        var data = document.RootElement.GetProperty("data");
+        return data.GetArrayLength() == 0 ? null : data[0].GetProperty("id").GetString();
+    }
+
+    private static string CatchDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_1" name="{{key}}_wake" />
+          <bpmn:process id="{{key}}" name="Waker" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="c" />
+            <bpmn:intermediateCatchEvent id="c">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="f1" sourceRef="c" targetRef="t" />
+            <bpmn:userTask id="t" name="After the wake" />
+          </bpmn:process>
+          {{Di(key, "s", "c", "t")}}
+        </bpmn:definitions>
+        """;
+
+    [Fact]
     public async Task A_signal_nobody_listens_for_is_not_an_error_and_is_visible_in_history()
     {
         // Broadcast semantics: reaching nobody is normal, not a failure. But an

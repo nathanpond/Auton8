@@ -1,5 +1,5 @@
 {
-  "$comment": "The studio palette (#241). One row per element an author can place, each naming the bpmn-support.json row it claims to offer. Membership is NOT this file's to decide: createManifestPaletteProvider offers only rows whose manifest entry is studio=supported, so withdrawing an element in the manifest removes it from the palette with no edit here. This file carries presentation -- label, icon, group -- which the manifest has no business holding. BpmnPaletteManifestTests fails if a row names a manifest entry that does not exist, if a supported element has no row and no stated reason, or if the groups drift from the order below.",
+  "$comment": "The studio palette (#241). One row per element an author can place, each naming the bpmn-support.json row it claims to offer. Membership is NOT this file's to decide: createManifestPaletteProvider offers only rows whose manifest entry is studio=supported, so withdrawing an element in the manifest removes it from the palette with no edit here. This file carries presentation -- label, icon, group -- which the manifest has no business holding. BpmnPaletteManifestTests fails if a row names a manifest entry that does not exist, if a supported element has no row and no stated reason, or if the groups drift from the order below. Entries whose manifest row is not `supported` stay listed on purpose: their className is what createManifestMenuFilter uses to strip them from bpmn-js's own Create-element popup and replace menu, which are separate surfaces the palette override does not reach (#264).",
   "$fields": {
     "id": "bpmn-js palette entry id. 'create.*' places a shape; 'append.*' attaches to the selection.",
     "label": "What the author reads in the palette.",
@@ -636,6 +636,28 @@
       "eventDefinitionType": "bpmn:CompensateEventDefinition",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate"
+    },
+    {
+      "id": "create.intermediate-catch-link",
+      "label": "Link catch event",
+      "description": "Continues from a link throw",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-catch-link",
+      "type": "bpmn:IntermediateCatchEvent",
+      "eventDefinitionType": "bpmn:LinkEventDefinition",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "link"
+    },
+    {
+      "id": "create.intermediate-throw-link",
+      "label": "Link throw event",
+      "description": "Jumps to a link catch",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-throw-link",
+      "type": "bpmn:IntermediateThrowEvent",
+      "eventDefinitionType": "bpmn:LinkEventDefinition",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "link"
     }
   ]
 }

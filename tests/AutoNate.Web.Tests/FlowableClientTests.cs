@@ -1000,21 +1000,107 @@ public sealed class FlowableClientTests
     // --- SignalExecutionAsync ------------------------------------------------
 
     [Fact]
-    public async Task SignalExecutionAsync_PutsSignalEventReceivedActionWithVariables()
+    public async Task SignalExecutionAsync_SendsTheSignalNameTheEngineRequires()
     {
+        // #262. This test existed and could not see the defect: it asserted the
+        // payload's shape against a stub that answers 200 to anything, while the
+        // real engine answers 400 "Signal name is required" — so every external
+        // signal wake failed silently for the whole of M4 and the dispatcher's
+        // catch-and-log swallowed it.
+        //
+        // Asserting the name is present is the fix; the stub below refusing a
+        // payload without it is what stops the assertion being removed later
+        // without anything noticing.
         var (client, stub) = CreateClient();
         stub.WhenJson(HttpMethod.Put, "service/runtime/executions/exec-1",
             new { id = "exec-1" });
 
         await client.SignalExecutionAsync(
             executionId: "exec-1",
+            signalName: "OrderPlaced",
             variables: new Dictionary<string, object?> { ["eventData"] = "{\"x\":1}" });
 
         var sent = Assert.Single(stub.Requests);
         Assert.Equal(HttpMethod.Put, sent.Method);
         Assert.EndsWith("/runtime/executions/exec-1", new Uri(sent.Url).AbsolutePath);
         Assert.Contains("\"action\":\"signalEventReceived\"", sent.Body);
+        Assert.Contains("\"signalName\":\"OrderPlaced\"", sent.Body);
         Assert.Contains("\"name\":\"eventData\"", sent.Body);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SignalExecutionAsync_RefusesToSendAWakeTheEngineWouldReject(string? signalName)
+    {
+        // The complement, and the half that makes the assertion above load-bearing:
+        // a nameless wake never reaches the engine at all, so it cannot become a
+        // 400 that a catch-and-log turns into silence.
+        var (client, stub) = CreateClient();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.SignalExecutionAsync(
+            executionId: "exec-1",
+            signalName: signalName!));
+
+        Assert.Empty(stub.Requests);
+    }
+
+    // --- #263: every delivery path asks the engine to re-check conditions ----
+
+    [Theory]
+    [InlineData("trigger")]
+    [InlineData("message")]
+    [InlineData("signal")]
+    public async Task DeliveringVariablesAsksTheEngineToReevaluateConditions(string path)
+    {
+        // #263. Flowable never fires a conditional event on its own — #158's
+        // founding finding — so every path that changes a variable must ask.
+        // Task completion and the two /variables routes did; delivering a
+        // message, waking a signal and triggering a receive task did not, and
+        // those are how a variable arrives from OUTSIDE. A conditional wait
+        // parked forever whenever its variable came in that way.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Put, "service/runtime/executions/exec-1",
+            new { id = "exec-1", processInstanceId = "pi-9" });
+        stub.WhenJson(HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions",
+            new { });
+
+        switch (path)
+        {
+            case "trigger":
+                await client.TriggerExecutionAsync("exec-1",
+                    new Dictionary<string, object?> { ["ready"] = true });
+                break;
+            case "message":
+                await client.DeliverMessageToExecutionAsync("exec-1", "Nudge",
+                    new Dictionary<string, object?> { ["ready"] = true });
+                break;
+            default:
+                await client.SignalExecutionAsync("exec-1", "Wake",
+                    new Dictionary<string, object?> { ["ready"] = true });
+                break;
+        }
+
+        Assert.Contains(stub.Requests, r =>
+            r.Method == HttpMethod.Post
+            && r.Url.Contains("/process-instances/pi-9/evaluate-conditions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AFailedConditionNudgeDoesNotFailTheDeliveryThatSucceeded()
+    {
+        // The complement. The delivery already happened; reporting failure for it
+        // because a best-effort follow-up call failed would be worse than the bug.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Put, "service/runtime/executions/exec-1",
+            new { id = "exec-1", processInstanceId = "pi-9" });
+        stub.When(HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions",
+            _ => new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError));
+
+        await client.SignalExecutionAsync("exec-1", "Wake");
+
+        Assert.Contains(stub.Requests, r => r.Method == HttpMethod.Put);
     }
 
     // --- ListExecutionsBySignalSubscriptionAsync -----------------------------

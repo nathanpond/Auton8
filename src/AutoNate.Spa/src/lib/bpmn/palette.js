@@ -162,3 +162,69 @@ export function createManifestPaletteProvider() {
     paletteProvider: ["type", ManifestPaletteProvider]
   };
 }
+
+/**
+ * Every element the manifest does NOT call supported, by its bpmn-js icon class.
+ *
+ * The palette override cannot reach bpmn-js's other two surfaces, so this is what
+ * closes them (#264). Derived from the same catalog and the same manifest, so an
+ * element promoted in `bpmn-support.json` leaves this set with no edit here.
+ */
+export const WITHHELD_ICON_CLASSES = new Set(
+  PALETTE_CATALOG
+    .filter((entry) => studioStatusOf(entry) !== "supported")
+    .map((entry) => entry.className)
+    .filter(Boolean)
+);
+
+/**
+ * Strips withheld elements from bpmn-js's Create-element popup and replace menu.
+ *
+ * #241 derived the palette and overrode `paletteProvider`. That was necessary and
+ * not sufficient: the vendored bundle appends `create-append-anything` AFTER any
+ * `additionalModules`, and it registers under a DIFFERENT name
+ * (`createPaletteProvider`), so its "Create element" button survives the
+ * override. Its popup offered Transaction, Cancel End, Business Rule Task,
+ * Manual Task and generic Task — three of which publish then refuses. The stock
+ * replace menu (the wrench on the context pad) offered the same, plus both link
+ * events.
+ *
+ * So the withdrawn elements stayed one click away, and neither guard could see
+ * it: the catalog test reads JSON, and the browser test compares palette
+ * `data-action` values against catalog ids — the popup's own entries are neither.
+ *
+ * Implemented as popup-menu middleware rather than by replacing the providers.
+ * `PopupMenu._getEntries` lets a provider return a FUNCTION, which receives every
+ * entry accumulated so far and returns what survives — so this filters whatever
+ * the bundle offers, including entries a future bpmn-js adds, instead of
+ * reproducing its option tables and drifting from them.
+ *
+ * Registered at a priority BELOW the default so it runs last, after every
+ * provider has contributed.
+ */
+export function createManifestMenuFilter() {
+  const RUN_LAST = 500; // diagram-js default is 1000; higher runs first.
+
+  function ManifestMenuFilter(popupMenu) {
+    const filter = {
+      getPopupMenuEntries() {
+        return (entries) => Object.fromEntries(
+          Object.entries(entries).filter(
+            ([, entry]) => !WITHHELD_ICON_CLASSES.has(entry?.className)
+          )
+        );
+      }
+    };
+
+    for (const menu of ["bpmn-replace", "bpmn-create"]) {
+      popupMenu.registerProvider(menu, RUN_LAST, filter);
+    }
+  }
+
+  ManifestMenuFilter.$inject = ["popupMenu"];
+
+  return {
+    __init__: ["autonateManifestMenuFilter"],
+    autonateManifestMenuFilter: ["type", ManifestMenuFilter]
+  };
+}

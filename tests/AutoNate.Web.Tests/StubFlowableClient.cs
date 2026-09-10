@@ -146,13 +146,16 @@ internal sealed class StubFlowableClient : IFlowableClient
     public HashSet<string> InstanceScopedSignals { get; } = new(StringComparer.Ordinal);
 
     public Task<bool> IsSignalGlobalAsync(
-        string processDefinitionId, string signalName, CancellationToken cancellationToken = default)
+        string processDefinitionId,
+        string signalName,
+        string? activityId = null,
+        CancellationToken cancellationToken = default)
     {
-        Calls.Add($"SignalScope:{processDefinitionId}:{signalName}");
+        Calls.Add($"SignalScope:{processDefinitionId}:{signalName}:{activityId}");
         return Task.FromResult(!InstanceScopedSignals.Contains(signalName));
     }
 
-    public List<(string ExecutionId, string ProcessDefinitionId)> AwaitingSignalExecutions { get; } = [];
+    public List<(string ExecutionId, string ProcessDefinitionId, string? ActivityId)> AwaitingSignalExecutions { get; } = [];
 
     /// <summary>
     /// Executions waiting on a signal, from either fixture.
@@ -166,7 +169,7 @@ internal sealed class StubFlowableClient : IFlowableClient
     /// fixture in the new shape. Rewriting those assertions to match the new
     /// plumbing is how a guard quietly stops guarding what it was written for.
     /// </remarks>
-    public Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+    public Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId, string? ActivityId)>>
         ListExecutionsAwaitingSignalWithDefinitionAsync(
             string signalName, CancellationToken cancellationToken = default)
     {
@@ -174,14 +177,14 @@ internal sealed class StubFlowableClient : IFlowableClient
 
         if (AwaitingSignalExecutions.Count > 0)
         {
-            return Task.FromResult<IReadOnlyList<(string, string)>>(AwaitingSignalExecutions);
+            return Task.FromResult<IReadOnlyList<(string, string, string?)>>(AwaitingSignalExecutions);
         }
 
         var byName = WaitingExecutionsBySignal.TryGetValue(signalName, out var ids)
-            ? ids.Select(id => (id, "stub-definition:1:1")).ToList()
+            ? ids.Select(id => (id, "stub-definition:1:1", (string?)null)).ToList()
             : [];
 
-        return Task.FromResult<IReadOnlyList<(string, string)>>(byName);
+        return Task.FromResult<IReadOnlyList<(string, string, string?)>>(byName);
     }
 
     public Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
@@ -391,10 +394,19 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     public Task SignalExecutionAsync(
         string executionId,
+        string signalName,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default)
     {
-        Calls.Add($"SignalExecution:{executionId}");
+        // #262. The engine rejects a wake with no signal name, so a stub that
+        // accepts one would hide exactly the defect that shipped.
+        if (string.IsNullOrWhiteSpace(signalName))
+        {
+            throw new InvalidOperationException(
+                "Flowable answers 400 'Signal name is required' when signalName is absent.");
+        }
+
+        Calls.Add($"SignalExecution:{executionId}:{signalName}");
         SignalledExecutions.Add((executionId, variables));
         return Task.CompletedTask;
     }

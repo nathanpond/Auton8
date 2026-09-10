@@ -1,4 +1,4 @@
-import { createManifestPaletteProvider } from "./palette";
+import { createManifestPaletteProvider, createManifestMenuFilter } from "./palette";
 
 
 const WORKFLOW_JS_VERSION = "20260425_01";
@@ -21,7 +21,7 @@ export async function createModeler(container, xml, dotNetRef) {
   // the library ships regardless of what the support manifest says we run.
   const modeler = new window.BpmnJS({
     container,
-    additionalModules: [createManifestPaletteProvider()]
+    additionalModules: [createManifestPaletteProvider(), createManifestMenuFilter()]
   });
   const eventBus = modeler.get("eventBus", false);
 
