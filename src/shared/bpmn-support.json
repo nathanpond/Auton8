@@ -389,6 +389,16 @@
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
+      "name": "Boundary Event (None)",
+      "category": "Boundary Events",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
+      "localName": "boundaryEvent",
+      "eventDefinition": null,
+      "reason": "#282: a boundary event with no event definition has nothing to wait for. Flowable refuses the deployment outright \u2014 [Validation set: 'flowable-executable-process' | Problem: 'flowable-boundary-event-no-event-definition'] \u2014 so it is withdrawn from the palette and refused at publish, naming the step. It had no row at all until #282, which meant the popup filter had no deny key for it and publish had nothing to match: it was placeable, published with zero errors, and failed at the engine.",
+      "evidence": "deployed against a live 8.0.0 engine and refused: flowable-boundary-event-no-event-definition"
+    },
+    {
       "name": "Message End",
       "category": "End Events",
       "studio": "supported",

@@ -170,9 +170,54 @@ export function createManifestPaletteProvider() {
  * closes them (#264). Derived from the same catalog and the same manifest, so an
  * element promoted in `bpmn-support.json` leaves this set with no edit here.
  */
+/** Every element the manifest calls supported, and every one it does not. */
+const OFFERED = PALETTE_CATALOG.filter((entry) => studioStatusOf(entry) === "supported");
+const WITHHELD = PALETTE_CATALOG.filter((entry) => studioStatusOf(entry) !== "supported");
+
+/** The manifest's (localName, eventDefinition) key, in bpmn-js's own vocabulary. */
+function targetKeyOf(entry) {
+  return entry?.type ? `${entry.type}|${entry.eventDefinitionType ?? ""}` : null;
+}
+
+/**
+ * Withheld elements by bpmn-js's own `target`, which is what actually identifies
+ * one (#282).
+ *
+ * `className` is not an identity. bpmn-js gives the supported Intermediate Throw
+ * (None) and the withheld bare Boundary Event the SAME
+ * `bpmn-icon-intermediate-event-none`, because they are drawn with the same
+ * glyph — so a className-keyed filter must either let the boundary event through
+ * or wrongly withdraw the intermediate throw. It let it through: the bare
+ * boundary event was placeable, published with zero errors, and Flowable refused
+ * the deployment (`flowable-boundary-event-no-event-definition`).
+ *
+ * `target.type` plus `target.eventDefinitionType` is the pair bpmn-js replaces
+ * WITH, and it is the same pair the manifest keys on, so this is the manifest's
+ * own key expressed in the bundle's vocabulary rather than a glyph that happens
+ * to correlate with it.
+ */
+export const WITHHELD_TARGET_KEYS = new Set(
+  WITHHELD.map(targetKeyOf).filter(Boolean)
+);
+
+/**
+ * Class names safe to deny on, for entries carrying no `target`.
+ *
+ * Header entries — `toggle-loop` and friends — apply a marker rather than
+ * replacing the element, so they have no target and this is the only key
+ * available for them.
+ *
+ * A class name a SUPPORTED element also uses is excluded, because denying it
+ * would withdraw that element too. Computed rather than hand-maintained: an
+ * element promoted in `bpmn-support.json` drops out of this set with no edit
+ * here, which is the property the whole module rests on.
+ */
+const SUPPORTED_ICON_CLASSES = new Set(
+  OFFERED.flatMap((entry) => [entry.className, ...(entry.menuClassNames ?? [])]).filter(Boolean)
+);
+
 export const WITHHELD_ICON_CLASSES = new Set(
-  PALETTE_CATALOG
-    .filter((entry) => studioStatusOf(entry) !== "supported")
+  WITHHELD
     // #264. `className` alone was not enough: bpmn-js names some elements
     // differently in its own popups than the palette does, so
     // `bpmn-icon-business-rule-task` matched NOTHING in the bundle and Business
@@ -182,16 +227,40 @@ export const WITHHELD_ICON_CLASSES = new Set(
     // vendored bundle, because a deny key that matches nothing fails silently.
     .flatMap((entry) => [entry.className, ...(entry.menuClassNames ?? [])])
     .filter(Boolean)
+    .filter((className) => !SUPPORTED_ICON_CLASSES.has(className))
 );
 
 /**
- * Every popup menu bpmn-js registers that can place or swap an element (#264).
+ * bpmn-js's own entry ids for withheld elements (#282).
  *
- * `bpmn-append` was missed the first time — the context pad's "Append element"
- * button, fed by the same option table as the Create popup — so the withheld
- * elements stayed reachable there. Listing all three, with a test that fails if
- * the bundle registers a fourth.
+ * The Create and Append popups build their entries through `toActionEntry`,
+ * which keeps label / className / description / group / search / rank / action
+ * and **drops `target`**. So on those two surfaces there is nothing to judge by
+ * except the glyph — and the glyph is shared. The id is what is left, and
+ * bpmn-js builds it as `${idPrefix}-${actionName}`, hence the suffix match.
  */
+export const WITHHELD_MENU_ENTRY_IDS = new Set(
+  WITHHELD.flatMap((entry) => entry.menuEntryIds ?? [])
+);
+
+/** Would this popup entry place something the manifest does not support? */
+export function isWithheldMenuEntry(entry, id) {
+  const target = entry?.target;
+  if (target?.type) {
+    // The replace menu keeps `target`, so judge by what it would place — never
+    // by its glyph, which bpmn-js reuses across unrelated elements.
+    return WITHHELD_TARGET_KEYS.has(`${target.type}|${target.eventDefinitionType ?? ""}`);
+  }
+
+  if (typeof id === "string") {
+    for (const menuId of WITHHELD_MENU_ENTRY_IDS) {
+      if (id === menuId || id.endsWith(`-${menuId}`)) return true;
+    }
+  }
+
+  return WITHHELD_ICON_CLASSES.has(entry?.className);
+}
+
 export const FILTERED_POPUP_MENUS = ["bpmn-replace", "bpmn-create", "bpmn-append"];
 
 /**
@@ -224,9 +293,7 @@ export function createManifestMenuFilter() {
 
   function ManifestMenuFilter(popupMenu) {
     const strip = (entries) => Object.fromEntries(
-      Object.entries(entries).filter(
-        ([, entry]) => !WITHHELD_ICON_CLASSES.has(entry?.className)
-      )
+      Object.entries(entries).filter(([id, entry]) => !isWithheldMenuEntry(entry, id))
     );
 
     const filter = {

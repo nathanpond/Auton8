@@ -4578,3 +4578,105 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   says the figures move and how to re-measure. The percentage has been ~42%
   throughout.
   **Issue:** #273, #274, #264
+
+## 2026-09-10 — Signal scope: one interpretation, not a sixth point fix
+
+  **Rule 1.** #156's signal scope failed verification in five consecutive rounds,
+  and every failure was one family: `ApplySignalScopes` and
+  `BuildSignalScopeErrors` each read the author's declaration with their own
+  private rules, and the rules drifted. Round 3 they disagreed about what
+  "declares nothing" means. Round 5 (#278) they disagreed about how "instance" is
+  spelt — the expansion tested `declared == "instance"` while the validator
+  accepted "instance" OR "processInstance", so a diagram spelling it Flowable's
+  own way passed validation with zero errors and had its scope silently dropped,
+  running engine-wide.
+  Five point fixes had not converged, so I did not write a sixth. `ReadSignalScopeDeclaration`
+  / `InterpretSignalScope` / `CollectSignalScopeUses` are now the single
+  interpretation both callers consume; `ApplySignalScopes` is 12 lines and owns
+  only the decision to WRITE, and `BuildSignalScopeErrors` owns only the decision
+  to REFUSE. A new spelling is added in one place or in none.
+  **The guard is `The_two_paths_never_disagree`** — an 80-cell cross-product of
+  declaration x event kind x authored root state, asserting that a diagram which
+  publishes clean gets the scope it asked for and a diagram that is refused gets
+  nothing written. Deliberately generated, not enumerated: a list is what froze
+  the vocabulary axis and hid #278 in the first place.
+  **Mutation-proven, four ways.** Dropping "processinstance" -> 3 red; reading a
+  typo as global -> 5 red; treating "declared nothing" as a reason to strip ->
+  1 red, and *only* `The_two_paths_never_disagree` catches that one, which is the
+  case for it existing. Removing the duplicate-root refusal -> 1 red. The
+  behavioural E2E was mutation-proven against the live engine too: with the
+  vocabulary reverted, the `instance` row passes and the `processInstance` row
+  fails, a second instance hearing a signal it should not.
+  **#279 also fixed here**, being the same collection: two `<bpmn:signal>` roots
+  sharing a name are refused at publish (Flowable keys signals by NAME and answers
+  `flowable-signal-duplicate-name` with a 500), and the root's own carried
+  `flowable:scope` is now recorded once against the ROOT rather than attributed to
+  every event referencing it — which is what made "declares nothing" read as a
+  declaration and refused a diagram that deploys.
+  **#280's other halves:** the deployment grid was five rows short of the unit
+  grid it claims to complete, so both now assert the same literal and adding a row
+  to one fails the other; and nothing in the suite ever *ran* the #273 shape, only
+  published it — a leaked scope produces XML Flowable accepts perfectly happily,
+  so only a second instance can tell. `An_unscoped_throw_still_honours_the_catchs_scope`
+  is that test.
+  **#281 in the same pass**, being the third copy of the same vocabulary: the
+  studio read only the event's declaration, so an imported instance-scoped diagram
+  showed "Global" and pressing Apply on an untouched signal widened it. It now
+  falls back to the root's carried scope and shares the backend's spelling list.
+  **Issue:** #278, #279, #280, #281
+
+## 2026-09-10 — The manifest could not report its own gaps
+
+  **Rule 1 + Rule 2.** #282: a bare `bpmn:boundaryEvent` had no manifest row at
+  all. Every guard this milestone built iterates the manifest, so an element the
+  manifest never inventoried was invisible to all of them — including
+  `Every_withheld_element_has_a_deny_key_or_a_stated_reason`, which cannot report
+  a row that does not exist. It was placeable from the Create popup, published
+  with zero errors, and Flowable refused the deployment
+  (`flowable-boundary-event-no-event-definition`).
+  Three changes, and the second matters more than the first:
+  1. A manifest row (`withdrawn` / `cannot-execute`), so publish refuses it naming
+     the step. Verified: `errors=1`, quoting the engine's own message.
+  2. **`Every_element_the_bundle_can_place_has_a_manifest_row`** — the guard that
+     runs the other way, reading bpmn-js's own `PopupEntries` table rather than a
+     list here, because a list here would have the manifest's blind spot. It has
+     an anti-vacuity floor (>40 targets parsed) because a regex that stopped
+     matching would make it pass against nothing. Mutation-proven: removing the
+     new row fails it with `none-boundary-event -> boundaryEvent`.
+  3. **The filter keyed on the wrong thing.** bpmn-js draws the *supported*
+     Intermediate Throw (None) and the *withheld* bare Boundary Event with the same
+     glyph, so both carry `bpmn-icon-intermediate-event-none` — a className-keyed
+     filter must either leak one or withdraw the other. `isWithheldMenuEntry` now
+     judges by `target.type` + `target.eventDefinitionType`, which is bpmn-js's own
+     identity for what an entry places and the same pair the manifest keys on;
+     className remains only for header entries, which have no target, and a
+     className a supported element also uses is excluded automatically rather than
+     by hand. `No_class_name_deny_key_also_belongs_to_a_supported_element` pins the
+     one known collision so a new one is a decision rather than a leak.
+  **Issue:** #282
+
+## 2026-09-10 — BLOCKER: making a route-contract breach terminal
+
+  **Rule 4.** #283 is confirmed and its cause is understood:
+  `enforceRouteContract` throws a plain `FlowableException` while
+  `ExpandComplexGateways` stamps the generated routing task
+  `flowable:async="true"`, and Flowable retries an async job on
+  `FlowableException` — so a deterministic author error is attempted three times
+  over ~35 s before dead-lettering.
+  I did not fix it, because every available mechanism trades something the owner
+  should choose:
+  - `flowable:failedJobRetryTimeCycle` on the generated task is fully supported
+    and needs no Java, but it is static, so it would also make a genuinely
+    **transient** sandbox failure terminal — removing resilience the behaviour's
+    fail-closed design deliberately has.
+  - Setting the current job's retries to 0 from inside the behaviour distinguishes
+    the two correctly but needs engine-internal API, and there is no local Java
+    toolchain to develop it against.
+  - `AsyncRunnableExecutionExceptionHandler` is the supported SPI for exactly this
+    and is **new engine infrastructure** — Rule 4 by name.
+  What I did instead is stop the behaviour being invisible.
+  `A_bad_route_is_attempted_a_bounded_number_of_times` pins the observed attempt
+  count, so whichever answer the owner picks, changing it is a change somebody
+  sees — and the existing test could not tell one attempt from ten, because it
+  waits on the dead letter, which is the end of the retry sequence.
+  **Issue:** #283

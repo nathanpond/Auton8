@@ -223,6 +223,12 @@
  },
  {
   "group": "coming-soon",
+  "name": "Boundary Event (None)",
+  "verdict": "fails at deployment",
+  "note": "#282, NOT part of #103's original sweep -- this element had no row in either table, which is exactly why nothing found it. Probed the same way the rest were, by deploying it to a live 8.0.0 engine: [Validation set: 'flowable-executable-process' | Problem: 'flowable-boundary-event-no-event-definition']."
+ },
+ {
+  "group": "coming-soon",
   "name": "Message End",
   "verdict": "executes",
   "note": "deployed and started"
