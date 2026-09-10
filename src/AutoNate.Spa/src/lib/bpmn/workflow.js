@@ -871,6 +871,13 @@ function describeElementData(businessObject) {
       multiInstanceCollection: readFlowableString(loop, "collection") ?? "",
       multiInstanceElementVariable: readFlowableString(loop, "elementVariable") ?? "",
       multiInstanceCompletionCondition: readAutoNateAttribute(loop, "completionCondition") ?? "",
+      // #245. Stored as attributes for the same reason the completion condition
+      // is: bpmn-js has no Flowable moddle extension, so a <bpmn:loopCardinality>
+      // child and a <flowable:variableAggregation> extension element are both
+      // dropped on the author's next save. Publish rebuilds them.
+      multiInstanceCardinality: readAutoNateAttribute(loop, "loopCardinality") ?? "",
+      multiInstanceAggregateTarget: readAutoNateAttribute(loop, "aggregateTarget") ?? "",
+      multiInstanceAggregateSource: readAutoNateAttribute(loop, "aggregateSource") ?? "",
       // isSequential defaults to false in BPMN, and parallel is the common case.
       multiInstanceSequential: loop.isSequential === true
     };
@@ -3184,6 +3191,9 @@ export function updateElementDataProperties(modelerHandle, editor) {
     writeFlowableAttribute(loop, "collection", editor.collection);
     writeFlowableAttribute(loop, "elementVariable", editor.elementVariable);
     writeAutoNateAttribute(loop, "completionCondition", editor.completionCondition);
+    writeAutoNateAttribute(loop, "loopCardinality", editor.cardinality);
+    writeAutoNateAttribute(loop, "aggregateTarget", editor.aggregateTarget);
+    writeAutoNateAttribute(loop, "aggregateSource", editor.aggregateSource);
 
     // ...and isSequential goes through updateModdleProperties, which is what
     // pushes the command. Without a command the studio never re-serialises and

@@ -327,6 +327,75 @@ public sealed class EventSubProcessExecutionTests : E2ETestBase
     }
 
     [Fact]
+    public async Task A_non_interrupting_handler_runs_again_every_time_it_is_triggered()
+    {
+        // #246. The test plan promised "asserted with two triggers" and every
+        // non-interrupting test fires exactly once -- which is the assertion that
+        // cannot tell non-interrupting from interrupting at all. An interrupting
+        // handler consumes its scope on the first trigger and the second one has
+        // nothing left to catch it, so a single trigger passes either way.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"esp_r_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:message id="Msg_1" name="{{key}}_nudge" />
+              <bpmn:process id="{{key}}" name="Repeat Handler" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="ongoing" />
+                <bpmn:userTask id="ongoing" name="Ongoing work" />
+                <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+                  <bpmn:startEvent id="hs" isInterrupting="false"
+                                   flowable:autonateCorrelationKey="orderId">
+                    <bpmn:messageEventDefinition messageRef="Msg_1" />
+                  </bpmn:startEvent>
+                  <bpmn:sequenceFlow id="hf" sourceRef="hs" targetRef="ht" />
+                  <bpmn:userTask id="ht" name="Handled message" />
+                </bpmn:subProcess>
+              </bpmn:process>
+              {{Di(key, "s", "ongoing", "handler")}}
+            </bpmn:definitions>
+            """);
+
+        var instance = await StartAsync(api, key, new { orderId = "ORD-9" });
+        Assert.Contains("Ongoing work", await TaskNamesAsync(api, instance));
+
+        await NudgeAsync(api, key, "ORD-9");
+        await EventuallyAsync(api, instance,
+            n => n.Count(name => name == "Handled message") == 1,
+            "the handler to run the first time");
+
+        await NudgeAsync(api, key, "ORD-9");
+        var names = await EventuallyAsync(api, instance,
+            n => n.Count(name => name == "Handled message") == 2,
+            "the handler to run a SECOND time");
+
+        // Two instances of the handler's task, not one replaced by another.
+        Assert.Equal(2, names.Count(name => name == "Handled message"));
+
+        // And the scope it guards was never interrupted, either time.
+        Assert.Contains("Ongoing work", names);
+    }
+
+    private static async Task NudgeAsync(IAPIRequestContext api, string key, string correlationValue)
+    {
+        var sent = await api.PostAsync("/api/workflow-messages/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                processKey = key,
+                messageName = $"{key}_nudge",
+                correlationValue
+            }
+        });
+        Assert.True(sent.Ok, $"Send failed: {sent.Status} {await sent.TextAsync()}");
+    }
+
+    [Fact]
     public async Task An_event_subprocess_that_can_never_trigger_is_refused_at_publish()
     {
         await using var session = await NewSignedInAsAdminAsync();

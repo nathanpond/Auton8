@@ -4234,3 +4234,63 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   test since they hit this; workflow events had none, which is precisely why this
   family drifted.
   **Issue:** #253, #254
+
+- **Verification fix pass, batch 4 (#246, #245).**
+  **#246 — four criteria that asserted only the positive half.**
+  #114's escalation test asserted "Escalated" appeared and never that "After
+  subprocess" did not, which passes for a NON-interrupting boundary — the opposite
+  feature. It was the one test in that file without its complement. Asserted now,
+  and asserted again after a settle so a cancellation that merely lost a race
+  cannot pass.
+  #162's plan promised "asserted with two triggers" and every non-interrupting
+  test fired once — an assertion that cannot tell non-interrupting from
+  interrupting at all, since an interrupting handler consumes its scope on the
+  first trigger. A message handler is now nudged twice and two handler tasks are
+  asserted.
+  #157's "deleting an instance removes its pending timers" was **claimed in a
+  docstring that named the file where it supposedly lived**. It lived nowhere. It
+  does now, reading the engine's `management/timer-jobs` surface, and asserting the
+  job EXISTED first so the absence afterwards is not vacuous. And "completing the
+  activity first removes the timer" — which its own docstring said had to be
+  asserted on the job being gone — was `DoesNotContain("Escalated")` against a
+  PT30S timer polled sub-second, i.e. "nothing has happened yet". It reads the job
+  surface now.
+  #115's failing-handler criterion had no test and rested on a probe in a comment.
+  Writing it found the engine's real guarantee, which is **stronger than the story
+  assumed**: compensation runs inside the completing transaction, so a handler that
+  throws fails the operator's own request with the script's message and rolls the
+  completion back. There is no window in which the undo looks done. Pinned as
+  found rather than as imagined. The over-compensation direction — nothing
+  compensates on the happy path — is asserted too; every other test in that file
+  throws compensation, so a handler running on every completion would have passed
+  all of them while reversing payments nobody asked to reverse.
+  One existing test failed on my own #242 change and I updated the assertion rather
+  than the code: the uncaught-error refusal now quotes the error CODE the author
+  typed instead of the `<bpmn:error>` element's id, which is what BPMN matches on.
+  **#245 — #159 ticked two criteria that did not exist.** Result aggregation had
+  zero implementation, zero documentation and no field; a fixed instance count had
+  no panel field and was neither read nor written by `workflow.js`, so no author
+  could have set one — while the manifest asserted it worked.
+  Both are built now, stored as `autonate:` attributes and rebuilt at publish for
+  the reason everything else in this milestone is: bpmn-js has no Flowable moddle
+  extension and drops a `<bpmn:loopCardinality>` child or a
+  `<flowable:variableAggregation>` extension element on the author's next save,
+  silently, with their configuration inside it.
+  Two new refusals, both for settings the engine honours *partly*: a list and a
+  fixed count together (Flowable reads the list and ignores the count, so the
+  author asked for N runs and got one per item), and half an aggregation.
+  The story's own key_link said "the cancellation is the half most likely to be
+  missed". It was missed; it is asserted now — the outstanding approval is GONE,
+  not merely un-completed. So is independent assignment: one task per item was
+  asserted by COUNT, which is equally true of an implementation whose tasks share
+  an assignee and complete together.
+  Schema order is pinned by a test, because appending all three children is the
+  obvious implementation and it deploys fine until an author uses two together.
+  Aggregation surfaced one honest caveat, recorded rather than hidden: a script's
+  `variables.set` writes through to the process, so the per-run variable also lands
+  on the parent holding whichever run finished last. Aggregation itself is
+  unaffected — the list is built from the per-instance scope — and the docs say to
+  read the list, not the source.
+  `docs/workflow-multi-instance.md` is the documentation the criterion asked for.
+  The manifest rows now name the tests instead of asserting a manual probe.
+  **Issue:** #246, #245

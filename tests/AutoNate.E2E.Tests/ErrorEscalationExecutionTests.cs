@@ -57,7 +57,13 @@ public sealed class ErrorEscalationExecutionTests : E2ETestBase
 
         Assert.False(response.Ok, "Publishing an uncatchable error should be refused.");
         var body = await response.TextAsync();
-        Assert.Contains("Err_Known", body);
+
+        // The CODE the author typed, not the id of the <bpmn:error> element
+        // (#242). BPMN matches a thrown error to a boundary on errorCode, so
+        // quoting the ref id told the author about a detail that is not the one
+        // deciding the outcome -- and two <bpmn:error> roots sharing a code read
+        // as non-matching, which refused valid diagrams.
+        Assert.Contains("E_KNOWN", body);
         Assert.Contains("nothing in", body);
     }
 
@@ -100,6 +106,20 @@ public sealed class ErrorEscalationExecutionTests : E2ETestBase
             n => n.Contains("Escalated"), "the escalation end event's code to be caught");
 
         Assert.Contains("Escalated", names);
+
+        // #246. The boundary event is interrupting, so the subprocess is
+        // cancelled and its outgoing flow is never taken. Asserting only that
+        // "Escalated" appeared passes for a NON-interrupting boundary too, which
+        // is the opposite feature -- and every other test in this file carries
+        // its complement, so this one was the outlier.
+        Assert.DoesNotContain("After subprocess", names);
+
+        // And it stays that way. A cancellation that merely lost a race would
+        // show up as the normal path arriving a moment later.
+        await Task.Delay(2_000);
+        var settled = await TaskNamesAsync(api, instance);
+        Assert.Contains("Escalated", settled);
+        Assert.DoesNotContain("After subprocess", settled);
     }
 
     [Fact]

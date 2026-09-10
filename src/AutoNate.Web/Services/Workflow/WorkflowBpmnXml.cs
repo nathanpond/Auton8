@@ -167,6 +167,12 @@ public static partial class WorkflowBpmnXml
         ExpandSignalEndEvents(document);
         ExpandCompensationEndEvents(document);
         ExpandDataObjectTypes(document);
+        // #245. Both write children of multiInstanceLoopCharacteristics, whose
+        // schema sequence is extensionElements, loopCardinality, ...,
+        // completionCondition. Aggregation first (it is the extensionElements),
+        // then cardinality, then the condition, which appends last.
+        ExpandMultiInstanceAggregation(document);
+        ExpandMultiInstanceCardinality(document);
         ExpandCompletionConditions(document);
         ExpandComplexGateways(document);
         ApplySignalScopes(document);
@@ -404,6 +410,123 @@ public static partial class WorkflowBpmnXml
 
     /// <summary>Where an authored completion condition lives in the stored diagram (#159/#163).</summary>
     internal const string CompletionConditionAttribute = "completionCondition";
+
+    /// <summary>A fixed instance count, as the author wrote it (#245).</summary>
+    internal const string LoopCardinalityAttribute = "loopCardinality";
+
+    /// <summary>Where each run's result is collected, and from which variable (#245).</summary>
+    internal const string AggregateTargetAttribute = "aggregateTarget";
+
+    internal const string AggregateSourceAttribute = "aggregateSource";
+
+    /// <summary>
+    /// Turns an authored fixed instance count back into its BPMN child (#245).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Same reason as the completion condition one element over: bpmn-js is
+    /// vendored with no Flowable moddle extension, and a
+    /// <c>&lt;bpmn:loopCardinality&gt;</c> child written by hand is dropped on the
+    /// author's next save. The attribute survives; this puts the child back.
+    /// </para>
+    /// <para>
+    /// Cardinality and a collection are alternatives, not a pair — Flowable reads
+    /// the collection when both are present, so writing both would silently
+    /// ignore whichever the author thought they had set. A diagram carrying both
+    /// is refused at publish rather than deployed with one of them inert.
+    /// </para>
+    /// </remarks>
+    private static void ExpandMultiInstanceCardinality(XDocument document)
+    {
+        foreach (var loop in document
+            .Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics")
+            .ToList())
+        {
+            var declared = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value);
+            if (declared is null) continue;
+
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Remove();
+
+            // An author who hand-wrote the child meant it.
+            if (loop.Element(BpmnNamespace + "loopCardinality") is not null) continue;
+
+            var cardinality = new XElement(
+                BpmnNamespace + "loopCardinality",
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                declared);
+
+            // The schema sequence puts loopCardinality after extensionElements
+            // and before everything else; appending would put it after the
+            // completion condition and the deployment is refused with
+            // cvc-complex-type.2.4.d.
+            var extensions = loop.Element(BpmnNamespace + "extensionElements");
+            if (extensions is not null)
+            {
+                extensions.AddAfterSelf(cardinality);
+            }
+            else
+            {
+                loop.AddFirst(cardinality);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects each instance's output into one variable on the parent (#245).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable spells this <c>flowable:variableAggregation</c>, an extension
+    /// element on the loop characteristics carrying one or more
+    /// <c>flowable:variable</c> children. bpmn-js drops all of it, so the author's
+    /// two fields are stored as attributes and rebuilt here.
+    /// </para>
+    /// <para>
+    /// One source variable, not many. The panel asks "collect which variable, into
+    /// what" because that is the question an author has; the multi-variable form
+    /// is reachable by hand-writing the extension element, which this leaves
+    /// alone.
+    /// </para>
+    /// </remarks>
+    private static void ExpandMultiInstanceAggregation(XDocument document)
+    {
+        foreach (var loop in document
+            .Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics")
+            .ToList())
+        {
+            var target = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
+            var source = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Remove();
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Remove();
+
+            // A source with nowhere to go collects nothing; validation refuses
+            // that pairing rather than deploying a field the author filled in and
+            // the engine ignores.
+            if (target is null || source is null) continue;
+
+            var extensions = loop.Element(BpmnNamespace + "extensionElements");
+            if (extensions is null)
+            {
+                extensions = new XElement(BpmnNamespace + "extensionElements");
+                loop.AddFirst(extensions);
+            }
+
+            // An author who hand-wrote the aggregation meant it.
+            if (extensions.Elements(FlowableNamespace + "variableAggregation").Any()) continue;
+
+            extensions.Add(new XElement(
+                FlowableNamespace + "variableAggregation",
+                new XAttribute("target", target),
+                new XElement(
+                    FlowableNamespace + "variable",
+                    new XAttribute("source", source),
+                    new XAttribute("target", source))));
+        }
+    }
 
     /// <summary>
     /// The data a process declares: its data objects, stores, inputs and outputs
@@ -3249,8 +3372,65 @@ public static partial class WorkflowBpmnXml
             .. BuildEventSubProcessErrors(document),
             // #115 — a compensation handler that waits. Not a style question:
             // it crashes the engine mid-completion. See BuildCompensationErrors.
-            .. BuildCompensationErrors(document)
+            .. BuildCompensationErrors(document),
+            // #245 — a multi-instance marker configured two ways at once, where
+            // the engine quietly honours one of them.
+            .. BuildMultiInstanceErrors(document)
         ];
+
+    /// <summary>
+    /// Multi-instance settings the engine would silently ignore (#245).
+    /// </summary>
+    /// <remarks>
+    /// Both of these deploy cleanly and run, which is what makes them worth
+    /// refusing: the author sees a field they filled in and a result that does not
+    /// reflect it, with nothing anywhere saying why.
+    /// </remarks>
+    private static IEnumerable<string> BuildMultiInstanceErrors(XDocument document)
+    {
+        foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
+        {
+            var owner = LabelOf(loop.Parent) ?? "a step";
+
+            var hasCollection = Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value) is not null
+                || loop.Element(BpmnNamespace + "loopDataInputRef") is not null;
+            var hasCardinality =
+                Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value)
+                    is not null
+                || loop.Element(BpmnNamespace + "loopCardinality") is not null;
+
+            if (hasCollection && hasCardinality)
+            {
+                // Flowable reads the collection and ignores the count, so the
+                // author gets one instance per item having asked for exactly N.
+                yield return
+                    $"'{owner}' repeats over a list AND has a fixed number of runs. " +
+                    "Flowable uses the list and ignores the number, so one of them " +
+                    "would silently do nothing. Clear whichever you did not mean.";
+            }
+
+            var target = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
+            var source = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+
+            if (target is not null && source is null)
+            {
+                yield return
+                    $"'{owner}' collects each run's result into '{target}' but does " +
+                    "not say which variable to collect. Name the variable each run " +
+                    "sets, or clear the collection target.";
+            }
+
+            if (source is not null && target is null)
+            {
+                yield return
+                    $"'{owner}' collects the variable '{source}' from each run but " +
+                    "does not say where to put the results. Name a variable to " +
+                    "collect them into, or clear the variable.";
+            }
+        }
+    }
 
     // #242. BPMN matches an error by its errorCode, not by the id of the
     // <bpmn:error> root that carries it.

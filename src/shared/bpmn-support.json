@@ -576,7 +576,7 @@
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
       "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
-      "evidence": "deployed and started; per-instance element values and live-task counts observed"
+      "evidence": "deployed and started; per-instance element values and live-task counts observed. #245: the cardinality, early-completion-with-cancellation, independent assignment and result-aggregation claims are asserted in MultiInstanceExecutionTests, and the stored-to-deployed rewrite in MultiInstanceExpansionTests -- they were manual probes when this row was written, and two of them named features that did not exist yet."
     },
     {
       "name": "Multi-Instance (Sequential)",
@@ -586,7 +586,7 @@
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
       "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
-      "evidence": "deployed and started; per-instance element values and live-task counts observed"
+      "evidence": "deployed and started; per-instance element values and live-task counts observed. #245: the cardinality, early-completion-with-cancellation, independent assignment and result-aggregation claims are asserted in MultiInstanceExecutionTests, and the stored-to-deployed rewrite in MultiInstanceExpansionTests -- they were manual probes when this row was written, and two of them named features that did not exist yet."
     },
     {
       "name": "Compensation Marker",

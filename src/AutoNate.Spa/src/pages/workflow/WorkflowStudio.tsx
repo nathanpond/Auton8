@@ -276,6 +276,12 @@ type ElementDataEditor =
       collection: string;
       elementVariable: string;
       completionCondition: string;
+      // #245. A fixed count is an alternative to the list, not a companion:
+      // Flowable reads the list when both are set, so publish refuses the pair
+      // rather than letting one of them silently do nothing.
+      cardinality: string;
+      aggregateTarget: string;
+      aggregateSource: string;
       sequential: boolean;
     };
 
@@ -326,6 +332,9 @@ type ElementSelection = {
   multiInstanceCollection?: string | null;
   multiInstanceElementVariable?: string | null;
   multiInstanceCompletionCondition?: string | null;
+  multiInstanceCardinality?: string | null;
+  multiInstanceAggregateTarget?: string | null;
+  multiInstanceAggregateSource?: string | null;
   multiInstanceSequential?: boolean | null;
   assignee?: string | null;
   candidateUsers?: string[] | null;
@@ -810,6 +819,9 @@ export default function WorkflowStudio() {
         collection: selection.multiInstanceCollection ?? "",
         elementVariable: selection.multiInstanceElementVariable ?? "",
         completionCondition: selection.multiInstanceCompletionCondition ?? "",
+        cardinality: selection.multiInstanceCardinality ?? "",
+        aggregateTarget: selection.multiInstanceAggregateTarget ?? "",
+        aggregateSource: selection.multiInstanceAggregateSource ?? "",
         sequential: selection.multiInstanceSequential === true
       });
       return;
@@ -2736,11 +2748,39 @@ function ElementDataModal({
               onChange={(e) => onChange({ ...editor, elementVariable: e.currentTarget.value })}
             />
             <TextInput
+              label="Or a fixed number of runs"
+              placeholder="3"
+              description={
+                "Use instead of a list when the count is what matters. Setting both " +
+                "is refused at publish, because the engine would use the list and " +
+                "ignore the number."
+              }
+              value={editor.cardinality}
+              onChange={(e) => onChange({ ...editor, cardinality: e.currentTarget.value })}
+            />
+            <TextInput
               label="Stop early when"
               placeholder="${nrOfCompletedInstances >= 2}"
               description="Optional. Remaining runs are cancelled when this becomes true."
               value={editor.completionCondition}
               onChange={(e) => onChange({ ...editor, completionCondition: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Collect each run's result from"
+              placeholder="score"
+              description="Optional. The variable each run sets that you want kept."
+              value={editor.aggregateSource}
+              onChange={(e) => onChange({ ...editor, aggregateSource: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Into"
+              placeholder="scores"
+              description={
+                "A list on this process, one entry per run. Fill both of these or " +
+                "neither -- one alone is refused at publish."
+              }
+              value={editor.aggregateTarget}
+              onChange={(e) => onChange({ ...editor, aggregateTarget: e.currentTarget.value })}
             />
             <Switch
               label="Run them one at a time"
