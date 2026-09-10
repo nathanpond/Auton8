@@ -257,7 +257,7 @@ decision tables in #110. Seven decisions taken and applied:
 - **Decision:** Version binding is **pinned at deployment** for both call activities and decision tables. Republishing a child process or a table changes only newly deployed parents.
   **Why:** A running process never changes behaviour underneath its owner. Consistent with how #110 versions tables. The cost — propagating a fix in a shared sub-process needs parents redeployed — is documented rather than discovered.
   **Issue:** #113, #111
-- **Decision:** A behaviour's exception is catchable by an error boundary event **only when the behaviour declares a BPMN error code**. Undeclared exceptions stay unhandled failures, surfaced and retryable.
+- **Decision:** A behaviour's exception is catchable by an error boundary event **only when the behaviour declares a BPMN error code**. Undeclared exceptions stay unhandled failures, surfaced and retryable. *(Corrected 2026-09-09, #251: "retryable" was an assumption about the engine that turned out false. The bridge does not throw on `Failed`, so an undeclared code is neither caught nor retried — the process continues down its normal outgoing flow. Left as written because this log is append-only; see the M4 entry establishing it.)*
   **Why:** Making every exception catchable routes "the database was briefly unreachable" down the "payment declined" branch. That is the hardest class of failure to diagnose, and the opt-in keeps infrastructure failures out of business error paths.
   **Issue:** #114
 - **Decision:** No new **mutating** agent skills in M3. The assistant does not gain message-sending or decision-table authoring; that is M6's subject. Read-only exposure via the existing `Lookup*` pattern is optional, and a test asserts no mutating skill was added so the decision cannot be quietly reversed.
@@ -3358,6 +3358,14 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   `CatchableErrorCodes` is stripped, logged, and left an ordinary retryable
   failure. Enforced in the endpoint rather than trusted from the result, so a
   behaviour cannot make an arbitrary failure routable.
+  **[Corrected 2026-09-09, #251 — "retryable" was wrong.** This log is
+  append-only, so the sentence above stands as written; what it says about retry
+  does not. #223 established, and a passing test now proves, that the bridge does
+  not throw on `Failed` — so an undeclared code is neither caught NOR retried:
+  the process continues down the task's normal outgoing flow and the author
+  branches on the result variable. The same wrong claim was in the plugin-creator
+  skill and the endpoint's own remarks, both corrected. A plugin author who
+  believed it would wait for a second attempt that never comes.**]
   **Why the asymmetry:** if every failure became catchable, "the database was
   briefly unreachable" would travel down the "payment declined" branch.
   **ABI care (invariant 2):** `BusinessErrorCode` is an init-only PROPERTY, not a
@@ -4294,3 +4302,57 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   `docs/workflow-multi-instance.md` is the documentation the criterion asked for.
   The manifest rows now name the tests instead of asserting a manual probe.
   **Issue:** #246, #245
+
+- **Carried-bug pass (#248, #249, #251, #259). Owner picked these four on
+  2026-09-09; #250 stays carried.**
+  **#251 — four places, not the three filed.** The plugin-creator skill, the
+  endpoint's remarks, and two decisions-log entries all said an undeclared
+  business error stays "retryable". It does not: the bridge does not throw on
+  `Failed`, so it is neither caught nor retried and the process continues down the
+  task's normal outgoing flow. The two `AlwaysDeclinesBehavior` comments said it
+  too and were not in the report. The ledger is append-only, so both entries were
+  **annotated in place** rather than rewritten — the wrong sentence stands as
+  written with the correction beside it, because what was decided and what turned
+  out to be true are different facts and a log that edits the first loses both.
+  **#249 — the gate now covers the way in.** `BuildIdentityValidationErrors`
+  iterated `scriptTask` alone while #218 had widened the identity readers to
+  include `complexGateway`, so a gateway's routing script published clean where the
+  byte-identical script task was refused. It iterates script-bearing elements now,
+  with a message naming the gateway rather than calling it a script task, and skips
+  a gateway carrying no routing script (publish generates nothing for it, and a
+  freshly dropped gateway has none).
+  **This is a behaviour change worth naming:** a complex gateway with a routing
+  script, no `runAs`, and no preceding user task is now refused at publish. Six
+  `ComplexGatewayExecutionTests` failed on it immediately — their fixture is
+  `start -> gateway` with no identity declared, which is exactly the shape the rule
+  forbids. The fixture now declares `autonate:runAs="workflowAuthor"`, which is
+  what an author sets in the panel; that is the fixture meeting a rule it always
+  should have, not a guard being relaxed. Identity is declaration-only at v1.0 so
+  nothing changes at runtime, but re-publishing such a diagram will now fail.
+  **#248 — per-run database, and no FORCE against anyone else's.** `AutoNate_E2E`
+  was a fixed name dropped `WITH (FORCE)` at startup, so two runs on one machine
+  killed each other's connections mid-test. It is `autonate_e2e_<guid>` now,
+  CREATE-only at startup, dropped in `DisposeAsync`, with an **age-based** sweep of
+  orphans from runs that never disposed. Age-based deliberately: dropping every
+  database with our prefix would reintroduce the same defect one function over.
+  **#259 was two bugs, and the second is the one that mattered.** The filed defect
+  was real — the final assertion bound `GetByText(workflowName).First`, which also
+  matches the recent-executions link, so it tracked something that correctly
+  survives completing the task. Fixing the locator to the row then failed for a
+  **new reason**: the row genuinely stayed. A reload cleared it, which separated
+  "stale UI" from "not completed" — the task completes, the panel never refreshes.
+  `MyTasksPanel` queries `["home","my-tasks"]`; `useCompleteTask` invalidates
+  `["tasks","assigned-to-me"]`. **Those key sets never match**, so completing a task
+  from that panel invalidated nothing it reads. It looked fine because
+  `useInvalidateOnChannels` invalidates the right keys when the push arrives — so
+  the row usually vanished, and did not when the channel was slow, disconnected or
+  absent. Waiting on a push to reflect the user's OWN action was the mistake; the
+  push is for everyone else's. The panel now invalidates its own keys after its own
+  mutation.
+  **Method note.** A mass backend failure (~150 tests across unrelated areas) sent
+  me looking for a regression; it was my own contention — I had started an E2E run
+  alongside a full backend run, on a cluster carrying 81 leaked `autonate_test_*`
+  databases. One failing test passed in isolation, which settled it. Cleared the
+  backlog, ran each suite alone: **2290/2290 backend, 280/280 E2E** — the first
+  fully green E2E run of this session.
+  **Issue:** #248, #249, #251, #259

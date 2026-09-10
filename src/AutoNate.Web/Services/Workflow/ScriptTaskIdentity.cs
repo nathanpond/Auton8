@@ -110,26 +110,48 @@ public static class ScriptTaskIdentity
             var reachable = Reachable(nodes);
             var facts = Solve(nodes);
 
-            foreach (var scriptTask in scope.Elements(Bpmn + "scriptTask"))
+            // #249. Every element that CARRIES a script, matching
+            // ScriptBearingElements above rather than scriptTask alone.
+            //
+            // #218 widened DeclaresSystemIdentity and DeclaredIdentities to
+            // include the complex gateway and left this loop behind, so a
+            // gateway's routing script published clean where the byte-identical
+            // script task was refused — the same "gate still present, still
+            // passing, no longer covering the way in" that #218 fixed one
+            // function over. Publish already claims the routing script "is held
+            // to the same rules as one the author drew"; until now it was not.
+            foreach (var element in scope.Elements()
+                .Where(e => e.Name.Namespace == Bpmn
+                            && e.Name.LocalName is "scriptTask" or "complexGateway"))
             {
-                var id = scriptTask.Attribute("id")?.Value;
-                if (id is null || ReadRunAs(scriptTask) is not null) continue;
+                var id = element.Attribute("id")?.Value;
+                if (id is null || ReadRunAs(element) is not null) continue;
+
+                // A gateway with no routing script has nothing to run as anyone;
+                // publish generates no script task for it.
+                var isGateway = element.Name.LocalName == "complexGateway";
+                if (isGateway && !CarriesRoutingScript(element)) continue;
+
                 // Unreachable from any start event, so it can never run.
                 if (!reachable.Contains(id)) continue;
                 if (!facts.TryGetValue(id, out var f)) continue;
 
-                var label = scriptTask.Attribute("name")?.Value ?? id;
+                var label = element.Attribute("name")?.Value ?? id;
+                var subject = isGateway
+                    ? $"The routing script on gateway '{label}'"
+                    : $"Script task '{label}'";
+
                 if (!f.AllPathsHaveUserTask)
                 {
                     errors.Add(
-                        $"Script task '{label}' can be reached without a preceding user task, so " +
+                        $"{subject} can be reached without a preceding user task, so " +
                         "there is no assignee whose permissions it would run with. Set Run as to " +
                         "'System' (requires permission) or 'Workflow author'.");
                 }
                 else if (f.AnyPathCrossesJoin)
                 {
                     errors.Add(
-                        $"Script task '{label}' runs after a parallel join, where 'the last user " +
+                        $"{subject} runs after a parallel join, where 'the last user " +
                         "task' is ambiguous — more than one branch reaches it. Set Run as to " +
                         "'System' (requires permission) or 'Workflow author'.");
                 }
@@ -138,6 +160,18 @@ public static class ScriptTaskIdentity
 
         return errors;
     }
+
+    /// <summary>Does this complex gateway actually carry a routing script (#249)?</summary>
+    /// <remarks>
+    /// Stored as `autonate:routeScript` because bpmn-js drops a `&lt;bpmn:script&gt;`
+    /// child on an element its moddle does not model that way — proven by a
+    /// failing browser round-trip in #218. A gateway with neither spelling has no
+    /// script for publish to generate, so holding it to a script's identity rules
+    /// would refuse a diagram over code that does not exist.
+    /// </remarks>
+    private static bool CarriesRoutingScript(XElement gateway) =>
+        !string.IsNullOrWhiteSpace(gateway.Attribute(AutoNateNamespace + "routeScript")?.Value)
+        || gateway.Element(Bpmn + "script") is not null;
 
     // A scope is a process or an embedded subProcess. Nested subprocesses are
     // returned too, and each is analysed with its own start events.

@@ -139,8 +139,23 @@ export default function MyTasksPanel() {
   const completeFromModal = useCallback(
     async (taskId: string, variables?: Record<string, unknown>) => {
       await completeTask.mutateAsync({ taskId, variables });
+
+      // #259. This panel's own keys, which the mutation does not know about.
+      //
+      // useCompleteTask invalidates ["tasks","assigned-to-me"] and
+      // ["tasks","assigned-to-team"]; this panel queries ["home","my-tasks"]
+      // and ["home","team-tasks"], which merge the workflow tasks with the
+      // assigned RECORDS. Those key sets never match, so completing a task from
+      // here refreshed nothing.
+      //
+      // It looked fine because useInvalidateOnChannels does invalidate the right
+      // keys when the push arrives — so the row usually vanished, and did not
+      // when the channel was slow, disconnected, or absent (as in E2E, which is
+      // where this was finally caught). Waiting on a push to reflect the user's
+      // OWN action is the part that was wrong; the push is for everyone else's.
+      await Promise.all(queryKeys.map((queryKey) => qc.invalidateQueries({ queryKey })));
     },
-    [completeTask]
+    [completeTask, qc, queryKeys]
   );
 
   const columns = useMemo<DataTableColumn<TaskRow>[]>(

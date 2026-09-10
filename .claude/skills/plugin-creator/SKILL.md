@@ -395,7 +395,11 @@ public sealed class ChargeCardBehavior : IWorkflowBehavior
 }
 ```
 
-The **host enforces the declaration**: a `BusinessErrorCode` you did not list is stripped, logged, and left as an ordinary failure — still visible, still retryable, just not routable. That is deliberate. If any failure could become a catchable BPMN error, "the database was briefly unreachable" would travel down the "payment declined" branch, and the process would look like it handled something it never understood.
+The **host enforces the declaration**: a `BusinessErrorCode` you did not list is stripped and logged, and what remains is an ordinary `Failed` result.
+
+**It is not retried and it is not caught.** The bridge does not throw on `Failed`, so no error boundary event fires and the engine schedules no second attempt — the process continues down the task's normal outgoing flow. Branch on the result variable, or declare the code. A workflow relying on a boundary event for an undeclared code silently takes the success path.
+
+That is deliberate. If any failure could become a catchable BPMN error, "the database was briefly unreachable" would travel down the "payment declined" branch, and the process would look like it handled something it never understood.
 
 The code must match the error boundary event's code in the studio **character for character**. A mismatch is silent: the error simply stays unhandled.
 

@@ -325,4 +325,93 @@ public sealed class ScriptTaskIdentityTests
         Assert.False(ScriptTaskIdentity.DeclaresSystemIdentity(doc));
         Assert.Empty(ScriptTaskIdentity.DeclaredIdentities(doc));
     }
+
+    // --- #249: a routing script is held to the same rules --------------------
+
+    private static string Gateway(string id, string name = "Choose", string? script = "return 'a';") =>
+        script is null
+            ? $"""<bpmn:complexGateway id="{id}" name="{name}" default="fd"@RUNAS@ />"""
+            : $"""<bpmn:complexGateway id="{id}" name="{name}" default="fd"@RUNAS@ an8:routeScript="{script}" />""";
+
+    [Fact]
+    public void ARoutingScriptBeforeAnyUserTaskIsRefusedLikeAScriptTask()
+    {
+        // The defect: #218 widened DeclaresSystemIdentity and DeclaredIdentities
+        // to cover the complex gateway and left BuildIdentityValidationErrors
+        // iterating scriptTask alone. A gateway reachable with no preceding user
+        // task and no runAs published clean, while the byte-identical script task
+        // was refused -- so the gate was present, passing, and not covering the
+        // way in.
+        var xml = Process($"""
+            <bpmn:startEvent id="s" />
+            {Gateway("cg")}
+            <bpmn:userTask id="a" name="Route A" />
+            <bpmn:userTask id="d" name="Default" />
+            {Flow("f1", "s", "cg")}
+            {Flow("fa", "cg", "a")}
+            {Flow("fd", "cg", "d")}
+            """);
+
+        var error = Assert.Single(Errors(xml));
+        Assert.Contains("routing script on gateway 'Choose'", error, StringComparison.Ordinal);
+        Assert.Contains("without a preceding user task", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARoutingScriptAfterAUserTaskPublishes()
+    {
+        // The complement. Without it a validation that refused every gateway
+        // would pass the test above, and everyday authoring would be worse --
+        // which is exactly what this rule is forbidden from doing.
+        var xml = Process($"""
+            <bpmn:startEvent id="s" />
+            <bpmn:userTask id="u" name="Approve" />
+            {Gateway("cg")}
+            <bpmn:userTask id="a" name="Route A" />
+            <bpmn:userTask id="d" name="Default" />
+            {Flow("f1", "s", "u")}
+            {Flow("f2", "u", "cg")}
+            {Flow("fa", "cg", "a")}
+            {Flow("fd", "cg", "d")}
+            """);
+
+        Assert.Empty(Errors(xml));
+    }
+
+    [Fact]
+    public void ARoutingScriptWithRunAsSetIsNotSecondGuessed()
+    {
+        // runAs answers the question the rule asks, for a gateway exactly as for
+        // a script task.
+        var xml = Process($"""
+            <bpmn:startEvent id="s" />
+            {Gateway("cg")}
+            <bpmn:userTask id="a" name="Route A" />
+            <bpmn:userTask id="d" name="Default" />
+            {Flow("f1", "s", "cg")}
+            {Flow("fa", "cg", "a")}
+            {Flow("fd", "cg", "d")}
+            """, runAs: "workflowAuthor");
+
+        Assert.Empty(Errors(xml));
+    }
+
+    [Fact]
+    public void AGatewayCarryingNoRoutingScriptIsNotRefused()
+    {
+        // Publish generates no script task for it, so holding it to a script's
+        // identity rules would refuse a diagram over code that does not exist --
+        // and a freshly dropped gateway has no script yet.
+        var xml = Process($"""
+            <bpmn:startEvent id="s" />
+            {Gateway("cg", script: null)}
+            <bpmn:userTask id="a" name="Route A" />
+            <bpmn:userTask id="d" name="Default" />
+            {Flow("f1", "s", "cg")}
+            {Flow("fa", "cg", "a")}
+            {Flow("fd", "cg", "d")}
+            """);
+
+        Assert.Empty(Errors(xml));
+    }
 }
