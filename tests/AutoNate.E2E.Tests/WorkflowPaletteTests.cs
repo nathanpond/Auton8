@@ -192,6 +192,10 @@ public sealed class WorkflowPaletteTests : E2ETestBase
 
     [Theory]
     [InlineData("create", "Create element")]
+    // #264, second pass. The replace arm used to open on the START EVENT, whose
+    // six options contain no withheld element filtered or not — so it passed with
+    // the filter entirely disabled. It opens on an activity now, where the menu
+    // really does carry Task, Manual Task and Business Rule Task.
     [InlineData("replace", "replace menu")]
     [InlineData("append", "Append element")]
     public async Task No_popup_offers_an_element_the_manifest_withholds(string surface, string what)
@@ -219,10 +223,17 @@ public sealed class WorkflowPaletteTests : E2ETestBase
         }
         else
         {
-            await page.Locator("[data-element-id='start']").ClickAsync();
+            // An ACTIVITY, not the start event. A start event's replace menu
+            // offers six start types and no withheld element, so opening it there
+            // passed with the filter switched off entirely.
+            await page.Locator(".djs-palette .entry[data-action='create.user-task']").ClickAsync();
+            var canvas = page.Locator(".djs-container svg").First;
+            await canvas.ClickAsync(new LocatorClickOptions { Position = new Position { X = 420, Y = 300 } });
+
             var pad = surface == "replace"
                 ? ".djs-context-pad .entry[data-action='replace']"
                 : ".djs-context-pad .entry[data-action='append']";
+            await Assertions.Expect(page.Locator(pad)).ToBeVisibleAsync(new() { Timeout = 10_000 });
             await page.Locator(pad).ClickAsync();
         }
 
@@ -241,9 +252,31 @@ public sealed class WorkflowPaletteTests : E2ETestBase
                 .filter(c => c.startsWith('bpmn-icon-')))
             """);
 
-        // The popup rendered something, else every absence assertion below is
-        // satisfied by an empty list.
-        Assert.True(classes.Length > 0, $"The {what} popup rendered no entries at all.");
+        // #264, second pass. `Length > 0` was the only anti-vacuity check, and it
+        // is far too weak: a filter predicate that gutted every menu to a single
+        // entry left `create` and `append` passing. A floor, plus a named
+        // supported element that must survive, is what makes the absence
+        // assertions below mean anything.
+        var floor = surface switch { "create" => 40, "append" => 35, _ => 8 };
+        Assert.True(
+            classes.Length >= floor,
+            $"The {what} popup rendered {classes.Length} icon classes, below the " +
+            $"floor of {floor}. Either the popup did not open, or the filter is " +
+            $"removing far more than the manifest withholds. Saw: {string.Join(", ", classes)}");
+
+        // A supported element the manifest offers must still be there on every
+        // surface — the complement of "withheld elements are gone".
+        //
+        // Per surface, because a replace menu deliberately omits the type the
+        // element already IS — a user task's replace list has no user task in it.
+        //
+        // Note the spelling: `bpmn-icon-user`, not `bpmn-icon-user-task`. I wrote
+        // the long one first and this assertion failed, which is the very mistake
+        // #264 is about made inside the assertion guarding against it. On the deny
+        // side `Every_denied_icon_class_actually_occurs_in_the_vendored_bundle`
+        // catches it mechanically; here the popup did.
+        var mustSurvive = surface == "replace" ? "bpmn-icon-service" : "bpmn-icon-user";
+        Assert.Contains(mustSurvive, classes);
 
         var (_, withheld) = PartitionCatalog();
         Assert.NotEmpty(withheld);

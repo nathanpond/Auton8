@@ -192,6 +192,110 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
         Assert.Contains("Heard the end signal", bNames);
     }
 
+    [Theory]
+    [MemberData(nameof(AcceptedScopeCases))]
+    public async Task Every_accepted_signal_scope_case_deploys(string because, string body)
+    {
+        // #273/#274. `SignalScopeCasesTests` proves the expansion is correct;
+        // this proves the engine takes it. #270 established those are different
+        // claims — its expansion was "correct" by every tree assertion and
+        // Flowable answered 500.
+        //
+        // One row per neighbouring case, because #270's fix was right for its own
+        // case and wrong for the two beside it.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sc{Guid.NewGuid():N}"[..20];
+        var xml = ScopeCaseDiagram(key, body);
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed(key);
+        var created = await api.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        Assert.True(created.Ok, await created.TextAsync());
+
+        var published = await api.PostAsync($"/api/workflows/{id}/publish", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+
+        Assert.True(published.Ok,
+            $"Publishing '{because}' failed: {published.Status} {await published.TextAsync()}");
+    }
+
+    /// <summary>
+    /// The accepted rows from <c>SignalScopeCasesTests</c>, as whole diagrams.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately restated rather than shared: this project cannot reference the
+    /// backend test assembly, and a shared fixture would let one edit change what
+    /// both the unit grid and the deployment grid mean at once.
+    /// </remarks>
+    public static TheoryData<string, string> AcceptedScopeCases() => new()
+    {
+        { "a lone scoped catch", ScopedCatch("c") },
+        { "a scoped catch beside an unscoped throw", UnscopedThrow("th") + ScopedCatch("c") },
+        { "a scoped catch beside a second catch that declares nothing", UnscopedCatch("c2") + ScopedCatch("c") },
+        { "two catches both scoped to the instance", ScopedCatch("c1") + ScopedCatch("c2") },
+        { "a scoped throw beside an event-subprocess signal start", ScopedThrowWithEventSubProcess() },
+    };
+
+    private static string ScopedCatch(string id) => $"""
+            <bpmn:intermediateCatchEvent id="{id}" name="{id}">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="instance" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+        """;
+
+    private static string UnscopedCatch(string id) => $"""
+            <bpmn:intermediateCatchEvent id="{id}" name="{id}">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+        """;
+
+    private static string UnscopedThrow(string id) => $"""
+            <bpmn:intermediateThrowEvent id="{id}" name="{id}">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateThrowEvent>
+        """;
+
+    private static string ScopedThrowWithEventSubProcess() => """
+            <bpmn:intermediateThrowEvent id="th" name="th">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="instance" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateThrowEvent>
+            <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+              <bpmn:startEvent id="hs" name="hs" isInterrupting="false">
+                <bpmn:signalEventDefinition signalRef="Sig_1" />
+              </bpmn:startEvent>
+              <bpmn:sequenceFlow id="hf" sourceRef="hs" targetRef="ht" />
+              <bpmn:userTask id="ht" name="Handled" />
+            </bpmn:subProcess>
+        """;
+
+    private static string ScopeCaseDiagram(string key, string body) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_1" name="{{key}}_sig" />
+          <bpmn:process id="{{key}}" name="Scope case" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Work" />
+        {{body}}
+          </bpmn:process>
+          {{Di(key, "s", "t")}}
+        </bpmn:definitions>
+        """;
+
     [Fact]
     public async Task What_publish_emits_for_a_scoped_signal_actually_deploys()
     {

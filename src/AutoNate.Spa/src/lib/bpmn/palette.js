@@ -223,14 +223,24 @@ export function createManifestMenuFilter() {
   const RUN_LAST = 500; // diagram-js default is 1000; higher runs first.
 
   function ManifestMenuFilter(popupMenu) {
+    const strip = (entries) => Object.fromEntries(
+      Object.entries(entries).filter(
+        ([, entry]) => !WITHHELD_ICON_CLASSES.has(entry?.className)
+      )
+    );
+
     const filter = {
-      getPopupMenuEntries() {
-        return (entries) => Object.fromEntries(
-          Object.entries(entries).filter(
-            ([, entry]) => !WITHHELD_ICON_CLASSES.has(entry?.className)
-          )
-        );
-      }
+      getPopupMenuEntries: () => strip,
+
+      // #264, second pass. The HEADER row is a separate reduce.
+      //
+      // `PopupMenu._getEntries` and `_getHeaderEntries` walk the providers
+      // independently and call different hooks, so implementing only the first
+      // left the replace menu's header buttons untouched — and one of them,
+      // `toggle-loop`, applies `bpmn:StandardLoopCharacteristics`, whose manifest
+      // row is `withdrawn` / `cannot-execute`. Publish refuses it. An author
+      // could reach it in two clicks: wrench, Loop, save.
+      getPopupMenuHeaderEntries: () => strip
     };
 
     for (const menu of FILTERED_POPUP_MENUS) {
