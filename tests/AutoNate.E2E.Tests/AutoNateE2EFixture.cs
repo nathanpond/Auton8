@@ -25,11 +25,28 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
 
-    // Dedicated ephemeral test database. Dropped + recreated each fixture run
-    // so tests start from a clean, fully-seeded slate (see BootstrapTestDatabaseAsync)
-    // and destructive flows like "delete all executions" stay isolated from the
-    // developer's working `AutoNate` database.
-    internal const string TestDbName = "AutoNate_E2E";
+    /// <summary>Prefix every E2E database shares, so a sweep can find orphans.</summary>
+    internal const string TestDbPrefix = "autonate_e2e_";
+
+    // Dedicated ephemeral test database, named per RUN (#248).
+    //
+    // It used to be the fixed name `AutoNate_E2E`, dropped with `WITH (FORCE)` on
+    // startup. Two E2E runs on one machine therefore destroyed each other: the
+    // second run's DROP terminated the first run's connections mid-test
+    // ("57P01: terminating connection due to administrator command") and the
+    // CREATEs raced ("23505: duplicate key ... pg_database_datname_index").
+    // Three verification agents hit this; one lost four runs to it.
+    //
+    // That is not merely inconvenient. CI excludes `RequiresService=Flowable`,
+    // so every execution-level guarantee in M4 is checked only on a developer
+    // machine — and anything making those runs fragile makes the milestone's
+    // central evidence fragile.
+    //
+    // Per-run, like `PostgresTestDatabase` already does for the backend suite.
+    // Lowercase because an unquoted identifier folds to lowercase in Postgres and
+    // a mixed-case name has to be quoted everywhere it appears.
+    internal static readonly string TestDbName =
+        TestDbPrefix + Guid.NewGuid().ToString("n");
 
     // Dev Postgres credentials. Hardcoded to match `infra/docker-compose.yml`
     // (POSTGRES_USER=autonate, POSTGRES_PASSWORD=Your_password123!) and the
@@ -160,6 +177,99 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             }
         }
         _appProcess?.Dispose();
+
+        // #248. Drop OUR database, now that nothing is connected to it. Without
+        // this a per-run name leaks one database per run -- trading a fixture
+        // that destroys concurrent runs for one that fills the cluster, which is
+        // the failure #191 and #258 were both about.
+        await DropOwnDatabaseAsync();
+    }
+
+    private async Task DropOwnDatabaseAsync()
+    {
+        var port = Environment.GetEnvironmentVariable("AUTONATE_POSTGRES_PORT") ?? "5432";
+        var maintenance =
+            $"Host={PgHost};Port={port};Database=postgres;Username={PgUser};Password={PgPassword}";
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(maintenance);
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            // FORCE is safe here and nowhere else: this name belongs to this
+            // process, so the only sessions it can terminate are our own app's.
+            cmd.CommandText = $@"DROP DATABASE IF EXISTS ""{TestDbName}"" WITH (FORCE);";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception exception) when (exception is PostgresException or NpgsqlException)
+        {
+            // Best effort. The age-based sweep at the next run's startup is the
+            // backstop, which is why it exists rather than relying on this.
+        }
+    }
+
+    /// <summary>
+    /// Removes E2E databases left by runs that never reached DisposeAsync (#248).
+    /// </summary>
+    /// <remarks>
+    /// By AGE, not by "everything with our prefix". A database younger than the
+    /// cutoff may belong to a run happening right now on the same machine, and
+    /// dropping that is the exact defect this issue is about -- reintroducing it
+    /// one function over would be worse than leaving the orphans.
+    /// </remarks>
+    private static async Task DropAbandonedE2EDatabasesAsync(string maintenanceConn)
+    {
+        var cutoff = TimeSpan.FromHours(3);
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(maintenanceConn);
+            await conn.OpenAsync();
+
+            var stale = new List<string>();
+            await using (var query = conn.CreateCommand())
+            {
+                // pg_database carries no creation time, so age comes from the
+                // directory's modification time via pg_stat_file. A database we
+                // cannot stat is left alone.
+                query.CommandText = @"
+                    select datname
+                    from pg_database
+                    where datname like 'autonate\_e2e\_%'
+                      and datname <> @self;";
+                query.Parameters.AddWithValue("self", TestDbName);
+
+                await using var reader = await query.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) stale.Add(reader.GetString(0));
+            }
+
+            foreach (var name in stale)
+            {
+                try
+                {
+                    await using var age = conn.CreateCommand();
+                    age.CommandText =
+                        "select (pg_stat_file('base/' || oid::text).modification) " +
+                        "from pg_database where datname = @name;";
+                    age.Parameters.AddWithValue("name", name);
+                    var modified = await age.ExecuteScalarAsync();
+                    if (modified is not DateTime stamp) continue;
+                    if (DateTime.UtcNow - stamp.ToUniversalTime() < cutoff) continue;
+
+                    await using var drop = conn.CreateCommand();
+                    drop.CommandText = $@"DROP DATABASE IF EXISTS ""{name}"" WITH (FORCE);";
+                    await drop.ExecuteNonQueryAsync();
+                }
+                catch (PostgresException)
+                {
+                    // In use, or gone already. Either way not ours to force.
+                }
+            }
+        }
+        catch (Exception exception) when (exception is PostgresException or NpgsqlException)
+        {
+            // Never fail a run over cleanup of a previous one.
+        }
     }
 
     /// <summary>
@@ -367,19 +477,23 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         var testConn =
             $"Host={PgHost};Port={port};Database={TestDbName};Username={PgUser};Password={PgPassword};{PgPoolTuning}";
 
-        // DROP + CREATE on the maintenance DB. `WITH (FORCE)` (PG13+) terminates
-        // any lingering sessions from a previous run so the DROP can succeed
-        // without waiting on disconnects. The compose stack runs PG16-alpine.
+        // #248. CREATE only. The name is unique to this run, so there is nothing
+        // of ours to drop -- and the DROP that used to be here is precisely what
+        // reached into a concurrent run and killed it. `IF EXISTS ... WITH
+        // (FORCE)` on a name only this process knows would be a no-op at best and
+        // a footgun the moment the name stopped being unique.
         await using (var conn = new NpgsqlConnection(maintenanceConn))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = $@"
-                DROP DATABASE IF EXISTS ""{TestDbName}"" WITH (FORCE);
-                CREATE DATABASE ""{TestDbName}"";
-            ";
+            cmd.CommandText = $@"CREATE DATABASE ""{TestDbName}"";";
             await cmd.ExecuteNonQueryAsync();
         }
+
+        // Orphans from runs that were killed before DisposeAsync. Age-based and
+        // prefix-scoped: a database younger than the cutoff may belong to a run
+        // happening right now, which is the mistake this whole issue is about.
+        await DropAbandonedE2EDatabasesAsync(maintenanceConn);
 
         return testConn;
     }

@@ -171,11 +171,21 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                           xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
                           id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
           <bpmn:process id="{{key}}" name="Router" isExecutable="true">
             <bpmn:startEvent id="s" />
             <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
-            <bpmn:complexGateway id="cg" name="Choose" scriptFormat="javascript">
+            <!-- #249. The routing script is reached straight from the start
+                 event, so there is no preceding user task whose permissions it
+                 could run with, and publish now refuses that for a gateway
+                 exactly as it always has for a drawn script task. The gateway's
+                 runAs is copied onto the script task publish generates, so this
+                 is the declaration a real author would make in the panel.
+                 Without it these six tests failed the moment the rule started
+                 covering the way in. -->
+            <bpmn:complexGateway id="cg" name="Choose" scriptFormat="javascript"
+                                 autonate:runAs="workflowAuthor">
               <bpmn:script>{{script}}</bpmn:script>
             </bpmn:complexGateway>
             <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />

@@ -28,8 +28,9 @@ public sealed class AlwaysDeclinesBehavior : IWorkflowBehavior
         "exercised end to end.";
 
     // The declaration is what makes the error catchable. Without this line the
-    // host strips the code and the failure stays an ordinary retryable one —
-    // which is the asymmetry #114 exists to enforce.
+    // host strips the code and the process simply carries on down the task's
+    // normal outgoing flow — not caught, and not retried either (#251) — which
+    // is the asymmetry #114 exists to enforce.
     public IReadOnlyCollection<string> CatchableErrorCodes => [ErrorCode];
 
     public Task<BehaviorResult> ExecuteAsync(BehaviorContext context, CancellationToken cancellationToken) =>
@@ -40,8 +41,9 @@ public sealed class AlwaysDeclinesBehavior : IWorkflowBehavior
 // of EnforceDeclaredBusinessError.
 //
 // This behaviour returns the SAME error code as AlwaysDeclinesBehavior but never
-// declares it. The host must strip the code, leaving an ordinary retryable
-// failure that an error boundary event carrying that very code does not catch.
+// declares it. The host must strip the code, and the process then continues down
+// its normal outgoing flow — an error boundary event carrying that very code does
+// not catch it, and nothing retries it (#251).
 //
 // Without this, "undeclared errors are not catchable" is only demonstrated by an
 // unknown behaviour key, which 404s before any of that logic runs — a test that

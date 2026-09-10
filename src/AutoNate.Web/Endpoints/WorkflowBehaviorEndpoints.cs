@@ -75,8 +75,16 @@ public static class WorkflowBehaviorEndpoints
     /// <remarks>
     /// Enforced here rather than trusted from the result, so a behaviour cannot
     /// make an arbitrary failure routable — including one that reached
-    /// BusinessErrorCode by accident. Undeclared codes are stripped, which leaves
-    /// the failure exactly what it was: unhandled, surfaced, and retryable.
+    /// BusinessErrorCode by accident.
+    ///
+    /// **An undeclared code is stripped, and the process carries on.** The bridge
+    /// does not throw on `Failed`, so nothing is raised for a boundary event to
+    /// catch and nothing is retried — the token takes the task's normal outgoing
+    /// flow and the author is expected to branch on the result variable. This
+    /// comment said "unhandled, surfaced, and retryable" until #251; the retry
+    /// half was never true, and a plugin author who believed it would wait for a
+    /// second attempt that never comes (see the log message below, which had it
+    /// right).
     ///
     /// That asymmetry is the point. If every failure became a catchable BPMN
     /// error, "the database was briefly unreachable" would travel down the

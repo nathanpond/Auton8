@@ -31,6 +31,11 @@ internal static class TestResourceSweep
     /// <summary>Databases the suite owns, and may therefore sweep schemas inside.</summary>
     private static bool IsSuiteOwnedDatabase(string name) =>
         name.StartsWith("autonate_test_", StringComparison.Ordinal)
+        // #248 gave the E2E fixture a per-run name (`autonate_e2e_<guid>`) in
+        // place of the fixed `AutoNate_E2E`, which it dropped WITH (FORCE) at
+        // startup and so destroyed any concurrent run. The old name is still
+        // matched: a developer's cluster can carry one from before that change.
+        || name.StartsWith("autonate_e2e_", StringComparison.Ordinal)
         || string.Equals(name, "AutoNate_E2E", StringComparison.Ordinal);
 
     internal sealed record Counts(int Roles, int Schemas, int Directories)

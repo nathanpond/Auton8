@@ -220,21 +220,35 @@ public sealed class WorkflowExecutionTests : E2ETestBase
         await seeder.StartExecutionAsync(processKey, instanceName: TestNames.Prefixed("complete"));
 
         await page.GotoAsync("/home");
-        var taskName = page.GetByText(workflowName).First;
-        await Assertions.Expect(taskName).ToBeVisibleAsync(new() { Timeout = 15_000 });
 
+        // #259. The ROW, not the bare text.
+        //
+        // `GetByText(workflowName).First` also matches the recent-executions
+        // list, where the same name renders as a link to the execution. That
+        // link correctly survives completing the task -- the execution still
+        // exists -- so asserting it disappears fails while looking like it is
+        // tracking the task. The row-scoped locator was already built below for
+        // the click; it is what the assertions should use throughout.
+        //
         // Flowable state is shared across the dev DB so stale workflow
         // executions from previous runs leave their own "Open" buttons
-        // in the My Tasks table. Scope the click to the row containing
-        // this test's unique workflowName so we don't trip strict-mode
-        // when 5+ "Open" buttons sit beside each other.
+        // in the My Tasks table. Scoping to the row containing this test's
+        // unique workflowName also keeps strict-mode happy when 5+ "Open"
+        // buttons sit beside each other.
         var taskRow = page.GetByRole(AriaRole.Row).Filter(new() { HasText = workflowName });
+        await Assertions.Expect(taskRow).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
         await taskRow.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true }).ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Review" });
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Complete Task" }).ClickAsync();
 
         await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await Assertions.Expect(taskName).Not.ToBeVisibleAsync(new() { Timeout = 20_000 });
+        // The row is gone because the panel refreshed, not because the page was
+        // reloaded. It failed here until #259: the panel queries ["home","my-tasks"]
+        // and the completion mutation invalidates ["tasks","assigned-to-me"], so
+        // nothing this panel reads was ever invalidated by the user's own action.
+        await Assertions.Expect(taskRow).ToHaveCountAsync(0, new() { Timeout = 20_000 });
+
     }
 }
