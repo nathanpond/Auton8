@@ -376,6 +376,123 @@ public sealed class WorkflowOverrideEnforcementTests
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
+    // ── #163's ad-hoc routes (#254) ──────────────────────────────────────────
+    //
+    // AuthorizationGatePresenceTests proves these carry a gate; it cannot tell
+    // which. They were the only Override-gated execution routes with no
+    // enforcement test, so a future mis-wiring -- to View, say, which every
+    // operator holds -- would have passed every green test in the suite.
+
+    [Fact]
+    public async Task StartAdhocActivity_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-adhoc"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-adhoc",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-adhoc/adhoc/exec-1/activities/a1", new { });
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, call => call.StartsWith("AdhocStart", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StartAdhocActivity_WithViewGrantOnly_IsStillForbidden()
+    {
+        // Starting an activity in someone else's case is a mutation on their
+        // work. Reading the case is not the same permission, and this is the
+        // assertion that would catch the gate being softened to View.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-adhoc-view"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-adhoc-view",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "AdhocViewer", "/workflowexecution/*", Actions.View);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-adhoc-view/adhoc/exec-1/activities/a1", new { });
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, call => call.StartsWith("AdhocStart", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StartAdhocActivity_WithOverrideGrant_ReachesTheEngine()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-adhoc-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-adhoc-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "AdhocStarter", "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-adhoc-ok/adhoc/exec-1/activities/a1", new { });
+
+        Assert.NotEqual(HttpStatusCode.Forbidden, resp.StatusCode);
+
+        // A gate that opens and then does nothing is indistinguishable from one
+        // that stays shut, so the engine call itself is the evidence.
+        Assert.Contains("AdhocStart:exec-1:a1", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task CompleteAdhocSubProcess_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-adhoc-c"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-adhoc-c",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync("/api/executions/pi-adhoc-c/adhoc/exec-1/complete", new { });
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, call => call.StartsWith("AdhocComplete", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CompleteAdhocSubProcess_WithOverrideGrant_ReachesTheEngine()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-adhoc-c-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-adhoc-c-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "AdhocCompleter", "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync("/api/executions/pi-adhoc-c-ok/adhoc/exec-1/complete", new { });
+
+        Assert.NotEqual(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.Contains("AdhocComplete:exec-1", factory.FlowableStub.Calls);
+    }
+
     private static async Task SeedRoleAndGrantAsync(
         AutoNateWebApplicationFactory factory,
         string roleName,

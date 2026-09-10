@@ -65,11 +65,32 @@ public sealed class CallActivityExecutionTests : E2ETestBase
         var childHistory = await api.GetAsync($"/api/executions/{child}/history");
         Assert.True(childHistory.Ok, $"Reading the child's history failed: {childHistory.Status}");
 
-        await CompleteFirstTaskAsync(api, child);
+        // The child received what the parent mapped IN. Without this, the
+        // out-mapping below could be satisfied by a value that never crossed the
+        // boundary at all.
+        Assert.Equal("ORD-1", await VariableAsync(child, "childOrderId"));
+
+        // The child finishes holding two variables: one the parent maps back and
+        // one it deliberately does not.
+        await CompleteFirstTaskAsync(api, child, new
+        {
+            childOrderId = "ORD-1-done",
+            childScratch = "must not cross the boundary"
+        });
 
         var parentTasks = await EventuallyAsync(api, parent,
             names => names.Contains("Parent after child"), "the parent to resume");
         Assert.Contains("Parent after child", parentTasks);
+
+        // #113's headline claim, and the test never read it: the mapped output
+        // arrives on the parent under the name the mapping gives it.
+        Assert.Equal("ORD-1-done", await VariableAsync(parent, "returned"));
+
+        // The half that detects an implementation passing everything through.
+        // Deleting both <flowable:in> and <flowable:out> from the fixture left
+        // every test in this file green; these two are what stop that.
+        Assert.Null(await VariableAsync(parent, "childScratch"));
+        Assert.Null(await VariableAsync(parent, "childOrderId"));
     }
 
     [Fact]
@@ -286,16 +307,39 @@ public sealed class CallActivityExecutionTests : E2ETestBase
         return document.RootElement.GetProperty("id").GetString()!;
     }
 
-    private static async Task CompleteFirstTaskAsync(IAPIRequestContext api, string instanceId)
+    private static async Task CompleteFirstTaskAsync(
+        IAPIRequestContext api, string instanceId, object? variables = null)
     {
         var response = await api.GetAsync($"/api/executions/{instanceId}/tasks");
         using var document = JsonDocument.Parse(await response.TextAsync());
         var taskId = document.RootElement[0].GetProperty("id").GetString()!;
         var completed = await api.PostAsync($"/api/tasks/{taskId}/complete", new APIRequestContextOptions
         {
-            DataObject = new { }
+            DataObject = variables is null ? new { } : new { variables }
         });
         Assert.True(completed.Ok, $"Completing failed: {completed.Status} {await completed.TextAsync()}");
+    }
+
+    /// <summary>One process variable's value, or null when the instance has none.</summary>
+    private static async Task<string?> VariableAsync(string processInstanceId, string name)
+    {
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var body = await client.GetStringAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/variables");
+        using var document = JsonDocument.Parse(body);
+        foreach (var variable in document.RootElement.EnumerateArray())
+        {
+            if (variable.GetProperty("name").GetString() == name)
+            {
+                return variable.TryGetProperty("value", out var value) ? value.ToString() : null;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<List<string>> TaskNamesAsync(IAPIRequestContext api, string instanceId)

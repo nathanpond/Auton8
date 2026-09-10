@@ -4187,3 +4187,50 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   the engine's message rather than an unhandled exception. Probed live: 404 with
   a message where a 500 with none used to be.
   **Issue:** #241, #252
+
+- **Verification fix pass, batch 3 (#253, #254).**
+  Both are the same shape: a claim the milestone rests on with no test that could
+  fail, and in every case the reason it looked covered was a sibling that was.
+  **#253 — four publish-path guarantees, none of them checked without an engine**
+  (and CI excludes `RequiresService=Flowable`, so none of them checked at all).
+  `WorkflowPublishPathTests` is 11 tests, pure functions, no engine, no browser.
+  The callback stamping's production complement now exists: **nothing is stamped
+  when the override is unset**, asserted byte-identical rather than merely
+  attribute-free, because that is every production diagram and a defaulted
+  argument would have leaked an E2E-only attribute into all of them.
+  The stored-versus-deployed split is asserted on a message throw, which is the
+  element the rewrite actually transforms — the test that claimed to cover it used
+  the complex gateway fixture and asserted an input *string* was unchanged, which
+  is true of any `string -> string` function; persisting the deployable copy would
+  have left it green. Pinning gained the direction the test plan named and nobody
+  wrote: a parent published later picks up the child version current *then*, so a
+  pin that always resolved to version 1 now fails.
+  And the mapped output, which no test ever read: the parent asserts `returned`
+  arrived, and — the half that detects an implementation passing everything
+  through — that a variable the child set and the mapping omits is **absent**.
+  Proven by deleting both `<flowable:in>` and `<flowable:out>` from the fixture,
+  the exact mutation the verifier said left all five tests green. It fails now.
+  **#254 — the new kind's whole reason was unasserted.** #112 made
+  `WorkflowMessage` an `EntityKind` rather than an action on `WorkflowExecution`
+  so an integration can advance a waiting process **without** operator powers over
+  every instance. `KindGateEnforcementTests` enumerates GET routes and this is a
+  POST, so it was never added, and a future mis-wiring to `workflowexecution:*`
+  would have passed everything. Both directions are asserted now: an actor holding
+  Override + View + Delete on executions is refused, and the message grant alone
+  does not open an operator route.
+  One of my assertions there was wrong and I corrected it rather than the code:
+  `GET /api/executions/` gates nothing and filters inside the handler, so an actor
+  with no execution grant gets 200 and an empty list **by design**. The test now
+  points at `PUT /variables`, which is the operator power actually at stake.
+  #163's `/adhoc` routes were the only Override-gated execution routes with no
+  enforcement test; five now cover them, including a View-only grant being refused
+  and — because a gate that opens and then does nothing looks identical to one
+  that stays shut — the engine call itself as the evidence that it opened.
+  Six workflow audit events were published but absent from `EventCatalog`, so they
+  did not appear on the Events admin page and no subscriber could discover them —
+  which makes "who advanced which instance is on the record" weaker than it reads.
+  All six added, and `WorkflowEventCatalogParityTests` closes the drift in both
+  directions plus empty descriptions and duplicates. Dashboards have had such a
+  test since they hit this; workflow events had none, which is precisely why this
+  family drifted.
+  **Issue:** #253, #254
