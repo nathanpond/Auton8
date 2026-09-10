@@ -327,6 +327,17 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         info.Environment["ASPNETCORE_URLS"] = $"http://+:{callbackPort}";
         info.Environment["WorkflowBehaviors__CallbackBaseUrlOverride"] =
             $"http://host.docker.internal:{callbackPort}";
+
+        // #257. Makes every deployment this suite publishes identifiable BY NAME
+        // (`e2e-<key>.bpmn20.xml`), which is what lets FlowableDeploymentSweep match
+        // only the suite's own work. Unset in production, where the name is the
+        // process key exactly as before.
+        //
+        // The first #257 fix swept by age instead and deleted a developer's own
+        // three-hour-old deployments — 348 of them in one observed run — while the
+        // sweep's own remarks promised it could not. This restores the guard rather
+        // than trading it away.
+        info.Environment["Flowable__DeploymentNamePrefix"] = Support.FlowableDeploymentSweep.SuiteDeploymentPrefix;
         // Skip the dev Dapr sidecar probe so the host doesn't refuse to start.
         info.Environment["AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR"] = "true";
         // The whole point: the user-typed login flow is unreachable when

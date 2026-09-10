@@ -44,12 +44,22 @@ public interface IFlowableClient
     /// Which activities can be started right now in each ad-hoc subprocess of a
     /// running instance (#163).
     /// </summary>
-    /// <summary>Is this signal global in that deployed definition? (#243)</summary>
+    /// <summary>
+    /// Is this signal global for the event the execution is parked at? (#243)
+    /// </summary>
+    /// <remarks>
+    /// Scope belongs to the signal an EVENT references, not to the name — after
+    /// #244 one definition may carry two roots of the same name, one scoped and
+    /// one not, so <paramref name="activityId"/> is what makes the answer exact.
+    /// </remarks>
     Task<bool> IsSignalGlobalAsync(
-        string processDefinitionId, string signalName, CancellationToken cancellationToken = default);
+        string processDefinitionId,
+        string signalName,
+        string? activityId = null,
+        CancellationToken cancellationToken = default);
 
-    /// <summary>Executions waiting on a signal, with the definition each runs (#243).</summary>
-    Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+    /// <summary>Executions waiting on a signal, with the definition and event each is at (#243).</summary>
+    Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId, string? ActivityId)>>
         ListExecutionsAwaitingSignalWithDefinitionAsync(
             string signalName, CancellationToken cancellationToken = default);
 
@@ -175,6 +185,8 @@ public interface IFlowableClient
     // subscriptions.
     Task SignalExecutionAsync(
         string executionId,
+        // #262. Required by the engine. Was omitted, so every wake answered 400.
+        string signalName,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default);
 

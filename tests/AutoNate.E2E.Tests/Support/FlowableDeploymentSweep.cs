@@ -25,7 +25,30 @@ internal static class FlowableDeploymentSweep
 {
     private const string SuitePrefix = "e2e-";
 
-    // #257. The prefix above matched NOTHING the suite actually produces.
+    /// <summary>
+    /// What the fixture sets `Flowable:DeploymentNamePrefix` to (#257).
+    /// </summary>
+    /// <remarks>
+    /// One constant, so the thing that CREATES the name and the thing that
+    /// matches it cannot drift — which is precisely how the original prefix came
+    /// to match nothing while its test stayed green.
+    /// </remarks>
+    internal const string SuiteDeploymentPrefix = SuitePrefix;
+
+    // #257, second pass. The prefix now matches, because the suite MAKES it match.
+    //
+    // First pass swept by age instead, and that removed the orphans by removing
+    // the guard: it deleted any deployment older than three hours whatever its
+    // name, including a developer's own work on the same engine — the exact thing
+    // the remarks above promise it will not do, and 348 such deployments went in
+    // one observed sweep. Age is not the honest signal; it was the only one
+    // available while the suite deployed under names it could not recognise.
+    //
+    // `Flowable:DeploymentNamePrefix` (unset in production) makes the E2E fixture
+    // deploy as `e2e-<key>.bpmn20.xml`, so matching by name is exact again and
+    // the remarks above are true again.
+    //
+    // For the record, the original defect:
     //
     // A deployment is named after the model's process key
     // (`FlowableClient.cs:51` -> "{ProcessKey}.bpmn20.xml"), and every E2E
@@ -35,17 +58,8 @@ internal static class FlowableDeploymentSweep
     // deployed its own `e2e-…` fixture directly instead of going through the
     // publish path the suite uses. The engine reached 1,306 deployments.
     //
-    // Age is the honest signal, and the only one available: the suite drops its
-    // database every run, so anything it deployed is orphaned by definition, and
-    // an orphan cannot be told apart from a developer's work by NAME without the
-    // guessing #214 was careful to avoid. A generous cutoff keeps a developer's
-    // current session safe; the deployment they made three hours ago on the test
-    // engine is not something this suite can preserve and also do its job.
-    private static readonly TimeSpan OrphanAge = TimeSpan.FromHours(3);
-
     internal static async Task<int> SweepAsync(HttpClient client)
     {
-        var cutoff = DateTimeOffset.UtcNow - OrphanAge;
         List<(string Id, string Name)> deployments;
         try
         {
@@ -61,18 +75,11 @@ internal static class FlowableDeploymentSweep
             deployments = document.RootElement.GetProperty("data").EnumerateArray()
                 .Select(element => (
                     Id: element.GetProperty("id").GetString() ?? string.Empty,
-                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
-                    DeployedAt: element.TryGetProperty("deploymentTime", out var time)
-                                && time.ValueKind == JsonValueKind.String
-                                && DateTimeOffset.TryParse(time.GetString(), out var parsed)
-                        ? parsed
-                        : (DateTimeOffset?)null))
-                // The legacy prefix at any age, plus anything old enough to be an
-                // orphan. A deployment with no timestamp is left alone rather than
-                // guessed at.
+                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty))
+                // Only what the suite deployed. A deployment this rule does not
+                // match is somebody's work, at any age.
                 .Where(deployment =>
-                    deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal)
-                    || (deployment.DeployedAt is { } at && at < cutoff))
+                    deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
                 .Select(deployment => (deployment.Id, deployment.Name))
                 .ToList();
         }

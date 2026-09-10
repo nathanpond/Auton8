@@ -91,32 +91,99 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         }
     }
 
-    // #257. The original test deployed an `e2e-…` fixture DIRECTLY, so
-    // `Assert.True(deleted > 0)` only ever saw its own plant — the sweep could
-    // remove nothing the suite actually produces and stay green. This one uses a
-    // realistically-named deployment, which is what exposed the defect.
+    // #257, second pass. The claim this file most needs to make, and the one it
+    // was not making: that the name the APP produces is a name the sweep matches.
+    //
+    // Both tests above deploy their fixture straight to the engine, choosing the
+    // name themselves. That is how the original defect survived its own test for
+    // the whole of M4 — the suite published through FlowableClient, which named
+    // deployments after the process key (`adh…`, `cgx…`), while the sweep looked
+    // for `e2e-`. Two conventions, no test comparing them.
+    //
+    // This one publishes through the real endpoint and then asks the sweep to
+    // find it. It fails if the prefix option is dropped, if the fixture stops
+    // setting it, or if the sweep's constant drifts from the fixture's.
     [Fact]
-    public async Task The_sweep_removes_a_realistically_named_orphan_not_just_its_own_fixture()
+    public async Task The_sweep_matches_what_the_app_actually_deploys()
     {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"swp{Guid.NewGuid():N}"[..20];
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed(key);
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="{key}" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+                <bpmn:userTask id="t" name="Wait" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var created = await api.PostAsync("/api/workflows/", new Microsoft.Playwright.APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        var published = await api.PostAsync($"/api/workflows/{id}/publish", new Microsoft.Playwright.APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        Assert.True(published.Ok, $"Publishing failed: {published.Status} {await published.TextAsync()}");
+
         using var client = FlowableDeploymentSweep.CreateClient(
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
 
-        // Named the way FlowableClient names a published model: "{processKey}.bpmn20.xml",
-        // with a short generated key exactly like the suite's own.
+        // The name the app chose, not one this test chose.
+        var deployedAs = FlowableDeploymentSweep.SuiteDeploymentPrefix + key;
+        Assert.True(
+            await ExistsAsync(client, deployedAs),
+            $"The app published as something other than '{deployedAs}'. The sweep " +
+            "matches by name, so a mismatch here is the sweep silently removing " +
+            "nothing -- which is exactly what #257 was.");
+
+        var deleted = await FlowableDeploymentSweep.SweepAsync(client);
+        Assert.True(deleted > 0, "The sweep reported deleting nothing.");
+        Assert.False(await ExistsAsync(client, deployedAs),
+            "The sweep did not remove a deployment the app itself published.");
+    }
+
+    [Fact]
+    public async Task The_sweep_leaves_a_realistically_named_deployment_alone_at_any_age()
+    {
+        // The complement of the above, and the property the first #257 fix broke:
+        // it swept by age, so a developer's own three-hour-old work went with the
+        // orphans while this file's own remarks promised it would not.
+        using var client = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        // Named the way FlowableClient names a PRODUCTION model: no prefix.
         var key = $"cgx{Guid.NewGuid():N}"[..20];
         await DeployAsync(client, key);
 
-        Assert.True(await ExistsAsync(client, key),
-            "the fixture did not deploy, so the sweep assertion below would be vacuous");
+        try
+        {
+            Assert.True(await ExistsAsync(client, key),
+                "the fixture did not deploy, so the assertion below would be vacuous");
 
-        // Fresh, so the age rule must NOT take it — a sweep that deleted a live
-        // run's deployments mid-suite would be worse than one that leaks.
-        await FlowableDeploymentSweep.SweepAsync(client);
-        Assert.True(await ExistsAsync(client, key),
-            "the sweep removed a deployment made moments ago");
+            await FlowableDeploymentSweep.SweepAsync(client);
 
-        await DeleteByNameAsync(client, key);
+            Assert.True(await ExistsAsync(client, key),
+                "The sweep removed a deployment outside the suite's naming " +
+                "convention. On a shared engine that is a developer's real work.");
+        }
+        finally
+        {
+            await DeleteByNameAsync(client, key);
+        }
     }
 }

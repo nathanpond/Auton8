@@ -121,7 +121,7 @@ public sealed class WorkflowSignalDispatcher(
         // be raised from within its own run. Waking one from the bus woke it in
         // every running instance, which is the cross-instance leak #156 exists to
         // prevent, arriving by the one path #156 never covered.
-        IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)> waiting;
+        IReadOnlyList<(string ExecutionId, string ProcessDefinitionId, string? ActivityId)> waiting;
         try
         {
             waiting = await _flowableClient
@@ -136,11 +136,12 @@ public sealed class WorkflowSignalDispatcher(
             return;
         }
 
-        foreach (var (executionId, processDefinitionId) in waiting)
+        foreach (var (executionId, processDefinitionId, activityId) in waiting)
         {
             try
             {
-                if (!await _flowableClient.IsSignalGlobalAsync(processDefinitionId, eventType))
+                if (!await _flowableClient.IsSignalGlobalAsync(
+                        processDefinitionId, eventType, activityId))
                 {
                     _logger.LogDebug(
                         "Signal '{SignalName}' is instance-scoped in definition {DefinitionId}; "
@@ -151,6 +152,7 @@ public sealed class WorkflowSignalDispatcher(
 
                 await _flowableClient.SignalExecutionAsync(
                     executionId,
+                    eventType,
                     new Dictionary<string, object?> { ["eventData"] = message.Payload });
             }
             catch (Exception exception)

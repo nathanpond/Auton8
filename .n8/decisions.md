@@ -4356,3 +4356,77 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   backlog, ran each suite alone: **2290/2290 backend, 280/280 E2E** — the first
   fully green E2E run of this session.
   **Issue:** #248, #249, #251, #259
+
+- **Round-two fix pass — the five blockers from the M4 re-verify (#262, #243,
+  #263, #264, #257).**
+  The re-verify found one pattern behind almost all of them, distinct from the
+  first round's: **the implementation was correct and nothing checked it was
+  reached.** A guard reading a field the engine does not return; a fix applied to
+  an unimported copy; a sweep whose only test plants its own fixture. That is the
+  mistake #241 was filed about, repeated three more times *while fixing #241*.
+  **#262 — the feature never worked, and its test could not see that.**
+  `SignalExecutionAsync` sent no `signalName`. Flowable answers **400 "Signal name
+  is required"** and the dispatcher's per-execution catch logged it, so every
+  external signal wake failed silently for the whole milestone. Probed live: the
+  identical request WITH the name returns 200 and the token moves.
+  The existing test asserted the payload against a stub that answers 200 to
+  anything. Three things now stop that recurring: the payload carries the name, an
+  `ArgumentException` refuses a nameless wake before it reaches the engine, and the
+  **stub itself throws** on one — so a future edit that drops the name fails in
+  unit tests rather than in production silence. Plus an E2E contract test that
+  pins BOTH halves against the real engine, so the day Flowable changes its mind
+  we hear about it.
+  **#243 — the fix was fail-open, always.** `IsSignalGlobalAsync` was right; the
+  definition id it needs is not returned by Flowable's execution query. Measured:
+  the response carries `activityId, id, parentId, …, processInstanceId, …` and no
+  `processDefinitionId`. Every execution therefore hit the fail-open branch and the
+  scope filter never once fired. Resolved through `processInstanceId` instead —
+  which IS returned — cached per instance.
+  And a second defect the verifier found: **the two fixes were mutually
+  defeating.** #244 deliberately emits two `<bpmn:signal>` roots of the same name,
+  one scoped and one not, so a scoped catch can be narrowed without narrowing a
+  start event that shares the name. `FirstOrDefault(name == …)` always found the
+  unscoped one. Scope belongs to the signal an EVENT references, so the lookup now
+  goes through the waiting execution's `activityId` — which the query does return —
+  and falls back to the *scoped* root when it must guess for a catch.
+  Four dispatcher tests added, because that branch had none: replacing the check
+  with `if (false)` used to leave 13/13 green and now fails two.
+  **#263 — outcome 10 did not hold.** Flowable never fires a conditional event on
+  its own (#158's founding finding), so every path that changes a variable must
+  ask. Task completion and the two `/variables` routes did; **delivering a message,
+  waking a signal and triggering a receive task did not** — and those are how a
+  variable arrives from outside. A conditional wait parked forever whenever its
+  variable came in that way. All three now nudge, reading the instance id from the
+  engine's own response rather than paying a round trip, best-effort so a failed
+  nudge cannot fail a delivery that succeeded.
+  **#264 — the palette override was necessary and not sufficient.** The vendored
+  bundle appends `create-append-anything` AFTER `additionalModules` and registers
+  under a different DI name, so its "Create element" popup survived — offering
+  Transaction, Cancel End and Business Rule Task, three elements publish then
+  refuses. The stock replace menu did the same, plus both link events.
+  Filtered as popup-menu **middleware** rather than by replacing the providers:
+  `PopupMenu._getEntries` lets a provider return a function that receives every
+  accumulated entry, so this strips whatever the bundle offers — including entries
+  a future bpmn-js adds — instead of reproducing its option tables and drifting
+  from them. The deny set is the catalog's own `className` values for rows the
+  manifest does not call supported, so promoting an element still needs no edit
+  outside `bpmn-support.json`. The two link events were added to the catalog for
+  their classNames; being withdrawn, the palette filter already excludes them.
+  **#257 — the guard restored rather than traded away.** The first fix swept by
+  age, which removed the orphans by removing the protection: it deleted any
+  deployment older than three hours whatever its name — 348 non-suite ones in a
+  single observed sweep — while two doc comments still promised it could not. That
+  was a safety property #214 established deliberately, and reversing it was not
+  mine to decide.
+  `Flowable:DeploymentNamePrefix` (unset in production, set by the E2E fixture, the
+  same shape as #223's `CallbackBaseUrlOverride`) makes the suite deploy as
+  `e2e-<key>`, so name matching is exact again and a developer's `autonate` or
+  `car` deployment is safe at any age.
+  The test gap mattered more than the rule: **both existing tests deployed their
+  fixture straight to the engine and chose the name themselves**, which is exactly
+  how the original defect survived its own test — the suite published through
+  `FlowableClient` under one convention while the sweep looked for another, and no
+  test compared them. The new test **publishes through the real endpoint** and then
+  asks the sweep to find it. Removing the fixture's prefix line makes it fail with
+  "The app published as something other than 'e2e-…'".
+  **Issue:** #262, #243, #263, #264, #257

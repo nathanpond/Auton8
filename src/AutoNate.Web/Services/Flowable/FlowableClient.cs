@@ -48,7 +48,12 @@ public sealed class FlowableClient(
         }
 
         using var content = new MultipartFormDataContent();
-        var fileName = $"{model.ProcessKey}.bpmn20.xml";
+
+        // #257. Unset in production; the name is the process key exactly as
+        // before. The E2E fixture sets it so its deployments are identifiable by
+        // name, which is what lets the sweep match only what the suite deployed
+        // instead of deleting anything old enough.
+        var fileName = $"{_options.DeploymentNamePrefix}{model.ProcessKey}.bpmn20.xml";
         content.Add(new StringContent(model.BpmnXml, Encoding.UTF8, "application/xml"), "file", fileName);
 
         using var response = await _httpClient.PostAsync("service/repository/deployments", content, cancellationToken);
@@ -1515,15 +1520,28 @@ public sealed class FlowableClient(
 
     public async Task SignalExecutionAsync(
         string executionId,
+        string signalName,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(executionId))
             throw new ArgumentException("Execution id is required.", nameof(executionId));
 
+        // #262. `signalName` is REQUIRED by Flowable, and its absence made every
+        // external signal wake fail silently for the whole of M4.
+        //
+        // Without it the engine answers 400 "Signal name is required", and
+        // WorkflowSignalDispatcher's per-execution catch logged it and moved on —
+        // so a waiting process simply never advanced and nothing surfaced. Probed
+        // against 8.0.0: the identical request WITH the name returns 200 and the
+        // token moves on.
+        if (string.IsNullOrWhiteSpace(signalName))
+            throw new ArgumentException("Signal name is required.", nameof(signalName));
+
         var payload = new Dictionary<string, object?>
         {
             ["action"] = "signalEventReceived",
+            ["signalName"] = signalName,
             ["variables"] = ToFlowableVariables(variables)
         };
 
@@ -1533,6 +1551,9 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, $"signal execution '{executionId}'");
+
+        // #263. Same for a signal's payload.
+        await EvaluateConditionsForRespondingExecutionAsync(response, cancellationToken);
     }
 
     // #243. Whether a signal NAME is global in a given deployed definition.
@@ -1545,7 +1566,10 @@ public sealed class FlowableClient(
     //
     // Cached per definition, which is immutable once deployed.
     public async Task<bool> IsSignalGlobalAsync(
-        string processDefinitionId, string signalName, CancellationToken cancellationToken = default)
+        string processDefinitionId,
+        string signalName,
+        string? activityId = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(processDefinitionId) || string.IsNullOrWhiteSpace(signalName))
         {
@@ -1554,7 +1578,7 @@ public sealed class FlowableClient(
             return true;
         }
 
-        var cacheKey = $"autonate:signal-scope:{processDefinitionId}:{signalName}";
+        var cacheKey = $"autonate:signal-scope:{processDefinitionId}:{signalName}:{activityId}";
         if (_cache.TryGetValue<bool>(cacheKey, out var cached)) return cached;
 
         using var response = await _httpClient.GetAsync(
@@ -1566,8 +1590,46 @@ public sealed class FlowableClient(
         try
         {
             var document = XDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            var signal = document.Descendants(BpmnNamespace + "signal")
-                .FirstOrDefault(element => element.Attribute("name")?.Value == signalName);
+
+            // #243. Resolve through the EVENT this execution is parked at, not by
+            // name.
+            //
+            // A name lookup was wrong in a way #244 makes routine: when a scoped
+            // catch shares a name with an unscoped start event, ApplySignalScopes
+            // deliberately emits TWO <bpmn:signal> roots with that name — one
+            // scoped, one not — so the catch can be narrowed without narrowing the
+            // start. `FirstOrDefault(name == …)` then always found the unscoped
+            // one, and judged the scoped catch global. The two fixes were
+            // mutually defeating.
+            //
+            // Scope is a property of the signal an EVENT references, so the
+            // event's own signalRef is the only correct route. activityId comes
+            // back on the execution query, unlike processDefinitionId.
+            XElement? signal = null;
+
+            if (!string.IsNullOrWhiteSpace(activityId))
+            {
+                var signalRef = document.Descendants()
+                    .FirstOrDefault(element => element.Attribute("id")?.Value == activityId)?
+                    .Elements(BpmnNamespace + "signalEventDefinition")
+                    .FirstOrDefault()?
+                    .Attribute("signalRef")?.Value;
+
+                if (!string.IsNullOrWhiteSpace(signalRef))
+                {
+                    signal = document.Descendants(BpmnNamespace + "signal")
+                        .FirstOrDefault(element => element.Attribute("id")?.Value == signalRef);
+                }
+            }
+
+            // No activity id, or a definition that does not describe it: fall back
+            // to the name. Ambiguous only in the two-roots case above, and there
+            // the scoped root is the conservative answer for a catch event.
+            signal ??= document.Descendants(BpmnNamespace + "signal")
+                .Where(element => element.Attribute("name")?.Value == signalName)
+                .OrderBy(element => element.Attribute(
+                    XNamespace.Get("http://flowable.org/bpmn") + "scope")?.Value == "processInstance" ? 0 : 1)
+                .FirstOrDefault();
 
             // flowable:scope="processInstance" is what ApplySignalScopes writes
             // for an instance-scoped signal; anything else (including absent) is
@@ -1587,13 +1649,13 @@ public sealed class FlowableClient(
     /// <summary>
     /// Executions waiting on a signal, paired with the definition they run (#243).
     /// </summary>
-    public async Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+    public async Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId, string? ActivityId)>>
         ListExecutionsAwaitingSignalWithDefinitionAsync(
             string signalName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(signalName))
         {
-            return Array.Empty<(string, string)>();
+            return Array.Empty<(string, string, string?)>();
         }
 
         using var response = await _httpClient.GetAsync(
@@ -1604,14 +1666,73 @@ public sealed class FlowableClient(
         var page = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(response, cancellationToken);
         if (page.Data is null || page.Data.Count == 0)
         {
-            return Array.Empty<(string, string)>();
+            return Array.Empty<(string, string, string?)>();
         }
 
-        return page.Data
-            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-            .Select(item => (item.Id!, item.ProcessDefinitionId ?? string.Empty))
-            .ToArray();
+        // #243. The execution query does NOT return processDefinitionId.
+        //
+        // Measured against 8.0.0 — the response carries exactly:
+        //   activityId, id, parentId, parentUrl, processInstanceId,
+        //   processInstanceUrl, superExecutionId, superExecutionUrl,
+        //   suspended, tenantId, url
+        //
+        // Mapping the absent field to "" fed IsSignalGlobalAsync its
+        // fail-open branch for EVERY execution, so the scope filter this
+        // method exists to serve never once fired in production. The
+        // instance is where the definition lives, and processInstanceId IS
+        // returned — so resolve through it, once per distinct instance.
+        var definitionByInstance = new Dictionary<string, string>(StringComparer.Ordinal);
+        var resolved = new List<(string, string, string?)>(page.Data.Count);
+
+        foreach (var item in page.Data.Where(item => !string.IsNullOrWhiteSpace(item.Id)))
+        {
+            var definitionId = item.ProcessDefinitionId;
+
+            if (string.IsNullOrWhiteSpace(definitionId)
+                && !string.IsNullOrWhiteSpace(item.ProcessInstanceId))
+            {
+                if (!definitionByInstance.TryGetValue(item.ProcessInstanceId!, out definitionId))
+                {
+                    definitionId = await ResolveDefinitionOfInstanceAsync(
+                        item.ProcessInstanceId!, cancellationToken);
+                    definitionByInstance[item.ProcessInstanceId!] = definitionId;
+                }
+            }
+
+            resolved.Add((item.Id!, definitionId ?? string.Empty, item.ActivityId));
+        }
+
+        return resolved;
     }
+
+    /// <summary>The definition a running instance belongs to, or "" (#243).</summary>
+    /// <remarks>
+    /// An empty answer means <see cref="IsSignalGlobalAsync"/> falls open and the
+    /// execution is woken. That is the safe direction for a lookup failure — a
+    /// signal that wakes something it need not is a visible bug, where one that
+    /// silently fails to wake a waiting process is the failure this whole path
+    /// was written to end.
+    /// </remarks>
+    private async Task<string> ResolveDefinitionOfInstanceAsync(
+        string processInstanceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}",
+                cancellationToken);
+            if (!response.IsSuccessStatusCode) return string.Empty;
+
+            var instance = await DeserializeAsync<FlowableProcessInstanceSummary>(
+                response, cancellationToken);
+            return instance.ProcessDefinitionId ?? string.Empty;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
 
     public async Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
@@ -1756,6 +1877,9 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, $"deliver message '{messageName}' to execution {executionId}");
+
+        // #263. A delivered message's variables can make a conditional event true.
+        await EvaluateConditionsForRespondingExecutionAsync(response, cancellationToken);
     }
 
     public async Task TriggerExecutionAsync(
@@ -1775,7 +1899,52 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, $"trigger execution {executionId}");
+
+        // #263. A receive task's trigger carries variables in with it.
+        await EvaluateConditionsForRespondingExecutionAsync(response, cancellationToken);
     }
+
+    /// <summary>
+    /// Asks the engine to re-check conditional events after delivering variables
+    /// into a running instance (#263).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable ships a behaviour class for conditional events and still never
+    /// fires them — #158's founding finding — so every path that CHANGES a
+    /// process variable has to ask. Task completion and the two `/variables`
+    /// routes did. **Delivering a message, waking a signal and triggering a
+    /// receive task did not**, and those are the ordinary ways a variable arrives
+    /// from outside, so a conditional wait parked forever whenever its variable
+    /// came in that way.
+    /// </para>
+    /// <para>
+    /// The instance id is read from the engine's own response, which returns the
+    /// execution it just advanced — no extra round trip. Best-effort for the same
+    /// reason as the completion path: the delivery already succeeded, and failing
+    /// here would report failure for work that was done.
+    /// </para>
+    /// </remarks>
+    private async Task EvaluateConditionsForRespondingExecutionAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        string? processInstanceId = null;
+        try
+        {
+            var execution = await DeserializeAsync<FlowableExecutionResponse>(response, cancellationToken);
+            processInstanceId = execution.ProcessInstanceId;
+        }
+        catch (Exception exception) when (exception is JsonException or HttpRequestException)
+        {
+            // The delivery worked; only the follow-up nudge is lost.
+        }
+
+        if (!string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            await TryEvaluateConditionalEventsAsync(processInstanceId!, cancellationToken);
+        }
+    }
+
 
     public async Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
         string parentProcessInstanceId,
@@ -2220,8 +2389,19 @@ public sealed class FlowableClient(
         public string? Id { get; init; }
 
         // #243. Needed to look up the signal's declared scope in the definition
-        // this execution is running.
+        // this execution is running. Flowable does NOT return it on the execution
+        // query — measured against 8.0.0 — so it is always null here and the
+        // definition is resolved through ProcessInstanceId instead. Kept because
+        // a future engine version may populate it, and the resolution short-
+        // circuits when it does.
         public string? ProcessDefinitionId { get; init; }
+
+        // Returned, unlike the above, and the route to the definition.
+        public string? ProcessInstanceId { get; init; }
+
+        // #243. The catch event this execution is parked at. Scope is a property
+        // of the EVENT, not of the name — see IsSignalGlobalAsync.
+        public string? ActivityId { get; init; }
     }
 
     private sealed class FlowableHistoricProcessInstanceResponse
