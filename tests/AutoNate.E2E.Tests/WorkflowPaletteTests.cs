@@ -286,6 +286,37 @@ public sealed class WorkflowPaletteTests : E2ETestBase
             offered.Count == 0,
             $"The {what} popup offers elements the manifest withholds — an author " +
             $"can place what publish refuses: {string.Join(", ", offered)}");
+
+        // #282. The class-based check above cannot see the bare boundary event,
+        // because bpmn-js draws it with the SAME glyph as the supported
+        // Intermediate Throw (None) — `bpmn-icon-intermediate-event-none` is on
+        // the screen either way, and asserting its absence would demand the
+        // supported element disappear too.
+        //
+        // So this reads the entries' own ids, which are what bpmn-js actually
+        // keys them by. Narrow on purpose: a general id-based rule would need the
+        // catalog to carry every bundle id, and that mapping drifting silently is
+        // the failure mode #264 was filed for. One named element, checked exactly.
+        var ids = await popup.EvaluateAllAsync<string[]>(
+            """
+            nodes => nodes.flatMap(root =>
+              Array.from(root.querySelectorAll('[data-id]'))
+                .map(e => e.getAttribute('data-id'))
+                .filter(Boolean))
+            """);
+
+        Assert.True(
+            ids.Length > 0,
+            $"The {what} popup exposed no entry ids at all, so the assertion below " +
+            "would pass for free. bpmn-js has changed how it renders popup entries.");
+
+        var bareBoundary = ids.Where(id => id.Contains("none-boundary-event", StringComparison.Ordinal)).ToList();
+        Assert.True(
+            bareBoundary.Count == 0,
+            $"The {what} popup still offers a boundary event with no event " +
+            "definition. Flowable refuses to deploy one — " +
+            "flowable-boundary-event-no-event-definition — so an author can place " +
+            $"it, publish it, and have the deployment fail: {string.Join(", ", bareBoundary)}");
     }
 
     /// <summary>Every bpmn-js icon class belonging to a withheld element.</summary>
@@ -304,24 +335,44 @@ public sealed class WorkflowPaletteTests : E2ETestBase
             File.ReadAllText(Path.Combine(root.FullName, "src", "shared", "bpmn-palette.json")));
 
         var classes = new List<string>();
+        var supportedClasses = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var entry in catalog.RootElement.GetProperty("entries").EnumerateArray())
         {
             var key = Key(entry.GetProperty("localName").GetString()!,
                           entry.GetProperty("eventDefinition").GetString());
-            if (supported.Contains(key)) continue;
 
+            var names = new List<string>();
             if (entry.TryGetProperty("className", out var c) && c.GetString() is { Length: > 0 } cls)
             {
-                classes.Add(cls);
+                names.Add(cls);
             }
 
             if (entry.TryGetProperty("menuClassNames", out var extra))
             {
-                classes.AddRange(extra.EnumerateArray().Select(n => n.GetString()!));
+                names.AddRange(extra.EnumerateArray().Select(n => n.GetString()!));
+            }
+
+            if (supported.Contains(key))
+            {
+                foreach (var name in names) supportedClasses.Add(name);
+            }
+            else
+            {
+                classes.AddRange(names);
             }
         }
 
-        return classes;
+        // #282. A class name a SUPPORTED element also uses is not evidence of
+        // anything: bpmn-js reuses glyphs, so `bpmn-icon-intermediate-event-none`
+        // belongs to both the supported Intermediate Throw (None) and the
+        // withheld bare Boundary Event. Asserting its absence would demand the
+        // supported element vanish from the menu.
+        //
+        // Dropped here for the same reason palette.js drops it from
+        // WITHHELD_ICON_CLASSES, and computed the same way rather than listed —
+        // the bare boundary event is instead checked by id, above.
+        return classes.Where(name => !supportedClasses.Contains(name)).Distinct(StringComparer.Ordinal).ToList();
     }
 
     [Theory]

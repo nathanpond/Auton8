@@ -12,7 +12,8 @@
     "properties": "Extra businessObject properties set at creation (isExpanded, triggeredByEvent, isForCompensation).",
     "localName": "The bpmn-support.json row's localName. The join key -- a typo here fails the drift test.",
     "eventDefinition": "The bpmn-support.json row's eventDefinition. Null where the row has none.",
-    "menuClassNames": "Additional bpmn-js icon classes for the SAME element, used only by the menu filter (#264). bpmn-js names some elements differently in its own popups than the palette does -- 'bpmn-icon-business-rule' vs the palette's 'bpmn-icon-business-rule-task'. A deny key that matches nothing silently leaves the element reachable, so BpmnPaletteManifestTests asserts every key here and every withheld className actually appears in the vendored bundle."
+    "menuClassNames": "Additional bpmn-js icon classes for the SAME element, used only by the menu filter (#264). bpmn-js names some elements differently in its own popups than the palette does -- 'bpmn-icon-business-rule' vs the palette's 'bpmn-icon-business-rule-task'. A deny key that matches nothing silently leaves the element reachable, so BpmnPaletteManifestTests asserts every key here and every withheld className actually appears in the vendored bundle.",
+    "menuEntryIds": "bpmn-js's OWN entry ids for the same element, used only by the menu filter (#282). The Create and Append popups build their entries with toActionEntry, which keeps label/className/description/group/search/rank/action and DROPS `target` -- so those two surfaces cannot be filtered by what an entry places, and className is not an identity there either: bpmn-js draws the supported Intermediate Throw (None) and the withheld bare Boundary Event with the same glyph. The entry id is the only key that separates them, and bpmn-js builds it as `${idPrefix}-${actionName}`, so this carries the actionName and the filter matches any prefix. BpmnPaletteManifestTests asserts every id here occurs in the vendored bundle, because a deny key that matches nothing silently leaves the element reachable."
   },
   "groupOrder": [
     "Events",
@@ -656,6 +657,19 @@
       "eventDefinitionType": "bpmn:CompensateEventDefinition",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate"
+    },
+    {
+      "id": "append.boundary-none",
+      "label": "Boundary event",
+      "description": "Attached boundary event with no event definition",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-none",
+      "type": "bpmn:BoundaryEvent",
+      "localName": "boundaryEvent",
+      "eventDefinition": null,
+      "menuEntryIds": [
+        "none-boundary-event"
+      ]
     },
     {
       "id": "create.intermediate-catch-link",

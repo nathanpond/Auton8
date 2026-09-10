@@ -1018,146 +1018,265 @@ public static partial class WorkflowBpmnXml
             .Any(sub => string.Equals(
                 sub.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase));
 
-    private static string? ReadSignalScope(XElement element) =>
+    /// <summary>
+    /// What one event declares about its signal's scope (#278).
+    /// </summary>
+    /// <remarks>
+    /// Four states, not two. The two that keep being conflated are
+    /// <see cref="Unspecified"/> — the author said nothing, so whatever the
+    /// diagram already carries stands — and <see cref="Global"/>, an explicit
+    /// request to widen. Treating the first as the second strips a scope its
+    /// author deliberately narrowed.
+    /// </remarks>
+    private enum SignalScopeDeclaration
+    {
+        /// <summary>Says nothing. NOT the same as saying "global".</summary>
+        Unspecified,
+
+        /// <summary>Only this process instance hears it.</summary>
+        Instance,
+
+        /// <summary>Every instance on the engine hears it.</summary>
+        Global,
+
+        /// <summary>
+        /// Says something no spelling recognises — a typo. Refused at publish
+        /// rather than silently read as "global", which is what shipped: a
+        /// mistyped <c>instnace</c> published clean and ran engine-wide (#278).
+        /// </summary>
+        Unrecognised
+    }
+
+    /// <summary>
+    /// The ONE place a signal-scope declaration is interpreted (#278).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This function exists because of how #156 failed verification five rounds
+    /// running. Every failure was the same family: <c>ApplySignalScopes</c> and
+    /// <c>BuildSignalScopeErrors</c> each read the author's declaration with
+    /// their own private rules, and the two sets of rules drifted apart. Round 3
+    /// they disagreed about what "declares nothing" means. Round 5 they
+    /// disagreed about how "instance" is spelt — the expansion tested
+    /// <c>declared == "instance"</c> while the validator accepted "instance" OR
+    /// "processInstance", so a diagram saying <c>processInstance</c> passed
+    /// validation and had its scope silently dropped:
+    /// </para>
+    /// <code>
+    /// value='instance'         errors=0  emittedScope=processInstance
+    /// value='processInstance'  errors=0  emittedScope=(NONE)      &lt;- leaked global
+    /// value='instnace' (typo)  errors=0  emittedScope=(NONE)      &lt;- leaked global
+    /// </code>
+    /// <para>
+    /// Five point fixes did not converge, because each one repaired a
+    /// disagreement without removing the ability to disagree. Both callers now
+    /// consume this function's answer and nothing else, so a new spelling is
+    /// added in one place or in none.
+    /// <c>SignalScopeCasesTests.The_two_paths_never_disagree</c> is the guard.
+    /// </para>
+    /// </remarks>
+    private static SignalScopeDeclaration ReadSignalScopeDeclaration(XElement element) =>
+        // #274. A PROCESS-LEVEL start event is global by nature: it exists to be
+        // triggered from outside any instance, so it cannot be scoped, and it
+        // says so whether or not the author wrote anything. A start event inside
+        // an event subprocess is an in-instance handler and is not one of these.
+        ForcesGlobalSignal(element)
+            ? SignalScopeDeclaration.Global
+            : InterpretSignalScope(RawSignalScope(element));
+
+    /// <summary>The studio's raw declaration, uninterpreted.</summary>
+    /// <remarks>
+    /// Recorded as an extension ELEMENT on the event, because moddle would not
+    /// let the studio write an attribute onto an event parsed without one.
+    /// </remarks>
+    private static string? RawSignalScope(XElement element) =>
         element.Element(BpmnNamespace + "extensionElements")?
             .Elements()
             .FirstOrDefault(child => child.Name.LocalName == "autonateSignalScope")?
             .Attribute("value")?.Value;
 
-    private static void ApplySignalScopes(XDocument document)
-    {
-        var root = document.Root;
-        if (root is null) return;
-
-        var signalsById = root.Elements(BpmnNamespace + "signal")
-            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
-            .ToDictionary(signal => signal.Attribute("id")!.Value, signal => signal, StringComparer.Ordinal);
-        if (signalsById.Count == 0) return;
-
-        // One signal element per (name, scope) actually used. The FIRST scope seen
-        // for a name reuses the original element; a second scope for the same name
-        // gets its own, because two events that agree on a name but not on who
-        // hears it are genuinely different subscriptions and cannot share one.
-        var byNameAndScope = new Dictionary<(string Name, bool Scoped), XElement>();
-
-        // #273/#274. Signal names a PROCESS-LEVEL START EVENT uses.
-        //
-        // This set used to be "names some event references without declaring a
-        // scope", which conflated two different things and produced both of the
-        // defects that reopened #270:
-        //
-        //   - An event that declares nothing is NOT in conflict with a scoped
-        //     one. An unscoped throw and an instance-scoped catch share one
-        //     signal root, and scoping that root is exactly what #156 wants —
-        //     the throw raises it, the scope decides who hears it. Treating it as
-        //     a conflict made the expansion skip the element and emit no scope at
-        //     all, so the diagram published and ran GLOBAL with the author's
-        //     declared scope silently discarded (#273). That is the #156 leak,
-        //     arriving quietly where the previous version at least failed loudly.
-        //
-        //   - A start event inside an event subprocess does not force global
-        //     (#274), for the reason on ForcesGlobalSignal.
-        //
-        // What genuinely cannot be reconciled is a process-level start event —
-        // which must be global to start instances from outside — sharing a name
-        // with an instance-scoped event. BuildSignalScopeErrors refuses that.
-        var namesForcedGlobal = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var probe in document.Descendants())
-        {
-            if (probe.Name.Namespace != BpmnNamespace) continue;
-            if (!ForcesGlobalSignal(probe)) continue;
-
-            var probeDefinition = probe.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
-            var probeRef = probeDefinition?.Attribute("signalRef")?.Value;
-            if (probeDefinition is null
-                || string.IsNullOrWhiteSpace(probeRef)
-                || !signalsById.TryGetValue(probeRef!, out var probeSignal))
+    /// <summary>Every spelling the product accepts, in one switch.</summary>
+    private static SignalScopeDeclaration InterpretSignalScope(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? SignalScopeDeclaration.Unspecified
+            : raw.Trim().ToLowerInvariant() switch
             {
-                continue;
+                // "processInstance" is Flowable's own spelling, and a diagram
+                // round-tripped through another modeller carries it. "instance"
+                // is the studio's. Both mean the same thing and both must, or
+                // one of them leaks global.
+                "instance" or "processinstance" => SignalScopeDeclaration.Instance,
+                "global" => SignalScopeDeclaration.Global,
+                _ => SignalScopeDeclaration.Unrecognised
+            };
+
+    /// <summary>Everything one signal NAME has been asked to be.</summary>
+    /// <remarks>
+    /// Keyed by name rather than by signal id because Flowable's namespace is
+    /// keyed by name: two <c>&lt;bpmn:signal&gt;</c> roots sharing a name are
+    /// refused at deployment whatever their ids, so scope is a property of the
+    /// name and one name means one scope.
+    /// </remarks>
+    private sealed class SignalScopeUse
+    {
+        /// <summary>The root carrying this name, where exactly one does.</summary>
+        public XElement? Root { get; set; }
+
+        /// <summary>Every root carrying this name — more than one is refused.</summary>
+        public List<XElement> Roots { get; } = [];
+
+        /// <summary>Who asked for what. More than one key is a contradiction.</summary>
+        public Dictionary<SignalScopeDeclaration, List<string>> DeclaredBy { get; } = new();
+
+        /// <summary>Events whose declaration is not a spelling we know.</summary>
+        public List<(string Label, string Raw)> Unrecognised { get; } = [];
+
+        /// <summary>
+        /// The single scope every declarer agreed on, or null where they did not
+        /// agree, nobody declared, or somebody misspelt it. Null means "emit
+        /// nothing" — the authored diagram stands and validation has the say.
+        /// </summary>
+        public SignalScopeDeclaration? Agreed =>
+            Unrecognised.Count == 0 && DeclaredBy.Count == 1
+                ? DeclaredBy.Keys.Single()
+                : null;
+    }
+
+    /// <summary>
+    /// Reads every signal-scope declaration in the diagram, once (#278).
+    /// </summary>
+    /// <remarks>
+    /// The expansion and the validator both start here, so they cannot disagree
+    /// about what the diagram says — only about what to do about it.
+    /// </remarks>
+    private static Dictionary<string, SignalScopeUse> CollectSignalScopeUses(XDocument document)
+    {
+        var uses = new Dictionary<string, SignalScopeUse>(StringComparer.Ordinal);
+
+        SignalScopeUse For(string name)
+        {
+            if (!uses.TryGetValue(name, out var use))
+            {
+                use = new SignalScopeUse();
+                uses[name] = use;
             }
 
-            namesForcedGlobal.Add(probeSignal.Attribute("name")?.Value ?? probeRef!);
+            return use;
         }
 
-
-
-        foreach (var element in document.Descendants().ToList())
+        // The roots first, so a name that no event references is still seen — a
+        // duplicate pair of them is refused whether or not anything catches it.
+        foreach (var root in document.Descendants(BpmnNamespace + "signal"))
         {
-            if (element.Name.Namespace != BpmnNamespace) continue;
+            var id = Trimmed(root.Attribute("id")?.Value);
+            var rootName = Trimmed(root.Attribute("name")?.Value) ?? id;
+            if (rootName is null) continue;
 
+            var use = For(rootName);
+            use.Roots.Add(root);
+            use.Root ??= root;
+        }
+
+        // A scope the diagram ALREADY carries is the signal's own state, not a
+        // declaration by any event that happens to reference it. #279: attributing
+        // it to every referencing event made "declares nothing" read as a
+        // declaration, so an unscoped throw beside a pre-scoped root looked like a
+        // contradiction and the whole diagram was refused. It is recorded once,
+        // against the root, so it can still contradict an explicit `global`.
+        foreach (var (name, use) in uses)
+        {
+            if (use.Roots.Count != 1 || use.Root is null) continue;
+
+            var carried = InterpretSignalScope(use.Root.Attribute(FlowableNamespace + "scope")?.Value);
+            if (carried is SignalScopeDeclaration.Instance or SignalScopeDeclaration.Global)
+            {
+                Declare(use, carried, $"the signal '{name}' itself");
+            }
+        }
+
+        foreach (var element in document.Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace))
+        {
             var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
-            var signalRef = definition?.Attribute("signalRef")?.Value;
-            if (definition is null
-                || string.IsNullOrWhiteSpace(signalRef)
-                || !signalsById.TryGetValue(signalRef!, out var original))
+            if (definition is null) continue;
+
+            var signalRef = Trimmed(definition.Attribute("signalRef")?.Value);
+            if (signalRef is null) continue;
+
+            var root = document.Descendants(BpmnNamespace + "signal")
+                .FirstOrDefault(s => s.Attribute("id")?.Value == signalRef);
+            var name = Trimmed(root?.Attribute("name")?.Value) ?? signalRef;
+
+            var use = For(name);
+            var label = LabelOf(element);
+
+            switch (ReadSignalScopeDeclaration(element))
             {
-                continue;
+                case SignalScopeDeclaration.Instance:
+                    Declare(use, SignalScopeDeclaration.Instance, label);
+                    break;
+                case SignalScopeDeclaration.Global:
+                    Declare(use, SignalScopeDeclaration.Global, label);
+                    break;
+                case SignalScopeDeclaration.Unrecognised:
+                    use.Unrecognised.Add((label, RawSignalScope(element)!.Trim()));
+                    break;
+                // Unspecified declares nothing, and is not a conflict with
+                // anything. An unscoped THROW beside an instance-scoped catch is
+                // the ordinary shape: the throw raises the signal, the scope
+                // decides who hears it (#273).
+            }
+        }
+
+        return uses;
+
+        static void Declare(SignalScopeUse use, SignalScopeDeclaration scope, string label)
+        {
+            if (!use.DeclaredBy.TryGetValue(scope, out var declarers))
+            {
+                declarers = [];
+                use.DeclaredBy[scope] = declarers;
             }
 
-            var name = original.Attribute("name")?.Value ?? signalRef!;
-
-            // Three states, not two. An event that says nothing is NOT the same as
-            // one that says "global":
-            //
-            //   "instance" — scope the signal.
-            //   "global"   — unscope it.
-            //   absent     — leave the signal exactly as authored.
-            //
-            // The third case matters because a diagram may already carry
-            // Flowable's own flowable:scope, written by hand or by another
-            // modeller. Treating absent as "global" stripped it, silently widening
-            // a signal its author had deliberately narrowed. That is how this was
-            // found: a test wrote flowable:scope directly, publish removed it, and
-            // the instance-scoped assertion failed only under load — in isolation
-            // the check ran before the other instance had reacted, so it passed
-            // for the wrong reason.
-            var declared = ReadSignalScope(element);
-            if (string.IsNullOrWhiteSpace(declared)) continue;
-
-            var wantScoped = string.Equals(declared, "instance", StringComparison.OrdinalIgnoreCase);
-
-            var key = (name, wantScoped);
-            if (!byNameAndScope.TryGetValue(key, out var target))
-            {
-                // #270. Clone only when the clone can carry a DIFFERENT name.
-                //
-                // #244 cloned the root, kept the name, and changed only the id —
-                // which Flowable refuses outright:
-                //   [Problem: 'flowable-signal-duplicate-name'] : Duplicate signal
-                //   name found
-                // and the deployment fails with a 500. Measured against 8.0.0: two
-                // roots with distinct names deploy; two sharing a name do not.
-                //
-                // So scope is a property of the signal NAME — one name, one scope —
-                // and the diagram #244 set out to support cannot exist. A signal
-                // start event must be global to start instances from outside; an
-                // instance-scoped catch on that same name is a contradiction the
-                // engine will not accept, and BuildSignalScopeErrors refuses it at
-                // publish with a message naming both events.
-                //
-                // Two events that BOTH declare a scope and disagree are the same
-                // contradiction and refused there too. What remains here is the
-                // ordinary case: every user of a name wants the same scope, so the
-                // authored root is simply annotated.
-                var conflicting = byNameAndScope.Keys.Any(k => k.Name == name)
-                                  || namesForcedGlobal.Contains(name);
-                if (conflicting)
-                {
-                    // Validation refuses this diagram; expansion leaves it alone
-                    // rather than emitting XML the engine rejects with a 500.
-                    continue;
-                }
-
-                target = original;
-
-                target.SetAttributeValue(
-                    FlowableNamespace + "scope", wantScoped ? "processInstance" : null);
-                byNameAndScope[key] = target;
-            }
-
-            definition.SetAttributeValue("signalRef", target.Attribute("id")?.Value);
+            declarers.Add(label);
         }
     }
+
+
+    /// <summary>
+    /// Writes the agreed scope onto each signal root (#156, #270, #278).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// All of the interpretation lives in <see cref="CollectSignalScopeUses"/>.
+    /// What is left here is the one decision this function actually owns: what to
+    /// WRITE. A name whose declarers disagree, or that carries a misspelt
+    /// declaration, is refused by <see cref="BuildSignalScopeErrors"/> — so
+    /// nothing is emitted for it rather than XML the engine rejects with a 500.
+    /// </para>
+    /// <para>
+    /// A name nobody declared is left exactly as authored. That is the case that
+    /// keeps being got wrong: a diagram may already carry Flowable's own
+    /// <c>flowable:scope</c>, written by hand or by another modeller, and
+    /// treating "declared nothing" as "wants global" strips it — silently
+    /// widening a signal its author had deliberately narrowed.
+    /// </para>
+    /// </remarks>
+    private static void ApplySignalScopes(XDocument document)
+    {
+        foreach (var use in CollectSignalScopeUses(document).Values)
+        {
+            if (use.Root is null || use.Roots.Count != 1) continue;
+
+            // Null means: emit nothing. Contradiction, typo, or nobody asked.
+            if (use.Agreed is not { } agreed) continue;
+
+            use.Root.SetAttributeValue(
+                FlowableNamespace + "scope",
+                agreed == SignalScopeDeclaration.Instance ? "processInstance" : null);
+        }
+    }
+
 
     // The execution diagram renders from the DEPLOYED definition, so an element
     // with no BPMNShape would be invisible there. Cloned from the element it
@@ -3460,54 +3579,42 @@ public static partial class WorkflowBpmnXml
     /// </remarks>
     private static IEnumerable<string> BuildSignalScopeErrors(XDocument document)
     {
-        // name -> (scope declared, the events declaring it)
-        var byName = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
-
-        foreach (var element in document.Descendants()
-            .Where(e => e.Name.Namespace == BpmnNamespace))
+        foreach (var (name, use) in CollectSignalScopeUses(document))
         {
-            var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
-            if (definition is null) continue;
-
-            var signalRef = Trimmed(definition.Attribute("signalRef")?.Value);
-            if (signalRef is null) continue;
-
-            var root = document.Descendants(BpmnNamespace + "signal")
-                .FirstOrDefault(s => s.Attribute("id")?.Value == signalRef);
-            var name = Trimmed(root?.Attribute("name")?.Value) ?? signalRef;
-
-            // #274. A PROCESS-LEVEL start event is global by nature: it exists to
-            // be triggered from outside any instance, so it cannot be scoped. A
-            // start event inside an event subprocess is an in-instance handler and
-            // is not one of these — classifying it global refused a diagram
-            // Flowable deploys and runs.
-            var declared = ForcesGlobalSignal(element)
-                ? "global"
-                : Normalise(ReadSignalScope(element)) ?? Normalise(
-                    root?.Attribute(FlowableNamespace + "scope")?.Value == "processInstance"
-                        ? "instance" : null);
-
-            if (declared is null) continue;
-
-            if (!byName.TryGetValue(name, out var byScope))
+            // #279. Two roots sharing a name is refused by Flowable at deployment
+            // — flowable-signal-duplicate-name, a 500 with no usable message —
+            // and nothing here caught it, so the studio said "published" and the
+            // deploy failed. Ids differ, names do not; the engine keys on name.
+            if (use.Roots.Count > 1)
             {
-                byScope = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-                byName[name] = byScope;
+                var ids = string.Join("', '", use.Roots
+                    .Select(root => root.Attribute("id")?.Value ?? "(no id)"));
+
+                yield return
+                    $"The diagram declares the signal '{name}' {use.Roots.Count} times " +
+                    $"(as '{ids}'). Flowable identifies a signal by its name and refuses a " +
+                    "deployment that declares one name twice, so give them different names " +
+                    "or delete the duplicates.";
             }
 
-            if (!byScope.TryGetValue(declared, out var users))
+            // #278. A spelling nothing recognises used to be read as "not
+            // instance", i.e. global — so a mistyped `instnace` published clean
+            // and ran engine-wide, which is the exact leak the scope exists to
+            // prevent. Silence about a typo is the worst of the three options.
+            foreach (var (label, raw) in use.Unrecognised)
             {
-                users = [];
-                byScope[declared] = users;
+                yield return
+                    $"'{label}' asks for the signal '{name}' to be scoped '{raw}', which is " +
+                    "not a scope Auton8 understands. Use 'instance' so only this process " +
+                    "instance hears it, or 'global' so every instance does.";
             }
 
-            users.Add(LabelOf(element) ?? element.Attribute("id")?.Value ?? "an event");
-        }
+            if (use.DeclaredBy.Count <= 1) continue;
 
-        foreach (var (name, byScope) in byName.Where(entry => entry.Value.Count > 1))
-        {
-            var scoped = string.Join("', '", byScope.GetValueOrDefault("instance", []));
-            var global = string.Join("', '", byScope.GetValueOrDefault("global", []));
+            var scoped = string.Join("', '",
+                use.DeclaredBy.GetValueOrDefault(SignalScopeDeclaration.Instance, []));
+            var global = string.Join("', '",
+                use.DeclaredBy.GetValueOrDefault(SignalScopeDeclaration.Global, []));
 
             yield return
                 $"The signal '{name}' is scoped to this instance by '{scoped}', and is also " +
@@ -3516,13 +3623,6 @@ public static partial class WorkflowBpmnXml
                 "different signal name, or put them both on the same scope.";
         }
     }
-
-    private static string? Normalise(string? scope) => scope?.Trim().ToLowerInvariant() switch
-    {
-        "instance" or "processinstance" => "instance",
-        "global" => "global",
-        _ => null
-    };
 
     /// <summary>
     /// Multi-instance settings the engine would silently ignore (#245).

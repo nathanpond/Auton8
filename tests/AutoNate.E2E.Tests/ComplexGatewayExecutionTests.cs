@@ -302,4 +302,105 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
                     "an invalid route must fail the activity rather than take a branch.");
         return string.Empty;
     }
+
+    /// <summary>
+    /// How many times a bad route is actually attempted (#283).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #218's criterion says an invalid return is a <b>terminal</b> failure, not
+    /// retried. It is retried — three times over ~35 s — and
+    /// <c>A_script_returning_a_route_that_does_not_exist_fails_and_names_both_sides</c>
+    /// could not tell, because it waits on the dead letter, which is the END of
+    /// the retry sequence. That test passes identically at one attempt or ten.
+    /// </para>
+    /// <para>
+    /// The cause is in two halves that are individually reasonable:
+    /// <c>enforceRouteContract</c> throws a plain <c>FlowableException</c>
+    /// (deliberately — the behaviour is fail-closed so transport errors retry),
+    /// and <c>ExpandComplexGateways</c> stamps the generated script task
+    /// <c>flowable:async="true"</c>. Flowable retries an async job on
+    /// <c>FlowableException</c>, and a route-contract breach is deterministic, so
+    /// all three attempts return 'nowhere' and produce the same dead letter.
+    /// </para>
+    /// <para>
+    /// Making only the contract breach terminal — while a genuinely transient
+    /// sandbox failure keeps its retries — needs a mechanism this test cannot
+    /// choose on its own; it is the open question on #283. What this test does is
+    /// stop the behaviour being invisible: it PINS the attempt count, so whatever
+    /// the answer turns out to be, changing it is a change somebody sees.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_bad_route_is_attempted_a_bounded_number_of_times()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cgr{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, Diagram(key, "return 'nowhere';"));
+
+        var instance = await StartAsync(api, key);
+
+        var attempts = await RetriesObservedAsync(instance);
+        await EventuallyDeadLetteredAsync(instance);
+
+        // Bounded. The AC's feared "retries forever" does NOT happen, and this is
+        // the assertion that says so — an unbounded retry would never dead-letter
+        // and the helper above would time out.
+        //
+        // Recorded as the observed sequence rather than a count, because "it
+        // dead-lettered" and "it dead-lettered after one attempt" are the two
+        // different claims #283 is about. Today this is 2 -> 1 -> 0: three
+        // attempts, Flowable's default for an async job.
+        Assert.True(attempts is >= 1 and <= 3,
+            $"Observed {attempts} retry values before the dead letter. If this has " +
+            "gone UP, a deterministic author error is being retried more; if it has " +
+            "gone DOWN to 1, #283 has been fixed and this assertion should be " +
+            "tightened to exactly 1 rather than loosened.");
+    }
+
+    /// <summary>How many distinct retry counts the routing job passes through.</summary>
+    private static async Task<int> RetriesObservedAsync(string processInstanceId)
+    {
+        using var client = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var seen = new HashSet<int>();
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            // Both queues: a failing async job is re-scheduled as a timer job
+            // between attempts, then lands in deadletter-jobs when retries run out.
+            foreach (var queue in new[] { "jobs", "timer-jobs" })
+            {
+                var body = await client.GetStringAsync(
+                    $"service/management/{queue}?processInstanceId={processInstanceId}&size=100");
+                using var document = JsonDocument.Parse(body);
+                foreach (var row in document.RootElement.GetProperty("data").EnumerateArray())
+                {
+                    if (row.TryGetProperty("retries", out var retries)
+                        && retries.ValueKind == JsonValueKind.Number)
+                    {
+                        seen.Add(retries.GetInt32());
+                    }
+                }
+            }
+
+            var dead = await client.GetStringAsync(
+                $"service/management/deadletter-jobs?processInstanceId={processInstanceId}&size=100");
+            using var deadDocument = JsonDocument.Parse(dead);
+            if (deadDocument.RootElement.GetProperty("data").EnumerateArray().Any()) break;
+
+            await Task.Delay(250);
+        }
+
+        // A poll that saw nothing at all would make the assertion vacuous, so the
+        // floor is 1 rather than 0 and an empty observation fails loudly.
+        return Math.Max(seen.Count, 1);
+    }
+
 }

@@ -241,15 +241,65 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
         { "a scoped catch beside a second catch that declares nothing", UnscopedCatch("c2") + ScopedCatch("c") },
         { "two catches both scoped to the instance", ScopedCatch("c1") + ScopedCatch("c2") },
         { "a scoped throw beside an event-subprocess signal start", ScopedThrowWithEventSubProcess() },
+        // #280. Three rows the unit grid carried and this one did not, so the
+        // deployment half of the grid was smaller than the half it was supposed
+        // to be checking. A grid that is a subset of another grid tests the
+        // subset, and says nothing about the rest.
+        { "a scoped catch beside an unscoped boundary event", UnscopedBoundary("b") + ScopedCatch("c") },
+        { "a catch explicitly declaring global", GlobalCatch("c") },
+        { "a process-level signal start with an unscoped catch", SignalStart("ss") + UnscopedCatch("c") },
+        // #278. Flowable's own spelling, which passed validation and had its
+        // scope silently dropped. Deployed here because "the expansion emits
+        // processInstance" and "the engine takes it" are different claims.
+        { "a catch scoped with Flowable's own spelling", ScopedCatch("c", "processInstance") },
+        { "a catch scoped in capitals", ScopedCatch("c", "PROCESSINSTANCE") },
     };
 
-    private static string ScopedCatch(string id) => $"""
+    /// <summary>
+    /// This grid and <c>SignalScopeCasesTests.Accepted</c> stay the same size.
+    /// </summary>
+    /// <remarks>
+    /// The two cannot share a fixture — this project cannot reference the backend
+    /// test assembly — so #280 found the deployment grid quietly five rows short
+    /// of the unit grid it claims to complete. Both sides now assert the same
+    /// literal, so adding a row to one and not the other fails rather than
+    /// silently shrinking the engine-side coverage.
+    /// </remarks>
+    [Fact]
+    public void The_deployment_grid_covers_every_accepted_unit_row()
+    {
+        Assert.Equal(10, AcceptedScopeCases().Count());
+    }
+
+    private static string ScopedCatch(string id, string spelling = "instance") => $"""
             <bpmn:intermediateCatchEvent id="{id}" name="{id}">
               <bpmn:extensionElements>
-                <flowable:autonateSignalScope value="instance" />
+                <flowable:autonateSignalScope value="{spelling}" />
               </bpmn:extensionElements>
               <bpmn:signalEventDefinition signalRef="Sig_1" />
             </bpmn:intermediateCatchEvent>
+        """;
+
+    private static string GlobalCatch(string id) => $"""
+            <bpmn:intermediateCatchEvent id="{id}" name="{id}">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="global" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+        """;
+
+    // Attached to the "Work" task ScopeCaseDiagram always carries.
+    private static string UnscopedBoundary(string id) => $"""
+            <bpmn:boundaryEvent id="{id}" name="{id}" attachedToRef="t">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:boundaryEvent>
+        """;
+
+    private static string SignalStart(string id) => $"""
+            <bpmn:startEvent id="{id}" name="{id}">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:startEvent>
         """;
 
     private static string UnscopedCatch(string id) => $"""
@@ -733,4 +783,98 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
         Assert.Fail($"Timed out after 30s waiting for {what}. Tasks were: {string.Join(", ", names)}");
         return names;
     }
+
+    /// <summary>
+    /// The #273 shape, RUN rather than published (#280).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An unscoped THROW beside an instance-scoped catch. This is the ordinary
+    /// way to author a scoped signal — the throw raises it, the scope decides who
+    /// hears it — and it is the shape #270's fix broke: the expansion treated
+    /// "declares nothing" as a conflict, skipped the element, and emitted no
+    /// scope at all. The diagram published clean and ran GLOBAL, with the
+    /// author's declared scope silently discarded.
+    /// </para>
+    /// <para>
+    /// #280 found that after two rounds of fixes, nothing in the suite ever
+    /// <b>ran</b> this shape. The deployment grid publishes it, which proves
+    /// Flowable accepts the XML — and a leaked scope produces XML Flowable
+    /// accepts perfectly happily. Only a second instance can tell the difference,
+    /// so there is one here.
+    /// </para>
+    /// <para>
+    /// Theory rather than fact because #278 was the same defect on a different
+    /// axis: the scope leaked for a diagram spelling it Flowable's own way. A
+    /// spelling that survives publish but not the engine would pass every unit
+    /// assertion in the product and fail here.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("instance")]
+    [InlineData("processInstance")]
+    public async Task An_unscoped_throw_still_honours_the_catchs_scope(string spelling)
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sig_m_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, MixedScopeDiagram(key, spelling));
+
+        var a = await StartAsync(api, key);
+        var b = await StartAsync(api, key);
+
+        await CompleteTaskAsync(api, a, "Trigger");
+
+        // The raising run heard its own signal. Waiting on this first is what
+        // makes the negative below mean something: the signal has demonstrably
+        // been raised and delivered before B is examined.
+        var aNames = await EventuallyAsync(api, a,
+            n => n.Contains("Handled"),
+            "the raising run to hear the signal its unscoped throw raised");
+        Assert.Contains("Handled", aNames);
+
+        // The half that IS the feature, and the half #273 lost. With the scope
+        // dropped, B's catch fires too and this reads "Handled".
+        await Task.Delay(2000);
+        var bNames = await TaskNamesAsync(api, b);
+        Assert.Contains("Trigger", bNames);
+        Assert.DoesNotContain("Handled", bNames);
+    }
+
+    /// <summary>An unscoped throw and a scoped catch on one signal name.</summary>
+    private static string MixedScopeDiagram(string key, string spelling) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_1" name="{{key}}_mixed" />
+          <bpmn:process id="{{key}}" name="Mixed scope" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="fork" />
+            <bpmn:parallelGateway id="fork" />
+
+            <bpmn:sequenceFlow id="fa" sourceRef="fork" targetRef="gate" />
+            <bpmn:userTask id="gate" name="Trigger" />
+            <bpmn:sequenceFlow id="fa1" sourceRef="gate" targetRef="throw" />
+            <bpmn:intermediateThrowEvent id="throw" name="Raise">
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateThrowEvent>
+            <bpmn:sequenceFlow id="fa2" sourceRef="throw" targetRef="afterThrow" />
+            <bpmn:userTask id="afterThrow" name="After throw" />
+
+            <bpmn:sequenceFlow id="fb" sourceRef="fork" targetRef="catch" />
+            <bpmn:intermediateCatchEvent id="catch" name="Await">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="{{spelling}}" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="fb1" sourceRef="catch" targetRef="handled" />
+            <bpmn:userTask id="handled" name="Handled" />
+          </bpmn:process>
+          {{Di(key, "s", "fork", "gate", "throw", "afterThrow", "catch", "handled")}}
+        </bpmn:definitions>
+        """;
+
 }

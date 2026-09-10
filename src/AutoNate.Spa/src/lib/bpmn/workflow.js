@@ -1057,7 +1057,7 @@ function describeSignalElement(businessObject) {
     // here and publish writes Flowable's own flowable:scope onto the root.
     // Absent means global — Flowable's default, and what every diagram authored
     // before this story carries.
-    signalEventScope: readSignalScope(businessObject),
+    signalEventScope: readSignalScope(businessObject, resolved),
     // A new element has no signal yet; the editor defaults THOSE to instance.
     signalEventIsNew: !ref,
     signalEventInterrupting:
@@ -1067,11 +1067,37 @@ function describeSignalElement(businessObject) {
   };
 }
 
-// Absent means global — Flowable's default, and what every diagram authored
-// before this story carries. Read as it is rather than defaulted to instance, so
-// opening an existing signal does not silently propose narrowing a deployed
-// process.
-function readSignalScope(businessObject) {
+// Every spelling of "instance" the product accepts, matching InterpretSignalScope
+// in WorkflowBpmnXml.cs. #278: the studio and publish recognising different
+// spellings is exactly how a declared scope gets silently dropped, and the two
+// lists disagreeing is the defect rather than a tidiness question.
+//
+//   "instance"        — what this studio writes.
+//   "processInstance" — Flowable's own, on any diagram round-tripped elsewhere.
+function meansInstance(raw) {
+  const normalised = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return normalised === "instance" || normalised === "processinstance";
+}
+
+// What the diagram says this signal's scope is.
+//
+// Two sources, in order: the author's declaration on the EVENT, then the scope
+// the signal ROOT already carries.
+//
+// The second is #281. An imported diagram — one authored elsewhere, or published
+// by Auton8 and re-opened, since publish writes flowable:scope onto the root and
+// the event's extension element does not survive that round trip — carries its
+// scope only on the root. Reading the event alone showed "Global" for a signal
+// that is instance-scoped, and because the panel then wrote back what it had
+// displayed, pressing Apply on an untouched signal WIDENED it. A read that is
+// wrong is bad; a read that is wrong and then saved is a data change nobody asked
+// for.
+//
+// Absent from both means global — Flowable's default, and what every diagram
+// authored before #156 carries. Reported as it is rather than defaulted to
+// instance, so opening an existing signal does not silently propose narrowing a
+// deployed process.
+function readSignalScope(businessObject, signalRoot) {
   const values = Array.isArray(businessObject?.extensionElements?.values)
     ? businessObject.extensionElements.values
     : [];
@@ -1080,8 +1106,13 @@ function readSignalScope(businessObject) {
     const local = type.includes(":") ? type.split(":")[1] : type;
     return local === "autonateSignalScope";
   });
-  const raw = found?.value ?? found?.$attrs?.value;
-  return raw === "instance" ? "instance" : "global";
+  const declared = found?.value ?? found?.$attrs?.value;
+  if (typeof declared === "string" && declared.trim() !== "") {
+    return meansInstance(declared) ? "instance" : "global";
+  }
+
+  const carried = signalRoot?.scope ?? signalRoot?.$attrs?.["flowable:scope"];
+  return meansInstance(carried) ? "instance" : "global";
 }
 
 // #156. Writes the signal name and scope, maintaining the root element behind it.
