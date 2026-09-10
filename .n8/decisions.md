@@ -4134,3 +4134,56 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   role is in use, and skipping them turned ~210 connections into ~6. Cleared 210
   leaked test databases while confirming it.
   **Issue:** #239, #240, #242, #243, #244, #247, #257, #258
+
+- **Verification fix pass, batch 2 (#241, #252).**
+  **#241 was worse than filed, and the filing was already bad.** The report said
+  the palette disagreed with the manifest on six elements. In fact
+  `BPMN_MENU_ENTRIES` — the 51-entry array #107 shipped as "the palette" — was
+  **referenced by nothing**. `createModeler` passed no `additionalModules`, so
+  what authors actually saw was bpmn-js's stock palette: nine create entries,
+  manifest unconsulted, no ad-hoc sub-process, no signal or error events, no call
+  activity, no complex gateway. Every claim #107 made about palette contents was
+  true of dead code.
+  So the fix is a real derivation, not a filter over the old list.
+  `src/shared/bpmn-palette.json` carries presentation — label, icon, group — and
+  the manifest row each entry claims; `palette.js` builds a bpmn-js
+  `paletteProvider` from the entries whose manifest row is `studio: supported`,
+  registered through `additionalModules` so it **overrides** the stock provider
+  rather than adding to it (adding can only ever offer more, and every defect
+  here was something offered that should not be). Withdrawing an element in
+  `bpmn-support.json` now removes it from the palette with no edit anywhere else.
+  Two supported elements got entries they never had: the ad-hoc sub-process #163
+  shipped, and the compensation throw #115 needs. Seven entries stopped being
+  offered because their manifest row is not `supported` — three of which publish
+  then refuses.
+  Guarded twice, because the old array's failure was *being unreferenced* and a
+  catalog test alone would have passed throughout it: `BpmnPaletteManifestTests`
+  (19 tests, no engine, no browser) checks the join, that every supported element
+  is offered or excluded **with a stated reason**, and that the modeler registers
+  the provider; `WorkflowPaletteTests` (5 browser tests, no Flowable trait) reads
+  the palette the studio actually renders. Sensitivity proven by removing the
+  ad-hoc entry and watching the exact defect reappear as a failure.
+  The `notOnThePalette` list is the honest part: nine supported rows are not
+  shapes an author drags — connections, markers, process-level data declarations,
+  and the two start events legal only inside an event sub-process — and each
+  carries the reason and how the author reaches it instead.
+  **#252 — the reserved id is gone rather than guarded.** Starting an activity and
+  completing the subprocess shared one actuator operation branching on the literal
+  `activityId` "complete", so an ad-hoc subprocess containing
+  `<userTask id="complete"/>` answered 204 to a request to START that task and
+  completed the whole subprocess instead, advancing the parent. Completion has its
+  own endpoint now (`adhocComplete`, one selector), and `complete` is an ordinary
+  activity id. A guard would have had to be remembered; a separate route cannot
+  collide.
+  And the 500s: the extension threw, so **every** ad-hoc caller error reached
+  Auton8 as a 500 — which made `catch ... when (exception.IsCallerError)` dead
+  code on both routes, and discarded the engine's useful sentence in favour of
+  "Could not complete 'adhoc'." with no reason. The operations return
+  `WebEndpointResponse` now and classify: 404 unknown execution, 400 illegal
+  argument, **409** for "has running child executions that need to be completed
+  first" — retrying that identical request after the section closes succeeds,
+  which is what makes 409 honest and 500 misleading. The .NET side no longer
+  depends on the extension getting it right: a 5xx becomes a defined 502 carrying
+  the engine's message rather than an unhandled exception. Probed live: 404 with
+  a message where a 500 with none used to be.
+  **Issue:** #241, #252

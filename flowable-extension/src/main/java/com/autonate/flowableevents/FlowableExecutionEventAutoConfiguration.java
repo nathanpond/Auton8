@@ -74,6 +74,17 @@ public class FlowableExecutionEventAutoConfiguration {
         return new AdhocSubProcessActionEndpoint(runtimeService);
     }
 
+    // #252. Completing has its own endpoint because it takes one selector where
+    // starting takes two, and because the alternative -- a reserved activity id
+    // of "complete" -- silently completed the subprocess when an author happened
+    // to name an activity that.
+    @Bean
+    AdhocSubProcessCompleteEndpoint adhocSubProcessCompleteEndpoint(
+        org.flowable.engine.RuntimeService runtimeService
+    ) {
+        return new AdhocSubProcessCompleteEndpoint(runtimeService);
+    }
+
     @Bean
     FlowableScriptTaskSupportController flowableScriptTaskSupportController(
         FlowableScriptTaskSupportService scriptTaskSupportService

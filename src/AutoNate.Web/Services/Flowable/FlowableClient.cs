@@ -659,10 +659,22 @@ public sealed class FlowableClient(
     public async Task CompleteAdhocSubProcessAsync(
         string executionId, CancellationToken cancellationToken = default)
     {
-        // "complete" is a reserved activity id on the extension's write endpoint;
-        // an actuator endpoint has one write operation, so completing rides the
-        // same selector shape as starting.
-        await StartAdhocActivityAsync(executionId, "complete", cancellationToken);
+        // #252. Its own actuator endpoint, not the activity route with a reserved
+        // id of "complete". That arrangement made `complete` an activity id no
+        // author could use: a subprocess containing <userTask id="complete"/>
+        // answered 204 to a request to START that task and completed the whole
+        // subprocess instead, advancing the parent. Nothing validated the id, and
+        // a guard that has to be remembered is worth less than a route that
+        // cannot collide.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"actuator/adhocComplete/{Uri.EscapeDataString(executionId)}")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, "complete the ad-hoc sub-process");
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
