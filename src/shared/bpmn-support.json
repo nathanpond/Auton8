@@ -646,7 +646,7 @@
       "localName": "dataStoreReference",
       "eventDefinition": null,
       "reason": "#166: a typed process-variable declaration, like a data object, not an annotation. The condition validator counts it as a known variable, so referencing one produces no unset-variable warning. What the store POINTS AT is enriched by M6's trusted data repository; the declaration does not wait on it.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Data Input",
@@ -656,7 +656,7 @@
       "localName": "dataInput",
       "eventDefinition": null,
       "reason": "#166: declares an activity's inbound variable contract and counts as a known variable for the condition validator.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Data Output",
@@ -666,7 +666,7 @@
       "localName": "dataOutput",
       "eventDefinition": null,
       "reason": "#166: declares an activity's outbound variable contract and counts as a known variable for the condition validator.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Text Annotation",
