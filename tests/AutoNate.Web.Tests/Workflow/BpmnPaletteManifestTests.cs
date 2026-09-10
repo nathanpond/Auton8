@@ -346,6 +346,60 @@ public sealed class BpmnPaletteManifestTests
     }
 
     [Fact]
+    public void Every_withheld_element_has_a_deny_key_or_a_stated_reason()
+    {
+        // #264, second pass. The complement of the guard above, and the one whose
+        // absence let Loop Marker through.
+        //
+        // `Every_denied_icon_class_actually_occurs_in_the_vendored_bundle` checks
+        // that deny keys WHICH EXIST name something real. Nothing required a
+        // withheld element to HAVE a deny key — so Loop Marker, with no catalog
+        // row and no exclusion, was reachable from the replace menu's header and
+        // invisible to every guard. Compensation Start, Lane and Message Flow had
+        // the same hole.
+        var catalogued = Entries()
+            .Select(entry => Key(entry.LocalName, entry.EventDefinition))
+            .ToHashSet(StringComparer.Ordinal);
+        var excused = Exclusions()
+            .Select(exclusion => Key(exclusion.LocalName, exclusion.EventDefinition))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var unguarded = Manifest()
+            .Where(element => element.Studio != "supported")
+            .Where(element => !catalogued.Contains(Key(element.LocalName, element.EventDefinition)))
+            .Where(element => !excused.Contains(Key(element.LocalName, element.EventDefinition)))
+            .Select(element => $"{element.Name} ({element.Studio})")
+            .ToList();
+
+        Assert.True(
+            unguarded.Count == 0,
+            "Elements the manifest withholds that have neither a catalog row (so " +
+            "the menu filter has a deny key for them) nor a notOnThePalette reason " +
+            $"saying why they need none:{Environment.NewLine}  " +
+            string.Join(Environment.NewLine + "  ", unguarded));
+    }
+
+    [Fact]
+    public void The_filter_covers_the_header_row_as_well_as_the_entries()
+    {
+        // The two are separate reduces in bpmn-js (`_getEntries` vs
+        // `_getHeaderEntries`, calling `getPopupMenuEntries` vs
+        // `getPopupMenuHeaderEntries`). Implementing one and not the other left
+        // the replace menu's `toggle-loop` button — Loop Marker, which publish
+        // refuses — reachable in two clicks.
+        var provider = File.ReadAllText(ProviderPath);
+
+        Assert.Contains("getPopupMenuEntries", provider, StringComparison.Ordinal);
+        Assert.Contains("getPopupMenuHeaderEntries", provider, StringComparison.Ordinal);
+
+        var bundle = File.ReadAllText(BundlePath);
+
+        // And the bundle really does have both hooks, so this is guarding a real
+        // seam rather than a name I invented.
+        Assert.Contains("getPopupMenuHeaderEntries", bundle, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_filter_covers_every_element_menu_the_bundle_registers()
     {
         // #264 shipped covering two of three menus. `bpmn-append` — the context

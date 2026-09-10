@@ -68,6 +68,16 @@
       "localName": "*",
       "eventDefinition": "isForCompensation",
       "reason": "A marker on an existing activity, set by attaching a compensation boundary event. Not a shape."
+    },
+    {
+      "localName": "lane",
+      "eventDefinition": null,
+      "reason": "Added by the pool's own 'add lane' control, not by any element menu. Coming soon; when it ships it becomes a catalog row."
+    },
+    {
+      "localName": "messageFlow",
+      "eventDefinition": null,
+      "reason": "A connection between pools, drawn from the context pad, not an entry in any element menu. Coming soon."
     }
   ],
   "entries": [
@@ -668,6 +678,26 @@
       "eventDefinitionType": "bpmn:LinkEventDefinition",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "link"
+    },
+    {
+      "id": "create.loop-marker",
+      "label": "Loop marker",
+      "description": "Repeats a step until a condition",
+      "group": "Tasks",
+      "className": "bpmn-icon-loop-marker",
+      "localName": "*",
+      "eventDefinition": "standardLoopCharacteristics"
+    },
+    {
+      "id": "create.start-event-compensation",
+      "label": "Compensation start event",
+      "description": "Starts an event sub-process on compensation",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-compensation",
+      "type": "bpmn:StartEvent",
+      "eventDefinitionType": "bpmn:CompensateEventDefinition",
+      "localName": "startEvent",
+      "eventDefinition": "compensate"
     }
   ]
 }

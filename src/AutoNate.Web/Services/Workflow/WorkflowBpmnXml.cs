@@ -995,6 +995,29 @@ public static partial class WorkflowBpmnXml
     // scope rather than one of them silently winning.
     // The studio records the scope as an extension ELEMENT on the event, because
     // moddle would not let it write an attribute onto an event parsed without one.
+    /// <summary>
+    /// Is this event one that FORCES its signal to be global? (#274)
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a start event at PROCESS level. It exists to be triggered from
+    /// outside any instance, so its signal cannot be instance-scoped.
+    /// </para>
+    /// <para>
+    /// A start event inside <c>&lt;subProcess triggeredByEvent="true"&gt;</c> is not
+    /// one of these. It is an in-instance handler — an event subprocess fires
+    /// within the run that raised the signal — so it may share an instance-scoped
+    /// signal quite happily. #270 classified every <c>startEvent</c> as global and
+    /// refused that shape; measured against 8.0.0, it deploys (201) and runs, both
+    /// the guarded task and the handler's task appearing.
+    /// </para>
+    /// </remarks>
+    private static bool ForcesGlobalSignal(XElement element) =>
+        element.Name.LocalName == "startEvent"
+        && !element.Ancestors(BpmnNamespace + "subProcess")
+            .Any(sub => string.Equals(
+                sub.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase));
+
     private static string? ReadSignalScope(XElement element) =>
         element.Element(BpmnNamespace + "extensionElements")?
             .Elements()
@@ -1017,13 +1040,33 @@ public static partial class WorkflowBpmnXml
         // hears it are genuinely different subscriptions and cannot share one.
         var byNameAndScope = new Dictionary<(string Name, bool Scoped), XElement>();
 
-        // #244. Signal names referenced by at least one event that declares no
-        // scope. Collected before anything is rewritten, because the loop below
-        // skips those events and would otherwise not know they exist.
-        var namesWithUndeclaredUsers = new HashSet<string>(StringComparer.Ordinal);
+        // #273/#274. Signal names a PROCESS-LEVEL START EVENT uses.
+        //
+        // This set used to be "names some event references without declaring a
+        // scope", which conflated two different things and produced both of the
+        // defects that reopened #270:
+        //
+        //   - An event that declares nothing is NOT in conflict with a scoped
+        //     one. An unscoped throw and an instance-scoped catch share one
+        //     signal root, and scoping that root is exactly what #156 wants —
+        //     the throw raises it, the scope decides who hears it. Treating it as
+        //     a conflict made the expansion skip the element and emit no scope at
+        //     all, so the diagram published and ran GLOBAL with the author's
+        //     declared scope silently discarded (#273). That is the #156 leak,
+        //     arriving quietly where the previous version at least failed loudly.
+        //
+        //   - A start event inside an event subprocess does not force global
+        //     (#274), for the reason on ForcesGlobalSignal.
+        //
+        // What genuinely cannot be reconciled is a process-level start event —
+        // which must be global to start instances from outside — sharing a name
+        // with an instance-scoped event. BuildSignalScopeErrors refuses that.
+        var namesForcedGlobal = new HashSet<string>(StringComparer.Ordinal);
         foreach (var probe in document.Descendants())
         {
             if (probe.Name.Namespace != BpmnNamespace) continue;
+            if (!ForcesGlobalSignal(probe)) continue;
+
             var probeDefinition = probe.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
             var probeRef = probeDefinition?.Attribute("signalRef")?.Value;
             if (probeDefinition is null
@@ -1033,11 +1076,10 @@ public static partial class WorkflowBpmnXml
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(ReadSignalScope(probe)))
-            {
-                namesWithUndeclaredUsers.Add(probeSignal.Attribute("name")?.Value ?? probeRef!);
-            }
+            namesForcedGlobal.Add(probeSignal.Attribute("name")?.Value ?? probeRef!);
         }
+
+
 
         foreach (var element in document.Descendants().ToList())
         {
@@ -1098,7 +1140,7 @@ public static partial class WorkflowBpmnXml
                 // ordinary case: every user of a name wants the same scope, so the
                 // authored root is simply annotated.
                 var conflicting = byNameAndScope.Keys.Any(k => k.Name == name)
-                                  || namesWithUndeclaredUsers.Contains(name);
+                                  || namesForcedGlobal.Contains(name);
                 if (conflicting)
                 {
                     // Validation refuses this diagram; expansion leaves it alone
@@ -3434,9 +3476,12 @@ public static partial class WorkflowBpmnXml
                 .FirstOrDefault(s => s.Attribute("id")?.Value == signalRef);
             var name = Trimmed(root?.Attribute("name")?.Value) ?? signalRef;
 
-            // A start event is global by nature: it exists to be triggered from
-            // outside any instance, so it declares no scope and cannot be scoped.
-            var declared = element.Name.LocalName == "startEvent"
+            // #274. A PROCESS-LEVEL start event is global by nature: it exists to
+            // be triggered from outside any instance, so it cannot be scoped. A
+            // start event inside an event subprocess is an in-instance handler and
+            // is not one of these — classifying it global refused a diagram
+            // Flowable deploys and runs.
+            var declared = ForcesGlobalSignal(element)
                 ? "global"
                 : Normalise(ReadSignalScope(element)) ?? Normalise(
                     root?.Attribute(FlowableNamespace + "scope")?.Value == "processInstance"

@@ -4503,3 +4503,78 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   the same false-attribution the last verification criticised in the descope lines,
   and I nearly repeated it one paragraph later.
   **Issue:** #270, #243, #263, #264
+
+- **Round-four fix pass — #273, #274, #264, plus outcome 10 and the F1/F3
+  leftovers.**
+  The fourth verification named the pattern precisely, and it had moved again:
+  rounds 1–3 were *assert only the positive half* → *a correct implementation
+  nothing reaches* → *a shape test standing in for a behaviour test*. This round
+  the tests genuinely deployed and genuinely mutated. What failed was narrower:
+  **each fix was correct for the case it was written for and wrong for the case
+  beside it** — the scoped catch beside a start event, the event-subprocess start
+  beside a process start, the popup entry beside the popup header. Three fixes,
+  three adjacent cases, none exercised.
+  So the response is not three more point fixes. Each area now has an enumerated
+  **grid** of neighbouring cases, and the grid is what the tests iterate.
+  **#273 and #274 were one root cause.** The code conflated two distinct notions:
+  "an event that declares nothing" with "an event in conflict", and "a start
+  event" with "an event that forces the signal global".
+  Separating them is the whole fix. `ForcesGlobalSignal` is true only for a
+  **process-level** start event — the one thing that must be triggerable from
+  outside any instance. An event-subprocess start is an in-instance handler and
+  may share an instance-scoped signal; Flowable deploys and runs that shape, which
+  #270 refused (#274). And an unscoped throw is not a conflict at all — it raises
+  the signal, the scope decides who hears it — where #270 treated it as one and
+  silently emitted no scope, publishing a diagram that ran global with the
+  author's declaration discarded (#273). That was worse than the 500 it replaced:
+  a loud failure traded for a quiet one.
+  `SignalScopeCasesTests` is the grid — eight accepted rows and two refused,
+  crossing *who declares a scope* with *what kind of event shares the name*. The
+  accepted rows are then **deployed** by
+  `SignalScopeExecutionTests.Every_accepted_signal_scope_case_deploys`, because
+  #270 proved "the expansion is correct" and "the engine takes it" are different
+  claims. Reverting either conflation now fails the grid: 4 rows for #273, 1 for
+  #274.
+  **#264 — the header row is a separate reduce.** `PopupMenu._getEntries` and
+  `_getHeaderEntries` walk providers independently and call different hooks; the
+  filter implemented only the first, so `ReplaceMenuProvider`'s `toggle-loop`
+  button — which applies `StandardLoopCharacteristics`, i.e. Loop Marker,
+  `cannot-execute` — stayed reachable in two clicks and publish refused it.
+  Both hooks are filtered now. But the deeper hole was in the guard's *shape*:
+  `Every_denied_icon_class_actually_occurs_in_the_vendored_bundle` checks that
+  deny keys **which exist** name something real, and nothing required a withheld
+  element to **have** one. Loop Marker had no catalog row and no exclusion, so it
+  had no deny key even in principle — and neither did Compensation Start, Lane or
+  Message Flow. `Every_withheld_element_has_a_deny_key_or_a_stated_reason` closes
+  that, and the four are covered: two as catalog rows, two as exclusions with
+  reasons (a lane comes from the pool's own control; a message flow is a
+  connection).
+  Two arms of the browser test were vacuous and are fixed: the `replace` arm
+  opened on the **start event**, whose six options contain no withheld element
+  either way, so it passed with the filter switched entirely off — it opens on an
+  activity now; and the only anti-vacuity was `classes.Length > 0`, so a predicate
+  gutting every menu to one entry still passed — there is a per-surface floor and
+  a named supported element that must survive.
+  Proven: with the filter off, **all three** arms now fail (previously `replace`
+  passed); with the header hook removed, `replace` fails naming
+  `bpmn-icon-loop-marker`.
+  **A note on my own error, because it is the same one.** My first positive
+  assertion used `bpmn-icon-user-task`. bpmn-js's popups emit `bpmn-icon-user`. I
+  wrote a className the bundle does not emit **inside the assertion guarding
+  against classNames the bundle does not emit**, and the popup itself caught it.
+  On the deny side the mechanical guard catches this; on the assert side nothing
+  did until the test ran.
+  **Outcome 10 is qualified at last.** Reported overstated three times. I fixed
+  the code asymmetry in #263 and filed the residue as #271, whose own closing line
+  says the description should say so — and then did not write the sentence. It now
+  names exactly which paths resume and which do not, and why closing the rest
+  needs an engine-side listener.
+  **F1's leftover:** the `descoped:` line named three of the eight in-scope items
+  withdrawn, while the Map below it descoped all eight and the corrected
+  arithmetic counted all eight. Now eight.
+  **F3's counts** were measured on the parent commit and were stale by three
+  within the same PR that wrote them. Re-measured with the runner rather than a
+  regex — 26 classes, 116 Flowable cases, 122 of 292 excluded — and the note now
+  says the figures move and how to re-measure. The percentage has been ~42%
+  throughout.
+  **Issue:** #273, #274, #264
