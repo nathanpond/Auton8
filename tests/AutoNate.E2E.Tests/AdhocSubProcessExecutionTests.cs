@@ -97,6 +97,112 @@ public sealed class AdhocSubProcessExecutionTests : E2ETestBase
         Assert.Contains("never finish", await published.TextAsync(), StringComparison.Ordinal);
     }
 
+    // ── #252: the defined answers, and the id that was reserved ─────────────
+
+    [Fact]
+    public async Task Finishing_a_section_with_an_open_activity_is_refused_with_the_reason()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"adc{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, Diagram(key));
+        var instance = await StartAsync(api, key);
+
+        var state = await AdhocStateAsync(api, instance);
+        var executionId = state.GetProperty("executionId").GetString()!;
+
+        await StartActivityAsync(api, instance, executionId, "a1");
+        await EventuallyAsync(api, instance, n => n.Count == 1, "the chosen activity to start");
+
+        var response = await api.PostAsync(
+            $"/api/executions/{instance}/adhoc/{executionId}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        var body = await response.TextAsync();
+
+        // This was a bare 500 with no body, which #163's AC7 requires be
+        // "handled in a defined, documented way" and was neither. The operator
+        // saw "Could not complete 'adhoc'." with no reason, because the studio's
+        // describeAdhocError had no `message` to find.
+        Assert.False(response.Ok, $"Expected a refusal, got {response.Status}: {body}");
+        Assert.NotEqual(500, response.Status);
+        Assert.Equal(409, response.Status);
+
+        // The engine's own sentence, not ours: it names the actual obstacle.
+        Assert.Contains("running child executions", body, StringComparison.OrdinalIgnoreCase);
+
+        // And the refusal changed nothing -- the section is still open and the
+        // task still there, so the operator can finish it and try again.
+        Assert.Equal(["Call the customer"], await TaskNamesAsync(api, instance));
+    }
+
+    [Fact]
+    public async Task An_unknown_activity_id_is_a_caller_error_not_a_server_fault()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"adu{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, Diagram(key));
+        var instance = await StartAsync(api, key);
+
+        var state = await AdhocStateAsync(api, instance);
+        var executionId = state.GetProperty("executionId").GetString()!;
+
+        var response = await api.PostAsync(
+            $"/api/executions/{instance}/adhoc/{executionId}/activities/not-an-activity",
+            new APIRequestContextOptions { DataObject = new { } });
+        var body = await response.TextAsync();
+
+        Assert.False(response.Ok, $"Expected a refusal, got {response.Status}: {body}");
+
+        // 500 was the measured behaviour for every one of these, which is what
+        // made every `catch ... when (IsCallerError)` on this route dead code.
+        Assert.NotEqual(500, response.Status);
+        Assert.InRange(response.Status, 400, 499);
+        Assert.False(string.IsNullOrWhiteSpace(body), "the refusal carried no reason");
+    }
+
+    [Fact]
+    public async Task An_activity_named_complete_is_started_and_does_not_finish_the_section()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"adr{Guid.NewGuid():N}"[..20];
+
+        // `complete` used to be a reserved activity id: the start route and the
+        // completion route were one actuator operation that branched on the
+        // literal string. Starting this task answered 204 and silently completed
+        // the WHOLE subprocess instead, advancing the parent.
+        var xml = Diagram(key).Replace(
+            "<bpmn:userTask id=\"a1\" name=\"Call the customer\" />",
+            "<bpmn:userTask id=\"complete\" name=\"Call the customer\" />",
+            StringComparison.Ordinal);
+        Assert.Contains("id=\"complete\"", xml, StringComparison.Ordinal);
+
+        await PublishAsync(api, key, xml);
+        var instance = await StartAsync(api, key);
+
+        var state = await AdhocStateAsync(api, instance);
+        var executionId = state.GetProperty("executionId").GetString()!;
+
+        await StartActivityAsync(api, instance, executionId, "complete");
+
+        // It ran as the activity it is.
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("Call the customer"), "the activity named 'complete' to start");
+        Assert.Contains("Call the customer", names);
+
+        // And the section did NOT finish -- which is the whole defect. Asserting
+        // only that the task appeared would pass even if the subprocess had also
+        // completed underneath it.
+        var after = await AdhocStateAsync(api, instance);
+        Assert.Equal(executionId, after.GetProperty("executionId").GetString());
+        Assert.Contains("a2", after.GetProperty("enabledActivities").EnumerateArray()
+            .Select(a => a.GetProperty("id").GetString()!));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static string Diagram(string key) => $$"""

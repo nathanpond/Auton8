@@ -1013,6 +1013,50 @@ public static class EventCatalog
                     "Fires from POST /api/executions/{processInstanceId}/variables.",
                     ["resource: { processInstanceId }. details: { variableCount, names }."]),
                 new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.MessageDelivered,
+                    "A message was correlated to a waiting process instance and advanced it.",
+                    "Fires from POST /api/workflow-messages/ once exactly one instance matched.",
+                    [
+                        "resource: { processKey, messageName, correlationValue }.",
+                        "details: { processInstanceId } \u2014 the instance that was advanced.",
+                        "Gated on workflowmessage:send, deliberately independent of workflowexecution permissions."
+                    ]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.MessageRefused,
+                    "A message matched no instance, or matched more than one, and nothing was advanced.",
+                    "Fires from POST /api/workflow-messages/ on every refusal.",
+                    [
+                        "resource: { processKey, messageName, correlationValue }. details: { reason, matchCount }.",
+                        "The refusals are on the record on purpose: a multi-match means a process is modelled wrong, and nobody learns that from a 409 alone."
+                    ]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.AdhocActivityStarted,
+                    "Someone chose and started one activity inside a running ad-hoc sub-process.",
+                    "Fires from POST /api/executions/{processInstanceId}/adhoc/{executionId}/activities/{activityId}.",
+                    [
+                        "resource: { processInstanceId }. details: { executionId, activityId }.",
+                        "An ad-hoc sub-process has no fixed order to reconstruct afterwards, so this trail IS the record of what was decided and by whom.",
+                        "The same activity may be started repeatedly; each start is its own event."
+                    ]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.AdhocSubProcessCompleted,
+                    "Someone finished a running ad-hoc sub-process, letting the parent continue.",
+                    "Fires from POST /api/executions/{processInstanceId}/adhoc/{executionId}/complete.",
+                    [
+                        "resource: { processInstanceId }. details: { executionId }.",
+                        "Not published when the engine refuses \u2014 a section with an activity still open answers 409 and nothing is recorded, because nothing happened."
+                    ]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.AdhocActivitiesViewed,
+                    "Someone read which activities can currently be started in an instance's ad-hoc sub-processes.",
+                    "Fires from GET /api/executions/{processInstanceId}/adhoc.",
+                    ["resource: { processInstanceId }. details: { subProcessCount }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionChildrenViewed,
+                    "Someone read the child executions a parent is waiting on through a call activity.",
+                    "Fires from GET /api/executions/{processInstanceId}/children.",
+                    ["resource: { processInstanceId }. details: { childCount }."]),
+                new EventCatalogEntry(
                     WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionStateMoved,
                     "An admin moved an execution to a different BPMN activity.",
                     "Fires from POST /api/executions/{processInstanceId}/move-state.",

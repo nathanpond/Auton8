@@ -141,6 +141,49 @@ internal sealed class StubFlowableClient : IFlowableClient
     // #163
     public List<AdhocSubProcessState> AdhocSubProcesses { get; } = [];
 
+    // #243. Settable so a test can make a signal instance-scoped; global by
+    // default, which is what every existing test assumes.
+    public HashSet<string> InstanceScopedSignals { get; } = new(StringComparer.Ordinal);
+
+    public Task<bool> IsSignalGlobalAsync(
+        string processDefinitionId, string signalName, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"SignalScope:{processDefinitionId}:{signalName}");
+        return Task.FromResult(!InstanceScopedSignals.Contains(signalName));
+    }
+
+    public List<(string ExecutionId, string ProcessDefinitionId)> AwaitingSignalExecutions { get; } = [];
+
+    /// <summary>
+    /// Executions waiting on a signal, from either fixture.
+    /// </summary>
+    /// <remarks>
+    /// #243 moved the dispatcher onto this overload so it can ask each waiting
+    /// execution's definition whether the signal is instance-scoped. Tests that
+    /// only care THAT waiting executions are woken still set
+    /// <see cref="WaitingExecutionsBySignal"/>, and they are still testing the
+    /// same guarantee -- so this reads both rather than making them restate a
+    /// fixture in the new shape. Rewriting those assertions to match the new
+    /// plumbing is how a guard quietly stops guarding what it was written for.
+    /// </remarks>
+    public Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+        ListExecutionsAwaitingSignalWithDefinitionAsync(
+            string signalName, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AwaitingSignal:{signalName}");
+
+        if (AwaitingSignalExecutions.Count > 0)
+        {
+            return Task.FromResult<IReadOnlyList<(string, string)>>(AwaitingSignalExecutions);
+        }
+
+        var byName = WaitingExecutionsBySignal.TryGetValue(signalName, out var ids)
+            ? ids.Select(id => (id, "stub-definition:1:1")).ToList()
+            : [];
+
+        return Task.FromResult<IReadOnlyList<(string, string)>>(byName);
+    }
+
     public Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

@@ -44,6 +44,15 @@ public interface IFlowableClient
     /// Which activities can be started right now in each ad-hoc subprocess of a
     /// running instance (#163).
     /// </summary>
+    /// <summary>Is this signal global in that deployed definition? (#243)</summary>
+    Task<bool> IsSignalGlobalAsync(
+        string processDefinitionId, string signalName, CancellationToken cancellationToken = default);
+
+    /// <summary>Executions waiting on a signal, with the definition each runs (#243).</summary>
+    Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+        ListExecutionsAwaitingSignalWithDefinitionAsync(
+            string signalName, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
         string processInstanceId, CancellationToken cancellationToken = default);
 

@@ -721,14 +721,24 @@ public static class ExecutionEndpoints
             {
                 await flowable.StartAdhocActivityAsync(executionId, activityId, cancellationToken);
             }
-            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            catch (FlowableRequestException exception)
             {
                 // An activity that is not enabled, or an execution that is not an
                 // ad-hoc subprocess. #226's rule: the engine classified it, so do
                 // not relabel it as a server fault.
+                //
+                // #252: the `when (IsCallerError)` this used to carry made the
+                // whole block dead code, because the extension answered 500 to
+                // every one of those. It classifies them now, and this no longer
+                // depends on that -- an engine 5xx still reaches the operator as
+                // a defined response carrying the engine's own sentence, rather
+                // than escaping as an unhandled exception and rendering as
+                // "Could not complete 'adhoc'." with no reason at all.
                 return Results.Json(
                     new { message = exception.Message },
-                    statusCode: (int)exception.StatusCode);
+                    statusCode: exception.IsCallerError
+                        ? (int)exception.StatusCode
+                        : StatusCodes.Status502BadGateway);
             }
 
             // An ad-hoc process has no fixed order to reconstruct afterwards, so
@@ -756,11 +766,20 @@ public static class ExecutionEndpoints
             {
                 await flowable.CompleteAdhocSubProcessAsync(executionId, cancellationToken);
             }
-            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            catch (FlowableRequestException exception)
             {
+                // #252. Finishing a section while an activity inside it is still
+                // open is the ordinary operator mistake here, and Flowable refuses
+                // it with "Ad-hoc sub process has running child executions that
+                // need to be completed first". That arrived as a 500 with no body,
+                // which is neither defined nor documented -- the two things #163's
+                // AC7 requires of it. The engine now classifies it 409; either
+                // way its sentence reaches the operator.
                 return Results.Json(
                     new { message = exception.Message },
-                    statusCode: (int)exception.StatusCode);
+                    statusCode: exception.IsCallerError
+                        ? (int)exception.StatusCode
+                        : StatusCodes.Status502BadGateway);
             }
 
             await auditPublisher.PublishAsync(

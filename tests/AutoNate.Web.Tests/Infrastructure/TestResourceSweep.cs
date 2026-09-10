@@ -66,12 +66,26 @@ internal static class TestResourceSweep
             "select rolname from pg_roles where rolname like 'plg\\_%';");
         if (roles.Count == 0) return 0;
 
-        databases ??= await QueryStringsAsync("postgres",
-            "select datname from pg_database where datistemplate = false and datallowconn;");
+        // #258. Only databases the suite does NOT own.
+        //
+        // A `plg_*` schema inside an ephemeral `autonate_test_*` database is not
+        // evidence that the role is serving anything — those databases are
+        // created and dropped constantly, and the role is test scratch by
+        // definition. An installed plugin's schema lives in an app database.
+        //
+        // This is also what makes the sweep reliable: the cluster routinely
+        // carries hundreds of suite databases, and connecting to each one is what
+        // made this fail under load. Scanning the handful that matter turns ~210
+        // connections into ~6.
+        databases ??= (await QueryStringsAsync("postgres",
+                "select datname from pg_database where datistemplate = false and datallowconn;"))
+            .Where(name => !IsSuiteOwnedDatabase(name))
+            .ToList();
 
         // Every schema name in use anywhere. A role matching one of these is
         // serving an installed plugin and must survive.
         var schemasInUse = new HashSet<string>(StringComparer.Ordinal);
+        var unreadableDatabases = 0;
         foreach (var database in databases)
         {
             try
@@ -95,14 +109,42 @@ internal static class TestResourceSweep
                 // visible symptom was TestResourceSweepTests reporting "the sweep
                 // dropped no roles" about eleven minutes into a full run.
             }
-            catch (PostgresException)
+            catch (Exception ex) when (ex is PostgresException or NpgsqlException or TimeoutException)
             {
-                // A database that exists but could not be read. Unlike the case
-                // above we genuinely cannot see its schemas, so treat every role as
-                // in use rather than risk dropping one that is serving a plugin.
-                return 0;
+                // #258. This used to `return 0` for ANY Postgres failure, and that
+                // is what kept the flake alive after #215: under full-suite load
+                // the pool saturates and a connection fails for reasons that have
+                // nothing to do with the database's contents, so the sweep gave up
+                // having examined nothing and the test reported "dropped no roles"
+                // — nine and a half minutes into a run, exactly the symptom #215
+                // claimed to have fixed.
+                //
+                // One retry, then treat this database as unreadable and carry on.
+                // Skipping ONE database only risks dropping a role whose schema
+                // lives in it; bailing out entirely guaranteed the sweep did
+                // nothing at all, which is strictly worse and much harder to see.
+                try
+                {
+                    await Task.Delay(250);
+                    foreach (var schema in await QueryStringsAsync(database,
+                        @"select schema_name from information_schema.schemata where schema_name like 'plg\_%';"))
+                    {
+                        schemasInUse.Add(schema);
+                    }
+                }
+                catch (Exception retry) when (retry is PostgresException or NpgsqlException or TimeoutException)
+                {
+                    // Genuinely unreadable. Every role it might have backed stays,
+                    // because a role we cannot rule out is a role we do not drop.
+                    unreadableDatabases++;
+                }
             }
         }
+
+        // A database we could not read might hold the schema backing any of these
+        // roles, so dropping on incomplete knowledge is the one thing this sweep
+        // must never do (#214: `plg_*` names a real installed plugin's role).
+        if (unreadableDatabases > 0) return 0;
 
         var dropped = 0;
         foreach (var role in roles.Where(role => !schemasInUse.Contains(role)))

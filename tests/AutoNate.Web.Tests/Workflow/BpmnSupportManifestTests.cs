@@ -656,6 +656,83 @@ public sealed class BpmnSupportManifestTests
             """;
     }
 
+    // ── #255: the evidence field was the one nothing read ───────────────────
+
+    /// <summary>
+    /// The only element whose runtime creates a process variable.
+    /// </summary>
+    /// <remarks>
+    /// Re-probed against Flowable 8.0.0 while fixing #255: a process carrying a
+    /// <c>dataStoreReference</c>, an <c>ioSpecification</c> with a
+    /// <c>dataInput</c> and a <c>dataOutput</c>, and a <c>dataObject</c>, started
+    /// and inspected, reported exactly one variable — the data object's. The
+    /// other three are design-time declarations; the condition validator counts
+    /// them as known names so a condition using one is not flagged as a typo, and
+    /// that is all they do.
+    /// </remarks>
+    private const string OnlyElementWithARuntimeVariable = "Data Object Reference";
+
+    [Fact]
+    public void No_element_claims_a_runtime_variable_it_does_not_create()
+    {
+        // The manifest's whole design is that a later reader can CHECK a claim
+        // rather than trust it, and every other field here is guarded. `evidence`
+        // was not read by anything -- so three rows carried
+        // "declared type observed on the process variable" for elements that
+        // produce no variable at all, added during #166 without measurement, and
+        // nothing noticed. `rows.json` had the honest weaker note the whole time.
+        var manifest = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!;
+
+        var overclaiming = manifest["elements"]!.AsArray()
+            .Where(node => ((string?)node!["evidence"] ?? "")
+                .Contains("on the process variable", StringComparison.OrdinalIgnoreCase))
+            .Select(node => (string)node!["name"]!)
+            .Where(name => name != OnlyElementWithARuntimeVariable)
+            .ToList();
+
+        Assert.True(
+            overclaiming.Count == 0,
+            "Elements whose evidence claims a process variable was observed, when " +
+            $"only '{OnlyElementWithARuntimeVariable}' creates one: " +
+            string.Join(", ", overclaiming));
+    }
+
+    [Fact]
+    public void Every_element_carries_evidence_that_says_something()
+    {
+        // An empty or placeholder evidence string is the same failure one step
+        // earlier: a field that reads as measured and is not.
+        var manifest = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!;
+
+        foreach (var node in manifest["elements"]!.AsArray())
+        {
+            var name = (string)node!["name"]!;
+            var evidence = (string?)node["evidence"];
+
+            Assert.False(
+                string.IsNullOrWhiteSpace(evidence),
+                $"'{name}' has no evidence. Every row in this manifest was measured " +
+                "against a running engine; a row that cannot say how is a guess.");
+
+            Assert.True(
+                evidence!.Length > 10,
+                $"'{name}' has evidence of '{evidence}', which is too short to " +
+                "record what was actually run.");
+
+            Assert.DoesNotContain("TODO", evidence, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // A third guard was tried here and removed: "manifest evidence must begin
+    // with the rows.json note". It failed on its first run against
+    // 'Intermediate Throw (None)', whose evidence reads "deployed and executed"
+    // where the note says "deployed and started" -- a stronger and entirely
+    // honest wording. The field records seventeen different kinds of probe
+    // (deployments, missing behaviour classes, a NoClassDefFoundError, a
+    // re-probe that corrected an earlier one), and a rule that needs a carve-out
+    // on day one is a rule that gets weakened later. The two above catch what
+    // #255 actually was: a claim about a runtime artefact that does not exist.
+
     private static string FlipToCannotExecute(string json, string name, string reason)
     {
         var root = JsonNode.Parse(json)

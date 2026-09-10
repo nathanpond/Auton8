@@ -4091,3 +4091,206 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   connection. `FlowableRoleIsolationTests` names `AutoNate` too but already skips
   when it is absent, so it needed nothing.
   **Issue:** #214, #236
+
+- **Verification fix pass, batch 1 (#239, #240, #242, #243, #244, #247, #257, #258).**
+  Every one of these was found by the fresh-context verifiers, not by me, and each
+  is a defect I shipped.
+  **#240 — a text annotation on a user task blocked publish.** The compensation
+  rule collected every `<association>` target, and bpmn-js uses an association to
+  attach an annotation. Narrowed to associations whose SOURCE is a compensation
+  boundary event; the wait-state set also widened to `subProcess`/`callActivity`/
+  `adHocSubProcess`, which the verifier pointed out can wait too.
+  **#239 — an author condition on a route flow silently defeated the route
+  contract.** `allowedRoutes` and "flows the result can actually select" were not
+  the same set: the contract accepted `'fa'` while `${1 == 2}` sent the token to
+  the default. Refused at publish now, naming the gateway, the route and the way
+  out. This also reopens #218's default-flow departure, whose reasoning assumed
+  those two sets agreed.
+  **#242 — publish refused valid diagrams.** The uncaught-code rule compared
+  `errorRef` element IDS; BPMN matches on `errorCode`. Two roots sharing a code
+  read as non-matching. Resolved to codes on both sides, and the message now
+  quotes the code the author typed rather than a ref id.
+  **#247 — every promoted-rule error was emitted twice**, because
+  `ValidateProcess` called `BuildStructureErrors` AND the three rules it already
+  contains. My own new test caught it.
+  **#244 — a scoped catch narrowed a signal START event's shared signal.** The
+  start declares no scope, so it was skipped and never registered; the catch then
+  mutated the shared root. A pre-pass now records names with undeclared users so
+  the scoped event gets its own copy.
+  **#243 — external signals bypassed scope entirely.** The Dapr dispatcher woke
+  every subscriber by name. It now asks the deployed definition whether the signal
+  is global and skips instance-scoped ones — the leak #156 existed to prevent,
+  arriving by the one path #156 never covered.
+  **#257 — the Flowable sweep matched `e2e-`, which nothing produces.** Deployments
+  are named from the process key (`adh…`, `cgx…`). Age is the only honest signal
+  available, so it sweeps orphans older than three hours, oldest first. **The
+  engine went from 1,306 deployments to 131.** Its test also stopped planting its
+  own `e2e-` fixture, which is what made the defect invisible.
+  **#258 — the flake #215 "fixed" still reproduced.** The blanket
+  `catch (PostgresException) { return 0; }` fired under load, so the sweep gave up
+  having examined nothing. Now: one retry, then count the database as unreadable —
+  and, the real fix, the role sweep no longer scans suite-owned databases at all. A
+  `plg_*` schema inside an ephemeral `autonate_test_*` database is not evidence a
+  role is in use, and skipping them turned ~210 connections into ~6. Cleared 210
+  leaked test databases while confirming it.
+  **Issue:** #239, #240, #242, #243, #244, #247, #257, #258
+
+- **Verification fix pass, batch 2 (#241, #252).**
+  **#241 was worse than filed, and the filing was already bad.** The report said
+  the palette disagreed with the manifest on six elements. In fact
+  `BPMN_MENU_ENTRIES` — the 51-entry array #107 shipped as "the palette" — was
+  **referenced by nothing**. `createModeler` passed no `additionalModules`, so
+  what authors actually saw was bpmn-js's stock palette: nine create entries,
+  manifest unconsulted, no ad-hoc sub-process, no signal or error events, no call
+  activity, no complex gateway. Every claim #107 made about palette contents was
+  true of dead code.
+  So the fix is a real derivation, not a filter over the old list.
+  `src/shared/bpmn-palette.json` carries presentation — label, icon, group — and
+  the manifest row each entry claims; `palette.js` builds a bpmn-js
+  `paletteProvider` from the entries whose manifest row is `studio: supported`,
+  registered through `additionalModules` so it **overrides** the stock provider
+  rather than adding to it (adding can only ever offer more, and every defect
+  here was something offered that should not be). Withdrawing an element in
+  `bpmn-support.json` now removes it from the palette with no edit anywhere else.
+  Two supported elements got entries they never had: the ad-hoc sub-process #163
+  shipped, and the compensation throw #115 needs. Seven entries stopped being
+  offered because their manifest row is not `supported` — three of which publish
+  then refuses.
+  Guarded twice, because the old array's failure was *being unreferenced* and a
+  catalog test alone would have passed throughout it: `BpmnPaletteManifestTests`
+  (19 tests, no engine, no browser) checks the join, that every supported element
+  is offered or excluded **with a stated reason**, and that the modeler registers
+  the provider; `WorkflowPaletteTests` (5 browser tests, no Flowable trait) reads
+  the palette the studio actually renders. Sensitivity proven by removing the
+  ad-hoc entry and watching the exact defect reappear as a failure.
+  The `notOnThePalette` list is the honest part: nine supported rows are not
+  shapes an author drags — connections, markers, process-level data declarations,
+  and the two start events legal only inside an event sub-process — and each
+  carries the reason and how the author reaches it instead.
+  **#252 — the reserved id is gone rather than guarded.** Starting an activity and
+  completing the subprocess shared one actuator operation branching on the literal
+  `activityId` "complete", so an ad-hoc subprocess containing
+  `<userTask id="complete"/>` answered 204 to a request to START that task and
+  completed the whole subprocess instead, advancing the parent. Completion has its
+  own endpoint now (`adhocComplete`, one selector), and `complete` is an ordinary
+  activity id. A guard would have had to be remembered; a separate route cannot
+  collide.
+  And the 500s: the extension threw, so **every** ad-hoc caller error reached
+  Auton8 as a 500 — which made `catch ... when (exception.IsCallerError)` dead
+  code on both routes, and discarded the engine's useful sentence in favour of
+  "Could not complete 'adhoc'." with no reason. The operations return
+  `WebEndpointResponse` now and classify: 404 unknown execution, 400 illegal
+  argument, **409** for "has running child executions that need to be completed
+  first" — retrying that identical request after the section closes succeeds,
+  which is what makes 409 honest and 500 misleading. The .NET side no longer
+  depends on the extension getting it right: a 5xx becomes a defined 502 carrying
+  the engine's message rather than an unhandled exception. Probed live: 404 with
+  a message where a 500 with none used to be.
+  **Issue:** #241, #252
+
+- **Verification fix pass, batch 3 (#253, #254).**
+  Both are the same shape: a claim the milestone rests on with no test that could
+  fail, and in every case the reason it looked covered was a sibling that was.
+  **#253 — four publish-path guarantees, none of them checked without an engine**
+  (and CI excludes `RequiresService=Flowable`, so none of them checked at all).
+  `WorkflowPublishPathTests` is 11 tests, pure functions, no engine, no browser.
+  The callback stamping's production complement now exists: **nothing is stamped
+  when the override is unset**, asserted byte-identical rather than merely
+  attribute-free, because that is every production diagram and a defaulted
+  argument would have leaked an E2E-only attribute into all of them.
+  The stored-versus-deployed split is asserted on a message throw, which is the
+  element the rewrite actually transforms — the test that claimed to cover it used
+  the complex gateway fixture and asserted an input *string* was unchanged, which
+  is true of any `string -> string` function; persisting the deployable copy would
+  have left it green. Pinning gained the direction the test plan named and nobody
+  wrote: a parent published later picks up the child version current *then*, so a
+  pin that always resolved to version 1 now fails.
+  And the mapped output, which no test ever read: the parent asserts `returned`
+  arrived, and — the half that detects an implementation passing everything
+  through — that a variable the child set and the mapping omits is **absent**.
+  Proven by deleting both `<flowable:in>` and `<flowable:out>` from the fixture,
+  the exact mutation the verifier said left all five tests green. It fails now.
+  **#254 — the new kind's whole reason was unasserted.** #112 made
+  `WorkflowMessage` an `EntityKind` rather than an action on `WorkflowExecution`
+  so an integration can advance a waiting process **without** operator powers over
+  every instance. `KindGateEnforcementTests` enumerates GET routes and this is a
+  POST, so it was never added, and a future mis-wiring to `workflowexecution:*`
+  would have passed everything. Both directions are asserted now: an actor holding
+  Override + View + Delete on executions is refused, and the message grant alone
+  does not open an operator route.
+  One of my assertions there was wrong and I corrected it rather than the code:
+  `GET /api/executions/` gates nothing and filters inside the handler, so an actor
+  with no execution grant gets 200 and an empty list **by design**. The test now
+  points at `PUT /variables`, which is the operator power actually at stake.
+  #163's `/adhoc` routes were the only Override-gated execution routes with no
+  enforcement test; five now cover them, including a View-only grant being refused
+  and — because a gate that opens and then does nothing looks identical to one
+  that stays shut — the engine call itself as the evidence that it opened.
+  Six workflow audit events were published but absent from `EventCatalog`, so they
+  did not appear on the Events admin page and no subscriber could discover them —
+  which makes "who advanced which instance is on the record" weaker than it reads.
+  All six added, and `WorkflowEventCatalogParityTests` closes the drift in both
+  directions plus empty descriptions and duplicates. Dashboards have had such a
+  test since they hit this; workflow events had none, which is precisely why this
+  family drifted.
+  **Issue:** #253, #254
+
+- **Verification fix pass, batch 4 (#246, #245).**
+  **#246 — four criteria that asserted only the positive half.**
+  #114's escalation test asserted "Escalated" appeared and never that "After
+  subprocess" did not, which passes for a NON-interrupting boundary — the opposite
+  feature. It was the one test in that file without its complement. Asserted now,
+  and asserted again after a settle so a cancellation that merely lost a race
+  cannot pass.
+  #162's plan promised "asserted with two triggers" and every non-interrupting
+  test fired once — an assertion that cannot tell non-interrupting from
+  interrupting at all, since an interrupting handler consumes its scope on the
+  first trigger. A message handler is now nudged twice and two handler tasks are
+  asserted.
+  #157's "deleting an instance removes its pending timers" was **claimed in a
+  docstring that named the file where it supposedly lived**. It lived nowhere. It
+  does now, reading the engine's `management/timer-jobs` surface, and asserting the
+  job EXISTED first so the absence afterwards is not vacuous. And "completing the
+  activity first removes the timer" — which its own docstring said had to be
+  asserted on the job being gone — was `DoesNotContain("Escalated")` against a
+  PT30S timer polled sub-second, i.e. "nothing has happened yet". It reads the job
+  surface now.
+  #115's failing-handler criterion had no test and rested on a probe in a comment.
+  Writing it found the engine's real guarantee, which is **stronger than the story
+  assumed**: compensation runs inside the completing transaction, so a handler that
+  throws fails the operator's own request with the script's message and rolls the
+  completion back. There is no window in which the undo looks done. Pinned as
+  found rather than as imagined. The over-compensation direction — nothing
+  compensates on the happy path — is asserted too; every other test in that file
+  throws compensation, so a handler running on every completion would have passed
+  all of them while reversing payments nobody asked to reverse.
+  One existing test failed on my own #242 change and I updated the assertion rather
+  than the code: the uncaught-error refusal now quotes the error CODE the author
+  typed instead of the `<bpmn:error>` element's id, which is what BPMN matches on.
+  **#245 — #159 ticked two criteria that did not exist.** Result aggregation had
+  zero implementation, zero documentation and no field; a fixed instance count had
+  no panel field and was neither read nor written by `workflow.js`, so no author
+  could have set one — while the manifest asserted it worked.
+  Both are built now, stored as `autonate:` attributes and rebuilt at publish for
+  the reason everything else in this milestone is: bpmn-js has no Flowable moddle
+  extension and drops a `<bpmn:loopCardinality>` child or a
+  `<flowable:variableAggregation>` extension element on the author's next save,
+  silently, with their configuration inside it.
+  Two new refusals, both for settings the engine honours *partly*: a list and a
+  fixed count together (Flowable reads the list and ignores the count, so the
+  author asked for N runs and got one per item), and half an aggregation.
+  The story's own key_link said "the cancellation is the half most likely to be
+  missed". It was missed; it is asserted now — the outstanding approval is GONE,
+  not merely un-completed. So is independent assignment: one task per item was
+  asserted by COUNT, which is equally true of an implementation whose tasks share
+  an assignee and complete together.
+  Schema order is pinned by a test, because appending all three children is the
+  obvious implementation and it deploys fine until an author uses two together.
+  Aggregation surfaced one honest caveat, recorded rather than hidden: a script's
+  `variables.set` writes through to the process, so the per-run variable also lands
+  on the parent holding whichever run finished last. Aggregation itself is
+  unaffected — the list is built from the per-instance scope — and the docs say to
+  read the list, not the source.
+  `docs/workflow-multi-instance.md` is the documentation the criterion asked for.
+  The manifest rows now name the tests instead of asserting a manual probe.
+  **Issue:** #246, #245

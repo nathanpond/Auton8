@@ -167,6 +167,12 @@ public static partial class WorkflowBpmnXml
         ExpandSignalEndEvents(document);
         ExpandCompensationEndEvents(document);
         ExpandDataObjectTypes(document);
+        // #245. Both write children of multiInstanceLoopCharacteristics, whose
+        // schema sequence is extensionElements, loopCardinality, ...,
+        // completionCondition. Aggregation first (it is the extensionElements),
+        // then cardinality, then the condition, which appends last.
+        ExpandMultiInstanceAggregation(document);
+        ExpandMultiInstanceCardinality(document);
         ExpandCompletionConditions(document);
         ExpandComplexGateways(document);
         ApplySignalScopes(document);
@@ -404,6 +410,123 @@ public static partial class WorkflowBpmnXml
 
     /// <summary>Where an authored completion condition lives in the stored diagram (#159/#163).</summary>
     internal const string CompletionConditionAttribute = "completionCondition";
+
+    /// <summary>A fixed instance count, as the author wrote it (#245).</summary>
+    internal const string LoopCardinalityAttribute = "loopCardinality";
+
+    /// <summary>Where each run's result is collected, and from which variable (#245).</summary>
+    internal const string AggregateTargetAttribute = "aggregateTarget";
+
+    internal const string AggregateSourceAttribute = "aggregateSource";
+
+    /// <summary>
+    /// Turns an authored fixed instance count back into its BPMN child (#245).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Same reason as the completion condition one element over: bpmn-js is
+    /// vendored with no Flowable moddle extension, and a
+    /// <c>&lt;bpmn:loopCardinality&gt;</c> child written by hand is dropped on the
+    /// author's next save. The attribute survives; this puts the child back.
+    /// </para>
+    /// <para>
+    /// Cardinality and a collection are alternatives, not a pair — Flowable reads
+    /// the collection when both are present, so writing both would silently
+    /// ignore whichever the author thought they had set. A diagram carrying both
+    /// is refused at publish rather than deployed with one of them inert.
+    /// </para>
+    /// </remarks>
+    private static void ExpandMultiInstanceCardinality(XDocument document)
+    {
+        foreach (var loop in document
+            .Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics")
+            .ToList())
+        {
+            var declared = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value);
+            if (declared is null) continue;
+
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Remove();
+
+            // An author who hand-wrote the child meant it.
+            if (loop.Element(BpmnNamespace + "loopCardinality") is not null) continue;
+
+            var cardinality = new XElement(
+                BpmnNamespace + "loopCardinality",
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                declared);
+
+            // The schema sequence puts loopCardinality after extensionElements
+            // and before everything else; appending would put it after the
+            // completion condition and the deployment is refused with
+            // cvc-complex-type.2.4.d.
+            var extensions = loop.Element(BpmnNamespace + "extensionElements");
+            if (extensions is not null)
+            {
+                extensions.AddAfterSelf(cardinality);
+            }
+            else
+            {
+                loop.AddFirst(cardinality);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects each instance's output into one variable on the parent (#245).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable spells this <c>flowable:variableAggregation</c>, an extension
+    /// element on the loop characteristics carrying one or more
+    /// <c>flowable:variable</c> children. bpmn-js drops all of it, so the author's
+    /// two fields are stored as attributes and rebuilt here.
+    /// </para>
+    /// <para>
+    /// One source variable, not many. The panel asks "collect which variable, into
+    /// what" because that is the question an author has; the multi-variable form
+    /// is reachable by hand-writing the extension element, which this leaves
+    /// alone.
+    /// </para>
+    /// </remarks>
+    private static void ExpandMultiInstanceAggregation(XDocument document)
+    {
+        foreach (var loop in document
+            .Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics")
+            .ToList())
+        {
+            var target = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
+            var source = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Remove();
+            loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Remove();
+
+            // A source with nowhere to go collects nothing; validation refuses
+            // that pairing rather than deploying a field the author filled in and
+            // the engine ignores.
+            if (target is null || source is null) continue;
+
+            var extensions = loop.Element(BpmnNamespace + "extensionElements");
+            if (extensions is null)
+            {
+                extensions = new XElement(BpmnNamespace + "extensionElements");
+                loop.AddFirst(extensions);
+            }
+
+            // An author who hand-wrote the aggregation meant it.
+            if (extensions.Elements(FlowableNamespace + "variableAggregation").Any()) continue;
+
+            extensions.Add(new XElement(
+                FlowableNamespace + "variableAggregation",
+                new XAttribute("target", target),
+                new XElement(
+                    FlowableNamespace + "variable",
+                    new XAttribute("source", source),
+                    new XAttribute("target", source))));
+        }
+    }
 
     /// <summary>
     /// The data a process declares: its data objects, stores, inputs and outputs
@@ -894,6 +1017,28 @@ public static partial class WorkflowBpmnXml
         // hears it are genuinely different subscriptions and cannot share one.
         var byNameAndScope = new Dictionary<(string Name, bool Scoped), XElement>();
 
+        // #244. Signal names referenced by at least one event that declares no
+        // scope. Collected before anything is rewritten, because the loop below
+        // skips those events and would otherwise not know they exist.
+        var namesWithUndeclaredUsers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var probe in document.Descendants())
+        {
+            if (probe.Name.Namespace != BpmnNamespace) continue;
+            var probeDefinition = probe.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            var probeRef = probeDefinition?.Attribute("signalRef")?.Value;
+            if (probeDefinition is null
+                || string.IsNullOrWhiteSpace(probeRef)
+                || !signalsById.TryGetValue(probeRef!, out var probeSignal))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(ReadSignalScope(probe)))
+            {
+                namesWithUndeclaredUsers.Add(probeSignal.Attribute("name")?.Value ?? probeRef!);
+            }
+        }
+
         foreach (var element in document.Descendants().ToList())
         {
             if (element.Name.Namespace != BpmnNamespace) continue;
@@ -932,7 +1077,15 @@ public static partial class WorkflowBpmnXml
             var key = (name, wantScoped);
             if (!byNameAndScope.TryGetValue(key, out var target))
             {
-                var nameTaken = byNameAndScope.Keys.Any(k => k.Name == name);
+                // #244. A name is also "taken" when some OTHER event references
+                // the same signal and declares no scope at all — a signal start
+                // event, typically, which is skipped above and so never registers
+                // here. Without this the scoped catch mutated the shared root and
+                // silently narrowed the start event's signal, which then cannot
+                // start an instance from an external event: a behaviour change to
+                // a deployed process that nothing reported.
+                var nameTaken = byNameAndScope.Keys.Any(k => k.Name == name)
+                                || namesWithUndeclaredUsers.Contains(name);
                 if (nameTaken)
                 {
                     target = new XElement(original);
@@ -1250,15 +1403,15 @@ public static partial class WorkflowBpmnXml
             // One set now, so "the validation set" means one thing. Prepare gains
             // them too, which is where an author would rather meet them anyway.
             errors.AddRange(BuildAdhocSubProcessErrors(document));
+            // The promoted structure rules, ONCE. They used to be listed here
+            // individually as well as inside BuildStructureErrors, so an author
+            // saw every one of these messages twice (#247).
             errors.AddRange(BuildStructureErrors(document));
             // #167: elements the studio converts away, and converted tasks nobody can do.
             errors.AddRange(BuildNonWaitingTaskErrors(document));
-            errors.AddRange(BuildUncaughtThrownCodeErrors(document));
             // #164: a gateway that cannot be a choice, or points somewhere the
             // engine will not follow.
-            errors.AddRange(BuildEventBasedGatewayErrors(document));
             // #162: an event subprocess that can never trigger.
-            errors.AddRange(BuildEventSubProcessErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -2861,6 +3014,29 @@ public static partial class WorkflowBpmnXml
                 !string.IsNullOrWhiteSpace(flow.Attribute("id")?.Value)
                 && flow.Attribute("id")!.Value != defaultFlowId);
 
+            // #239. A route the script may return whose flow carries the author's
+            // own condition is a silent misroute waiting to happen: the contract
+            // accepts 'fa', the author's ${1 == 2} is false, and the engine takes
+            // the default. No exception, no dead letter — the exact failure this
+            // milestone exists to end.
+            //
+            // The expansion deliberately leaves an author-written condition alone,
+            // so the two sets have to be reconciled HERE rather than silently
+            // diverging.
+            foreach (var flow in outgoing)
+            {
+                var flowId = Trimmed(flow.Attribute("id")?.Value);
+                if (flowId is null || flowId == defaultFlowId) continue;
+                if (flow.Element(BpmnNamespace + "conditionExpression") is null) continue;
+
+                var flowLabel = Trimmed(flow.Attribute("name")?.Value) ?? flowId;
+                errors.Add(
+                    $"The route '{flowLabel}' out of the complex gateway '{label}' has its own " +
+                    "condition. The gateway's script chooses the route, so a condition here can " +
+                    "send the process somewhere the script did not choose and nothing would report " +
+                    "it. Remove the condition, or use an exclusive gateway instead of a complex one.");
+            }
+
             if (routeCount == 0)
             {
                 // Flowable deploys this happily and the instance then fails at
@@ -3196,8 +3372,84 @@ public static partial class WorkflowBpmnXml
             .. BuildEventSubProcessErrors(document),
             // #115 — a compensation handler that waits. Not a style question:
             // it crashes the engine mid-completion. See BuildCompensationErrors.
-            .. BuildCompensationErrors(document)
+            .. BuildCompensationErrors(document),
+            // #245 — a multi-instance marker configured two ways at once, where
+            // the engine quietly honours one of them.
+            .. BuildMultiInstanceErrors(document)
         ];
+
+    /// <summary>
+    /// Multi-instance settings the engine would silently ignore (#245).
+    /// </summary>
+    /// <remarks>
+    /// Both of these deploy cleanly and run, which is what makes them worth
+    /// refusing: the author sees a field they filled in and a result that does not
+    /// reflect it, with nothing anywhere saying why.
+    /// </remarks>
+    private static IEnumerable<string> BuildMultiInstanceErrors(XDocument document)
+    {
+        foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
+        {
+            var owner = LabelOf(loop.Parent) ?? "a step";
+
+            var hasCollection = Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value) is not null
+                || loop.Element(BpmnNamespace + "loopDataInputRef") is not null;
+            var hasCardinality =
+                Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value)
+                    is not null
+                || loop.Element(BpmnNamespace + "loopCardinality") is not null;
+
+            if (hasCollection && hasCardinality)
+            {
+                // Flowable reads the collection and ignores the count, so the
+                // author gets one instance per item having asked for exactly N.
+                yield return
+                    $"'{owner}' repeats over a list AND has a fixed number of runs. " +
+                    "Flowable uses the list and ignores the number, so one of them " +
+                    "would silently do nothing. Clear whichever you did not mean.";
+            }
+
+            var target = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
+            var source = Trimmed(
+                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+
+            if (target is not null && source is null)
+            {
+                yield return
+                    $"'{owner}' collects each run's result into '{target}' but does " +
+                    "not say which variable to collect. Name the variable each run " +
+                    "sets, or clear the collection target.";
+            }
+
+            if (source is not null && target is null)
+            {
+                yield return
+                    $"'{owner}' collects the variable '{source}' from each run but " +
+                    "does not say where to put the results. Name a variable to " +
+                    "collect them into, or clear the variable.";
+            }
+        }
+    }
+
+    // #242. BPMN matches an error by its errorCode, not by the id of the
+    // <bpmn:error> root that carries it.
+    //
+    // Comparing errorRef ids refused diagrams Flowable runs correctly: two roots
+    // sharing one errorCode under different ids read as non-matching. The studio
+    // reuses one root per code so it never bit an Auton8-authored diagram — only
+    // hand-authored and imported ones, which is the population the "imported
+    // diagram" criterion exists for.
+    //
+    // Falls back to the ref itself when no root declares it, so a dangling ref
+    // still compares equal to another dangling ref of the same name rather than
+    // silently matching everything.
+    private static string ResolveErrorCode(XDocument document, string errorRef)
+    {
+        var root = document.Descendants(BpmnNamespace + "error")
+            .FirstOrDefault(e => e.Attribute("id")?.Value == errorRef);
+        return Trimmed(root?.Attribute("errorCode")?.Value) ?? errorRef;
+    }
 
     private static IReadOnlyList<string> BuildUncaughtThrownCodeErrors(XDocument document)
     {
@@ -3214,7 +3466,7 @@ public static partial class WorkflowBpmnXml
                 .Elements(BpmnNamespace + "errorEventDefinition")
                 .Select(definition => definition.Attribute("errorRef")?.Value)
                 .Where(code => !string.IsNullOrWhiteSpace(code))
-                .Select(code => code!)
+                .Select(code => ResolveErrorCode(document, code!))
                 .ToHashSet(StringComparer.Ordinal);
 
             // An error start event inside an event subprocess catches too (#162's
@@ -3232,7 +3484,7 @@ public static partial class WorkflowBpmnXml
                     // An error start event with no errorRef catches ANY error, so
                     // once one exists nothing in this process is uncatchable.
                     if (string.IsNullOrWhiteSpace(code)) { caught.Clear(); caught.Add("*"); }
-                    else caught.Add(code);
+                    else caught.Add(ResolveErrorCode(document, code));
                 }
             }
 
@@ -3245,10 +3497,14 @@ public static partial class WorkflowBpmnXml
                     .Select(d => d.Attribute("errorRef")?.Value)
                     .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
 
-                if (string.IsNullOrWhiteSpace(code) || caught.Contains(code!)) continue;
+                if (string.IsNullOrWhiteSpace(code)) continue;
+                var thrownCode = ResolveErrorCode(document, code!);
+                if (caught.Contains(thrownCode)) continue;
 
                 errors.Add(
-                    $"The error end event '{LabelOf(throwing)}' raises '{code}', and nothing in " +
+                    // The CODE the author typed, not the ref id — the id means
+                    // nothing to someone reading their own diagram.
+                    $"The error end event '{LabelOf(throwing)}' raises '{thrownCode}', and nothing in " +
                     $"'{LabelOf(process)}' catches it. Add an error boundary event carrying the " +
                     "same code to the activity it should interrupt. Published as-is, reaching " +
                     "this event destroys the whole process instance — there is no history to " +
@@ -3558,11 +3814,26 @@ public static partial class WorkflowBpmnXml
     {
         var warnings = new List<string>();
 
+        // Only associations whose SOURCE is a compensation boundary event. An
+        // association is also how bpmn-js attaches a text annotation, so taking
+        // every association's target treated an annotated user task as a
+        // compensation handler and refused the whole diagram — publish, and (per
+        // #234) save with it. Verification caught that; the fixture here now
+        // covers a non-compensation association so it cannot come back.
+        var compensationBoundaryIds = document
+            .Descendants(BpmnNamespace + "boundaryEvent")
+            .Where(boundary => boundary.Elements(BpmnNamespace + "compensateEventDefinition").Any())
+            .Select(boundary => Trimmed(boundary.Attribute("id")?.Value))
+            .Where(id => id is not null)
+            .ToHashSet(StringComparer.Ordinal!);
+
         var handlerIds = document
             .Descendants(BpmnNamespace + "association")
+            .Where(association =>
+                compensationBoundaryIds.Contains(Trimmed(association.Attribute("sourceRef")?.Value) ?? string.Empty))
             .Select(association => Trimmed(association.Attribute("targetRef")?.Value))
             .Where(id => id is not null)
-            .ToHashSet(StringComparer.Ordinal);
+            .ToHashSet(StringComparer.Ordinal!);
         if (handlerIds.Count == 0) return warnings;
 
         foreach (var element in document.Descendants())
@@ -3572,13 +3843,22 @@ public static partial class WorkflowBpmnXml
             var id = Trimmed(element.Attribute("id")?.Value);
             if (id is null || !handlerIds.Contains(id)) continue;
 
-            // Only elements that actually wait. An ordinary task, a service task
-            // or a script task all complete within the compensation.
-            if (element.Name.LocalName is not ("userTask" or "receiveTask")) continue;
+            // Elements that WAIT. An ordinary task, a service task or a script
+            // task all complete within the compensation.
+            //
+            // A subProcess or callActivity is here because it can contain a user
+            // task and therefore waits too — verification pointed out the
+            // original pair let those through into the engine crash this refusal
+            // exists to prevent.
+            if (element.Name.LocalName is not
+                ("userTask" or "receiveTask" or "subProcess" or "callActivity" or "adHocSubProcess"))
+            {
+                continue;
+            }
 
             var label = Trimmed(element.Attribute("name")?.Value) ?? id;
             warnings.Add(
-                $"The compensation handler '{label}' waits for a person or a message, and Flowable " +
+                $"The compensation handler '{label}' waits, and Flowable " +
                 "cannot run one. When compensation is triggered while a user task is being " +
                 "completed, a waiting handler fails the engine's own transaction and the task can " +
                 "never be completed — the process stops there for good. Make the handler an " +

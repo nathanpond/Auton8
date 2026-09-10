@@ -127,6 +127,271 @@ public sealed class MultiInstanceExecutionTests : E2ETestBase
 
     // ── diagrams ─────────────────────────────────────────────────────────────
 
+    // ── #245: the criteria #159 ticked and did not implement ────────────────
+
+    [Fact]
+    public async Task A_fixed_count_creates_exactly_that_many_instances()
+    {
+        // No test anywhere set loopCardinality; the manifest asserted it worked on
+        // a manual probe. There was also no field in the panel and no read or
+        // write of it in workflow.js, so an author could not have set one.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mic{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, CardinalityDiagram(key, count: "3"));
+
+        // Deliberately started with NO collection: a cardinality that quietly fell
+        // back to a list would have nothing to iterate and create nothing.
+        var instance = await StartAsync(api, key, null);
+
+        var names = await EventuallyAsync(api, instance, n => n.Count >= 3,
+            "three instances from a fixed count");
+        Assert.Equal(3, names.Count(n => n == "Approve"));
+
+        // And not a fourth a moment later.
+        await Task.Delay(2_000);
+        Assert.Equal(3, (await TaskNamesAsync(api, instance)).Count(n => n == "Approve"));
+    }
+
+    [Fact]
+    public async Task A_multi_instance_user_task_is_independently_assignable_and_completable()
+    {
+        // #159's criterion asserted the COUNT and nothing else. One task per item
+        // is also true of an implementation whose tasks all carry one assignee and
+        // complete together, which is the opposite of what a per-approver step is
+        // for.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mia{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, AssignedUserTaskDiagram(key));
+        var instance = await StartAsync(api, key, ["ana", "ben", "cat"]);
+
+        var tasks = await EventuallyTasksAsync(api, instance, t => t.Count == 3,
+            "one task per approver");
+
+        // Each carries ITS OWN item as assignee, not one shared value.
+        var assignees = tasks.Select(t => t.Assignee).OrderBy(a => a, StringComparer.Ordinal).ToList();
+        Assert.Equal(["ana", "ben", "cat"], assignees);
+
+        // Completing one completes ONE. A shared-execution implementation would
+        // take all three down together, and the count assertion above cannot see
+        // the difference.
+        var first = tasks.First(t => t.Assignee == "ben");
+        var completed = await api.PostAsync($"/api/tasks/{first.Id}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(completed.Ok, $"Completing failed: {completed.Status} {await completed.TextAsync()}");
+
+        var remaining = await EventuallyTasksAsync(api, instance, t => t.Count == 2,
+            "the other two approvals to be untouched");
+        Assert.Equal(
+            ["ana", "cat"],
+            remaining.Select(t => t.Assignee).OrderBy(a => a, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_completion_condition_ends_the_loop_early_and_cancels_the_rest()
+    {
+        // The story's own key_link said outright that "the cancellation is the half
+        // most likely to be missed". It was missed: nothing ran a completion
+        // condition against the engine at all.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"miq{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, AssignedUserTaskDiagram(
+            key, completionCondition: "${nrOfCompletedInstances >= 2}"));
+        var instance = await StartAsync(api, key, ["ana", "ben", "cat"]);
+
+        var tasks = await EventuallyTasksAsync(api, instance, t => t.Count == 3,
+            "one task per approver");
+
+        foreach (var assignee in new[] { "ana", "ben" })
+        {
+            var task = tasks.First(t => t.Assignee == assignee);
+            var done = await api.PostAsync($"/api/tasks/{task.Id}/complete",
+                new APIRequestContextOptions { DataObject = new { } });
+            Assert.True(done.Ok, $"Completing {assignee} failed: {done.Status}");
+        }
+
+        // Early completion: the process moved on with one approval outstanding.
+        var after = await EventuallyAsync(api, instance,
+            n => n.Contains("After approvals"), "the loop to finish early");
+        Assert.Contains("After approvals", after);
+
+        // The cancellation, which is the half that was missing. Cat's task is
+        // GONE, not merely un-completed -- an implementation that let the loop
+        // proceed while the parent moved on would leave it sitting there.
+        Assert.DoesNotContain("Approve", after);
+
+        var settled = await EventuallyTasksAsync(api, instance,
+            t => t.All(task => task.Assignee != "cat"),
+            "the outstanding approval to be cancelled");
+        Assert.DoesNotContain(settled, task => task.Assignee == "cat");
+    }
+
+    [Fact]
+    public async Task Each_runs_result_is_collected_into_one_list_on_the_process()
+    {
+        // "Results aggregate back" was ticked with zero implementation: no
+        // flowable:variableAggregation anywhere, no field, nothing in docs.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mig{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, AggregatingDiagram(key));
+        var instance = await StartAsync(api, key, ["alpha", "beta", "gamma"]);
+
+        var variables = await EventuallyVariablesAsync(api, instance,
+            v => v.ContainsKey("finished"), "the process to finish");
+
+        Assert.True(variables.ContainsKey("scores"),
+            "Nothing was collected: the parent has no 'scores' variable. Present: " +
+            string.Join(", ", variables.Keys));
+
+        var scores = variables["scores"];
+
+        // One entry per run, each the value THAT run produced. Asserting only
+        // that the variable exists would pass for an aggregation that collected
+        // the last instance's value and called it a list.
+        foreach (var expected in new[] { "alpha!", "beta!", "gamma!" })
+        {
+            Assert.Contains(expected, scores, StringComparison.Ordinal);
+        }
+
+        // Three entries, not one value that happens to contain the strings. A
+        // "list" holding only the last instance's result would satisfy the
+        // Contains assertions above if the earlier runs' values appeared
+        // anywhere else in it.
+        Assert.Equal(3, scores.Split("alpha!").Length - 1
+            + scores.Split("beta!").Length - 1
+            + scores.Split("gamma!").Length - 1);
+
+        // Recorded rather than asserted as a defect: the per-run variable also
+        // ends up on the process under its own name, because the script sandbox's
+        // variables.set writes through to the instance. Aggregation is unaffected
+        // -- `scores` is built from the per-instance scope, which is why it has
+        // all three values and not three copies of the last one -- but an author
+        // reading `score` on the parent gets whichever run finished last, so the
+        // aggregated list is the one to read.
+        Assert.True(variables.ContainsKey("scores"));
+    }
+
+    private sealed record TaskRow(string Id, string Name, string? Assignee);
+
+    private static async Task<List<TaskRow>> TasksAsync(IAPIRequestContext api, string instanceId)
+    {
+        var response = await api.GetAsync($"/api/executions/{instanceId}/tasks");
+        Assert.True(response.Ok, await response.TextAsync());
+        using var document = JsonDocument.Parse(await response.TextAsync());
+        return document.RootElement.EnumerateArray()
+            .Select(e => new TaskRow(
+                e.GetProperty("id").GetString()!,
+                e.GetProperty("name").GetString()!,
+                e.TryGetProperty("assignee", out var a) ? a.GetString() : null))
+            .ToList();
+    }
+
+    private static async Task<List<TaskRow>> EventuallyTasksAsync(
+        IAPIRequestContext api, string instanceId, Func<List<TaskRow>, bool> until, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        List<TaskRow> tasks = [];
+        while (DateTime.UtcNow < deadline)
+        {
+            tasks = await TasksAsync(api, instanceId);
+            if (until(tasks)) return tasks;
+            await Task.Delay(500);
+        }
+
+        Assert.Fail($"Timed out waiting for {what}. Tasks were: " +
+            string.Join(", ", tasks.Select(t => $"{t.Name}/{t.Assignee}")));
+        return tasks;
+    }
+
+    private static async Task<List<string>> TaskNamesAsync(IAPIRequestContext api, string instanceId) =>
+        (await TasksAsync(api, instanceId)).Select(t => t.Name).ToList();
+
+    /// <summary>A fixed number of runs, with no collection at all.</summary>
+    private static string CardinalityDiagram(string key, string count) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Fixed count" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Approve">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                     autonate:loopCardinality="{{count}}" />
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="t" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+          {{Di(key, "s", "t", "e")}}
+        </bpmn:definitions>
+        """;
+
+    /// <summary>One task per item, each assigned to its own item.</summary>
+    private static string AssignedUserTaskDiagram(string key, string? completionCondition = null) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Approvals" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Approve" flowable:assignee="${approver}">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                     flowable:collection="${items}"
+                                                     flowable:elementVariable="approver"{{
+                (completionCondition is null
+                    ? ""
+                    : $"\n                                                     autonate:completionCondition=\"{completionCondition}\"")}} />
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="t" targetRef="after" />
+            <bpmn:userTask id="after" name="After approvals" />
+            <bpmn:sequenceFlow id="f2" sourceRef="after" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+          {{Di(key, "s", "t", "after", "e")}}
+        </bpmn:definitions>
+        """;
+
+    /// <summary>Each run sets a variable; the loop collects them into one list.</summary>
+    private static string AggregatingDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Collect" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:scriptTask id="t" name="Score one" scriptFormat="javascript"
+                             autonate:runAs="workflowAuthor">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                     flowable:collection="${items}"
+                                                     flowable:elementVariable="item"
+                                                     autonate:aggregateSource="score"
+                                                     autonate:aggregateTarget="scores" />
+              <bpmn:script>variables.set('score', variables.get('item') + '!');</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="t" targetRef="done" />
+            <bpmn:scriptTask id="done" name="Finish" scriptFormat="javascript"
+                             autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('finished', true);</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:sequenceFlow id="f2" sourceRef="done" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+          {{Di(key, "s", "t", "done", "e")}}
+        </bpmn:definitions>
+        """;
+
     private static string Marker(bool sequential) =>
         $"<bpmn:multiInstanceLoopCharacteristics isSequential=\"{(sequential ? "true" : "false")}\" " +
         "flowable:collection=\"${items}\" flowable:elementVariable=\"item\" />";
@@ -218,11 +483,16 @@ public sealed class MultiInstanceExecutionTests : E2ETestBase
     }
 
     private static async Task<string> StartAsync(
-        IAPIRequestContext api, string key, string[] items)
+        IAPIRequestContext api, string key, string[]? items)
     {
+        // #245. A null collection is not an empty one: the cardinality test must
+        // start with no `items` variable at all, so that a cardinality quietly
+        // falling back to a list has nothing to iterate and creates nothing.
         var response = await api.PostAsync($"/api/workflows/{key}/start", new APIRequestContextOptions
         {
-            DataObject = new { variables = new { items } }
+            DataObject = items is null
+                ? new { variables = new { } }
+                : (object)new { variables = new { items } }
         });
         Assert.True(response.Ok, $"Starting failed: {response.Status} {await response.TextAsync()}");
         using var document = JsonDocument.Parse(await response.TextAsync());

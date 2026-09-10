@@ -129,6 +129,118 @@ public sealed class CompensationExecutionTests : E2ETestBase
         </bpmn:definitions>
         """;
 
+    // ── #246: the two directions #115 asserted in neither ───────────────────
+
+    [Fact]
+    public async Task Nothing_compensates_when_the_process_ends_normally()
+    {
+        // The over-compensation direction, and it had no test. A handler that
+        // ran on every completion would satisfy every other test in this file --
+        // they all throw compensation -- while undoing successful work in
+        // production. Reversing a payment nobody asked to reverse is the worst
+        // failure this element has.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cmn{Guid.NewGuid():N}"[..20];
+
+        // The same diagram, ending normally instead of throwing compensation.
+        var xml = Diagram(key).Replace(
+            """
+            <bpmn:endEvent id="done" name="Undo everything">
+                  <bpmn:compensateEventDefinition />
+                </bpmn:endEvent>
+            """.Trim(),
+            """<bpmn:endEvent id="done" name="Finished" />""",
+            StringComparison.Ordinal);
+        // The replacement landed. Without this the fixture would still throw
+        // compensation and the absence assertions below would be about the wrong
+        // diagram -- though in this case they would fail rather than pass
+        // vacuously, an unmatched Replace is silent and worth naming.
+        Assert.Contains("""<bpmn:endEvent id="done" name="Finished" />""", xml,
+            StringComparison.Ordinal);
+
+        // Exactly the two boundary definitions remain; the end event's is gone.
+        Assert.Equal(2, xml.Split("compensateEventDefinition").Length - 1);
+
+        await PublishAsync(api, key, xml);
+        var instance = await StartAsync(api, key);
+
+        await EventuallyAsync(api, instance,
+            n => n.Contains("Take payment"), "the first step to be waiting");
+        await CompleteFirstTaskAsync(api, instance, "Take payment");
+
+        // The process runs to its end. Give the handlers every chance to fire
+        // wrongly -- an assertion of absence taken too early is indistinguishable
+        // from success, which is the trap this whole file lives next to.
+        await Task.Delay(4_000);
+
+        var variables = await VariablesAsync(api, instance);
+        Assert.False(variables.ContainsKey("refunded"),
+            "A compensation handler ran on a process that ended normally: the " +
+            $"payment was refunded without anything asking for it. Variables: " +
+            $"{string.Join(", ", variables.Keys)}");
+        Assert.False(variables.ContainsKey("released"),
+            $"'Release stock' compensated on the happy path. Variables: " +
+            $"{string.Join(", ", variables.Keys)}");
+    }
+
+    [Fact]
+    public async Task A_failing_compensation_handler_is_surfaced_not_swallowed()
+    {
+        // The criterion's own wording: a silent failure to undo is worse than not
+        // trying, because the operator believes the rollback succeeded. It rested
+        // on a manual probe recorded in a comment and had no test at all.
+        //
+        // What the engine actually does is stronger than a log entry, and worth
+        // pinning precisely because it is not what you would guess: compensation
+        // runs INSIDE the completing transaction, so a handler that throws fails
+        // the operator's own request and rolls the completion back. There is no
+        // window in which the undo looks done.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cmf{Guid.NewGuid():N}"[..20];
+
+        // The first handler throws instead of recording its undo.
+        var xml = Diagram(key).Replace(
+            "<bpmn:script>variables.set('refunded', true);</bpmn:script>",
+            "<bpmn:script>throw new Error('the refund gateway refused');</bpmn:script>",
+            StringComparison.Ordinal);
+        Assert.Contains("refund gateway refused", xml, StringComparison.Ordinal);
+
+        await PublishAsync(api, key, xml);
+        var instance = await StartAsync(api, key);
+
+        await EventuallyAsync(api, instance,
+            n => n.Contains("Take payment"), "the first step to be waiting");
+
+        var completed = await TryCompleteTaskAsync(api, instance, "Take payment");
+        var body = await completed.TextAsync();
+
+        // Not swallowed: the request fails rather than answering 204 and leaving
+        // the operator to find out later, or never.
+        Assert.False(
+            completed.Ok,
+            "Completing the task succeeded even though the compensation handler " +
+            "threw, so the operator was told the undo worked when it did not.");
+
+        // And it says WHICH handler and WHY, in the author's own words. A generic
+        // "internal error" would satisfy the status check above while leaving
+        // nobody able to act on it.
+        Assert.Contains("h1", body, StringComparison.Ordinal);
+        Assert.Contains("the refund gateway refused", body, StringComparison.Ordinal);
+
+        // The transaction rolled back, so the undo did not half-happen...
+        var variables = await VariablesAsync(api, instance);
+        Assert.False(variables.ContainsKey("refunded"),
+            $"Variables after the failed compensation: {string.Join(", ", variables.Keys)}");
+
+        // ...and the work is still there to retry, rather than the process having
+        // moved on past a rollback that never ran.
+        Assert.Contains("Take payment", await TaskNamesAsync(api, instance));
+    }
+
     private static string Diagram(string key) => $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -218,6 +330,22 @@ public sealed class CompensationExecutionTests : E2ETestBase
         Assert.True(response.Ok, $"Starting failed: {response.Status} {await response.TextAsync()}");
         using var document = JsonDocument.Parse(await response.TextAsync());
         return document.RootElement.GetProperty("id").GetString()!;
+    }
+
+    /// <summary>Completes a task and returns the raw response, refusals included.</summary>
+    private static async Task<IAPIResponse> TryCompleteTaskAsync(
+        IAPIRequestContext api, string instanceId, string name)
+    {
+        var response = await api.GetAsync($"/api/executions/{instanceId}/tasks");
+        Assert.True(response.Ok, await response.TextAsync());
+        using var document = JsonDocument.Parse(await response.TextAsync());
+        var taskId = document.RootElement.EnumerateArray()
+            .First(t => t.GetProperty("name").GetString() == name)
+            .GetProperty("id").GetString()!;
+
+        return await api.PostAsync(
+            $"/api/executions/{instanceId}/tasks/{taskId}/force-complete",
+            new APIRequestContextOptions { DataObject = new { } });
     }
 
     private static async Task CompleteFirstTaskAsync(

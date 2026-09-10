@@ -1,0 +1,641 @@
+{
+  "$comment": "The studio palette (#241). One row per element an author can place, each naming the bpmn-support.json row it claims to offer. Membership is NOT this file's to decide: createManifestPaletteProvider offers only rows whose manifest entry is studio=supported, so withdrawing an element in the manifest removes it from the palette with no edit here. This file carries presentation -- label, icon, group -- which the manifest has no business holding. BpmnPaletteManifestTests fails if a row names a manifest entry that does not exist, if a supported element has no row and no stated reason, or if the groups drift from the order below.",
+  "$fields": {
+    "id": "bpmn-js palette entry id. 'create.*' places a shape; 'append.*' attaches to the selection.",
+    "label": "What the author reads in the palette.",
+    "description": "One-line hint, shown as the entry's title.",
+    "group": "Palette section; must appear in groupOrder.",
+    "className": "bpmn-js icon class.",
+    "type": "The bpmn moddle type the element factory creates.",
+    "createFactory": "Set instead of `type` for entries bpmn-js builds through a dedicated factory (participants).",
+    "eventDefinitionType": "Event definition to attach, where the type alone does not identify the element.",
+    "properties": "Extra businessObject properties set at creation (isExpanded, triggeredByEvent, isForCompensation).",
+    "localName": "The bpmn-support.json row's localName. The join key -- a typo here fails the drift test.",
+    "eventDefinition": "The bpmn-support.json row's eventDefinition. Null where the row has none."
+  },
+  "groupOrder": [
+    "Events",
+    "Tasks",
+    "Gateways",
+    "Containers",
+    "Collaboration",
+    "Artifacts",
+    "Boundary Events"
+  ],
+  "notOnThePalette": [
+    {
+      "localName": "sequenceFlow",
+      "eventDefinition": null,
+      "reason": "Drawn from an element's context pad, not dragged from the palette."
+    },
+    {
+      "localName": "association",
+      "eventDefinition": null,
+      "reason": "Drawn from an element's context pad, not dragged from the palette."
+    },
+    {
+      "localName": "dataInput",
+      "eventDefinition": null,
+      "reason": "A process-level data declaration, made in the element data editor (#166); it is not a shape."
+    },
+    {
+      "localName": "dataOutput",
+      "eventDefinition": null,
+      "reason": "A process-level data declaration, made in the element data editor (#166); it is not a shape."
+    },
+    {
+      "localName": "startEvent",
+      "eventDefinition": "error",
+      "reason": "Legal only inside an event sub-process; reached through that start event's replace menu, where the palette cannot place it."
+    },
+    {
+      "localName": "startEvent",
+      "eventDefinition": "escalation",
+      "reason": "Legal only inside an event sub-process; reached through that start event's replace menu, where the palette cannot place it."
+    },
+    {
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
+      "reason": "A marker on an existing activity, set in the element data editor. Not a shape."
+    },
+    {
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
+      "reason": "A marker on an existing activity, set in the element data editor. Not a shape."
+    },
+    {
+      "localName": "*",
+      "eventDefinition": "isForCompensation",
+      "reason": "A marker on an existing activity, set by attaching a compensation boundary event. Not a shape."
+    }
+  ],
+  "entries": [
+    {
+      "id": "create.start-event",
+      "label": "Start event",
+      "description": "Blank process start",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-none",
+      "type": "bpmn:StartEvent",
+      "localName": "startEvent",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.start-event-message",
+      "label": "Message start event",
+      "description": "Starts on message",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-message",
+      "type": "bpmn:StartEvent",
+      "eventDefinitionType": "bpmn:MessageEventDefinition",
+      "localName": "startEvent",
+      "eventDefinition": "message"
+    },
+    {
+      "id": "create.start-event-timer",
+      "label": "Timer start event",
+      "description": "Starts on timer",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-timer",
+      "type": "bpmn:StartEvent",
+      "eventDefinitionType": "bpmn:TimerEventDefinition",
+      "localName": "startEvent",
+      "eventDefinition": "timer"
+    },
+    {
+      "id": "create.start-event-signal",
+      "label": "Signal start event",
+      "description": "Starts on signal",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-signal",
+      "type": "bpmn:StartEvent",
+      "eventDefinitionType": "bpmn:SignalEventDefinition",
+      "localName": "startEvent",
+      "eventDefinition": "signal"
+    },
+    {
+      "id": "create.start-event-conditional",
+      "label": "Conditional start event",
+      "description": "Starts on condition",
+      "group": "Events",
+      "className": "bpmn-icon-start-event-condition",
+      "type": "bpmn:StartEvent",
+      "eventDefinitionType": "bpmn:ConditionalEventDefinition",
+      "localName": "startEvent",
+      "eventDefinition": "conditional"
+    },
+    {
+      "id": "create.intermediate-catch-message",
+      "label": "Message intermediate catch event",
+      "description": "Waits for message",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-catch-message",
+      "type": "bpmn:IntermediateCatchEvent",
+      "eventDefinitionType": "bpmn:MessageEventDefinition",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "message"
+    },
+    {
+      "id": "create.intermediate-catch-timer",
+      "label": "Timer intermediate catch event",
+      "description": "Waits for timer",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-catch-timer",
+      "type": "bpmn:IntermediateCatchEvent",
+      "eventDefinitionType": "bpmn:TimerEventDefinition",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "timer"
+    },
+    {
+      "id": "create.intermediate-catch-signal",
+      "label": "Signal intermediate catch event",
+      "description": "Waits for signal",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-catch-signal",
+      "type": "bpmn:IntermediateCatchEvent",
+      "eventDefinitionType": "bpmn:SignalEventDefinition",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "signal"
+    },
+    {
+      "id": "create.intermediate-catch-conditional",
+      "label": "Conditional intermediate catch event",
+      "description": "Waits for condition",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-catch-condition",
+      "type": "bpmn:IntermediateCatchEvent",
+      "eventDefinitionType": "bpmn:ConditionalEventDefinition",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "conditional"
+    },
+    {
+      "id": "create.intermediate-throw-none",
+      "label": "Intermediate throw event",
+      "description": "Plain throw event",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-none",
+      "type": "bpmn:IntermediateThrowEvent",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.intermediate-throw-message",
+      "label": "Message intermediate throw event",
+      "description": "Throws message",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-throw-message",
+      "type": "bpmn:IntermediateThrowEvent",
+      "eventDefinitionType": "bpmn:MessageEventDefinition",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "message"
+    },
+    {
+      "id": "create.intermediate-throw-signal",
+      "label": "Signal intermediate throw event",
+      "description": "Throws signal",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-throw-signal",
+      "type": "bpmn:IntermediateThrowEvent",
+      "eventDefinitionType": "bpmn:SignalEventDefinition",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "signal"
+    },
+    {
+      "id": "create.intermediate-throw-escalation",
+      "label": "Escalation intermediate throw event",
+      "description": "Throws escalation",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-throw-escalation",
+      "type": "bpmn:IntermediateThrowEvent",
+      "eventDefinitionType": "bpmn:EscalationEventDefinition",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "escalation"
+    },
+    {
+      "id": "create.intermediate-throw-compensation",
+      "label": "Compensation throw event",
+      "description": "Triggers compensation handlers",
+      "group": "Events",
+      "className": "bpmn-icon-intermediate-event-throw-compensation",
+      "type": "bpmn:IntermediateThrowEvent",
+      "eventDefinitionType": "bpmn:CompensateEventDefinition",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "compensate"
+    },
+    {
+      "id": "create.end-event",
+      "label": "End event",
+      "description": "Blank process end",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-none",
+      "type": "bpmn:EndEvent",
+      "localName": "endEvent",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.end-event-message",
+      "label": "Message end event",
+      "description": "Ends with message",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-message",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:MessageEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "message"
+    },
+    {
+      "id": "create.end-event-signal",
+      "label": "Signal end event",
+      "description": "Ends with signal",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-signal",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:SignalEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "signal"
+    },
+    {
+      "id": "create.end-event-escalation",
+      "label": "Escalation end event",
+      "description": "Ends with escalation",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-escalation",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:EscalationEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "escalation"
+    },
+    {
+      "id": "create.end-event-error",
+      "label": "Error end event",
+      "description": "Ends with error",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-error",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:ErrorEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "error"
+    },
+    {
+      "id": "create.end-event-cancel",
+      "label": "Cancel end event",
+      "description": "Ends with cancel",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-cancel",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:CancelEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "cancel"
+    },
+    {
+      "id": "create.end-event-compensation",
+      "label": "Compensation end event",
+      "description": "Ends with compensation",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-compensation",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:CompensateEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "compensate"
+    },
+    {
+      "id": "create.end-event-terminate",
+      "label": "Terminate end event",
+      "description": "Terminates process",
+      "group": "Events",
+      "className": "bpmn-icon-end-event-terminate",
+      "type": "bpmn:EndEvent",
+      "eventDefinitionType": "bpmn:TerminateEventDefinition",
+      "localName": "endEvent",
+      "eventDefinition": "terminate"
+    },
+    {
+      "id": "create.task",
+      "label": "Task",
+      "description": "Generic task",
+      "group": "Tasks",
+      "className": "bpmn-icon-task",
+      "type": "bpmn:Task",
+      "localName": "task",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.user-task",
+      "label": "User task",
+      "description": "Human task",
+      "group": "Tasks",
+      "className": "bpmn-icon-user-task",
+      "type": "bpmn:UserTask",
+      "localName": "userTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.service-task",
+      "label": "Service task",
+      "description": "Automated service work",
+      "group": "Tasks",
+      "className": "bpmn-icon-service-task",
+      "type": "bpmn:ServiceTask",
+      "localName": "serviceTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.script-task",
+      "label": "Script task",
+      "description": "Scripted step",
+      "group": "Tasks",
+      "className": "bpmn-icon-script-task",
+      "type": "bpmn:ScriptTask",
+      "localName": "scriptTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.business-rule-task",
+      "label": "Business rule task",
+      "description": "Decision/rules step",
+      "group": "Tasks",
+      "className": "bpmn-icon-business-rule-task",
+      "type": "bpmn:BusinessRuleTask",
+      "localName": "businessRuleTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.manual-task",
+      "label": "Manual task",
+      "description": "Offline manual step",
+      "group": "Tasks",
+      "className": "bpmn-icon-manual-task",
+      "type": "bpmn:ManualTask",
+      "localName": "manualTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.receive-task",
+      "label": "Receive task",
+      "description": "Waits to receive",
+      "group": "Tasks",
+      "className": "bpmn-icon-receive-task",
+      "type": "bpmn:ReceiveTask",
+      "localName": "receiveTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.send-task",
+      "label": "Send task",
+      "description": "Sends message/work",
+      "group": "Tasks",
+      "className": "bpmn-icon-send-task",
+      "type": "bpmn:SendTask",
+      "localName": "sendTask",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.exclusive-gateway",
+      "label": "Exclusive gateway",
+      "description": "XOR decision",
+      "group": "Gateways",
+      "className": "bpmn-icon-gateway-xor",
+      "type": "bpmn:ExclusiveGateway",
+      "localName": "exclusiveGateway",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.parallel-gateway",
+      "label": "Parallel gateway",
+      "description": "Parallel split/join",
+      "group": "Gateways",
+      "className": "bpmn-icon-gateway-parallel",
+      "type": "bpmn:ParallelGateway",
+      "localName": "parallelGateway",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.inclusive-gateway",
+      "label": "Inclusive gateway",
+      "description": "OR decision",
+      "group": "Gateways",
+      "className": "bpmn-icon-gateway-or",
+      "type": "bpmn:InclusiveGateway",
+      "localName": "inclusiveGateway",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.event-based-gateway",
+      "label": "Event-based gateway",
+      "description": "Waits on event outcome",
+      "group": "Gateways",
+      "className": "bpmn-icon-gateway-eventbased",
+      "type": "bpmn:EventBasedGateway",
+      "localName": "eventBasedGateway",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.complex-gateway",
+      "label": "Complex gateway",
+      "description": "Advanced routing",
+      "group": "Gateways",
+      "className": "bpmn-icon-gateway-complex",
+      "type": "bpmn:ComplexGateway",
+      "localName": "complexGateway",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.sub-process",
+      "label": "Expanded sub-process",
+      "description": "Nested process",
+      "group": "Containers",
+      "className": "bpmn-icon-subprocess-expanded",
+      "type": "bpmn:SubProcess",
+      "properties": {
+        "isExpanded": true
+      },
+      "localName": "subProcess",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.event-sub-process",
+      "label": "Event sub-process",
+      "description": "Triggered by event",
+      "group": "Containers",
+      "className": "bpmn-icon-event-subprocess-expanded",
+      "type": "bpmn:SubProcess",
+      "properties": {
+        "isExpanded": true,
+        "triggeredByEvent": true
+      },
+      "localName": "subProcess",
+      "eventDefinition": "triggeredByEvent"
+    },
+    {
+      "id": "create.adhoc-sub-process",
+      "label": "Ad-hoc sub-process",
+      "description": "Activities run in any order, on demand",
+      "group": "Containers",
+      "className": "bpmn-icon-ad-hoc-sub-process",
+      "type": "bpmn:AdHocSubProcess",
+      "properties": {
+        "isExpanded": true
+      },
+      "localName": "adHocSubProcess",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.transaction",
+      "label": "Transaction",
+      "description": "Transactional sub-process",
+      "group": "Containers",
+      "className": "bpmn-icon-transaction",
+      "type": "bpmn:Transaction",
+      "localName": "transaction",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.call-activity",
+      "label": "Call activity",
+      "description": "Invokes another process",
+      "group": "Containers",
+      "className": "bpmn-icon-call-activity",
+      "type": "bpmn:CallActivity",
+      "localName": "callActivity",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.participant",
+      "label": "Participant pool",
+      "description": "Pool/participant",
+      "group": "Collaboration",
+      "className": "bpmn-icon-participant",
+      "createFactory": "participant",
+      "localName": "participant",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.data-object",
+      "label": "Data object reference",
+      "description": "Data object",
+      "group": "Artifacts",
+      "className": "bpmn-icon-data-object",
+      "type": "bpmn:DataObjectReference",
+      "localName": "dataObjectReference",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.data-store",
+      "label": "Data store reference",
+      "description": "Data store",
+      "group": "Artifacts",
+      "className": "bpmn-icon-data-store",
+      "type": "bpmn:DataStoreReference",
+      "localName": "dataStoreReference",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.text-annotation",
+      "label": "Text annotation",
+      "description": "Diagram note",
+      "group": "Artifacts",
+      "className": "bpmn-icon-text-annotation",
+      "type": "bpmn:TextAnnotation",
+      "localName": "textAnnotation",
+      "eventDefinition": null
+    },
+    {
+      "id": "create.group",
+      "label": "Group",
+      "description": "Visual grouping",
+      "group": "Artifacts",
+      "className": "bpmn-icon-group",
+      "type": "bpmn:Group",
+      "localName": "group",
+      "eventDefinition": null
+    },
+    {
+      "id": "append.boundary-message",
+      "label": "Message boundary event",
+      "description": "Attached message boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-message",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:MessageEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "message"
+    },
+    {
+      "id": "append.boundary-timer",
+      "label": "Timer boundary event",
+      "description": "Attached timer boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-timer",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:TimerEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "timer"
+    },
+    {
+      "id": "append.boundary-signal",
+      "label": "Signal boundary event",
+      "description": "Attached signal boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-signal",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:SignalEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "signal"
+    },
+    {
+      "id": "append.boundary-conditional",
+      "label": "Conditional boundary event",
+      "description": "Attached conditional boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-condition",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:ConditionalEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "conditional"
+    },
+    {
+      "id": "append.boundary-error",
+      "label": "Error boundary event",
+      "description": "Attached error boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-error",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:ErrorEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "error"
+    },
+    {
+      "id": "append.boundary-escalation",
+      "label": "Escalation boundary event",
+      "description": "Attached escalation boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-escalation",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:EscalationEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "escalation"
+    },
+    {
+      "id": "append.boundary-cancel",
+      "label": "Cancel boundary event",
+      "description": "Attached cancel boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-cancel",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:CancelEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "cancel"
+    },
+    {
+      "id": "append.boundary-compensation",
+      "label": "Compensation boundary event",
+      "description": "Attached compensation boundary",
+      "group": "Boundary Events",
+      "className": "bpmn-icon-intermediate-event-catch-compensation",
+      "type": "bpmn:BoundaryEvent",
+      "eventDefinitionType": "bpmn:CompensateEventDefinition",
+      "localName": "boundaryEvent",
+      "eventDefinition": "compensate"
+    }
+  ]
+}

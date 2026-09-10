@@ -181,8 +181,81 @@ public sealed class TimerBoundaryExecutionTests : E2ETestBase
         var after = await EventuallyAsync(api, instanceId,
             n => n.Contains("Finished normally"), "the process to move past the task");
 
-        // The timer never fires, because completing removed its job.
+        // #246. "Escalated is absent" with a PT30S timer and a sub-second poll is
+        // just "nothing has happened yet" -- true of any duration long enough,
+        // and true of an implementation that never removes the job at all. This
+        // docstring already said the assertion had to be on the job being GONE;
+        // it was not, so here it is.
+        Assert.Equal(0, await TimerJobCountAsync(instanceId));
+
         Assert.DoesNotContain("Escalated", after);
+    }
+
+    [Fact]
+    public async Task Deleting_an_instance_removes_its_pending_timers()
+    {
+        // #246. Claimed in TimerBoundaryEventTests' own remarks, which named this
+        // file as where it was asserted. It was not asserted anywhere. A timer job
+        // outliving the instance it belongs to fires against a process that no
+        // longer exists, and the operator who deleted the instance has no way to
+        // see it coming.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"tb_del_{Guid.NewGuid():N}"[..24];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="{{key}}" name="Deleted with a timer" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="work" />
+                <bpmn:userTask id="work" name="Long work" />
+                <bpmn:boundaryEvent id="late" name="Too late" attachedToRef="work" cancelActivity="true">
+                  <bpmn:timerEventDefinition>
+                    <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT10M</bpmn:timeDuration>
+                  </bpmn:timerEventDefinition>
+                </bpmn:boundaryEvent>
+                <bpmn:sequenceFlow id="f2" sourceRef="late" targetRef="escalated" />
+                <bpmn:userTask id="escalated" name="Escalated" />
+              </bpmn:process>
+              {{Di(key, "s", "work", "late", "escalated")}}
+            </bpmn:definitions>
+            """);
+
+        var instanceId = await StartAsync(api, key);
+        Assert.Contains("Long work", await TaskNamesAsync(api, instanceId));
+
+        // The timer exists first. Without this the assertion after the delete is
+        // satisfied by a timer that was never created -- the shape of vacuous
+        // absence this whole file was written to avoid.
+        var before = await TimerJobCountAsync(instanceId);
+        Assert.True(before > 0,
+            "The instance had no pending timer job before it was deleted, so the " +
+            "assertion below would prove nothing.");
+
+        var deleted = await api.DeleteAsync($"/api/executions/{instanceId}");
+        Assert.True(deleted.Ok, $"Deleting failed: {deleted.Status} {await deleted.TextAsync()}");
+
+        Assert.Equal(0, await TimerJobCountAsync(instanceId));
+    }
+
+    /// <summary>Pending timer jobs the engine holds for one instance.</summary>
+    private static async Task<int> TimerJobCountAsync(string processInstanceId)
+    {
+        // Read from the engine, not from Auton8: what is being asserted is that
+        // the JOB is gone, and Auton8 has no surface that would show one it had
+        // forgotten about.
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var body = await client.GetStringAsync(
+            $"service/management/timer-jobs?processInstanceId={Uri.EscapeDataString(processInstanceId)}");
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.GetProperty("total").GetInt32();
     }
 
     [Fact]

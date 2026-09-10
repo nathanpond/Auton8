@@ -576,7 +576,7 @@
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
       "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
-      "evidence": "deployed and started; per-instance element values and live-task counts observed"
+      "evidence": "deployed and started; per-instance element values and live-task counts observed. #245: the cardinality, early-completion-with-cancellation, independent assignment and result-aggregation claims are asserted in MultiInstanceExecutionTests, and the stored-to-deployed rewrite in MultiInstanceExpansionTests -- they were manual probes when this row was written, and two of them named features that did not exist yet."
     },
     {
       "name": "Multi-Instance (Sequential)",
@@ -586,7 +586,7 @@
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
       "reason": "#159: verified against 8.0.0. Parallel creates its instances concurrently (3 live user tasks) and sequential runs them one at a time (1 live task); each instance sees its own item through elementVariable; loopCardinality creates a fixed count; a completionCondition ends the set early and cancels the rest; and an EMPTY collection completes the activity immediately rather than hanging. Completion conditions go through the shared condition check.",
-      "evidence": "deployed and started; per-instance element values and live-task counts observed"
+      "evidence": "deployed and started; per-instance element values and live-task counts observed. #245: the cardinality, early-completion-with-cancellation, independent assignment and result-aggregation claims are asserted in MultiInstanceExecutionTests, and the stored-to-deployed rewrite in MultiInstanceExpansionTests -- they were manual probes when this row was written, and two of them named features that did not exist yet."
     },
     {
       "name": "Compensation Marker",
@@ -646,7 +646,7 @@
       "localName": "dataStoreReference",
       "eventDefinition": null,
       "reason": "#166: a typed process-variable declaration, like a data object, not an annotation. The condition validator counts it as a known variable, so referencing one produces no unset-variable warning. What the store POINTS AT is enriched by M6's trusted data repository; the declaration does not wait on it.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Data Input",
@@ -656,7 +656,7 @@
       "localName": "dataInput",
       "eventDefinition": null,
       "reason": "#166: declares an activity's inbound variable contract and counts as a known variable for the condition validator.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Data Output",
@@ -666,7 +666,7 @@
       "localName": "dataOutput",
       "eventDefinition": null,
       "reason": "#166: declares an activity's outbound variable contract and counts as a known variable for the condition validator.",
-      "evidence": "deployed and started; declared type observed on the process variable"
+      "evidence": "deployed and started; creates NO runtime process variable (#255 -- re-probed against 8.0.0: a process carrying a dataStoreReference, an ioSpecification dataInput and a dataOutput alongside a dataObject reported exactly one variable, the data object's). It is a design-time declaration: the condition validator counts it as a known variable so a condition naming it is not flagged as a typo."
     },
     {
       "name": "Text Annotation",
