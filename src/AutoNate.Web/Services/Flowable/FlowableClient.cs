@@ -1523,6 +1523,84 @@ public sealed class FlowableClient(
         await EnsureSuccessAsync(response, $"signal execution '{executionId}'");
     }
 
+    // #243. Whether a signal NAME is global in a given deployed definition.
+    //
+    // An external signal arrives from outside every instance, so it may only wake
+    // catch events whose signal is global. An instance-scoped signal exists to be
+    // raised from within its own run; waking one from the bus is the exact
+    // cross-instance leak #156 set out to prevent, and the dispatcher was doing
+    // it for every subscriber.
+    //
+    // Cached per definition, which is immutable once deployed.
+    public async Task<bool> IsSignalGlobalAsync(
+        string processDefinitionId, string signalName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processDefinitionId) || string.IsNullOrWhiteSpace(signalName))
+        {
+            // Nothing to judge on. Treating it as global preserves the previous
+            // behaviour rather than silently dropping a signal.
+            return true;
+        }
+
+        var cacheKey = $"autonate:signal-scope:{processDefinitionId}:{signalName}";
+        if (_cache.TryGetValue<bool>(cacheKey, out var cached)) return cached;
+
+        using var response = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId)}/resourcedata",
+            cancellationToken);
+        if (!response.IsSuccessStatusCode) return true;
+
+        var isGlobal = true;
+        try
+        {
+            var document = XDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var signal = document.Descendants(BpmnNamespace + "signal")
+                .FirstOrDefault(element => element.Attribute("name")?.Value == signalName);
+
+            // flowable:scope="processInstance" is what ApplySignalScopes writes
+            // for an instance-scoped signal; anything else (including absent) is
+            // global.
+            var scope = signal?.Attribute(XNamespace.Get("http://flowable.org/bpmn") + "scope")?.Value;
+            isGlobal = !string.Equals(scope, "processInstance", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (System.Xml.XmlException)
+        {
+            // Unreadable definition: do not silently swallow the signal.
+        }
+
+        _cache.Set(cacheKey, isGlobal, TimeSpan.FromHours(1));
+        return isGlobal;
+    }
+
+    /// <summary>
+    /// Executions waiting on a signal, paired with the definition they run (#243).
+    /// </summary>
+    public async Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+        ListExecutionsAwaitingSignalWithDefinitionAsync(
+            string signalName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(signalName))
+        {
+            return Array.Empty<(string, string)>();
+        }
+
+        using var response = await _httpClient.GetAsync(
+            $"service/runtime/executions?signalEventSubscriptionName={Uri.EscapeDataString(signalName)}",
+            cancellationToken);
+        await EnsureSuccessAsync(response, $"list executions waiting on '{signalName}'");
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<(string, string)>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => (item.Id!, item.ProcessDefinitionId ?? string.Empty))
+            .ToArray();
+    }
+
     public async Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
         CancellationToken cancellationToken = default)
@@ -2128,6 +2206,10 @@ public sealed class FlowableClient(
     private sealed class FlowableExecutionResponse
     {
         public string? Id { get; init; }
+
+        // #243. Needed to look up the signal's declared scope in the definition
+        // this execution is running.
+        public string? ProcessDefinitionId { get; init; }
     }
 
     private sealed class FlowableHistoricProcessInstanceResponse

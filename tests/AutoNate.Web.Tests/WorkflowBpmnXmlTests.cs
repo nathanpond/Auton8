@@ -6,6 +6,256 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // ── #244: a scoped catch must not narrow a signal start sharing its signal ──
+
+    [Fact]
+    public void ExpandForDeployment_DoesNotScopeASignalAStartEventAlsoUses()
+    {
+        // A signal start event declares no scope, so it is skipped — and the
+        // scoped catch used to write flowable:scope onto the SHARED root under
+        // it. A processInstance-scoped signal cannot start a new instance from an
+        // external event, so that silently changed what a deployed process does.
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="record.created" flowable:topic="record.events" />
+              <bpmn:process id="both" name="Both" isExecutable="true">
+                <bpmn:startEvent id="s"><bpmn:signalEventDefinition signalRef="Sig_1" /></bpmn:startEvent>
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="wait" />
+                <bpmn:intermediateCatchEvent id="wait">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="instance" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateCatchEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var startRef = document.Descendants(Bpmn218 + "startEvent").Single()
+            .Element(Bpmn218 + "signalEventDefinition")!.Attribute("signalRef")!.Value;
+        var startSignal = document.Descendants(Bpmn218 + "signal")
+            .Single(sig => sig.Attribute("id")?.Value == startRef);
+
+        // The start event's signal stays unscoped — it must still be startable
+        // from outside.
+        Assert.Null(startSignal.Attribute(flowable + "scope"));
+        Assert.Equal("record.events", startSignal.Attribute(flowable + "topic")?.Value);
+
+        // ...and the catch event still gets its instance scope, on its own copy.
+        var catchRef = document.Descendants(Bpmn218 + "intermediateCatchEvent").Single()
+            .Element(Bpmn218 + "signalEventDefinition")!.Attribute("signalRef")!.Value;
+        var catchSignal = document.Descendants(Bpmn218 + "signal")
+            .Single(sig => sig.Attribute("id")?.Value == catchRef);
+
+        Assert.Equal("processInstance", catchSignal.Attribute(flowable + "scope")?.Value);
+        Assert.NotEqual(startRef, catchRef);
+        Assert.Equal("record.created", catchSignal.Attribute("name")?.Value);
+    }
+
+    // ── #242: errors match by CODE, not by the id of their <bpmn:error> root ──
+
+    private static string TwoErrorRoots(string boundaryRef) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:error id="Err_A" errorCode="E_SAME" name="Same" />
+          <bpmn:error id="Err_B" errorCode="E_SAME" name="Same" />
+          <bpmn:error id="Err_C" errorCode="E_OTHER" name="Other" />
+          <bpmn:process id="dup" name="Dup" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+            <bpmn:subProcess id="sub" name="Inner">
+              <bpmn:startEvent id="ss" />
+              <bpmn:sequenceFlow id="sf" sourceRef="ss" targetRef="boom" />
+              <bpmn:endEvent id="boom" name="Give up">
+                <bpmn:errorEventDefinition errorRef="Err_A" />
+              </bpmn:endEvent>
+            </bpmn:subProcess>
+            <bpmn:boundaryEvent id="catch" attachedToRef="sub">
+              <bpmn:errorEventDefinition errorRef="{boundaryRef}" />
+            </bpmn:boundaryEvent>
+            <bpmn:sequenceFlow id="f1" sourceRef="catch" targetRef="handled" />
+            <bpmn:userTask id="handled" name="Handled" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ValidateProcess_MatchesErrorsByCodeAcrossDifferentErrorRoots()
+    {
+        // Err_A and Err_B are different roots carrying the SAME errorCode.
+        // BPMN and Flowable match on the code, so this diagram runs correctly and
+        // must publish. Comparing ref ids refused it.
+        Assert.DoesNotContain(WorkflowBpmnXml.ValidateProcess(TwoErrorRoots("Err_B")).Errors, e =>
+            e.Contains("Give up", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_StillRefusesAThrownCodeNothingCatches()
+    {
+        // The complement: resolving to codes must not make everything match.
+        // Err_C is a genuinely different code and must still be refused.
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(TwoErrorRoots("Err_C")).Errors,
+            e => e.Contains("Give up", StringComparison.Ordinal));
+
+        // And the message quotes the CODE the author typed, not the ref id.
+        Assert.Contains("E_SAME", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("Err_A", error, StringComparison.Ordinal);
+    }
+
+    // ── #239: a route flow's own condition can defeat the route contract ─────
+
+    private static string GatewayWithRouteCondition(string? conditionOnFa) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="router" name="Router" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Choose" default="fd"
+                                 autonate:routeScript="return 'fa';" />
+            <bpmn:sequenceFlow id="fa" name="Approve" sourceRef="cg" targetRef="ta">
+              {conditionOnFa}
+            </bpmn:sequenceFlow>
+            <bpmn:sequenceFlow id="fd" sourceRef="cg" targetRef="td" />
+            <bpmn:userTask id="ta" name="Route A" />
+            <bpmn:userTask id="td" name="Default" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ValidateProcess_RefusesAnAuthorConditionOnAComplexGatewaysRoute()
+    {
+        // Without this the contract accepts 'fa', the author's own condition is
+        // false, and the engine quietly takes the default. Nothing fails, nothing
+        // is logged, and the process went somewhere the script did not choose.
+        var result = WorkflowBpmnXml.ValidateProcess(GatewayWithRouteCondition(
+            "<bpmn:conditionExpression xsi:type=\"bpmn:tFormalExpression\">${1 == 2}</bpmn:conditionExpression>"));
+
+        var error = Assert.Single(result.Errors, e => e.Contains("Approve", StringComparison.Ordinal));
+        Assert.Contains("Choose", error, StringComparison.Ordinal);
+        // The message has to name the way out, or an author is stuck with a
+        // diagram and a prohibition.
+        Assert.Contains("exclusive gateway", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsAComplexGatewayWhoseRoutesCarryNoConditions()
+    {
+        // The complement: the ordinary shape must still publish. A rule that
+        // refused every complex gateway would satisfy the test above and remove
+        // the feature.
+        Assert.DoesNotContain(WorkflowBpmnXml.ValidateProcess(GatewayWithRouteCondition("")).Errors, e =>
+            e.Contains("has its own condition", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_LeavesTheDefaultFlowFreeToCarryNoCondition()
+    {
+        // The default flow is excluded from the routes offered to the script, so
+        // it is not part of this reconciliation — and BPMN forbids a condition on
+        // it anyway. Pinned so a later tightening does not start refusing it.
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(
+            GatewayWithRouteCondition("")));
+
+        Assert.Equal("fa", document.Descendants(Bpmn218 + "scriptTask").Single()
+            .Attribute(Flowable218 + "autonateAllowedRoutes")?.Value);
+    }
+
+    // ── #240: an association is not necessarily a compensation association ────
+
+    [Fact]
+    public void ValidateProcess_DoesNotTreatAnAnnotatedUserTaskAsACompensationHandler()
+    {
+        // The rule collected every association's target, and bpmn-js uses an
+        // association to attach a TEXT ANNOTATION. So annotating an ordinary user
+        // task made the whole diagram unpublishable — and, since prepare's errors
+        // also block save, unsaveable.
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="annotated" name="Annotated" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+                <bpmn:userTask id="t" name="Approve the invoice" />
+                <bpmn:textAnnotation id="note"><bpmn:text>Check the totals</bpmn:text></bpmn:textAnnotation>
+                <bpmn:association id="a1" sourceRef="note" targetRef="t" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.DoesNotContain(WorkflowBpmnXml.ValidateProcess(xml).Errors, e =>
+            e.Contains("compensation handler", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_StillRefusesAWaitingHandlerOnARealCompensationAssociation()
+    {
+        // The complement of the fix: narrowing to compensation boundary events
+        // must not disarm the rule. Flowable fails its own transaction on a
+        // waiting handler, so this refusal has to survive.
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="undo" name="Undo" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+                <bpmn:userTask id="t1" name="Take payment" />
+                <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+                  <bpmn:compensateEventDefinition />
+                </bpmn:boundaryEvent>
+                <bpmn:userTask id="h1" name="Refund" isForCompensation="true" />
+                <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Contains(WorkflowBpmnXml.ValidateProcess(xml).Errors, e =>
+            e.Contains("Refund", StringComparison.Ordinal)
+            && e.Contains("waits", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("subProcess")]
+    [InlineData("callActivity")]
+    public void ValidateProcess_RefusesAContainerHandlerBecauseItCanWaitToo(string localName)
+    {
+        // The pair userTask/receiveTask was too narrow the other way: a
+        // subprocess or call activity handler can contain a user task, so it
+        // waits and hits the same engine crash.
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="undo" name="Undo" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+                <bpmn:userTask id="t1" name="Take payment" />
+                <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+                  <bpmn:compensateEventDefinition />
+                </bpmn:boundaryEvent>
+                <bpmn:{localName} id="h1" name="Undo it" isForCompensation="true" />
+                <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Contains(WorkflowBpmnXml.ValidateProcess(xml).Errors, e =>
+            e.Contains("Undo it", StringComparison.Ordinal));
+    }
+
     // ── #166: what a child declares, for a parent's mapping UI ───────────────
 
     private const string DeclaringChild = """
@@ -2803,7 +3053,7 @@ public sealed class WorkflowBpmnXmlTests
     {
         var errors = WorkflowBpmnXml.ValidateExecutableProcess(ErrorDiagram(boundaryCode: "Err_Other"));
 
-        Assert.Contains(errors, e => e.Contains("raises 'Err_Known'", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("raises 'E_KNOWN'", StringComparison.Ordinal));
         Assert.Contains(errors, e => e.Contains("nothing in", StringComparison.Ordinal));
     }
 

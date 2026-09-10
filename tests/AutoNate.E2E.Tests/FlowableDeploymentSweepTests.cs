@@ -68,7 +68,10 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
 
     private static async Task<string?> FindIdAsync(HttpClient client, string name)
     {
-        using var response = await client.GetAsync("service/repository/deployments?size=1000");
+        // Newest first: the shared engine holds more deployments than one page,
+        // so an unsorted query silently misses a deployment made seconds ago.
+        using var response = await client.GetAsync(
+            "service/repository/deployments?size=1000&sort=deployTime&order=desc");
         using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         foreach (var element in document.RootElement.GetProperty("data").EnumerateArray())
         {
@@ -86,5 +89,34 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         {
             using var _ = await client.DeleteAsync($"service/repository/deployments/{id}?cascade=true");
         }
+    }
+
+    // #257. The original test deployed an `e2e-…` fixture DIRECTLY, so
+    // `Assert.True(deleted > 0)` only ever saw its own plant — the sweep could
+    // remove nothing the suite actually produces and stay green. This one uses a
+    // realistically-named deployment, which is what exposed the defect.
+    [Fact]
+    public async Task The_sweep_removes_a_realistically_named_orphan_not_just_its_own_fixture()
+    {
+        using var client = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        // Named the way FlowableClient names a published model: "{processKey}.bpmn20.xml",
+        // with a short generated key exactly like the suite's own.
+        var key = $"cgx{Guid.NewGuid():N}"[..20];
+        await DeployAsync(client, key);
+
+        Assert.True(await ExistsAsync(client, key),
+            "the fixture did not deploy, so the sweep assertion below would be vacuous");
+
+        // Fresh, so the age rule must NOT take it — a sweep that deleted a live
+        // run's deployments mid-suite would be worse than one that leaks.
+        await FlowableDeploymentSweep.SweepAsync(client);
+        Assert.True(await ExistsAsync(client, key),
+            "the sweep removed a deployment made moments ago");
+
+        await DeleteByNameAsync(client, key);
     }
 }

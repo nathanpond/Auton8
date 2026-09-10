@@ -113,12 +113,19 @@ public sealed class WorkflowSignalDispatcher(
             }
         }
 
-        // Wake any waiting intermediate-catch executions on this signal.
-        IReadOnlyList<string> waitingExecutionIds;
+        // Wake any waiting intermediate-catch executions on this signal — but
+        // only the GLOBAL ones.
+        //
+        // #243. An external signal arrives from outside every instance, so an
+        // instance-scoped catch event is not its audience: that signal exists to
+        // be raised from within its own run. Waking one from the bus woke it in
+        // every running instance, which is the cross-instance leak #156 exists to
+        // prevent, arriving by the one path #156 never covered.
+        IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)> waiting;
         try
         {
-            waitingExecutionIds = await _flowableClient
-                .ListExecutionsBySignalSubscriptionAsync(eventType);
+            waiting = await _flowableClient
+                .ListExecutionsAwaitingSignalWithDefinitionAsync(eventType);
         }
         catch (Exception exception)
         {
@@ -129,10 +136,19 @@ public sealed class WorkflowSignalDispatcher(
             return;
         }
 
-        foreach (var executionId in waitingExecutionIds)
+        foreach (var (executionId, processDefinitionId) in waiting)
         {
             try
             {
+                if (!await _flowableClient.IsSignalGlobalAsync(processDefinitionId, eventType))
+                {
+                    _logger.LogDebug(
+                        "Signal '{SignalName}' is instance-scoped in definition {DefinitionId}; "
+                            + "execution {ExecutionId} was not woken by the external event.",
+                        eventType, processDefinitionId, executionId);
+                    continue;
+                }
+
                 await _flowableClient.SignalExecutionAsync(
                     executionId,
                     new Dictionary<string, object?> { ["eventData"] = message.Payload });

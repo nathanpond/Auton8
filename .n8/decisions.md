@@ -4091,3 +4091,46 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   connection. `FlowableRoleIsolationTests` names `AutoNate` too but already skips
   when it is absent, so it needed nothing.
   **Issue:** #214, #236
+
+- **Verification fix pass, batch 1 (#239, #240, #242, #243, #244, #247, #257, #258).**
+  Every one of these was found by the fresh-context verifiers, not by me, and each
+  is a defect I shipped.
+  **#240 — a text annotation on a user task blocked publish.** The compensation
+  rule collected every `<association>` target, and bpmn-js uses an association to
+  attach an annotation. Narrowed to associations whose SOURCE is a compensation
+  boundary event; the wait-state set also widened to `subProcess`/`callActivity`/
+  `adHocSubProcess`, which the verifier pointed out can wait too.
+  **#239 — an author condition on a route flow silently defeated the route
+  contract.** `allowedRoutes` and "flows the result can actually select" were not
+  the same set: the contract accepted `'fa'` while `${1 == 2}` sent the token to
+  the default. Refused at publish now, naming the gateway, the route and the way
+  out. This also reopens #218's default-flow departure, whose reasoning assumed
+  those two sets agreed.
+  **#242 — publish refused valid diagrams.** The uncaught-code rule compared
+  `errorRef` element IDS; BPMN matches on `errorCode`. Two roots sharing a code
+  read as non-matching. Resolved to codes on both sides, and the message now
+  quotes the code the author typed rather than a ref id.
+  **#247 — every promoted-rule error was emitted twice**, because
+  `ValidateProcess` called `BuildStructureErrors` AND the three rules it already
+  contains. My own new test caught it.
+  **#244 — a scoped catch narrowed a signal START event's shared signal.** The
+  start declares no scope, so it was skipped and never registered; the catch then
+  mutated the shared root. A pre-pass now records names with undeclared users so
+  the scoped event gets its own copy.
+  **#243 — external signals bypassed scope entirely.** The Dapr dispatcher woke
+  every subscriber by name. It now asks the deployed definition whether the signal
+  is global and skips instance-scoped ones — the leak #156 existed to prevent,
+  arriving by the one path #156 never covered.
+  **#257 — the Flowable sweep matched `e2e-`, which nothing produces.** Deployments
+  are named from the process key (`adh…`, `cgx…`). Age is the only honest signal
+  available, so it sweeps orphans older than three hours, oldest first. **The
+  engine went from 1,306 deployments to 131.** Its test also stopped planting its
+  own `e2e-` fixture, which is what made the defect invisible.
+  **#258 — the flake #215 "fixed" still reproduced.** The blanket
+  `catch (PostgresException) { return 0; }` fired under load, so the sweep gave up
+  having examined nothing. Now: one retry, then count the database as unreadable —
+  and, the real fix, the role sweep no longer scans suite-owned databases at all. A
+  `plg_*` schema inside an ephemeral `autonate_test_*` database is not evidence a
+  role is in use, and skipping them turned ~210 connections into ~6. Cleared 210
+  leaked test databases while confirming it.
+  **Issue:** #239, #240, #242, #243, #244, #247, #257, #258

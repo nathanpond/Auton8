@@ -25,20 +25,55 @@ internal static class FlowableDeploymentSweep
 {
     private const string SuitePrefix = "e2e-";
 
+    // #257. The prefix above matched NOTHING the suite actually produces.
+    //
+    // A deployment is named after the model's process key
+    // (`FlowableClient.cs:51` -> "{ProcessKey}.bpmn20.xml"), and every E2E
+    // process key is a short generated stem — `adh…`, `cgx…`, `mc…`, `rp_on_…`.
+    // Underscore, not hyphen, and never "e2e-". So the sweep removed nothing for
+    // the whole of M4 while its one test stayed green, because that test
+    // deployed its own `e2e-…` fixture directly instead of going through the
+    // publish path the suite uses. The engine reached 1,306 deployments.
+    //
+    // Age is the honest signal, and the only one available: the suite drops its
+    // database every run, so anything it deployed is orphaned by definition, and
+    // an orphan cannot be told apart from a developer's work by NAME without the
+    // guessing #214 was careful to avoid. A generous cutoff keeps a developer's
+    // current session safe; the deployment they made three hours ago on the test
+    // engine is not something this suite can preserve and also do its job.
+    private static readonly TimeSpan OrphanAge = TimeSpan.FromHours(3);
+
     internal static async Task<int> SweepAsync(HttpClient client)
     {
+        var cutoff = DateTimeOffset.UtcNow - OrphanAge;
         List<(string Id, string Name)> deployments;
         try
         {
-            using var response = await client.GetAsync("service/repository/deployments?size=1000");
+            // Oldest first, so a backlog larger than one page is drained from the
+            // end that matters. The engine reached 1,306 deployments while this
+            // swept nothing; a single unsorted page would keep missing the
+            // oldest ones even once the matching is fixed.
+            using var response = await client.GetAsync(
+                "service/repository/deployments?size=1000&sort=deployTime&order=asc");
             if (!response.IsSuccessStatusCode) return 0;
 
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             deployments = document.RootElement.GetProperty("data").EnumerateArray()
                 .Select(element => (
                     Id: element.GetProperty("id").GetString() ?? string.Empty,
-                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty))
-                .Where(deployment => deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
+                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
+                    DeployedAt: element.TryGetProperty("deploymentTime", out var time)
+                                && time.ValueKind == JsonValueKind.String
+                                && DateTimeOffset.TryParse(time.GetString(), out var parsed)
+                        ? parsed
+                        : (DateTimeOffset?)null))
+                // The legacy prefix at any age, plus anything old enough to be an
+                // orphan. A deployment with no timestamp is left alone rather than
+                // guessed at.
+                .Where(deployment =>
+                    deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal)
+                    || (deployment.DeployedAt is { } at && at < cutoff))
+                .Select(deployment => (deployment.Id, deployment.Name))
                 .ToList();
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException)

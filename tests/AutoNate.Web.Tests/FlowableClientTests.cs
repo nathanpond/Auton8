@@ -1397,4 +1397,30 @@ public sealed class FlowableClientTests
             NullLogger<FlowableClient>.Instance);
         return (client, stub);
     }
+
+    // ── #243: an external signal only wakes GLOBAL catch events ──────────────
+
+    [Fact]
+    public async Task IsSignalGlobalAsync_ReadsTheScopeFromTheDeployedDefinition()
+    {
+        var (client, stub) = CreateClient();
+        // When(), not WhenJson() — the latter serialises the payload as JSON, so
+        // the XML would arrive quoted and the parse would throw.
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/def-1/resourcedata",
+            _ => StubHttpMessageHandler.TextResponse("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn">
+              <bpmn:signal id="Sig_G" name="global.one" />
+              <bpmn:signal id="Sig_I" name="scoped.one" flowable:scope="processInstance" />
+            </bpmn:definitions>
+            """, mediaType: "application/xml"));
+
+        Assert.True(await client.IsSignalGlobalAsync("def-1", "global.one"));
+        Assert.False(await client.IsSignalGlobalAsync("def-1", "scoped.one"));
+
+        // A name the definition does not declare is treated as global: an
+        // external signal must not be silently swallowed because a lookup missed.
+        Assert.True(await client.IsSignalGlobalAsync("def-1", "not.declared"));
+    }
 }

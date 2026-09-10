@@ -141,6 +141,27 @@ internal sealed class StubFlowableClient : IFlowableClient
     // #163
     public List<AdhocSubProcessState> AdhocSubProcesses { get; } = [];
 
+    // #243. Settable so a test can make a signal instance-scoped; global by
+    // default, which is what every existing test assumes.
+    public HashSet<string> InstanceScopedSignals { get; } = new(StringComparer.Ordinal);
+
+    public Task<bool> IsSignalGlobalAsync(
+        string processDefinitionId, string signalName, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"SignalScope:{processDefinitionId}:{signalName}");
+        return Task.FromResult(!InstanceScopedSignals.Contains(signalName));
+    }
+
+    public List<(string ExecutionId, string ProcessDefinitionId)> AwaitingSignalExecutions { get; } = [];
+
+    public Task<IReadOnlyList<(string ExecutionId, string ProcessDefinitionId)>>
+        ListExecutionsAwaitingSignalWithDefinitionAsync(
+            string signalName, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AwaitingSignal:{signalName}");
+        return Task.FromResult<IReadOnlyList<(string, string)>>(AwaitingSignalExecutions);
+    }
+
     public Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
