@@ -324,11 +324,21 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
     /// all three attempts return 'nowhere' and produce the same dead letter.
     /// </para>
     /// <para>
-    /// Making only the contract breach terminal — while a genuinely transient
-    /// sandbox failure keeps its retries — needs a mechanism this test cannot
-    /// choose on its own; it is the open question on #283. What this test does is
-    /// stop the behaviour being invisible: it PINS the attempt count, so whatever
-    /// the answer turns out to be, changing it is a change somebody sees.
+    /// <b>Resolved on the owner's decision (#283, 2026-09-10): the criterion was
+    /// reworded, not the code.</b> #218's AC now reads "a <b>bounded</b> failure
+    /// that lands in dead-letter" rather than "terminal", because the hazard it
+    /// was written against — a retry-loop forever — does not happen. The failure
+    /// is bounded, the script re-runs against unchanged inputs and fails
+    /// identically, nothing is corrupted, and #239's prevention design makes a
+    /// contract breach an author bug met during development. Distinguishing it
+    /// from a genuinely transient sandbox failure would need
+    /// <c>AsyncRunnableExecutionExceptionHandler</c> — new engine infrastructure
+    /// for a 35-second wait.
+    /// </para>
+    /// <para>
+    /// So this test is the record of what "bounded" means. If the count ever
+    /// changes, in either direction, that is a change somebody sees rather than
+    /// one nobody notices.
     /// </para>
     /// </remarks>
     [Fact]
@@ -354,10 +364,13 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         // different claims #283 is about. Today this is 2 -> 1 -> 0: three
         // attempts, Flowable's default for an async job.
         Assert.True(attempts is >= 1 and <= 3,
-            $"Observed {attempts} retry values before the dead letter. If this has " +
-            "gone UP, a deterministic author error is being retried more; if it has " +
-            "gone DOWN to 1, #283 has been fixed and this assertion should be " +
-            "tightened to exactly 1 rather than loosened.");
+            $"Observed {attempts} retry values before the dead letter, where #218's " +
+            "criterion promises a bounded failure and Flowable's async default is " +
+            "three attempts. Gone UP: a deterministic author error is being retried " +
+            "more, and the bound in the criterion no longer describes it. Gone DOWN " +
+            "to 1: somebody made it terminal after all — good, and this assertion " +
+            "should be TIGHTENED to exactly 1 and #218's criterion reworded back, " +
+            "never loosened to accommodate the change.");
     }
 
     /// <summary>How many distinct retry counts the routing job passes through.</summary>
