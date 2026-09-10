@@ -269,6 +269,121 @@ public sealed class BpmnPaletteManifestTests
         Assert.Contains("studioStatusOf(entry) === \"supported\"", provider, StringComparison.Ordinal);
     }
 
+    // ── #264: the menu filter's deny keys must match something ──────────────
+
+    private static string BundlePath => Path.Combine(
+        RepoRoot.Path, "src", "AutoNate.Spa", "public", "vendor", "bpmn-js",
+        "bpmn-modeler.development.js");
+
+    /// <summary>Every icon class the menu filter denies, from the same source it uses.</summary>
+    private static IReadOnlyList<(string EntryId, string ClassName)> DenyKeys()
+    {
+        using var document = PaletteDocument();
+        var manifest = Manifest().ToDictionary(
+            element => Key(element.LocalName, element.EventDefinition),
+            element => element.Studio, StringComparer.Ordinal);
+
+        var keys = new List<(string, string)>();
+        foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray())
+        {
+            var key = Key(
+                entry.GetProperty("localName").GetString()!,
+                entry.GetProperty("eventDefinition").GetString());
+            if (manifest.GetValueOrDefault(key) == "supported") continue;
+
+            var id = entry.GetProperty("id").GetString()!;
+            if (entry.TryGetProperty("className", out var c) && c.GetString() is { Length: > 0 } cls)
+            {
+                keys.Add((id, cls));
+            }
+
+            if (entry.TryGetProperty("menuClassNames", out var extra))
+            {
+                foreach (var name in extra.EnumerateArray())
+                {
+                    keys.Add((id, name.GetString()!));
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    [Fact]
+    public void Every_denied_icon_class_actually_occurs_in_the_vendored_bundle()
+    {
+        // This is the defect #264 was reopened for, made mechanical.
+        //
+        // `WITHHELD_ICON_CLASSES` is built from the catalog's own className
+        // values, and three of them were names bpmn-js never emits —
+        // `bpmn-icon-business-rule-task` occurs ZERO times in the bundle, where
+        // bpmn-js uses `bpmn-icon-business-rule`. A deny key that matches nothing
+        // removes nothing, silently, so Business Rule Task stayed one click from
+        // an author on every menu and publish then refused it.
+        //
+        // A key is only a guard if it names something real.
+        var bundle = File.ReadAllText(BundlePath);
+        var keys = DenyKeys();
+
+        Assert.NotEmpty(keys);
+
+        // Per ELEMENT, not per key. The palette's own `className` is the class it
+        // renders with and need not be one bpmn-js uses; what must hold is that
+        // each withheld element has at least ONE key the bundle really emits,
+        // because that is what removes it from the menus.
+        var unmatched = keys
+            .GroupBy(key => key.EntryId, StringComparer.Ordinal)
+            .Where(group => !group.Any(key =>
+                bundle.Contains($"\"{key.ClassName}\"", StringComparison.Ordinal)))
+            .Select(group => $"{group.Key} -> tried {string.Join(", ", group.Select(k => k.ClassName))}")
+            .ToList();
+
+        Assert.True(
+            unmatched.Count == 0,
+            "Withheld elements whose every deny key is absent from the vendored " +
+            $"bpmn-js bundle, so nothing removes them:{Environment.NewLine}  " +
+            string.Join(Environment.NewLine + "  ", unmatched));
+    }
+
+    [Fact]
+    public void The_filter_covers_every_element_menu_the_bundle_registers()
+    {
+        // #264 shipped covering two of three menus. `bpmn-append` — the context
+        // pad's "Append element", fed by the same option table as the Create
+        // popup — was missed, so the withheld elements stayed reachable there.
+        //
+        // Reading the menu ids out of the bundle means a fourth one appearing in
+        // a future bpmn-js fails here instead of quietly opening a fourth door.
+        var bundle = File.ReadAllText(BundlePath);
+        var provider = File.ReadAllText(ProviderPath);
+
+        var registered = System.Text.RegularExpressions.Regex
+            .Matches(bundle, @"registerProvider\(""(?<id>[a-z-]+)""")
+            .Select(match => match.Groups["id"].Value)
+            .Distinct(StringComparer.Ordinal)
+            // Not an element menu — it aligns selected shapes.
+            .Where(id => id != "align-elements")
+            .ToList();
+
+        Assert.NotEmpty(registered);
+
+        var uncovered = registered
+            .Where(id => !provider.Contains($"\"{id}\"", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.True(
+            uncovered.Count == 0,
+            "Popup menus the bundle registers that the manifest filter does not " +
+            $"cover, so withdrawn elements remain reachable there: {string.Join(", ", uncovered)}");
+    }
+
+    [Fact]
+    public void The_modeler_registers_the_menu_filter()
+    {
+        var modeler = File.ReadAllText(ModelerPath);
+        Assert.Contains("createManifestMenuFilter", modeler, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_modeler_registers_the_manifest_palette_provider()
     {

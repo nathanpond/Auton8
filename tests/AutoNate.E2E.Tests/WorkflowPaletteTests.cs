@@ -191,6 +191,107 @@ public sealed class WorkflowPaletteTests : E2ETestBase
     }
 
     [Theory]
+    [InlineData("create", "Create element")]
+    [InlineData("replace", "replace menu")]
+    [InlineData("append", "Append element")]
+    public async Task No_popup_offers_an_element_the_manifest_withholds(string surface, string what)
+    {
+        // #264, second pass. The check this issue asked for the first time and
+        // did not get.
+        //
+        // Deriving the palette from the manifest was necessary and not
+        // sufficient: the vendored bundle appends `create-append-anything` AFTER
+        // additionalModules and registers under DIFFERENT DI names, so its
+        // Create-element popup, the replace menu and the context pad's Append
+        // button each kept offering Transaction, Cancel End and Business Rule
+        // Task — the last of which publish then refuses.
+        //
+        // The first fix filtered two of those three surfaces with deny keys, and
+        // three of the keys were classNames bpmn-js never emits. Both defects
+        // were invisible to a test that reads JSON. This one opens the popup.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = await OpenStudioAsync(session, $"popup-{surface}");
+
+        // Open the surface under test.
+        if (surface == "create")
+        {
+            await page.Locator(".djs-palette .entry[data-action='create']").ClickAsync();
+        }
+        else
+        {
+            await page.Locator("[data-element-id='start']").ClickAsync();
+            var pad = surface == "replace"
+                ? ".djs-context-pad .entry[data-action='replace']"
+                : ".djs-context-pad .entry[data-action='append']";
+            await page.Locator(pad).ClickAsync();
+        }
+
+        var popup = page.Locator(".djs-popup");
+        await Assertions.Expect(popup).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Every bpmn-icon-* class anywhere inside the popup, however bpmn-js
+        // happens to nest its entries. Reading a narrower selector risked
+        // finding nothing and passing every absence assertion for free — which
+        // is what the count check below exists to catch, and did.
+        var classes = await popup.EvaluateAllAsync<string[]>(
+            """
+            nodes => nodes.flatMap(root =>
+              Array.from(root.querySelectorAll('*'))
+                .flatMap(e => Array.from(e.classList))
+                .filter(c => c.startsWith('bpmn-icon-')))
+            """);
+
+        // The popup rendered something, else every absence assertion below is
+        // satisfied by an empty list.
+        Assert.True(classes.Length > 0, $"The {what} popup rendered no entries at all.");
+
+        var (_, withheld) = PartitionCatalog();
+        Assert.NotEmpty(withheld);
+
+        var offered = WithheldMenuClasses().Where(classes.Contains).ToList();
+        Assert.True(
+            offered.Count == 0,
+            $"The {what} popup offers elements the manifest withholds — an author " +
+            $"can place what publish refuses: {string.Join(", ", offered)}");
+    }
+
+    /// <summary>Every bpmn-js icon class belonging to a withheld element.</summary>
+    private static IReadOnlyList<string> WithheldMenuClasses()
+    {
+        var root = RepoRoot();
+        using var manifest = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(root.FullName, "src", "shared", "bpmn-support.json")));
+        var supported = manifest.RootElement.GetProperty("elements").EnumerateArray()
+            .Where(e => e.GetProperty("studio").GetString() == "supported")
+            .Select(e => Key(e.GetProperty("localName").GetString()!,
+                             e.GetProperty("eventDefinition").GetString()))
+            .ToHashSet(StringComparer.Ordinal);
+
+        using var catalog = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(root.FullName, "src", "shared", "bpmn-palette.json")));
+
+        var classes = new List<string>();
+        foreach (var entry in catalog.RootElement.GetProperty("entries").EnumerateArray())
+        {
+            var key = Key(entry.GetProperty("localName").GetString()!,
+                          entry.GetProperty("eventDefinition").GetString());
+            if (supported.Contains(key)) continue;
+
+            if (entry.TryGetProperty("className", out var c) && c.GetString() is { Length: > 0 } cls)
+            {
+                classes.Add(cls);
+            }
+
+            if (entry.TryGetProperty("menuClassNames", out var extra))
+            {
+                classes.AddRange(extra.EnumerateArray().Select(n => n.GetString()!));
+            }
+        }
+
+        return classes;
+    }
+
+    [Theory]
     [InlineData("create.adhoc-sub-process", "adHocSubProcess", null)]
     [InlineData("create.intermediate-throw-compensation", "intermediateThrowEvent", "compensateEventDefinition")]
     [InlineData("create.user-task", "userTask", null)]

@@ -67,9 +67,13 @@ replace menu: `timer-boundary` and `non-interrupting-timer-boundary`, with
 `cancelActivity: true/false` in the entry attributes. Right-click the boundary event,
 use the wrench.
 
-So step 2 is nothing. Do **not** go to `BPMN_MENU_ENTRIES` — it is dead code (see
-load-bearing fact 1). Say "no palette change needed, bpmn-js already offers it" in the
-story and move on.
+So step 2 is nothing *for this element* — a boundary event is attached with the
+wrench, not dragged.
+
+**Corrected 2026-09-10 (#241).** This used to say `BPMN_MENU_ENTRIES` was dead code
+to leave alone. That constant no longer exists. For an element that IS dragged, step
+2 is a row in `src/shared/bpmn-palette.json` plus its `studio` value in
+`src/shared/bpmn-support.json` — see the skill's step 2.
 
 ## 3. Read back — a NEW helper; neither existing one works
 

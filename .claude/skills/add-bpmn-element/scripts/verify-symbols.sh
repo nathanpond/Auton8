@@ -56,10 +56,23 @@ check_symbol "ValidateProcess"               2 "$WEB/Services/Workflow/WorkflowB
 check_symbol "BpmnSupportManifest"           2 "$WEB/Services/Workflow/BpmnSupportManifest.cs"
 
 echo "Claims:"
-# BPMN_MENU_ENTRIES must stay dead — if it gains a consumer, step 2 needs rewriting.
-n=$(grep -rho "BPMN_MENU_ENTRIES" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
-[ "$n" -eq 1 ] && ok "BPMN_MENU_ENTRIES still dead (1 occurrence)" \
-  || bad "BPMN_MENU_ENTRIES" "now $n occurrences — step 2's premise has changed"
+# #241/#264. This asserted BPMN_MENU_ENTRIES stayed dead at exactly one occurrence.
+# It is gone, and the palette is derived from the manifest — so the claim to hold is
+# the opposite one: the derivation exists and nothing has reintroduced the constant.
+# Comments explaining why it was removed are fine and useful; what must not come
+# back is a declaration or a reference, so match the code shapes rather than the
+# word. (`palette.js` names it once, in the remarks recording the #241 history.)
+n=$(grep -rhoE "(const|let|var|import|from)[^\n]*BPMN_MENU_ENTRIES|BPMN_MENU_ENTRIES *[=.[]" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
+[ "$n" -eq 0 ] && ok "BPMN_MENU_ENTRIES gone (no declaration or reference)" \
+  || bad "BPMN_MENU_ENTRIES" "$n code references — the dead constant is back; step 2 assumes it is gone"
+
+n=$(grep -rho "createManifestPaletteProvider" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
+[ "$n" -ge 2 ] && ok "palette derived from the manifest ($n references)" \
+  || bad "createManifestPaletteProvider" "$n references — the derived palette is not wired"
+
+n=$(grep -rho "createManifestMenuFilter" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
+[ "$n" -ge 2 ] && ok "bpmn-js popup menus filtered ($n references)" \
+  || bad "createManifestMenuFilter" "$n references — the popup menus are unfiltered"
 
 # ValidateProcess runs at BOTH /prepare and /publish since #225. Two call sites is
 # the correct state; one means publish stopped validating and fact 4 is stale in the
@@ -86,10 +99,10 @@ else
   bad "lint ratchet" "package.json says $r; SKILL.md quotes something else"
 fi
 
-# MENU_GROUP_ORDER carries the same dead-code claim as BPMN_MENU_ENTRIES.
+# MENU_GROUP_ORDER went with it (#241); the catalog's groupOrder replaced it.
 n=$(grep -rho "MENU_GROUP_ORDER" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
-[ "$n" -eq 1 ] && ok "MENU_GROUP_ORDER still dead (1 occurrence)" \
-  || bad "MENU_GROUP_ORDER" "now $n occurrences — step 2's premise has changed"
+[ "$n" -eq 0 ] && ok "MENU_GROUP_ORDER gone (0 occurrences)" \
+  || bad "MENU_GROUP_ORDER" "$n occurrences — the dead constant is back"
 
 # The support manifest is one file with 68 entries, and both sides read it (#107).
 # Counted from the JSON rather than eyeballed, which is what the old check asked for.

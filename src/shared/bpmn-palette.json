@@ -11,7 +11,8 @@
     "eventDefinitionType": "Event definition to attach, where the type alone does not identify the element.",
     "properties": "Extra businessObject properties set at creation (isExpanded, triggeredByEvent, isForCompensation).",
     "localName": "The bpmn-support.json row's localName. The join key -- a typo here fails the drift test.",
-    "eventDefinition": "The bpmn-support.json row's eventDefinition. Null where the row has none."
+    "eventDefinition": "The bpmn-support.json row's eventDefinition. Null where the row has none.",
+    "menuClassNames": "Additional bpmn-js icon classes for the SAME element, used only by the menu filter (#264). bpmn-js names some elements differently in its own popups than the palette does -- 'bpmn-icon-business-rule' vs the palette's 'bpmn-icon-business-rule-task'. A deny key that matches nothing silently leaves the element reachable, so BpmnPaletteManifestTests asserts every key here and every withheld className actually appears in the vendored bundle."
   },
   "groupOrder": [
     "Events",
@@ -357,7 +358,10 @@
       "className": "bpmn-icon-business-rule-task",
       "type": "bpmn:BusinessRuleTask",
       "localName": "businessRuleTask",
-      "eventDefinition": null
+      "eventDefinition": null,
+      "menuClassNames": [
+        "bpmn-icon-business-rule"
+      ]
     },
     {
       "id": "create.manual-task",
@@ -367,7 +371,10 @@
       "className": "bpmn-icon-manual-task",
       "type": "bpmn:ManualTask",
       "localName": "manualTask",
-      "eventDefinition": null
+      "eventDefinition": null,
+      "menuClassNames": [
+        "bpmn-icon-manual"
+      ]
     },
     {
       "id": "create.receive-task",
@@ -507,7 +514,10 @@
       "className": "bpmn-icon-participant",
       "createFactory": "participant",
       "localName": "participant",
-      "eventDefinition": null
+      "eventDefinition": null,
+      "menuClassNames": [
+        "bpmn-icon-lane"
+      ]
     },
     {
       "id": "create.data-object",

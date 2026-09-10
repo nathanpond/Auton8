@@ -173,9 +173,26 @@ export function createManifestPaletteProvider() {
 export const WITHHELD_ICON_CLASSES = new Set(
   PALETTE_CATALOG
     .filter((entry) => studioStatusOf(entry) !== "supported")
-    .map((entry) => entry.className)
+    // #264. `className` alone was not enough: bpmn-js names some elements
+    // differently in its own popups than the palette does, so
+    // `bpmn-icon-business-rule-task` matched NOTHING in the bundle and Business
+    // Rule Task -- which publish refuses -- stayed one click away on every menu.
+    // `menuClassNames` carries the bundle's spelling beside ours, and
+    // BpmnPaletteManifestTests asserts every key here really occurs in the
+    // vendored bundle, because a deny key that matches nothing fails silently.
+    .flatMap((entry) => [entry.className, ...(entry.menuClassNames ?? [])])
     .filter(Boolean)
 );
+
+/**
+ * Every popup menu bpmn-js registers that can place or swap an element (#264).
+ *
+ * `bpmn-append` was missed the first time — the context pad's "Append element"
+ * button, fed by the same option table as the Create popup — so the withheld
+ * elements stayed reachable there. Listing all three, with a test that fails if
+ * the bundle registers a fourth.
+ */
+export const FILTERED_POPUP_MENUS = ["bpmn-replace", "bpmn-create", "bpmn-append"];
 
 /**
  * Strips withheld elements from bpmn-js's Create-element popup and replace menu.
@@ -216,7 +233,7 @@ export function createManifestMenuFilter() {
       }
     };
 
-    for (const menu of ["bpmn-replace", "bpmn-create"]) {
+    for (const menu of FILTERED_POPUP_MENUS) {
       popupMenu.registerProvider(menu, RUN_LAST, filter);
     }
   }

@@ -1623,13 +1623,18 @@ public sealed class FlowableClient(
             }
 
             // No activity id, or a definition that does not describe it: fall back
-            // to the name. Ambiguous only in the two-roots case above, and there
-            // the scoped root is the conservative answer for a catch event.
+            // to the name.
+            //
+            // #270. This used to prefer the SCOPED root when two shared a name —
+            // i.e. it failed CLOSED, declining to wake. Two things are wrong with
+            // that. Flowable refuses to deploy two roots sharing a name at all, so
+            // the case cannot arise; and failing closed contradicts every other
+            // guard on this path, which fail OPEN on the stated principle that a
+            // signal silently failing to wake a waiting process is the failure
+            // this whole path exists to end. First match, and an unresolvable one
+            // leaves isGlobal true.
             signal ??= document.Descendants(BpmnNamespace + "signal")
-                .Where(element => element.Attribute("name")?.Value == signalName)
-                .OrderBy(element => element.Attribute(
-                    XNamespace.Get("http://flowable.org/bpmn") + "scope")?.Value == "processInstance" ? 0 : 1)
-                .FirstOrDefault();
+                .FirstOrDefault(element => element.Attribute("name")?.Value == signalName);
 
             // flowable:scope="processInstance" is what ApplySignalScopes writes
             // for an instance-scoped signal; anything else (including absent) is
@@ -2002,6 +2007,18 @@ public sealed class FlowableClient(
         await EnsureSuccessAsync(response, $"start a process instance by message '{messageName}'");
 
         var created = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+
+        // #263. The same nudge StartProcessInstanceAsync does, and the asymmetry
+        // that survived the first fix: a message start event can carry variables
+        // in with it, and if one of them makes a conditional event's condition
+        // true the engine still has to be asked. Without this, a process started
+        // by message whose first wait is conditional parks forever with the
+        // condition already satisfied.
+        if (!string.IsNullOrWhiteSpace(created.Id))
+        {
+            await TryEvaluateConditionalEventsAsync(created.Id!, cancellationToken);
+        }
+
         return created.Id ?? string.Empty;
     }
 

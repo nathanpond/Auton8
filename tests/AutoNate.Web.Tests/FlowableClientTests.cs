@@ -1088,6 +1088,28 @@ public sealed class FlowableClientTests
     }
 
     [Fact]
+    public async Task StartingByMessageAsksTheEngineToReevaluateConditions()
+    {
+        // #263, second pass. StartProcessInstanceAsync nudged; the message-start
+        // path beside it did not — a one-line asymmetry that left a process
+        // started by message parked forever when its first wait was conditional
+        // and the message's own variables had already satisfied it.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Post, "service/runtime/process-instances",
+            new { id = "pi-msg" });
+        stub.WhenJson(HttpMethod.Post, "service/runtime/process-instances/pi-msg/evaluate-conditions",
+            new { });
+
+        var id = await client.StartProcessInstanceByMessageAsync("OrderPlaced",
+            new Dictionary<string, object?> { ["ready"] = true });
+
+        Assert.Equal("pi-msg", id);
+        Assert.Contains(stub.Requests, r =>
+            r.Method == HttpMethod.Post
+            && r.Url.Contains("/process-instances/pi-msg/evaluate-conditions", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AFailedConditionNudgeDoesNotFailTheDeliveryThatSucceeded()
     {
         // The complement. The delivery already happened; reporting failure for it
@@ -1508,5 +1530,106 @@ public sealed class FlowableClientTests
         // A name the definition does not declare is treated as global: an
         // external signal must not be silently swallowed because a lookup missed.
         Assert.True(await client.IsSignalGlobalAsync("def-1", "not.declared"));
+    }
+
+    // --- #243: the two fixes, against the REAL client -----------------------
+    //
+    // Both fixes shipped untested. A verifier proved it, and so did I: reverting
+    // either one to its pre-fix behaviour left the whole of FlowableClientTests
+    // and WorkflowSignalDispatcherTests at 86/86 green. The four tests added with
+    // the fix sit at the DISPATCHER level against StubFlowableClient, whose
+    // IsSignalGlobalAsync matches on signal name and ignores activityId, and
+    // whose awaiting-signal list hands back a hand-written definition id — so
+    // neither could see the client at all.
+    //
+    // These two do not use the stub client. They exercise FlowableClient itself
+    // over a stubbed HTTP handler, which is the only level at which either fix is
+    // observable.
+
+    [Fact]
+    public async Task ListExecutionsAwaitingSignal_ResolvesTheDefinitionThroughTheInstance()
+    {
+        // Flowable's execution query does NOT return processDefinitionId —
+        // measured against 8.0.0, the response carries activityId, id, parentId,
+        // parentUrl, processInstanceId, processInstanceUrl, superExecutionId,
+        // superExecutionUrl, suspended, tenantId, url. Mapping the absent field
+        // to "" fed IsSignalGlobalAsync its fail-open branch for EVERY execution,
+        // so the scope filter never once fired in production.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/executions", new
+        {
+            data = new[]
+            {
+                // Exactly the engine's shape: no processDefinitionId.
+                new { id = "exec-1", processInstanceId = "pi-1", activityId = "catchEvent" },
+                new { id = "exec-2", processInstanceId = "pi-1", activityId = "catchEvent" }
+            }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/runtime/process-instances/pi-1",
+            new { id = "pi-1", processDefinitionId = "order:3:9001" });
+
+        var waiting = await client.ListExecutionsAwaitingSignalWithDefinitionAsync("OrderPlaced");
+
+        Assert.Equal(2, waiting.Count);
+        Assert.All(waiting, w => Assert.Equal("order:3:9001", w.ProcessDefinitionId));
+        Assert.All(waiting, w => Assert.Equal("catchEvent", w.ActivityId));
+
+        // One lookup for two executions of one instance — the resolution is
+        // cached, so a busy signal does not fan out a request per subscriber.
+        Assert.Single(stub.Requests, r =>
+            r.Url.Contains("/process-instances/pi-1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task IsSignalGlobalAsync_ResolvesScopeThroughTheEventNotTheName()
+    {
+        // Scope belongs to the signal an EVENT references. Two roots can share a
+        // name (a diagram authored elsewhere may do it), and a name lookup picks
+        // whichever comes first — which is how #243 and #244 defeated each other.
+        var (client, stub) = CreateClient();
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/def-2/resourcedata",
+            _ => StubHttpMessageHandler.TextResponse("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn">
+              <bpmn:signal id="Sig_G" name="shared.one" />
+              <bpmn:signal id="Sig_I" name="shared.one" flowable:scope="processInstance" />
+              <bpmn:process id="p" isExecutable="true">
+                <bpmn:startEvent id="startEvt">
+                  <bpmn:signalEventDefinition signalRef="Sig_G" />
+                </bpmn:startEvent>
+                <bpmn:intermediateCatchEvent id="scopedCatch">
+                  <bpmn:signalEventDefinition signalRef="Sig_I" />
+                </bpmn:intermediateCatchEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """, mediaType: "application/xml"));
+
+        // The event decides, and the two events disagree — which a name lookup
+        // cannot express at all.
+        Assert.False(await client.IsSignalGlobalAsync("def-2", "shared.one", "scopedCatch"));
+        Assert.True(await client.IsSignalGlobalAsync("def-2", "shared.one", "startEvt"));
+    }
+
+    [Fact]
+    public async Task IsSignalGlobalAsync_FallsOpenWhenTheEventCannotBeResolved()
+    {
+        // The complement, and the direction that matters: a lookup that fails
+        // must WAKE the execution. A signal that silently fails to wake a waiting
+        // process is the failure this whole path exists to end — the same
+        // principle ResolveDefinitionOfInstanceAsync and the blank-definition
+        // guard already follow.
+        var (client, stub) = CreateClient();
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/def-3/resourcedata",
+            _ => StubHttpMessageHandler.TextResponse("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn">
+              <bpmn:signal id="Sig_G" name="global.one" />
+            </bpmn:definitions>
+            """, mediaType: "application/xml"));
+
+        Assert.True(await client.IsSignalGlobalAsync("def-3", "global.one", "noSuchActivity"));
+        Assert.True(await client.IsSignalGlobalAsync("def-3", "global.one", null));
     }
 }

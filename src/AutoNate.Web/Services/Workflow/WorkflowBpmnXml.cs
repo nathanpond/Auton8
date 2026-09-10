@@ -1077,25 +1077,36 @@ public static partial class WorkflowBpmnXml
             var key = (name, wantScoped);
             if (!byNameAndScope.TryGetValue(key, out var target))
             {
-                // #244. A name is also "taken" when some OTHER event references
-                // the same signal and declares no scope at all — a signal start
-                // event, typically, which is skipped above and so never registers
-                // here. Without this the scoped catch mutated the shared root and
-                // silently narrowed the start event's signal, which then cannot
-                // start an instance from an external event: a behaviour change to
-                // a deployed process that nothing reported.
-                var nameTaken = byNameAndScope.Keys.Any(k => k.Name == name)
-                                || namesWithUndeclaredUsers.Contains(name);
-                if (nameTaken)
+                // #270. Clone only when the clone can carry a DIFFERENT name.
+                //
+                // #244 cloned the root, kept the name, and changed only the id —
+                // which Flowable refuses outright:
+                //   [Problem: 'flowable-signal-duplicate-name'] : Duplicate signal
+                //   name found
+                // and the deployment fails with a 500. Measured against 8.0.0: two
+                // roots with distinct names deploy; two sharing a name do not.
+                //
+                // So scope is a property of the signal NAME — one name, one scope —
+                // and the diagram #244 set out to support cannot exist. A signal
+                // start event must be global to start instances from outside; an
+                // instance-scoped catch on that same name is a contradiction the
+                // engine will not accept, and BuildSignalScopeErrors refuses it at
+                // publish with a message naming both events.
+                //
+                // Two events that BOTH declare a scope and disagree are the same
+                // contradiction and refused there too. What remains here is the
+                // ordinary case: every user of a name wants the same scope, so the
+                // authored root is simply annotated.
+                var conflicting = byNameAndScope.Keys.Any(k => k.Name == name)
+                                  || namesWithUndeclaredUsers.Contains(name);
+                if (conflicting)
                 {
-                    target = new XElement(original);
-                    target.SetAttributeValue("id", $"{signalRef}_{(wantScoped ? "scoped" : "global")}");
-                    original.AddAfterSelf(target);
+                    // Validation refuses this diagram; expansion leaves it alone
+                    // rather than emitting XML the engine rejects with a 500.
+                    continue;
                 }
-                else
-                {
-                    target = original;
-                }
+
+                target = original;
 
                 target.SetAttributeValue(
                     FlowableNamespace + "scope", wantScoped ? "processInstance" : null);
@@ -3375,8 +3386,98 @@ public static partial class WorkflowBpmnXml
             .. BuildCompensationErrors(document),
             // #245 — a multi-instance marker configured two ways at once, where
             // the engine quietly honours one of them.
-            .. BuildMultiInstanceErrors(document)
+            .. BuildMultiInstanceErrors(document),
+            // #270 — one signal name asked to carry two scopes, which Flowable
+            // refuses to deploy at all.
+            .. BuildSignalScopeErrors(document)
         ];
+
+    /// <summary>
+    /// One signal name cannot carry two scopes (#270).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable validates <c>flowable-signal-duplicate-name</c> at deployment, so
+    /// two <c>&lt;bpmn:signal&gt;</c> roots sharing a name are refused with a 500
+    /// — measured against 8.0.0, where two roots with DISTINCT names deploy
+    /// cleanly. Scope lives on the root, so one name means one scope.
+    /// </para>
+    /// <para>
+    /// #244 tried to have it both ways: it cloned the root for a scoped catch so a
+    /// signal start event sharing the name kept its global subscription. The clone
+    /// carried the same name, and the result would not deploy — the diagram that
+    /// fix existed to support became unpublishable, and its test never noticed
+    /// because it asserted the XML tree instead of deploying it.
+    /// </para>
+    /// <para>
+    /// This is a modelling contradiction, so it is reported as one. A start event
+    /// must be global to start instances from outside; asking the same name to be
+    /// instance-scoped elsewhere cannot be honoured by any engine, and the author
+    /// is the only one who can resolve it.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<string> BuildSignalScopeErrors(XDocument document)
+    {
+        // name -> (scope declared, the events declaring it)
+        var byName = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
+
+        foreach (var element in document.Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace))
+        {
+            var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var signalRef = Trimmed(definition.Attribute("signalRef")?.Value);
+            if (signalRef is null) continue;
+
+            var root = document.Descendants(BpmnNamespace + "signal")
+                .FirstOrDefault(s => s.Attribute("id")?.Value == signalRef);
+            var name = Trimmed(root?.Attribute("name")?.Value) ?? signalRef;
+
+            // A start event is global by nature: it exists to be triggered from
+            // outside any instance, so it declares no scope and cannot be scoped.
+            var declared = element.Name.LocalName == "startEvent"
+                ? "global"
+                : Normalise(ReadSignalScope(element)) ?? Normalise(
+                    root?.Attribute(FlowableNamespace + "scope")?.Value == "processInstance"
+                        ? "instance" : null);
+
+            if (declared is null) continue;
+
+            if (!byName.TryGetValue(name, out var byScope))
+            {
+                byScope = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                byName[name] = byScope;
+            }
+
+            if (!byScope.TryGetValue(declared, out var users))
+            {
+                users = [];
+                byScope[declared] = users;
+            }
+
+            users.Add(LabelOf(element) ?? element.Attribute("id")?.Value ?? "an event");
+        }
+
+        foreach (var (name, byScope) in byName.Where(entry => entry.Value.Count > 1))
+        {
+            var scoped = string.Join("', '", byScope.GetValueOrDefault("instance", []));
+            var global = string.Join("', '", byScope.GetValueOrDefault("global", []));
+
+            yield return
+                $"The signal '{name}' is scoped to this instance by '{scoped}', and is also " +
+                $"used by '{global}', which needs it global. Flowable allows one scope per " +
+                "signal name and refuses a diagram that declares two, so give one of them a " +
+                "different signal name, or put them both on the same scope.";
+        }
+    }
+
+    private static string? Normalise(string? scope) => scope?.Trim().ToLowerInvariant() switch
+    {
+        "instance" or "processinstance" => "instance",
+        "global" => "global",
+        _ => null
+    };
 
     /// <summary>
     /// Multi-instance settings the engine would silently ignore (#245).
