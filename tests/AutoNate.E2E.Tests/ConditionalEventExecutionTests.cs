@@ -296,4 +296,74 @@ public sealed class ConditionalEventExecutionTests : E2ETestBase
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
     }
+
+    /// <summary>
+    /// Moving a token onto a conditional catch releases it (#293).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second of the three Auton8 routes that moved a token without asking the
+    /// engine to re-check. Tested separately from the ad-hoc route rather than
+    /// assumed to share its fix: "the mechanism is the same" is exactly the
+    /// reasoning that let #268 ship covering one of two call sites, and #248 ship
+    /// with half its subject unfixed.
+    /// </para>
+    /// <para>
+    /// `move-state` is an operator override, so parking after it is less damaging
+    /// than parking after ad-hoc completion — but an operator who moves a run onto
+    /// a step whose condition is already true, and watches it stop there, has no
+    /// way to tell that from the move having failed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Moving_a_token_onto_a_conditional_catch_releases_it()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mvcond{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, MoveOntoConditionalDiagram(key));
+
+        // `ready` true from the outset: by the time the token arrives the
+        // condition is already satisfied and nothing will change it again.
+        var instanceId = await StartAsync(api, key, new { ready = true });
+
+        // Waiting on the user task, not yet on the catch.
+        Assert.Equal(new[] { "park" }, await CurrentActivitiesAsync(api, instanceId));
+
+        var moved = await api.PostAsync(
+            $"/api/executions/{instanceId}/move-state",
+            new APIRequestContextOptions { DataObject = new { targetActivityId = "wait" } });
+        Assert.True(moved.Ok, $"Moving state failed: {moved.Status} {await moved.TextAsync()}");
+
+        // Released, and through to the step after the catch. Without the nudge the
+        // instance sits on "wait" forever with its condition already true, which
+        // reads to an operator exactly like the move having failed.
+        Assert.Equal(new[] { "after" }, await CurrentActivitiesAsync(api, instanceId));
+    }
+
+    private static string MoveOntoConditionalDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Move onto a condition" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="park" />
+            <bpmn:userTask id="park" name="Park here" />
+            <bpmn:sequenceFlow id="f1" sourceRef="park" targetRef="wait" />
+            <bpmn:intermediateCatchEvent id="wait" name="Wait for ready">
+              <bpmn:conditionalEventDefinition id="cd">
+                <bpmn:condition xsi:type="bpmn:tFormalExpression">${ready == true}</bpmn:condition>
+              </bpmn:conditionalEventDefinition>
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="f2" sourceRef="wait" targetRef="after" />
+            <bpmn:userTask id="after" name="After the condition" />
+            <bpmn:sequenceFlow id="f3" sourceRef="after" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+          {{Di(key, "s", "park", "wait", "after", "e")}}
+        </bpmn:definitions>
+        """;
+
 }

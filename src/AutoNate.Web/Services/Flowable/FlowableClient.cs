@@ -648,6 +648,10 @@ public sealed class FlowableClient(
     public async Task StartAdhocActivityAsync(
         string executionId, string activityId, CancellationToken cancellationToken = default)
     {
+        // #293. Resolved BEFORE the call: the action can destroy this execution,
+        // and then there is nothing left to resolve the instance from.
+        var instanceId = await TryResolveProcessInstanceOfExecutionAsync(executionId, cancellationToken);
+
         // An actuator write operation is a POST with a JSON body, even when every
         // argument is in the path.
         using var request = new HttpRequestMessage(
@@ -659,6 +663,14 @@ public sealed class FlowableClient(
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, $"start the ad-hoc activity '{activityId}'");
+
+        // #293. Same reason as move-state, and this one matters more: ad-hoc is
+        // how case-work ordinarily advances in the sub-process #163 shipped, so a
+        // conditional catch downstream of it parks on the NORMAL path.
+        if (instanceId is not null)
+        {
+            await TryEvaluateConditionalEventsAsync(instanceId, cancellationToken);
+        }
     }
 
     public async Task CompleteAdhocSubProcessAsync(
@@ -671,6 +683,11 @@ public sealed class FlowableClient(
         // subprocess instead, advancing the parent. Nothing validated the id, and
         // a guard that has to be remembered is worth less than a route that
         // cannot collide.
+        // #293. Before the call: completing the sub-process destroys this
+        // execution, so resolving afterwards gets a 404 and the nudge is lost —
+        // which is how the first version of this fix silently did nothing.
+        var instanceId = await TryResolveProcessInstanceOfExecutionAsync(executionId, cancellationToken);
+
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
             $"actuator/adhocComplete/{Uri.EscapeDataString(executionId)}")
@@ -680,6 +697,13 @@ public sealed class FlowableClient(
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, "complete the ad-hoc sub-process");
+
+        // #293. Completing the sub-process advances the parent, which is exactly
+        // when a conditional catch downstream of it is reached.
+        if (instanceId is not null)
+        {
+            await TryEvaluateConditionalEventsAsync(instanceId, cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
@@ -1332,6 +1356,42 @@ public sealed class FlowableClient(
     /// missed nudge is a process that waits until the next variable write; the cost
     /// of throwing is telling the caller their completed action failed.
     /// </remarks>
+    /// <summary>
+    /// The process instance an execution belongs to, or null (#293).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ad-hoc routes are addressed by execution id, and the conditional nudge
+    /// needs an instance id. Call this <b>before</b> the action: completing an
+    /// ad-hoc sub-process destroys the execution, so a lookup afterwards answers
+    /// 404 and the nudge is silently lost — which is exactly what the first
+    /// version of this fix did, and the test caught it.
+    /// </para>
+    /// <para>
+    /// Never throws. The action it accompanies has its own error handling, and
+    /// failing an operator's request because a follow-up nudge could not be
+    /// prepared would turn a parked catch into a visible error on an action that
+    /// worked.
+    /// </para>
+    /// </remarks>
+    private async Task<string?> TryResolveProcessInstanceOfExecutionAsync(
+        string executionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var lookup = await _httpClient.GetAsync(
+                $"service/runtime/executions/{Uri.EscapeDataString(executionId)}", cancellationToken);
+            if (!lookup.IsSuccessStatusCode) return null;
+
+            var execution = await DeserializeAsync<FlowableExecutionResponse>(lookup, cancellationToken);
+            return string.IsNullOrWhiteSpace(execution.ProcessInstanceId) ? null : execution.ProcessInstanceId;
+        }
+        catch (Exception exception) when (exception is JsonException or HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
     private async Task TryEvaluateConditionalEventsAsync(
         string processInstanceId,
         CancellationToken cancellationToken)
@@ -1496,6 +1556,17 @@ public sealed class FlowableClient(
             payload,
             cancellationToken);
         await EnsureSuccessAsync(response, $"move execution '{processInstanceId}' to activity '{targetActivityId}'");
+
+        // #293. Moving a token onto a conditional catch is a delivery like any
+        // other, and Flowable never re-evaluates a condition on arrival — so a
+        // catch whose condition is ALREADY true parks permanently. Reproduced
+        // live; one evaluate-conditions call releases it.
+        //
+        // Outcome 10's qualification excused the gap on the grounds that Auton8
+        // "can only ask for writes it can see". This is a write Auton8 is making
+        // itself, so the excuse does not reach it, and neither does #271's
+        // engine-side listener.
+        await TryEvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
     }
 
     public async Task BroadcastSignalAsync(

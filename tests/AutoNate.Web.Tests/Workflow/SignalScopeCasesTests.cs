@@ -631,4 +631,58 @@ public sealed class SignalScopeCasesTests
         Assert.Equal(72, checkedCells);
     }
 
+
+    /// <summary>A typo on the ROOT is refused, like a typo on an event (#291).</summary>
+    /// <remarks>
+    /// <para>
+    /// #278 made <c>InterpretSignalScope</c> the one place a spelling is judged.
+    /// <c>CollectSignalScopeUses</c> called it for the root's carried scope and
+    /// then discarded the answer it did not have a branch for — the
+    /// <c>Unrecognised</c> case fell out of an <c>if</c>. So the shared
+    /// interpretation was consulted and ignored, which is the third time that
+    /// exact shape has produced a defect in #156's history.
+    /// </para>
+    /// <para>
+    /// The root is where publish itself writes the scope, so a
+    /// published-then-reopened diagram carries it there and nowhere else. Flowable
+    /// answers <c>HTTP 500 flowable-signal-invalid-scope</c>: "Only values 'global'
+    /// and 'processInstance' are supported".
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("instnace")]
+    [InlineData("process-instance")]
+    [InlineData("local")]
+    public void A_typo_on_the_signal_root_is_refused_and_quoted_back(string typo)
+    {
+        var roots = $"""<bpmn:signal id="Sig_1" name="the.signal" flowable:scope="{typo}" />""";
+        var xml = Diagram(Event("intermediateCatchEvent", "c", null), roots);
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains(typo, StringComparison.Ordinal));
+
+        // Named as the signal itself, not as one of the events referencing it —
+        // that distinction is #279's, and an author told "'Await' asks for..."
+        // would go and look at an event that says nothing.
+        Assert.Contains("the.signal", error, StringComparison.Ordinal);
+        Assert.Contains("'instance'", error, StringComparison.Ordinal);
+        Assert.Contains("'global'", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("processInstance")]
+    [InlineData("global")]
+    public void A_spelling_the_root_carries_that_we_do_recognise_is_not_refused(string spelling)
+    {
+        // The complement. A refusal rule written as "the root carries a scope"
+        // rather than "the root carries a scope we do not recognise" would refuse
+        // every diagram publish has ever produced, since publish writes this
+        // attribute itself.
+        var roots = $"""<bpmn:signal id="Sig_1" name="the.signal" flowable:scope="{spelling}" />""";
+        var xml = Diagram(Event("intermediateCatchEvent", "c", null), roots);
+
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(xml).Errors);
+    }
+
 }

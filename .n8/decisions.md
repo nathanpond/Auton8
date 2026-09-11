@@ -4716,3 +4716,95 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   at close-out."* Nothing is lost — each finding, its evidence and its
   recommendation stand as filed; what moves is when the criterion gets rewritten.
   **Issue:** #283, #284, #285, #286, #218, #156
+
+## 2026-09-11 — Round 6: five guards that could not fail, and two sweeps that destroyed state
+
+  **Rule 1 throughout.** Nine blocking bugs, and the shape of the round is worth
+  recording separately from the fixes: **five of the nine were tests, not
+  product** — and two of those five were guards I wrote in round 5 and reported
+  as mutation-proven.
+
+  **#290 — the grid froze arity.** `The_two_paths_never_disagree` asserts
+  `emitted == carried` on the refused path. In a SINGLE-EVENT grid that is
+  satisfiable by coincidence in every cell it can contain, because a plain-root
+  contradiction needs two events — with no carried scope there is nothing for a
+  lone event to contradict. An expansion half-applying a scope to exactly the
+  diagrams the validator refuses stayed 30/30 green.
+  I mutation-tested that file four ways in round 5 and reported it proven. Three
+  of those four exercise the accepted half, which genuinely is live. I never wrote
+  the mutation aimed at the property the refused half claims. **Four mutations
+  going red is proof those four are covered, not proof the test is live** — that
+  sentence is the lesson, and it is now in the file.
+  The fix is a two-event grid (6 x 6 x 2), which contains the plain-root
+  contradiction and catches the exact mutation. The single-event grid keeps its
+  assertion with a comment saying plainly that it does not discriminate alone. A
+  byte-identical assertion was tried there first and is wrong: `ExpandForDeployment`
+  legitimately rewrites signal END events, so "unchanged" is false for reasons
+  unrelated to scope.
+
+  **#292 — the anti-vacuity floor was what made it vacuous.**
+  `Math.Max(seen.Count, 1)` turned an empty observation into 1, which sits inside
+  the accepted range, under a comment claiming it would "fail loudly". It now
+  asserts `> 0` on its own line, and the bound assertion changed from a sampled
+  count to the two things #218's criterion actually states — it was retried, and
+  it reaches dead-letter. An exact assertion on a sampled number is a flake
+  wearing a guard's clothes; the first attempt at "exactly 3" failed immediately
+  because the poll observed 2 of the 3 values.
+
+  **#299 — #191's "test that forces a throw" forced none.** It double-disposed and
+  hoped; the second call did not throw and it printed so. Forcing it needed a hook,
+  so `AutoNateWebApplicationFactory.CreateAsync` gained an optional
+  `configureServices`, and the test registers a hosted service whose `StopAsync`
+  throws — the shape the real leak had. It now fails against the pre-#191 disposal.
+  #214's per-class count asserted labels rather than numbers and passed with two of
+  three passes disabled; it plants one sweepable item per class now.
+
+  **#300 — the schema sweep had no age and no liveness check** and dropped a live
+  run's schema, four times per suite run. It now reads the same create stamp the
+  DATABASE sweep reads, and takes the same two decisions for the same reason: no
+  stamp and an unparseable stamp both mean LIVE. Being wrong that way costs disk.
+
+  **#297 — #248 was closed with half its subject unfixed.** It named the fixed-name
+  database AND the Flowable sweep. The database half became a per-run guid; the
+  sweep went on cascading every `e2e-*` deployment at fixture startup, and a
+  verifier watched a live job vanish mid-retry. The sweep now spares anything
+  created after the run began. Two existing tests deployed during the run and
+  expected the default sweep to take them — the cut-off is injected there, so the
+  name axis stays under test and the clock axis gets its own pair of tests in both
+  directions.
+
+  **#289 — the manifest has no placement axis.** A process-level Error or
+  Escalation Start Event published with `errors=0 warnings=0` and Flowable refused
+  the WHOLE deployment. The rows are right (`#162` ships them inside event
+  subprocesses); the placement is not, and the manifest keys on
+  `(localName, eventDefinition)` with no container. `BuildConditionalStartPlacementErrors`
+  was the same constraint solved once as a one-off for conditional only; it is now
+  `BuildStartEventPlacementErrors` covering all three, with the complement asserted
+  so it cannot refuse #162's own work.
+
+  **#291 — the shared interpretation consulted and ignored.** `Unrecognised` fell
+  out of an `if` for the signal ROOT, so a typo there published clean and Flowable
+  answered `flowable-signal-invalid-scope`. Now a `switch` with an arm per case.
+
+  **#293 — Outcome 10's qualification was an enumeration, and enumerations miss.**
+  Three Auton8 endpoints moved a token without nudging: `move-state` and both
+  ad-hoc routes. Both tested separately rather than assumed to share a fix —
+  "the mechanism is the same" is exactly the reasoning that let #268 ship covering
+  one of two call sites. The first version of the ad-hoc fix resolved the instance
+  id AFTER the action, which destroys the execution, so the lookup 404'd and the
+  nudge was silently lost; the test caught it. The qualification is rewritten as a
+  rule with a checkable pointer at the code rather than a list.
+
+  **#294 — two criteria with no guard.** `StubFlowableClient.ExpansionSourceMap`
+  existed for #218's id-mapping AC and was never set by any test in any file; the
+  stub's diagram detail was hard-coded empty, so four of five surfaces could not be
+  exercised at all. Both are settable now, and the test asserts each surface both
+  ways (author's id present, generated id absent) plus an untouched id surviving.
+  Worth recording: the DIAGRAM endpoint maps from `detail.ExpansionSourceIds` and
+  the HISTORY endpoint from `GetExpansionSourceMapAsync` — two sources for one
+  mapping, which is why setting only the client-side one made half the test pass.
+  #115's "carries on" half now deploys an author-drawn intermediate
+  throw-compensate and asserts both halves; asserting only that it compensated
+  would pass for an end event, which is the opposite element.
+
+  **Issue:** #289, #290, #291, #292, #293, #294, #297, #299, #300
