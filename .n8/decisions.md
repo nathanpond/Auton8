@@ -2302,7 +2302,7 @@ rather than taken on trust:
 which any behaviour satisfies. Owner's call — they concern engine behaviour
 nobody has established yet.
 
-## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation
+## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation — reconciled by /n8-replan 2026-09-11
 
 **Change:** #160 ("Jump between points in a diagram with link events") cannot be
 executed as written. Spike #217 created and #160 sequenced behind it.
@@ -4891,3 +4891,134 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   (`create.loop-marker`), which is legitimately different — an activity marker has
   no type to place — so the rule says so explicitly and still demands a deny key.
   **Issue:** #304, #305, #306, #307, #308, #309, #310, #311, #312
+
+## Ad-hoc — 2026-09-11 — M4 replanned: the scope instrument cannot express what breaks
+
+  **Owner's decision, taken after eight verification rounds.** M4's claim was
+  "every element the studio offers executes, and Flowable executes all of it".
+  Its **studio half failed verification five consecutive rounds, each time with a
+  different element**: a Loop Marker, a bare `boundaryEvent` (#282), a
+  process-level Error/Escalation start (#289), Timer/Message/Signal starts in a
+  plain subprocess (#309), and a Send Task **in its default state** (#316).
+
+  Each fix was specific to its instance and each round's remediation became the
+  next round's defect. The cause is structural. `src/shared/bpmn-support.json`
+  keys every row on `(localName, eventDefinition)` with a `studio` and an `engine`
+  column, and three axes the product depends on have no column:
+
+  - **container** — an Error Start is correct inside an event subprocess and
+    refused at process level; a Timer Start is correct at process level and
+    refused inside a plain subprocess. One row, two verdicts.
+  - **configuration state** — a Message Boundary with its name set deploys; the
+    same element as the palette creates it does not.
+  - **authorability** — a Send Task has NO state the studio can produce that
+    deploys, and Data Input/Output are `studio: supported` and authorable nowhere.
+
+  Every guard built in M4 iterates that manifest and inherits the blind spot,
+  including #282's completeness guard, which asserts a row *exists* and cannot see
+  that the row is right for one placement and wrong for another.
+
+  And one fact makes a column unverifiable in principle: **there is no test runner
+  in `src/AutoNate.Spa`** — no vitest, no jest, zero `*.test.*` files. The
+  manifest's own `$fields` define `studio: supported` as "Authorable in the studio
+  today", and nothing in the repository can check that sentence. Three studio
+  fixes shipped broken during M4 for exactly that reason (#281, #311, and #159's
+  six unguarded properties), each caught later by reading rather than by a test.
+
+  **Decisions taken (both the owner's, offered with alternatives):**
+
+  1. **M4 narrows to its engine axis** — "the elements in scope execute on
+     Flowable", which is what eight rounds actually established, and established
+     well: 42 elements, live-engine verification, real complements, 2369 + 334
+     tests green. The alternative was keeping the claim and fixing until it holds;
+     on this milestone's evidence that is several more rounds.
+  2. **A new milestone, M4b: Workflows — a verifiable studio axis**, takes the
+     three structural stories: a SPA test runner (#323), the manifest's missing
+     axes with derived placement rules (#324), and an oracle for "deploys and then
+     silently does nothing" (#325) — the half of the founding complaint no
+     instrument can currently see. The alternative was folding them into M5, which
+     would have made one milestone mean two things.
+
+  **Applied:** epic #40's AC2 and AC5 narrowed and a new AC added (a coverage
+  claim is checkable before it is made, with M4b as its dependency); M4's title
+  and description narrowed, with a NOTE on the coverage-claim block saying it is
+  engine-axis only; #115, #156, #159 studio-axis criteria annotated as resting on
+  inspection rather than evidence; #218's "every id-bearing surface" un-ticked and
+  narrowed to the execution view, because eight further surfaces carry raw ids;
+  #314, #317, #265, #268, #256 moved to M4b.
+
+  **Deliberately NOT done:** nothing was lowered on the engine axis. Four blocking
+  bugs stay in M4 (#316, #318, #319, #321) because they are engine-axis
+  correctness and must be fixed before it closes. Narrowing the claim is not the
+  same as lowering the bar on what remains. The 76 closed M4 stories were not
+  touched — they are history.
+  **Issue:** #40, #115, #156, #159, #218, #323, #324, #325
+
+## 2026-09-11 — Round 8: the four engine-axis blockers, after the replan
+
+  **Rule 1 throughout.** These are the four M4 kept when the replan narrowed it to
+  its engine axis. All four are engine-axis correctness, so narrowing the claim
+  did not lower the bar on them.
+
+  **#321 — my own differential test had a factually wrong oracle.** Three fixes:
+  1. `compensateEventDefinition` removed from the event-subprocess allow-list. The
+     engine refuses it (`flowable-event-subprocess-invalid-start-event-definition`)
+     and the table said otherwise; the product was saved only because the manifest
+     withdraws Compensation Start Event for an unrelated reason.
+  2. **The oracle split in two.** AGREEMENT is now rule-agnostic (any error), because
+     the question "does publish refuse what the engine refuses" does not care which
+     rule refused — narrowing it to one phrase made cells another rule legitimately
+     owns fail. ATTRIBUTION is rule-specific and asks "did the PLACEMENT rule fire",
+     which is what stops the rule being deleted unnoticed. It is only asked where
+     the placement rule should be the one firing, and **that is derived from the
+     manifest**, not enumerated: an element the manifest withdraws is refused by
+     `BuildUnsupportedElementErrors` first, and that is correct.
+  3. Departures now assert BOTH sides and carry the phrase that proves their own
+     refusal — a departure is refused by a DIFFERENT rule than this test is about,
+     so matching the placement phrase there asserted the wrong thing. The dead
+     `_ = checkedDeparture;` line is gone; it was theatre.
+  Also added the multiple-start cell the round-7 PR claimed existed (deleting that
+  rule had left 541/541 green) and a `compensate` row, which had been missing
+  entirely — which is why restoring a wrong allow-list row stayed green.
+  **A limit I could not close and recorded in the test:** while a definition is
+  withdrawn, a wrong allow-list row is masked by the manifest refusal. The row is
+  still wrong and becomes live the moment the manifest promotes it — that scenario
+  IS red. Closing it properly means deriving the table from the manifest, which is
+  #324 in M4b.
+
+  **#316 — one rule over positions, not a fifth per-element rule.**
+  `BuildUnnamedEventTriggerErrors` walks every `signalEventDefinition` and
+  `messageEventDefinition` wherever it sits. A rule existed for signal START only,
+  which is the tell: written for the position someone tested, with four siblings
+  uncovered and no message rule at any position. Walking positions means the next
+  position added is covered by construction.
+  **Send Task withdrawn, with the engine axis untouched.** Flowable runs a
+  correctly configured send task, so `engine: executes` stays true; what was false
+  was `studio: supported`, which the manifest's own `$fields` define as "Authorable
+  in the studio today". No state the studio can produce deploys. `BuildSendTaskErrors`
+  is the publish half, since an imported diagram can still carry one. Making it
+  authorable again is #328 in M4b, where a test runner can prove it.
+
+  **#319 — the guard marked an element the control never applies to.** The
+  retry-point control is offered only on `bpmn:ServiceTask` and the backend
+  dispatches only for `localName == "serviceTask"`, so the fixture's marked
+  `userTask` was silently ignored — and the assertion compared two task-name lists
+  that could only ever be equal. Now a succeeding service task, with the mark's
+  effect asserted against the DEPLOYED resource.
+  Counting jobs was tried first and is wrong: a succeeding async step completes
+  before any poll can see its job, so both counts are zero and it proves nothing.
+  That is the third time in this milestone a sampled measurement has read as a
+  guard, and the lesson each time is the same — assert something that cannot have
+  finished before you look.
+
+  **#318 — two rules correct by construction and unguarded.** The JS capability
+  check works only because the endpoint expands before calling the client;
+  exempting gateway script tasks from `ContainsScriptTask` left 122 Web.Tests and
+  15 E2E cases green. `BuildExpansionSourceMap` had no test at all — emptying it
+  disabled #218's whole id-mapping feature with 642/642 green. Both guarded now,
+  the first at the seam (the deployable carries a script task; the authored diagram
+  does not).
+  The eight unmapped surfaces outside the execution view are #327 in M5 — the
+  replan narrowed #218's AC to the execution view, so they are no longer a claim
+  this milestone makes.
+  **Issue:** #316, #318, #319, #321

@@ -405,7 +405,13 @@
       "className": "bpmn-icon-send-task",
       "type": "bpmn:SendTask",
       "localName": "sendTask",
-      "eventDefinition": null
+      "eventDefinition": null,
+      "menuClassNames": [
+        "bpmn-icon-send"
+      ],
+      "menuEntryIds": [
+        "send-task"
+      ]
     },
     {
       "id": "create.exclusive-gateway",

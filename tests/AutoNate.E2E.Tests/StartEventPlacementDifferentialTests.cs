@@ -56,6 +56,9 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
         ("conditional", "|" + """<conditionalEventDefinition><condition>${ok}</condition></conditionalEventDefinition>"""),
         ("error", """<error id="Err_1" name="e" errorCode="E" />""" + "|" + """<errorEventDefinition errorRef="Err_1" />"""),
         ("escalation", """<escalation id="Esc_1" name="x" escalationCode="X" />""" + "|" + """<escalationEventDefinition escalationRef="Esc_1" />"""),
+        // #321. `compensate` was missing, which is why restoring a wrong allow-list
+        // row stayed green: there was no cell to fail.
+        ("compensate", "|" + """<compensateEventDefinition />"""),
     ];
 
     /// <summary>Every container an author can put a start event in.</summary>
@@ -77,13 +80,23 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
     /// 28th turned out to be a decision rather than a defect.
     /// </para>
     /// </remarks>
-    private static readonly Dictionary<(string Definition, string Container), string> StricterThanTheEngine =
+    private readonly record struct Departure(string Reason, string RefusalPhrase);
+
+    private static readonly Dictionary<(string Definition, string Container), Departure> StricterThanTheEngine =
         new()
         {
-            [("none", "eventSubProcess")] =
-                "an event subprocess is triggered BY its start event, so a bare one can never " +
-                "trigger at all -- Flowable deploys it and it silently never runs, which looks " +
-                "exactly like its event never happening (BuildEventSubProcessErrors)",
+            [("none", "eventSubProcess")] = new(
+                Reason:
+                    "an event subprocess is triggered BY its start event, so a bare one can never " +
+                    "trigger at all -- Flowable deploys it and it silently never runs, which looks " +
+                    "exactly like its event never happening",
+
+                // #321. Each departure names the phrase that proves ITS OWN refusal,
+                // because a departure is refused by a different rule than the one this
+                // test is about. Matching the placement rule's phrase here would assert
+                // the wrong thing; matching anything at all would assert nothing.
+                // This one comes from BuildEventSubProcessErrors.
+                RefusalPhrase: "starts with a plain start event"),
         };
 
     public static TheoryData<string, string> Cells()
@@ -113,13 +126,35 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
         // the studio itself calls, rather than the validation function. The E2E
         // project cannot reference AutoNate.Web, and going through the API is the
         // better test anyway: it is the path an author takes.
-        var refusedByAutoNate = (await PrepareErrorsAsync(api, key, xml))
-            .Any(e => e.Contains("start event", StringComparison.OrdinalIgnoreCase));
+        // #321. The oracle, narrowed. This was `Contains("start event")`, which the
+        // #115 descope message also satisfies -- "Compensation **Start Event**
+        // ('x') cannot be deployed: ..." -- so all four compensate cells reported
+        // a refusal that came from somewhere else entirely. Short-circuiting the
+        // placement rule turned 15 of 28 cells red and left those four green.
+        //
+        // "cannot start " is BuildStartEventPlacementErrors' own phrase and is
+        // produced by nothing else in the product. A comment there says to keep it
+        // stable, or to fix this line with it.
+        var errors = await PrepareErrorsAsync(api, key, xml);
+
+        // AGREEMENT is rule-agnostic: the question is whether publish refuses what
+        // the engine refuses, and which rule did it is irrelevant to that question.
+        // Narrowing this to one rule's phrase made the test fail on cells another
+        // rule legitimately owns.
+        var refusedByAutoNate = errors.Count > 0;
+
+        // ATTRIBUTION is rule-specific, and is what #321 was actually about: with a
+        // loose oracle the placement rule could be switched off while unrelated
+        // refusals kept the cells green. Only asked where the placement rule is the
+        // one that should have fired -- which is derived from the manifest, not
+        // enumerated here: an element the manifest WITHDRAWS is refused by
+        // BuildUnsupportedElementErrors first, and that is correct.
+        var withdrawnByManifest = WithdrawnStartEventDefinitions.Contains(definitionName);
+        var refusedByPlacement = errors.Any(e => e.Contains(PlacementRefusalPhrase, StringComparison.Ordinal));
 
         // What the engine says. Deployed with the raw BPMN namespace, since this
         // is about the engine's own parser rather than our expansion.
         var (deployed, deploymentId, engineMessage) = await TryDeployAsync(key, xml);
-        var checkedDeparture = false;
 
         try
         {
@@ -135,14 +170,42 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
             // deployment. The other direction is a false refusal, which blocks an
             // author from something that works, and is equally a defect unless it
             // is declared below.
-            if (StricterThanTheEngine.TryGetValue((definitionName, container), out var reason))
+            if (StricterThanTheEngine.TryGetValue((definitionName, container), out var departure))
             {
-                Assert.True(refusedByAutoNate,
+                var reason = departure.Reason;
+                var refusedByTheDeclaredRule = errors.Any(
+                    e => e.Contains(departure.RefusalPhrase, StringComparison.Ordinal));
+                // #321. BOTH sides. This asserted only that Auton8 refuses, so a row
+                // added for any refused cell switched that cell's engine-agreement
+                // check off permanently and nothing ever re-validated the other half.
+                // A departure is a claim about a DISAGREEMENT; if the engine starts
+                // refusing too, the departure is obsolete and should be deleted.
+                Assert.True(refusedByTheDeclaredRule,
                     $"A declared departure says Auton8 refuses {definitionName} x {container} " +
-                    $"({reason}), and it did not. Either the rule was lost, or the departure " +
-                    "should be deleted -- a declaration nothing enforces is worse than none.");
-                checkedDeparture = true;
+                    $"({reason}), and no error matched its stated phrase " +
+                    $"'{departure.RefusalPhrase}'. Either the rule was lost, or its wording " +
+                    "changed and this row is now checking nothing.");
+
+                Assert.True(deployed,
+                    $"A declared departure says Auton8 is STRICTER than the engine for " +
+                    $"{definitionName} x {container}, but the engine refuses it too " +
+                    $"({engineMessage}). The departure is obsolete -- delete the row and let " +
+                    "the ordinary agreement check cover this cell.");
                 return;
+            }
+
+            // The placement rule must be the thing that refused, where it is the
+            // thing that should have. This is the assertion that goes red when the
+            // rule is switched off, and it is scoped so an unrelated refusal cannot
+            // stand in for it.
+            if (!deployed && !withdrawnByManifest)
+            {
+                Assert.True(refusedByPlacement,
+                    $"{definitionName} x {container} is refused by the engine ({engineMessage}) " +
+                    "and by publish, but not by the placement rule -- no error contains " +
+                    $"'{PlacementRefusalPhrase}'. Some other rule is carrying this cell, so the " +
+                    "placement rule could be deleted without this test noticing. That is exactly " +
+                    "what #321 found.");
             }
 
             Assert.True(
@@ -159,10 +222,6 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
         {
             if (deploymentId is not null) await DeleteAsync(deploymentId);
         }
-
-        // A departure that stopped applying would otherwise pass silently by
-        // falling through to the agreement assertion.
-        _ = checkedDeparture;
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -194,6 +253,59 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
         if (xml.Length == 0) return ("", "");
         var parts = xml.Split('|');
         return (parts[0], parts[1]);
+    }
+
+    /// <summary>
+    /// The signature of <c>BuildStartEventPlacementErrors</c>'s message (#321).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately narrower than "start event". The #115 descope message contains
+    /// that phrase and comes from a completely different rule, so matching on it
+    /// made four cells pass on an unrelated refusal while the rule under test was
+    /// switched off. Mirrored in a comment beside the message that produces it,
+    /// because this project cannot reference the web assembly.
+    /// </remarks>
+    private const string PlacementRefusalPhrase = "cannot start ";
+
+    /// <summary>
+    /// Start-event definitions the manifest withdraws, read from the manifest (#321).
+    /// </summary>
+    /// <remarks>
+    /// Derived, not listed. An element the manifest withdraws is refused by
+    /// <c>BuildUnsupportedElementErrors</c> before placement is ever considered, and
+    /// that refusal is correct — so the attribution assertion must not demand the
+    /// placement rule for it. Reading the shared manifest is what keeps this honest:
+    /// promote a row and this set shrinks by itself, and the cell starts demanding
+    /// the placement rule, which is the behaviour #321 wanted.
+    /// </remarks>
+    private static readonly HashSet<string> WithdrawnStartEventDefinitions = LoadWithdrawnStartDefinitions();
+
+    // A LIMIT worth stating: while a definition is withdrawn, a wrong row in
+    // StartEventDefinitionsAllowed is masked -- the product refuses the element for
+    // a different, correct reason, so there is no defect to catch and this test
+    // rightly stays green. The row is still wrong, and it becomes a live missed
+    // refusal the moment the manifest promotes it (that scenario IS red). Closing
+    // the gap properly means deriving the table from the manifest rather than
+    // hand-writing it, which is #324 in M4b.
+
+    private static HashSet<string> LoadWithdrawnStartDefinitions()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !Directory.Exists(Path.Combine(root.FullName, ".git")))
+        {
+            root = root.Parent;
+        }
+
+        var path = Path.Combine(root!.FullName, "src", "shared", "bpmn-support.json");
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+        return document.RootElement.GetProperty("elements").EnumerateArray()
+            .Where(e => e.GetProperty("localName").GetString() == "startEvent")
+            .Where(e => e.GetProperty("studio").GetString() != "supported")
+            .Select(e => e.GetProperty("eventDefinition").GetString())
+            .Where(d => !string.IsNullOrEmpty(d))
+            .Select(d => d!)
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>An EL expression, kept out of the interpolated literal below.</summary>
@@ -299,4 +411,61 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
         // given and two fixtures had to be taught (#248, #297).
         await client.DeleteAsync($"service/repository/deployments/{Uri.EscapeDataString(deploymentId)}?cascade=true");
     }
+
+    /// <summary>
+    /// A plain subprocess with two start events is refused (#321).
+    /// </summary>
+    /// <remarks>
+    /// The round-7 PR said "Flowable's multiple-start-event refusal is covered
+    /// too". It was implemented and had no cell: deleting the rule left 541/541
+    /// green. This is the cell, and it is a differential check like the rest --
+    /// what Auton8 says is compared against what the engine says, not against what
+    /// I expect the engine to say.
+    /// </remarks>
+    [Fact]
+    public async Task A_plain_subprocess_with_two_start_events_agrees_with_the_engine()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"ms{Guid.NewGuid():N}"[..18];
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://autonate.dev/workflows">
+              <process id="{key}" name="Two starts" isExecutable="true">
+                <startEvent id="s" />
+                <sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+                <subProcess id="sub" name="Inner work">
+                  <startEvent id="s1" name="First" />
+                  <startEvent id="s2" name="Second" />
+                  <sequenceFlow id="f1" sourceRef="s1" targetRef="t" />
+                  <userTask id="t" name="Inner" />
+                </subProcess>
+                <sequenceFlow id="f2" sourceRef="sub" targetRef="e" />
+                <endEvent id="e" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = await PrepareErrorsAsync(api, key, xml);
+        var refused = errors.Any(e => e.Contains("start events", StringComparison.Ordinal));
+
+        var (deployed, deploymentId, engineMessage) = await TryDeployAsync(key, xml);
+        try
+        {
+            Assert.True(refused != deployed,
+                refused
+                    ? $"FALSE REFUSAL: a subprocess with two start events deploys to Flowable " +
+                      "and publish refuses it."
+                    : $"MISSED REFUSAL: a subprocess with two start events publishes with no " +
+                      $"error and Flowable refuses it -- {engineMessage}. One misplaced start " +
+                      "event fails the author's WHOLE deployment, behind a green studio.");
+        }
+        finally
+        {
+            if (deploymentId is not null) await DeleteAsync(deploymentId);
+        }
+    }
+
 }
