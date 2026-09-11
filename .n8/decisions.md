@@ -5022,3 +5022,66 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   replan narrowed #218's AC to the execution view, so they are no longer a claim
   this milestone makes.
   **Issue:** #316, #318, #319, #321
+
+## Round 9 — 2026-09-11 (during /n8-exec M4)
+
+**#332 — the repo-root walk (Rule 1).** `StartEventPlacementDifferentialTests`
+resolved the manifest path by walking up for a `.git` *directory*. In a git
+worktree `.git` is a file, so the walk ran off the top and the class threw at
+static init — 33 cells collapsed to `Failed: 1, Passed: 1, Total: 2`, and
+`/n8-verify` runs in worktrees, so the milestone's headline instrument had never
+executed in any verification round. Measured side by side at the same commit:
+33/33 in a clone, 1 error in a worktree. Fixed by anchoring on `AutoNate.sln`
+through a new `AutoNate.E2E.Tests.Support.RepoRoot` (mirroring the two helpers
+that already did it correctly), and guarded by `RepoRootAnchorTests`, which
+fails the build if any test source reintroduces the `.git`-directory form. The
+guard carries its own self-check, so a regex that stopped matching cannot report
+a clean tree.
+
+**#335 — my own false refusal (Rule 1).** Round 8's unnamed-trigger rule
+required a *name* for both signals and messages. I had verified the signal half
+against the engine and assumed the message half matched. It does not. Measured
+against Flowable 8.0.0 at catch, start and boundary — the split is by trigger
+type, identical at every position:
+
+    ref -> named root     signal deploys   message deploys
+    ref -> UNNAMED root   signal REFUSED   message DEPLOYS
+    ref absent            signal REFUSED   message REFUSED
+    ref -> missing root   signal REFUSED   message REFUSED
+
+and, for a root declared but referenced by nothing: unnamed signal REFUSED,
+unnamed message DEPLOYS.
+
+So the rule now splits: unresolvable ref is an error for both; an unnamed root
+is an error for signals and a **warning** for messages. Warning rather than
+error because the engine accepts it and the studio offers no way to name a
+message root (the Message field is disabled for everything but a Send Task, and
+nothing in the SPA emits a `bpmn:message`) — an error whose remedy the product
+does not offer is worse than none. Authorability is #328; the silent-no-op
+oracle that should own "deploys, then waits forever" is #325.
+
+Also added the missing rule the probe exposed: an unnamed `bpmn:signal` root
+sinks the deployment even when nothing references it, so publish refuses it.
+`PruneOrphanSignalRoots` handles this at prepare, but publish validates the
+stored XML.
+
+And fixed the fixture. `UnnamedTriggerDiagram` always emitted
+`<bpmn:signal id="Sig_Unnamed" />`, which makes *every* diagram built from it
+undeployable — so `A_named_trigger_is_accepted_at_any_position`, the complement
+written to prove the rule did not over-refuse, was asserting that publish
+accepts a document the engine rejects. Roots are now opt-in per test.
+
+Three mutations confirm the new rows: reinstating the false refusal fails 2;
+removing the orphan-root rule fails 3; widening it to messages fails 3.
+
+**#336 — asserting a precondition instead of the behaviour (Rule 1).** #318's
+guard asserted that the *expansion* puts a script task in the deployable. It
+never called `ContainsScriptTask`, so exempting expansion-generated ids left the
+whole suite green at 2386/2386 with the AC broken. Replaced with two rows
+through `DeployProcessAsync` that watch for the capability probe request itself,
+plus the complement that a script-free workflow does not probe. The named
+mutation now fails exactly one test, the one written for it.
+
+This is the third instance of the same substitution in this milestone (#292,
+#319), which is why the fix is at the call level rather than one more assertion
+about the XML.

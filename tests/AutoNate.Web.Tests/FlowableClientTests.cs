@@ -5,6 +5,7 @@ using System.Text.Json;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -1282,6 +1283,104 @@ public sealed class FlowableClientTests
             }));
         Assert.Contains("AutoNate script task capability probe", ex.Message);
     }
+
+    /// <summary>
+    /// A gateway-only workflow reaches the JavaScript capability check (#318, #336).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The AC is that the check <b>runs</b> for a workflow whose only script is the
+    /// one the expansion generates for a complex gateway. The first guard written
+    /// for it asserted something else: that the expanded diagram <em>contains</em> a
+    /// script task. That is a property of <c>ExpandForDeployment</c>, it never
+    /// called <c>ContainsScriptTask</c>, and narrowing that method to exempt
+    /// expansion-generated ids —
+    /// <c>!id.Contains("__autonateRoute")</c>, which is exactly the plausible
+    /// "optimisation" — left the entire backend suite green at 2386/2386 while the
+    /// AC was broken (#336).
+    /// </para>
+    /// <para>
+    /// Asserting a precondition of a behaviour is not asserting the behaviour. This
+    /// is the third time that substitution has shipped in this milestone (#292,
+    /// #319), so this row goes through <c>DeployProcessAsync</c> and watches for the
+    /// probe request itself — the only observable that means "the check ran".
+    /// </para>
+    /// <para>
+    /// The existing <c>DeployProcessAsync_ProbesScriptTaskSupport_*</c> rows do not
+    /// cover this: they use a hand-written script task, so an id-based exemption
+    /// leaves them passing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task DeployProcessAsync_ProbesScriptTaskSupport_ForAGatewayOnlyWorkflow()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "actuator/scriptTaskSupport",
+            new { javaScriptSupported = true, engineNames = new[] { "JavaScript" } });
+        stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-cg" });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions",
+            new { data = new[] { new { id = "pd-cg", key = "router", name = "Router", version = 1, deploymentId = "dep-cg" } } });
+
+        // The authored diagram has NO script task; the deployable one does. That
+        // is the whole point of the story -- the capability check has to see the
+        // expanded copy, which is what publish actually sends.
+        var deployable = WorkflowBpmnXml.ExpandForDeployment(GatewayOnlyWorkflow);
+        Assert.DoesNotContain("scriptTask", GatewayOnlyWorkflow, StringComparison.Ordinal);
+        Assert.Contains("scriptTask", deployable, StringComparison.Ordinal);
+
+        await client.DeployProcessAsync(new WorkflowModel
+        {
+            Id = Guid.NewGuid(), ProcessKey = "router", Name = "Router", BpmnXml = deployable
+        });
+
+        Assert.Contains(stub.Requests, r => r.Url.Contains("scriptTaskSupport", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// And the complement: a workflow with no script task does not probe (#336).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "always probe" passes the row above while adding a network
+    /// round-trip to every deployment — and would hide a <c>ContainsScriptTask</c>
+    /// that had stopped discriminating at all.
+    /// </remarks>
+    [Fact]
+    public async Task DeployProcessAsync_DoesNotProbeScriptTaskSupport_WhenThereIsNoScript()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-plain" });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions",
+            new { data = new[] { new { id = "pd-plain", key = "k", name = "n", version = 1, deploymentId = "dep-plain" } } });
+
+        await client.DeployProcessAsync(new WorkflowModel
+        {
+            Id = Guid.NewGuid(), ProcessKey = "k", Name = "n", BpmnXml = SimpleBpmn
+        });
+
+        Assert.DoesNotContain(stub.Requests, r => r.Url.Contains("scriptTaskSupport", StringComparison.Ordinal));
+    }
+
+    /// <summary>A complex gateway and nothing else scripted — #218's shape.</summary>
+    private const string GatewayOnlyWorkflow = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="router" name="Router" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Choose"
+                                 autonate:scriptFormat="javascript"
+                                 autonate:routeScript="return 'fa';"
+                                 autonate:runAs="system" />
+            <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
+            <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="tb" />
+            <bpmn:userTask id="ta" name="Route A" />
+            <bpmn:userTask id="tb" name="Route B" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
 
     // --- #177: cancelled vs completed in the execution diagram -----------------
 
