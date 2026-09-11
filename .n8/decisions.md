@@ -4680,3 +4680,39 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   sees — and the existing test could not tell one attempt from ten, because it
   waits on the dead letter, which is the end of the retry sequence.
   **Issue:** #283
+
+## 2026-09-10 — Owner decisions at M4 close-out
+
+  Three questions put to the owner with the alternatives laid out, at the point
+  where the fifth verification round had left one blocker and two findings that
+  were all decisions rather than work.
+
+  **#283 — reword, don't build.** Owner: *"Change #218's AC from 'terminal' to
+  'bounded and dead-lettered', which is what ships."* The hazard the criterion was
+  written against was a retry-loop forever; that does not happen. Three attempts
+  over ~35 s, bounded, re-running against unchanged inputs, nothing corrupted —
+  and #239's prevention design makes a contract breach an author bug met during
+  development rather than a production event. The mechanism that would fix it
+  properly (`AsyncRunnableExecutionExceptionHandler`) is new engine
+  infrastructure, disproportionate to a 35-second wait.
+  I had leaned the other way when I filed it and said so when asked; having
+  weighed what #239 already covers, reword is the proportionate answer and I
+  recommended it. #218's AC now describes what ships, with the measurement and
+  the reasoning inline, and `A_bad_route_is_attempted_a_bounded_number_of_times`
+  is the record of what "bounded" means — its failure message says to tighten it
+  to exactly 1 if anyone ever does make it terminal, never to loosen it.
+
+  **F4 and F5 both waived.** F5: the `flowable:scope` substitution for #156's
+  autonate-namespace criterion stands as recorded — better than what was promised,
+  since the engine enforces the scope, and no do-not-rename identifier moved; what
+  it lacked was the owner's words, which it now has. F4: the 54-item claim stands,
+  on the basis that the instrument's blind spot is now closed by a guard running
+  the other direction rather than merely noted. An element that was never
+  enumerated was never in the count; what #282 changed was the claim's
+  credibility.
+
+  **#284, #285, #286 carried to M5.** Owner: *"They don't block closure and each
+  is a wording decision, not missing work. Revisit with fresh context rather than
+  at close-out."* Nothing is lost — each finding, its evidence and its
+  recommendation stand as filed; what moves is when the criterion gets rewritten.
+  **Issue:** #283, #284, #285, #286, #218, #156
