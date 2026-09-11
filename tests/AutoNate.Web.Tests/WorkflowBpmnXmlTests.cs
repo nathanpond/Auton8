@@ -4544,6 +4544,143 @@ public sealed class WorkflowBpmnXmlTests
     }
 
 
+    // ── #333: refused by the engine, or deployed and inert ──────────────────
+
+    /// <summary>
+    /// Three elements the engine refuses — or silently never runs — for a missing
+    /// required attribute (#333).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each row is the state the palette actually leaves the element in, and each
+    /// verdict was measured against Flowable 8.0.0 rather than reasoned about:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    ///   multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    ///   callActivity, no target         DEPLOYS  then start fails 400
+    ///                                            "Process definition null was not found"
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The call activity is the one that matters most: it is the founding complaint
+    /// verbatim — draws, publishes, deploys, does nothing — and it is the only one
+    /// the engine does not catch for us.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_service_task_with_no_behaviour_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:serviceTask id="x" name="Do the thing" />""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+        Assert.Contains("Do the thing", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""flowable:class="com.example.Thing" """)]
+    [InlineData("""flowable:expression="${bean.method()}" """)]
+    [InlineData("""flowable:type="mail" """)]
+    [InlineData("""flowable:behaviorKey="autonate.send-message" """)]
+    public void A_service_task_that_names_its_behaviour_is_accepted(string wiring)
+    {
+        // The complement. Without it, "refuse every service task" passes the row
+        // above while refusing the element the whole behaviour system runs on --
+        // a far bigger regression than the bug.
+        var xml = UnnamedTriggerDiagram($"""<bpmn:serviceTask id="x" name="Do" {wiring}/>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A task on the AutoNate behaviour bridge is NOT accepted by the delegate
+    /// alone — it still needs a behaviour key.
+    /// </summary>
+    /// <remarks>
+    /// <c>BuildServiceTaskValidationErrors</c> has required this since before
+    /// #333, and it is stricter than the engine deliberately: Flowable is happy
+    /// with the delegate on its own, and the delegate with no key then fails at
+    /// run time. Worth a row here because the new rule sits next to it and the
+    /// two must not be collapsed — the new one covers the tasks the old one
+    /// SKIPS, which is every service task not wired to our delegate.
+    /// </remarks>
+    [Fact]
+    public void A_behaviour_bridge_task_still_needs_its_behaviour_key()
+    {
+        var xml = UnnamedTriggerDiagram(
+            """<bpmn:serviceTask id="x" name="Do" flowable:delegateExpression="${autonateBehaviorDelegate}" />""");
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("must have a behavior selected", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_repeat_with_nothing_to_repeat_over_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""
+            <bpmn:userTask id="x" name="Each one">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+            </bpmn:userTask>
+            """);
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+        Assert.Contains("Each one", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""<bpmn:multiInstanceLoopCharacteristics flowable:collection="items" flowable:elementVariable="i" />""")]
+    [InlineData("""<bpmn:multiInstanceLoopCharacteristics><bpmn:loopCardinality>3</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>""")]
+    public void A_repeat_that_says_what_to_repeat_over_is_accepted(string loop)
+    {
+        // Flowable takes EITHER a collection or a cardinality, so a rule demanding
+        // a collection would refuse a legal fixed-count repeat.
+        var xml = UnnamedTriggerDiagram($"""<bpmn:userTask id="x" name="Each">{loop}</bpmn:userTask>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The call activity: the only one of the three that DEPLOYS (#333).
+    /// </summary>
+    /// <remarks>
+    /// There is no deployment error to surface for this one, so publish is the
+    /// only place it can be caught. Left alone it draws, publishes, deploys, and
+    /// then fails every run the moment a token reaches it — which is the founding
+    /// complaint this milestone exists for, word for word.
+    /// </remarks>
+    [Fact]
+    public void A_call_activity_with_no_target_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:callActivity id="x" name="Run the sub-flow" />""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+        Assert.Contains("Run the sub-flow", error, StringComparison.Ordinal);
+        // Says what actually happens, because "it deploys" is the surprising part.
+        Assert.Contains("every run fails", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_call_activity_that_names_its_target_is_accepted()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:callActivity id="x" name="Run it" calledElement="child" />""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+    }
+
     // ── #318: two rules that were correct by construction and unguarded ─────
 
     /// <summary>

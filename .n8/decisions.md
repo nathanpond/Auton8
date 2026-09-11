@@ -5116,3 +5116,48 @@ pinned, the same shape the engine axis uses for declared departures. It does not
 verify the reasons are true — two are known false (`dataInput`/`dataOutput` cite
 an editor that does not exist in the SPA) and proving that needs #323's runner
 and #324's authorability column; #265 keeps that half.
+
+**#333 — three more publish-clean/engine-refuses defects (Rule 2).** Verified
+each against the live engine in the state the palette leaves it, rather than
+trusting the filing:
+
+    serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    callActivity, no target         DEPLOYS  then start fails 400
+                                             "Process definition null was not found"
+
+The call activity is the founding complaint verbatim — draws, publishes,
+deploys, does nothing — and the only one the engine does not catch for us, so
+publish is the only place it can be caught. Written as one rule over the class
+with the pattern stated in the code: *if the engine has a "missing required
+attribute" validation for an element the studio can place, publish needs the
+matching refusal.*
+
+Two things the work turned up that the filing did not have. The multi-instance
+rule accepts a `loopCardinality` as well as a collection — a rule demanding a
+collection would refuse a legal fixed-count repeat. And `BuildServiceTaskValidationErrors`
+already refuses a task on the AutoNate behaviour bridge with no behaviour key;
+it skips every service task *not* wired to our delegate, which is exactly the
+gap. My first complement row asserted the wrong thing and the pre-existing rule
+caught it — that is the rule working, and the row is now a positive assertion of
+it instead.
+
+Each of the three rules, disabled in turn, fails exactly one test.
+
+**#334 — a Java stack trace to the browser (Rule 2).** Publish had no catch
+around `DeployProcessAsync`, so an engine refusal reached the author as HTTP 500
+carrying a raw `FlowableRequestException`, a stack trace and absolute file
+paths. Now a 400 in the same `{errors:[…]}` shape publish already uses, carrying
+Flowable's problem code and its own sentence.
+
+Worth recording that my first version of this fix leaked. The recognised-shape
+branch was clean, and the fallback passed unrecognised messages through
+wholesale — which is the branch a raw Java dump actually takes. The tests I
+wrote for the leak caught my own fix, which is the first time this milestone a
+test has failed for the right reason before the code shipped. Stack frames and
+absolute paths are now stripped on every branch.
+
+The studio half — a refusal rendering as "Request failed with status code 400"
+because `WorkflowStudio.tsx` reads `data.message` against an `{errors:[…]}` body
+— is #256, and stays in M4b where the SPA runner can verify it. Until it lands,
+Outcome 2 is true of the API and still not of the product.

@@ -1596,6 +1596,9 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(triggerFindings.Errors);
             // #316: a send task the studio cannot configure and the engine refuses.
             errors.AddRange(BuildSendTaskErrors(document));
+            // #333: elements the engine refuses -- or silently never runs -- for a
+            // missing required attribute, in the state the palette leaves them.
+            errors.AddRange(BuildMissingRequiredAttributeErrors(document));
             // #157: a timer boundary with no time set never fires.
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
@@ -2990,6 +2993,103 @@ public static partial class WorkflowBpmnXml
         }
 
         return (errors, warnings);
+    }
+
+    /// <summary>
+    /// Elements the engine's validator refuses for a missing required attribute (#333).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The pattern, stated once because it keeps recurring:</b> if Flowable has a
+    /// "missing required attribute" validation for an element the studio can place,
+    /// publish needs the matching refusal. Without it the element draws, publishes
+    /// and then either sinks the deployment with a Java parser dump or — worse —
+    /// deploys and does nothing.
+    /// </para>
+    /// <para>
+    /// Measured against Flowable 8.0.0, each in the state the palette actually
+    /// leaves it:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    ///   multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    ///   callActivity, no target         DEPLOYS  -- then every start fails 400:
+    ///                                            "Process definition null was not found"
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The call activity is the worst of the three and is the founding complaint
+    /// verbatim: it draws fine, publishes, deploys, and does nothing.
+    /// <c>ExtractCallActivityTargets</c> skips an empty key, so the publish
+    /// endpoint's own comment — "a key resolving to nothing is refused here rather
+    /// than deployed" — did not describe the as-placed state.
+    /// </para>
+    /// <para>
+    /// All three are reachable without hand-editing XML: <c>create.service-task</c>
+    /// sets no properties, <c>toggle-parallel-mi</c> is a header entry the
+    /// manifest-derived filter keeps because the rows are supported, and
+    /// <c>create.call-activity</c> places a bare one.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildMissingRequiredAttributeErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var task in document.Descendants(BpmnNamespace + "serviceTask"))
+        {
+            // Any of Flowable's wirings, or ours. The expansion writes
+            // delegateExpression onto behaviour tasks, so a prepared diagram
+            // already carries one; this catches the as-placed and imported states.
+            var wired =
+                !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "delegateExpression")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "class")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "expression")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "type")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "behaviorKey")?.Value);
+
+            if (wired) continue;
+
+            errors.Add(
+                $"Service task '{LabelOf(task)}' has no behaviour chosen yet. Open it and pick what " +
+                "it should do. Left unset, Flowable refuses the whole deployment, not just this step.");
+        }
+
+        foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
+        {
+            // Flowable takes EITHER a collection to iterate or a fixed cardinality.
+            var hasCollection =
+                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value)
+                || !string.IsNullOrWhiteSpace(loop.Attribute("collection")?.Value);
+
+            var hasCardinality = loop
+                .Elements(BpmnNamespace + "loopCardinality")
+                .Any(c => !string.IsNullOrWhiteSpace(c.Value));
+
+            if (hasCollection || hasCardinality) continue;
+
+            var owner = loop.Parent;
+            var label = owner is null ? "this step" : $"'{LabelOf(owner)}'";
+            errors.Add(
+                $"The repeat on {label} has nothing to repeat over. Set the collection it should " +
+                "run once per item of, or a fixed number of times. Left unset, Flowable refuses " +
+                "the whole deployment, not just this step.");
+        }
+
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            if (!string.IsNullOrWhiteSpace(call.Attribute("calledElement")?.Value)) continue;
+
+            // This one DEPLOYS. That is why it needs refusing here rather than
+            // being left to the engine: there is no deployment error to surface,
+            // only an instance that fails the moment a token reaches the call.
+            errors.Add(
+                $"Call activity '{LabelOf(call)}' does not say which workflow to call. Open it and " +
+                "choose one. Left unset this publishes and deploys, and then every run fails the " +
+                "moment it reaches this step — Flowable reports \"Process definition null was not found\".");
+        }
+
+        return errors;
     }
 
     /// <summary>
