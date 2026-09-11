@@ -2302,7 +2302,7 @@ rather than taken on trust:
 which any behaviour satisfies. Owner's call — they concern engine behaviour
 nobody has established yet.
 
-## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation
+## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation — reconciled by /n8-replan 2026-09-11
 
 **Change:** #160 ("Jump between points in a diagram with link events") cannot be
 executed as written. Spike #217 created and #160 sequenced behind it.
@@ -4891,3 +4891,65 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   (`create.loop-marker`), which is legitimately different — an activity marker has
   no type to place — so the rule says so explicitly and still demands a deny key.
   **Issue:** #304, #305, #306, #307, #308, #309, #310, #311, #312
+
+## Ad-hoc — 2026-09-11 — M4 replanned: the scope instrument cannot express what breaks
+
+  **Owner's decision, taken after eight verification rounds.** M4's claim was
+  "every element the studio offers executes, and Flowable executes all of it".
+  Its **studio half failed verification five consecutive rounds, each time with a
+  different element**: a Loop Marker, a bare `boundaryEvent` (#282), a
+  process-level Error/Escalation start (#289), Timer/Message/Signal starts in a
+  plain subprocess (#309), and a Send Task **in its default state** (#316).
+
+  Each fix was specific to its instance and each round's remediation became the
+  next round's defect. The cause is structural. `src/shared/bpmn-support.json`
+  keys every row on `(localName, eventDefinition)` with a `studio` and an `engine`
+  column, and three axes the product depends on have no column:
+
+  - **container** — an Error Start is correct inside an event subprocess and
+    refused at process level; a Timer Start is correct at process level and
+    refused inside a plain subprocess. One row, two verdicts.
+  - **configuration state** — a Message Boundary with its name set deploys; the
+    same element as the palette creates it does not.
+  - **authorability** — a Send Task has NO state the studio can produce that
+    deploys, and Data Input/Output are `studio: supported` and authorable nowhere.
+
+  Every guard built in M4 iterates that manifest and inherits the blind spot,
+  including #282's completeness guard, which asserts a row *exists* and cannot see
+  that the row is right for one placement and wrong for another.
+
+  And one fact makes a column unverifiable in principle: **there is no test runner
+  in `src/AutoNate.Spa`** — no vitest, no jest, zero `*.test.*` files. The
+  manifest's own `$fields` define `studio: supported` as "Authorable in the studio
+  today", and nothing in the repository can check that sentence. Three studio
+  fixes shipped broken during M4 for exactly that reason (#281, #311, and #159's
+  six unguarded properties), each caught later by reading rather than by a test.
+
+  **Decisions taken (both the owner's, offered with alternatives):**
+
+  1. **M4 narrows to its engine axis** — "the elements in scope execute on
+     Flowable", which is what eight rounds actually established, and established
+     well: 42 elements, live-engine verification, real complements, 2369 + 334
+     tests green. The alternative was keeping the claim and fixing until it holds;
+     on this milestone's evidence that is several more rounds.
+  2. **A new milestone, M4b: Workflows — a verifiable studio axis**, takes the
+     three structural stories: a SPA test runner (#323), the manifest's missing
+     axes with derived placement rules (#324), and an oracle for "deploys and then
+     silently does nothing" (#325) — the half of the founding complaint no
+     instrument can currently see. The alternative was folding them into M5, which
+     would have made one milestone mean two things.
+
+  **Applied:** epic #40's AC2 and AC5 narrowed and a new AC added (a coverage
+  claim is checkable before it is made, with M4b as its dependency); M4's title
+  and description narrowed, with a NOTE on the coverage-claim block saying it is
+  engine-axis only; #115, #156, #159 studio-axis criteria annotated as resting on
+  inspection rather than evidence; #218's "every id-bearing surface" un-ticked and
+  narrowed to the execution view, because eight further surfaces carry raw ids;
+  #314, #317, #265, #268, #256 moved to M4b.
+
+  **Deliberately NOT done:** nothing was lowered on the engine axis. Four blocking
+  bugs stay in M4 (#316, #318, #319, #321) because they are engine-axis
+  correctness and must be fixed before it closes. Narrowing the claim is not the
+  same as lowering the bar on what remains. The 76 closed M4 stories were not
+  touched — they are history.
+  **Issue:** #40, #115, #156, #159, #218, #323, #324, #325
