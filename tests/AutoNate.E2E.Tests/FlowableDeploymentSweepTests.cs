@@ -32,7 +32,11 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             Assert.True(await ExistsAsync(client, mine), "Precondition: the suite deployment was not created.");
             Assert.True(await ExistsAsync(client, theirs), "Precondition: the other deployment was not created.");
 
-            var deleted = await FlowableDeploymentSweep.SweepAsync(client);
+            // #297. Cut-off injected: both deployments were made DURING this run,
+            // and the default cut-off spares exactly that. The axis under test here
+            // is the NAME, so the clock is moved out of the way -- the cut-off has
+            // its own pair of tests below, in both directions.
+            var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
 
             Assert.True(deleted > 0, "The sweep reported deleting nothing.");
             Assert.False(await ExistsAsync(client, mine), "A suite deployment survived the sweep.");
@@ -43,6 +47,9 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         finally
         {
             await DeleteByNameAsync(client, theirs);
+            // `mine` is normally swept above, but if an assertion failed first it
+            // is still there -- and leaving it would seed the next run's backlog.
+            await DeleteByNameAsync(client, mine);
         }
     }
 
@@ -149,10 +156,116 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             "matches by name, so a mismatch here is the sweep silently removing " +
             "nothing -- which is exactly what #257 was.");
 
-        var deleted = await FlowableDeploymentSweep.SweepAsync(client);
+        // #297. The cut-off is injected because this deployment was made DURING
+        // the run, and the default cut-off deliberately spares exactly that. What
+        // is under test here is the name matching, so the clock is moved out of
+        // the way rather than raced -- the cut-off's own behaviour has its own
+        // test below.
+        var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
         Assert.True(deleted > 0, "The sweep reported deleting nothing.");
         Assert.False(await ExistsAsync(client, deployedAs),
             "The sweep did not remove a deployment the app itself published.");
+    }
+
+    /// <summary>
+    /// A deployment made after the run began is never swept (#297).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #248 named two halves. The database half became a per-run
+    /// <c>autonate_e2e_&lt;guid&gt;</c>; this half went on deleting every
+    /// <c>e2e-*</c> deployment with <c>cascade=true</c> at fixture startup, on the
+    /// reasoning that they were "from earlier runs".
+    /// </para>
+    /// <para>
+    /// They are not necessarily from earlier runs. A verifier watched a live
+    /// <c>boom</c> job vanish from the jobs, timer-jobs and dead-letter tables
+    /// <b>mid-retry</b> because another agent's suite had just started; the same
+    /// test passed in 39 s once the engine was quiet. Cascade takes the
+    /// definitions, instances, jobs and history with it, so a concurrent run does
+    /// not fail cleanly — it fails as a timeout somewhere unrelated.
+    /// </para>
+    /// <para>
+    /// This is the assertion the previous fix lacked: it is not enough that the
+    /// sweep matches only the suite's own names, because a run happening right now
+    /// uses those same names.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_sweep_leaves_a_deployment_made_after_the_run_began()
+    {
+        using var client = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        // Named exactly as the suite names its own, so the PREFIX rule matches it
+        // and only the cut-off can save it. A name outside the convention would
+        // pass this test for the wrong reason.
+        var key = FlowableDeploymentSweep.SuiteDeploymentPrefix + $"cc{Guid.NewGuid():N}"[..18];
+
+        // "The run began" a moment ago; the deployment is made after it.
+        var runStartedAt = DateTimeOffset.UtcNow;
+        await Task.Delay(1100);   // the engine's deploymentTime has ms precision
+        await DeployAsync(client, key);
+
+        try
+        {
+            Assert.True(await ExistsAsync(client, key),
+                "the fixture did not deploy, so the assertion below would be vacuous");
+
+            var deleted = await FlowableDeploymentSweep.SweepAsync(client, runStartedAt);
+
+            Assert.True(await ExistsAsync(client, key),
+                $"The sweep removed a deployment created after the run began — it " +
+                $"deleted {deleted}. On a shared engine that is a CONCURRENT run's " +
+                "live work, and cascade takes its instances and jobs with it.");
+        }
+        finally
+        {
+            await DeleteByNameAsync(client, key);
+        }
+    }
+
+    /// <summary>The complement: an older one with the same name IS swept.</summary>
+    /// <remarks>
+    /// Without this, the cut-off could be a rule that spares everything — which is
+    /// how #257's first fix failed in the other direction, and how the sweep spent
+    /// the whole of M4 removing nothing while its test stayed green.
+    /// </remarks>
+    [Fact]
+    public async Task A_deployment_that_predates_the_run_is_still_swept()
+    {
+        using var client = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var key = FlowableDeploymentSweep.SuiteDeploymentPrefix + $"cp{Guid.NewGuid():N}"[..18];
+        await DeployAsync(client, key);
+
+        // Deployed first, so "the run began" after it — the shape of a leftover.
+        await Task.Delay(1100);
+        var runStartedAt = DateTimeOffset.UtcNow;
+
+        var swept = false;
+        try
+        {
+            Assert.True(await ExistsAsync(client, key),
+                "the fixture did not deploy, so the assertion below would be vacuous");
+
+            await FlowableDeploymentSweep.SweepAsync(client, runStartedAt);
+
+            swept = !await ExistsAsync(client, key);
+            Assert.True(swept,
+                "The sweep left a deployment that predates the run. The cut-off has " +
+                "become a rule that spares everything, which is the sweep doing " +
+                "nothing while reading as protection.");
+        }
+        finally
+        {
+            if (!swept) await DeleteByNameAsync(client, key);
+        }
     }
 
     [Fact]

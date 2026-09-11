@@ -280,7 +280,12 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
 
-        var deadline = DateTime.UtcNow.AddSeconds(90);
+        // #296. Was 90 s, and the operation outran it: dead-letter latency measured
+        // 34 s / 39 s / >90 s / >180 s across four runs. Both complex-gateway tests
+        // failed on at least one run at 90 s and passed at 300 s, which made the
+        // guard for #218's freshly reworded criterion intermittently red for
+        // reasons unrelated to what it measures.
+        var deadline = DateTime.UtcNow.AddSeconds(300);
         while (DateTime.UtcNow < deadline)
         {
             var body = await client.GetStringAsync("service/management/deadletter-jobs?size=500");
@@ -355,6 +360,19 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         var attempts = await RetriesObservedAsync(instance);
         await EventuallyDeadLetteredAsync(instance);
 
+        // #292. The anti-vacuity check, as its own assertion with its own message.
+        //
+        // This used to be `Math.Max(seen.Count, 1)` inside the helper, with a
+        // comment claiming "an empty observation fails loudly". It did the
+        // opposite: it floored 0 into 1, which sits inside the accepted range, so
+        // a poll that saw nothing PASSED. A floor that silently satisfies the
+        // range is worse than no floor, because it reads as protection.
+        Assert.True(attempts.Observed > 0,
+            "The poll observed no retry values at all before the dead letter. " +
+            "Either the job never entered the queues this helper watches, or the " +
+            "engine's REST shape has changed — either way the assertions below " +
+            "would be made against nothing.");
+
         // Bounded. The AC's feared "retries forever" does NOT happen, and this is
         // the assertion that says so — an unbounded retry would never dead-letter
         // and the helper above would time out.
@@ -363,18 +381,38 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         // dead-lettered" and "it dead-lettered after one attempt" are the two
         // different claims #283 is about. Today this is 2 -> 1 -> 0: three
         // attempts, Flowable's default for an async job.
-        Assert.True(attempts is >= 1 and <= 3,
-            $"Observed {attempts} retry values before the dead letter, where #218's " +
-            "criterion promises a bounded failure and Flowable's async default is " +
-            "three attempts. Gone UP: a deterministic author error is being retried " +
-            "more, and the bound in the criterion no longer describes it. Gone DOWN " +
-            "to 1: somebody made it terminal after all — good, and this assertion " +
-            "should be TIGHTENED to exactly 1 and #218's criterion reworded back, " +
-            "never loosened to accommodate the change.");
+        // #292. Two-sided, on the two things #218's criterion actually states.
+        //
+        // NOT on the attempt count. A poll samples, so the count it returns is
+        // sampling-dependent — this run observed 2 of the 3 values Flowable walks
+        // through, having missed the brief initial one. An exact assertion on a
+        // sampled number is a flake wearing a guard's clothes, which is the same
+        // mistake in a new place.
+        //
+        // What IS sampling-robust, and what the criterion says:
+        //
+        //   "bounded"     -> it reaches dead-letter at all. EventuallyDeadLetteredAsync
+        //                    above times out if it never does.
+        //   "not terminal"-> it was RETRIED first. A terminal failure goes straight
+        //                    to dead-letter with retries=0, so no positive retry
+        //                    value is ever observable in the live queues.
+        //
+        // So if somebody makes it terminal, MaxRetries goes to 0 and this fails —
+        // which is the direction the old `>= 1 and <= 3` range could not notice.
+        Assert.True(attempts.MaxRetries > 0,
+            $"The routing job reached dead-letter without ever showing a positive " +
+            $"retry count (max observed: {attempts.MaxRetries}), i.e. it failed " +
+            "TERMINALLY. That may well be an improvement — #283 records the argument " +
+            "— but #218's criterion says 'bounded', so change the criterion and this " +
+            "assertion together rather than deleting one of them.");
     }
 
-    /// <summary>How many distinct retry counts the routing job passes through.</summary>
-    private static async Task<int> RetriesObservedAsync(string processInstanceId)
+    /// <summary>What the routing job's retry counter was seen doing (#292).</summary>
+    /// <param name="Observed">How many distinct retry values were sampled. Anti-vacuity only.</param>
+    /// <param name="MaxRetries">The highest retry count seen live — 0 means it never retried.</param>
+    private readonly record struct RetryObservation(int Observed, int MaxRetries);
+
+    private static async Task<RetryObservation> RetriesObservedAsync(string processInstanceId)
     {
         using var client = FlowableDeploymentSweep.CreateClient(
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
@@ -382,7 +420,12 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
 
         var seen = new HashSet<int>();
-        var deadline = DateTime.UtcNow.AddSeconds(90);
+        // #296. 90 s was shorter than the operation: dead-letter latency was
+        // measured at 34 s / 39 s / >90 s / >180 s across four runs on a shared
+        // engine, so this guard was intermittently red for reasons unrelated to
+        // what it measures. Three attempts with Flowable's backoff, plus room for
+        // an engine another run is also driving.
+        var deadline = DateTime.UtcNow.AddSeconds(300);
 
         while (DateTime.UtcNow < deadline)
         {
@@ -411,9 +454,10 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
             await Task.Delay(250);
         }
 
-        // A poll that saw nothing at all would make the assertion vacuous, so the
-        // floor is 1 rather than 0 and an empty observation fails loudly.
-        return Math.Max(seen.Count, 1);
+        // #292. Returned raw. The caller asserts on its own lines with its own
+        // messages; flooring this to 1 turned "saw nothing" into "saw one", which
+        // sat inside the accepted range and therefore passed silently.
+        return new RetryObservation(seen.Count, seen.Count == 0 ? 0 : seen.Max());
     }
 
 }

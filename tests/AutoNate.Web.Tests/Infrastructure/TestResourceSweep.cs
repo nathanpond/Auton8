@@ -49,7 +49,7 @@ internal static class TestResourceSweep
     internal static async Task<Counts> SweepAsync(TimeSpan olderThan)
     {
         var roles = await SweepOrphanedPluginRolesAsync();
-        var schemas = await SweepPluginSchemasInSuiteDatabasesAsync();
+        var schemas = await SweepPluginSchemasInSuiteDatabasesAsync(olderThan);
         var directories = SweepTempDirectories(olderThan);
         return new Counts(roles, schemas, directories);
     }
@@ -169,6 +169,67 @@ internal static class TestResourceSweep
     }
 
     /// <summary>
+    /// Suite databases created before the cutoff — i.e. not a live run's (#300).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reads the same <c>COMMENT ON DATABASE</c> stamp
+    /// <c>PostgresTestDatabase.SweepAbandonedDatabasesAsync</c> writes at create,
+    /// and takes the same two decisions it takes, for the same reason:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>No stamp</b> — treated as LIVE. A database exists for a moment
+    /// between its create and its stamp, with no connections yet; anything that
+    /// treats that window as garbage drops a database out from under a test
+    /// about to open it.</item>
+    /// <item><b>Unparseable stamp</b> — treated as LIVE, same direction.</item>
+    /// </list>
+    /// <para>
+    /// Being wrong this way leaves a schema behind and costs disk. Being wrong the
+    /// other way destroys a concurrent test's state, which is what #300 was.
+    /// </para>
+    /// </remarks>
+    private static async Task<IReadOnlyList<string>> SuiteDatabasesOlderThanAsync(TimeSpan olderThan)
+    {
+        var cutoff = DateTimeOffset.UtcNow - olderThan;
+        var older = new List<string>();
+
+        await using var connection = new NpgsqlConnection(PostgresTestDatabase.AdminConnectionStringFor("postgres"));
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        // shobj_description carries the COMMENT ON DATABASE text, and the
+        // pg_stat_activity clause excludes anything with a live connection --
+        // both exactly as the database sweep does it.
+        command.CommandText =
+            """
+            select d.datname, shobj_description(d.oid, 'pg_database')
+            from pg_database d
+            where d.datistemplate = false and d.datallowconn
+              and not exists (
+                select 1 from pg_stat_activity a
+                where a.datname = d.datname and a.pid <> pg_backend_pid()
+              );
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var name = reader.GetString(0);
+            if (!IsSuiteOwnedDatabase(name)) continue;
+
+            var stamp = await reader.IsDBNullAsync(1) ? null : reader.GetString(1);
+            if (stamp is null) continue;                                    // live
+            if (!DateTimeOffset.TryParse(stamp, out var created)) continue; // live
+            if (created >= cutoff) continue;                                // live
+
+            older.Add(name);
+        }
+
+        return older;
+    }
+
+    /// <summary>
     /// Drops `plg_*` schemas inside databases the suite owns.
     /// </summary>
     /// <remarks>
@@ -176,12 +237,26 @@ internal static class TestResourceSweep
     /// plugins live there, and this tool is not allowed to be the thing that breaks
     /// them.
     /// </remarks>
-    private static async Task<int> SweepPluginSchemasInSuiteDatabasesAsync()
+    private static async Task<int> SweepPluginSchemasInSuiteDatabasesAsync(TimeSpan olderThan)
     {
-        var databases = (await QueryStringsAsync("postgres",
-                "select datname from pg_database where datistemplate = false and datallowconn;"))
-            .Where(IsSuiteOwnedDatabase)
-            .ToList();
+        // #300. Age AND liveness, which this pass had neither of.
+        //
+        // It dropped `plg_*` schemas from every suite-owned database with no
+        // regard for whether a run was using one. Reproduced directly: a fresh,
+        // stamped, LIVE `autonate_test_<guid>` carrying a `plg_scratchprobe`
+        // schema had it dropped by a single SweepAsync call —
+        //
+        //     schema present before sweep: True
+        //     schema present after  sweep: False
+        //
+        // — and `TestResourceSweepTests` calls SweepAsync four times per run, so a
+        // plugin test running in parallel can lose its schema mid-test.
+        //
+        // This is the failure #191 taught the DATABASE sweep not to commit, one
+        // axis over: that one gained a create stamp and a cutoff, and this pass,
+        // added in the same family of work, gained neither. The rule here is the
+        // same rule, read from the same stamp, so the two cannot drift.
+        var databases = await SuiteDatabasesOlderThanAsync(olderThan);
 
         var dropped = 0;
         foreach (var database in databases)
