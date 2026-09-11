@@ -271,6 +271,125 @@ public sealed class TestResourceSweepTests
         }
     }
 
+
+    /// <summary>
+    /// A suite database with no stamp keeps its plugin schema (#307).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #300 gave the schema sweep an age rule and guarded that one. Its other
+    /// three decisions — no stamp, unparseable stamp, and an open connection —
+    /// were stated in prose and asserted nowhere: all three could be made
+    /// sweepable with the whole suite green.
+    /// </para>
+    /// <para>
+    /// The no-stamp case is the #215 hazard, and the sweep's own docstring says
+    /// why: a database exists for a moment between its create and its stamp, with
+    /// no connections yet. Anything treating that window as garbage drops a
+    /// database out from under a test about to open it. The DATABASE sweep already
+    /// guards this (<c>A_database_with_no_stamp_is_left_alone</c>); the schema
+    /// sweep was the same rule with no test, which is how the two drifted again.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_suite_database_with_no_stamp_keeps_its_plugin_schema()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var database = $"autonate_test_{Guid.NewGuid():N}";
+        var schema = $"plg_nostamp{Guid.NewGuid():N}"[..18];
+
+        // Created WITHOUT the comment the real create writes — the window between
+        // `create database` and `comment on database`.
+        await ExecuteAsync("postgres", $"create database \"{database}\";");
+        try
+        {
+            await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+            await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "The sweep dropped a plugin schema from an unstamped database. That is the " +
+                "create/stamp window, so it may belong to a run that is about to open it.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop database if exists \"{database}\" with (force);");
+        }
+    }
+
+    /// <summary>An unparseable stamp is treated as live, not as garbage (#307).</summary>
+    [Fact]
+    public async Task A_suite_database_with_an_unparseable_stamp_keeps_its_plugin_schema()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var database = $"autonate_test_{Guid.NewGuid():N}";
+        var schema = $"plg_badstamp{Guid.NewGuid():N}"[..18];
+
+        await ExecuteAsync("postgres", $"create database \"{database}\";");
+        try
+        {
+            await ExecuteAsync("postgres",
+                $"comment on database \"{database}\" is 'not a timestamp at all';");
+            await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+            await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "The sweep dropped a plugin schema from a database whose stamp it could not " +
+                "read. Being wrong that way costs disk; being wrong the other way destroys a " +
+                "running test's state.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop database if exists \"{database}\" with (force);");
+        }
+    }
+
+    /// <summary>
+    /// An old database with an open connection keeps its schema (#307).
+    /// </summary>
+    /// <remarks>
+    /// The `pg_stat_activity` clause is the only one of the four rules with no
+    /// sibling on the database sweep either, so this is the first assertion of it
+    /// anywhere. A connection is the strongest evidence a run is live — stronger
+    /// than the stamp, which only says when it started.
+    /// </remarks>
+    [Fact]
+    public async Task An_old_suite_database_with_an_open_connection_keeps_its_plugin_schema()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var database = $"autonate_test_{Guid.NewGuid():N}";
+        var schema = $"plg_openconn{Guid.NewGuid():N}"[..18];
+
+        await ExecuteAsync("postgres", $"create database \"{database}\";");
+        try
+        {
+            // Old enough that the age rule alone would sweep it.
+            await ExecuteAsync("postgres",
+                $"comment on database \"{database}\" is '{DateTimeOffset.UtcNow.AddHours(-5):O}';");
+            await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+            // Held open across the sweep — the shape of a run in progress.
+            await using var held = new Npgsql.NpgsqlConnection(
+                PostgresTestDatabase.AdminConnectionStringFor(database));
+            await held.OpenAsync();
+
+            await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "The sweep dropped a plugin schema from a database with a live connection. " +
+                "Age said abandoned and the connection said otherwise; the connection is the " +
+                "stronger evidence and must win.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop database if exists \"{database}\" with (force);");
+        }
+    }
+
     // ── Helpers for the two tests above ─────────────────────────────────────
 
     private static Task<(string Database, string Schema)> PlantOldSuiteDatabaseWithSchemaAsync() =>

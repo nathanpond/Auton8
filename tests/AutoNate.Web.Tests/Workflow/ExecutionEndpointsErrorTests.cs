@@ -228,6 +228,73 @@ public sealed class ExecutionEndpointsErrorTests
         Assert.Contains("userTask_1", ids);
     }
 
+    /// <summary>
+    /// An error filed under a generated id lands on the author's row (#310).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The round-6 guard above seeds history rows and <b>no error rows</b>, so it
+    /// never entered the second code path — and that path grouped errors by the
+    /// RAW activity id while the history rows had already been mapped. The lookup
+    /// therefore never matched, and the phantom-row synthesis invented a row:
+    /// </para>
+    /// <code>
+    /// id='cg'                errored=(false)
+    /// id='cg__autonateRoute' errored=True   &lt;- an id in no diagram the author has seen
+    /// </code>
+    /// <para>
+    /// `WorkflowExecutionErrorRecorder` stores the id Flowable reports, which for a
+    /// complex gateway is always the generated one — so this is the ordinary case,
+    /// not an edge one. It is also the moment an operator most needs the row to be
+    /// findable: the routing script has just failed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task HistoryEndpoint_FilesAnErrorOnTheAuthoredRowNotAPhantomOne()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+
+        var processId = $"proc-{Guid.NewGuid():N}";
+        const string generated = "cg__autonateRoute";
+
+        factory.FlowableStub.ExpansionSourceMap =
+            new Dictionary<string, string>(StringComparer.Ordinal) { [generated] = "cg" };
+
+        factory.FlowableStub.HistoryByInstance[processId] =
+        [
+            new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = generated,
+                ActivityName = "Route (script)",
+                ActivityType = "scriptTask",
+                StartedAtUtc = DateTimeOffset.UtcNow
+            },
+        ];
+
+        // Filed under the GENERATED id, which is what the recorder actually stores.
+        await SeedErrorsAsync(factory, processId,
+            (generated, "the routing script returned 'maybe'", "trace", "2026-05-05T10:00:00Z"));
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var history = await client.GetFromJsonAsync<List<WorkflowExecutionHistoryEvent>>(
+            $"/api/executions/{processId}/history");
+
+        Assert.NotNull(history);
+
+        // No phantom row. This is the assertion that was missing.
+        Assert.DoesNotContain(history!, e => e.ActivityId == generated);
+
+        // Exactly one row, and it is the author's, and it carries the error.
+        var row = Assert.Single(history!);
+        Assert.Equal("cg", row.ActivityId);
+        Assert.True(row.ErrorCount > 0,
+            "The author's gateway row came back with no error count, so the failure was " +
+            "filed against an id the author cannot find in their diagram.");
+        Assert.Contains("maybe", row.ErrorMessage ?? "", StringComparison.Ordinal);
+    }
+
     private static async Task SeedErrorsAsync(
         AutoNateWebApplicationFactory factory,
         string processId,

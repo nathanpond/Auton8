@@ -325,8 +325,21 @@ public static class ExecutionEndpoints
                 .OrderBy(e => e.OccurredAtUtc)
                 .ToListAsync(cancellationToken);
 
+            // #310. Through the SAME mapping the history rows just went through.
+            //
+            // These were grouped by the RAW activity id while `history` above was
+            // mapped, so the lookup below never matched: the author's gateway came
+            // back not marked as errored, and the phantom-row synthesis further
+            // down then invented a row carrying `cg__autonateRoute` -- an id in no
+            // diagram the author has ever seen.
+            //
+            // The round-6 guard could not see it because it seeds history rows and
+            // no error rows, so this second code path was never entered.
+            string MapErrorActivityId(string activityId) =>
+                expansionSources.TryGetValue(activityId, out var source) ? source : activityId;
+
             var errorsByActivity = errorRows
-                .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
+                .GroupBy(e => MapErrorActivityId(e.ActivityId), StringComparer.Ordinal)
                 .ToDictionary(
                     g => g.Key,
                     g =>
@@ -392,7 +405,9 @@ public static class ExecutionEndpoints
                 history.Select(e => e.ActivityId),
                 StringComparer.Ordinal);
 
-            foreach (var errorRow in errorRows.GroupBy(e => e.ActivityId, StringComparer.Ordinal))
+            // #310. Mapped here too, or a generated id that IS present in history
+            // under its authored name gets a phantom row synthesized beside it.
+            foreach (var errorRow in errorRows.GroupBy(e => MapErrorActivityId(e.ActivityId), StringComparer.Ordinal))
             {
                 if (historyActivityIds.Contains(errorRow.Key))
                 {

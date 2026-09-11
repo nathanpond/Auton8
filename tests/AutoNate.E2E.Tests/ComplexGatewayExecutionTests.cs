@@ -381,36 +381,49 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         // dead-lettered" and "it dead-lettered after one attempt" are the two
         // different claims #283 is about. Today this is 2 -> 1 -> 0: three
         // attempts, Flowable's default for an async job.
-        // #292. Two-sided, on the two things #218's criterion actually states.
+        // #305. The "it was retried" half is DELETED, deliberately, and this
+        // comment is the record of why.
         //
-        // NOT on the attempt count. A poll samples, so the count it returns is
-        // sampling-dependent — this run observed 2 of the 3 values Flowable walks
-        // through, having missed the brief initial one. An exact assertion on a
-        // sampled number is a flake wearing a guard's clothes, which is the same
-        // mistake in a new place.
+        // Three versions of this assertion have now been vacuous:
         //
-        // What IS sampling-robust, and what the criterion says:
+        //   #283  `>= 1 and <= 3`        — could not fail if the bound went DOWN.
+        //   #292  `Math.Max(count, 1)`   — the anti-vacuity floor satisfied the range.
+        //   #305  `MaxRetries > 0`       — reads the job's INITIAL budget.
         //
-        //   "bounded"     -> it reaches dead-letter at all. EventuallyDeadLetteredAsync
-        //                    above times out if it never does.
-        //   "not terminal"-> it was RETRIED first. A terminal failure goes straight
-        //                    to dead-letter with retries=0, so no positive retry
-        //                    value is ever observable in the live queues.
+        // The third is the instructive one. Flowable creates an async job with
+        // `retries` already set to the executor's budget, before the first
+        // attempt, so the value is 3 whether or not a retry ever happens:
         //
-        // So if somebody makes it terminal, MaxRetries goes to 0 and this fails —
-        // which is the direction the old `>= 1 and <= 3` range could not notice.
-        Assert.True(attempts.MaxRetries > 0,
-            $"The routing job reached dead-letter without ever showing a positive " +
-            $"retry count (max observed: {attempts.MaxRetries}), i.e. it failed " +
-            "TERMINALLY. That may well be an improvement — #283 records the argument " +
-            "— but #218's criterion says 'bounded', so change the criterion and this " +
-            "assertion together rather than deleting one of them.");
+        //     t1: jobs=[('0a3235', 3)]      <- measured, before any execution
+        //
+        // A genuinely terminal failure (`R1/PT5S`, one attempt, dead-lettered in
+        // 0.3 s, never retried) yields Observed=1, MaxRetries=3 and passes. The
+        // comment defending it claimed MaxRetries would go to 0; it does not.
+        //
+        // Each replacement was REASONED about rather than measured, and each was
+        // wrong about what the engine's numbers mean. So this stops asserting the
+        // half that cannot be measured from the job queues.
+        //
+        // What remains is true, non-sampled, and what #218's criterion actually
+        // says: it is BOUNDED. `EventuallyDeadLetteredAsync` times out if the job
+        // never dead-letters, which is the retry-loop-forever the criterion was
+        // written against.
+        //
+        // If somebody wants the "retried" half guarded, the honest signal is
+        // elapsed time — a terminal failure dead-letters in under a second and a
+        // retried one takes ~35 s — and it should be written as an explicit
+        // measurement with that reasoning, not inferred from a counter whose
+        // meaning has now been guessed wrong three times.
     }
 
-    /// <summary>What the routing job's retry counter was seen doing (#292).</summary>
-    /// <param name="Observed">How many distinct retry values were sampled. Anti-vacuity only.</param>
-    /// <param name="MaxRetries">The highest retry count seen live — 0 means it never retried.</param>
-    private readonly record struct RetryObservation(int Observed, int MaxRetries);
+    /// <summary>What the routing job's retry counter was seen doing (#292, #305).</summary>
+    /// <param name="Observed">
+    /// How many distinct retry values were sampled. <b>Anti-vacuity only</b> — it
+    /// says the poll saw the job, and nothing about whether it was retried. The
+    /// counter starts at the executor's full budget before the first attempt, so
+    /// no value read from it distinguishes a retried job from a terminal one.
+    /// </param>
+    private readonly record struct RetryObservation(int Observed);
 
     private static async Task<RetryObservation> RetriesObservedAsync(string processInstanceId)
     {
@@ -457,7 +470,7 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         // #292. Returned raw. The caller asserts on its own lines with its own
         // messages; flooring this to 1 turned "saw nothing" into "saw one", which
         // sat inside the accepted range and therefore passed silently.
-        return new RetryObservation(seen.Count, seen.Count == 0 ? 0 : seen.Max());
+        return new RetryObservation(seen.Count);
     }
 
 }

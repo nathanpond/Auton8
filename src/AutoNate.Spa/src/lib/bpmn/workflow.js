@@ -1074,9 +1074,24 @@ function describeSignalElement(businessObject) {
 //
 //   "instance"        — what this studio writes.
 //   "processInstance" — Flowable's own, on any diagram round-tripped elsewhere.
-function meansInstance(raw) {
-  const normalised = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  return normalised === "instance" || normalised === "processinstance";
+// #311. THREE states, matching InterpretSignalScope's four in WorkflowBpmnXml.cs
+// (Unspecified collapses into the caller's fallback here).
+//
+// This returned a boolean, and the caller wrote `meansInstance(x) ? "instance" :
+// "global"`. So a typo -- `instnace` -- displayed as Global, and because the
+// panel writes back what it displayed, ONE press of Apply on an untouched signal
+// replaced the typo with `global`. The diagram became well-formed and wrong, the
+// backend's refusals (#278, #291) never saw it, and the signal ran engine-wide:
+// the feature defeated one layer above where it is implemented.
+//
+// A read that is wrong is bad; a read that is wrong and then saved is a data
+// change nobody asked for.
+export function interpretSignalScope(raw) {
+  if (typeof raw !== "string" || raw.trim() === "") return "unspecified";
+  const normalised = raw.trim().toLowerCase();
+  if (normalised === "instance" || normalised === "processinstance") return "instance";
+  if (normalised === "global") return "global";
+  return "unrecognised";
 }
 
 // What the diagram says this signal's scope is.
@@ -1107,12 +1122,16 @@ function readSignalScope(businessObject, signalRoot) {
     return local === "autonateSignalScope";
   });
   const declared = found?.value ?? found?.$attrs?.value;
-  if (typeof declared === "string" && declared.trim() !== "") {
-    return meansInstance(declared) ? "instance" : "global";
-  }
+  const fromEvent = interpretSignalScope(declared);
+  // "unrecognised" is reported as such rather than collapsed into "global", so the
+  // panel can refuse to write it back (#311).
+  if (fromEvent !== "unspecified") return fromEvent;
 
   const carried = signalRoot?.scope ?? signalRoot?.$attrs?.["flowable:scope"];
-  return meansInstance(carried) ? "instance" : "global";
+  const fromRoot = interpretSignalScope(carried);
+  // Absent from both means global -- Flowable's default, and what every diagram
+  // authored before #156 carries.
+  return fromRoot === "unspecified" ? "global" : fromRoot;
 }
 
 // #156. Writes the signal name and scope, maintaining the root element behind it.
@@ -1155,6 +1174,19 @@ export function updateSignalElementProperties(modelerHandle, payload) {
   // a direct write silently did nothing, and a namespaced key through
   // updateProperties did not serialise either. createAny is the mechanism this
   // file already uses for the call activity's in/out mappings, and it round-trips.
+  // #311. Never write back a scope the product does not understand.
+  //
+  // The panel writes what it displayed, so collapsing an unrecognised value into
+  // "global" for display meant Apply silently corrected an author's typo into the
+  // WIDER of the two options -- the one behaviour that cannot be right here.
+  // Refusing is what lets publish's own refusal (#278, #291) reach the author.
+  if (interpretSignalScope(scope) === "unrecognised") {
+    throw new Error(
+      `This signal's scope is '${scope}', which Auton8 does not understand. ` +
+      "Set it to 'instance' so only this process instance hears it, or 'global' " +
+      "so every instance does.");
+  }
+
   const scopeElement = moddle.createAny(
     "flowable:autonateSignalScope", FLOWABLE_NAMESPACE, { value: scope });
 

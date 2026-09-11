@@ -4808,3 +4808,86 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   would pass for an end event, which is the opposite element.
 
   **Issue:** #289, #290, #291, #292, #293, #294, #297, #299, #300
+
+## 2026-09-11 — Round 7: replace the instruments, not the cells
+
+  **Rule 1 throughout.** Round 7 found that four of round 6's nine fixes did not
+  hold, and **three of those four were guards**. The shape is no longer three
+  accidents, so this pass changes what the guards ARE rather than adding cells.
+
+  **#306 / #309 — the two enumerated guards become generators.** Three rounds
+  running, the signal-scope grid was fixed by unfreezing the axis just found and
+  freezing another: vocabulary (#278) -> arity (#290) -> kind (#306). The
+  placement rule did it twice: #289 widened the definition axis and left the
+  container axis binary, so `{message, timer, signal} x plain subProcess` was in
+  neither list.
+  Signal scope is now a **generated property** — 400 diagrams per seed, three
+  seeds, event count and kinds and declarations and root state all drawn from
+  their full ranges, with the expected value computed from a model written
+  independently of the production enum. All four historical defects go red.
+  Placement is now a **differential test** against the live engine — every
+  start-event definition crossed with every container, deployed, asserting publish
+  agrees with Flowable. It enumerates nothing by hand.
+  **The first version of the generated property was one-sided** and I caught it by
+  mutation: it asserted what a refused diagram writes and never that the refusal
+  DECISION was right, so reintroducing the #278 vocabulary gap left it green
+  (`processInstance` became Unrecognised, the diagram was refused, the refused
+  branch was satisfied). It now asserts the decision in both directions. That is
+  the same one-sidedness that has bitten every round, caught this time before
+  shipping.
+  **The differential test found a real asymmetry on its first run**: 27 of 28
+  cells agreed and the 28th — a bare start event in an event subprocess, which
+  Flowable deploys and Auton8 refuses — turned out to be a deliberate extra
+  strictness. It is a **declared departure** now, modelled on
+  `BpmnSupportManifestTests`' engine-axis departures, rather than a weakened
+  assertion.
+
+  **#310 — the history endpoint keyed errors on the raw id** while its history
+  rows had already been mapped, so the lookup never matched and the phantom-row
+  synthesis invented a row carrying `cg__autonateRoute`. My round-6 guard could
+  not see it because it seeds history rows and no error rows — it covered the half
+  that worked. Fixed, and the new test seeds an error under the generated id,
+  which is what the recorder actually stores.
+
+  **#311 — the studio was a fourth reader with two states.** `readSignalScope`
+  collapsed the four-state enum to a boolean, so a typo displayed as Global and
+  Apply wrote `global` back, destroying it before publish could refuse it. It
+  returns three states now and the panel REFUSES to write an unrecognised one.
+  I also corrected the comment in `WorkflowBpmnXml.cs` that claimed "a new
+  spelling is added in one place or in none" — that was false, there are three
+  readers, and the false claim is why nobody went looking.
+
+  **#304 — my own #297 fix was wrong twice.** `RunStartedAt` was a `static
+  readonly` initialised on first TYPE access, measured at 1206 ms after a marker
+  placed before the fixture's first touch; and "older than when I started" spares
+  only runs that began later, which is the opposite of the population at risk. It
+  is now **prefix AND a two-hour age threshold**, matching the sibling database
+  sweep. #257's history is not an argument against age — it records that age
+  ALONE deleted real work, when the prefix matched nothing.
+  The reason this shipped is that every test drove the injected overload; the new
+  test drives the **default** one, which is what the fixture calls.
+
+  **#308 — the file guarding "never delete a concurrent run's work" was the
+  largest violator of it.** Four of five tests swept with a cut-off of "now".
+  `SweepAsync` takes an optional name filter now, so each test exercises the real
+  predicate against a population it created.
+
+  **#307 — #300 guarded its age rule and none of its other three.** No-stamp,
+  unparseable-stamp and the `pg_stat_activity` clause were all stated in prose and
+  assertable-away. Three tests, three mutations, three reds.
+
+  **#305 — the retry assertion is DELETED, deliberately.** Three versions were
+  vacuous, and the third is the instructive one: `MaxRetries > 0` reads the job's
+  initial budget, visible before the first attempt (`t1: jobs=[('0a3235', 3)]`),
+  so a terminal failure passes. Each replacement was reasoned about rather than
+  measured. The test now asserts only what is true and non-sampled — that the
+  failure is BOUNDED, which is what #218's reworded criterion says — and the
+  comment records why the other half is not asserted and what would be needed to
+  assert it honestly.
+
+  **#312's participant leak fixed in passing**, plus the guard that would have
+  caught it: every catalog entry needs a `type`, or it drops out of
+  `WITHHELD_TARGET_KEYS` entirely. The guard immediately found a second entry
+  (`create.loop-marker`), which is legitimately different — an activity marker has
+  no type to place — so the rule says so explicitly and still demands a deny key.
+  **Issue:** #304, #305, #306, #307, #308, #309, #310, #311, #312
