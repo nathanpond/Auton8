@@ -4134,4 +4134,113 @@ public sealed class WorkflowBpmnXmlTests
 
         Assert.Contains(result.Warnings, w => w.Contains("Flow_B", StringComparison.Ordinal));
     }
+
+    // ── #289: placement, which the manifest has no axis for ─────────────────
+
+    private static string StartEventDiagram(string definitionXml, bool inEventSubProcess) =>
+        inEventSubProcess
+            ? $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                  id="D" targetNamespace="http://autonate.dev/workflows">
+                  <bpmn:error id="Err_1" name="Boom" errorCode="BOOM" />
+                  <bpmn:escalation id="Esc_1" name="Up" escalationCode="UP" />
+                  <bpmn:process id="p" isExecutable="true">
+                    <bpmn:startEvent id="s" />
+                    <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+                    <bpmn:userTask id="t" name="Work" />
+                    <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+                      <bpmn:startEvent id="hs" name="Caught">
+                {definitionXml}
+                      </bpmn:startEvent>
+                    </bpmn:subProcess>
+                  </bpmn:process>
+                </bpmn:definitions>
+                """
+            : $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                  id="D" targetNamespace="http://autonate.dev/workflows">
+                  <bpmn:error id="Err_1" name="Boom" errorCode="BOOM" />
+                  <bpmn:escalation id="Esc_1" name="Up" escalationCode="UP" />
+                  <bpmn:process id="p" isExecutable="true">
+                    <bpmn:startEvent id="s" name="Starts it">
+                {definitionXml}
+                    </bpmn:startEvent>
+                    <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+                    <bpmn:userTask id="t" name="Work" />
+                  </bpmn:process>
+                </bpmn:definitions>
+                """;
+
+    /// <summary>
+    /// A start event legal only inside an event subprocess is refused elsewhere (#289).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Error, escalation and conditional start events all react to something that
+    /// happens while a process is already running. Misplaced, Flowable answers
+    /// <c>flowable-start-event-invalid-event-definition</c> and refuses the
+    /// <b>whole deployment</b> — so one misplaced start event fails the author's
+    /// entire workflow, behind a studio that said nothing.
+    /// </para>
+    /// <para>
+    /// The rule covered conditional only. Error and escalation carry
+    /// <c>studio: supported</c> rows — correctly, since #162 ships them inside
+    /// event subprocesses — so <c>BuildUnsupportedElementErrors</c> matched the
+    /// row, found <c>engine: executes</c>, and let them through at any placement.
+    /// The manifest keys on <c>(localName, eventDefinition)</c> and has no
+    /// container axis, which is why #282's guard cannot see this either.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("""<bpmn:errorEventDefinition id="ed" errorRef="Err_1" />""", "Error")]
+    [InlineData("""<bpmn:escalationEventDefinition id="ed" escalationRef="Esc_1" />""", "Escalation")]
+    [InlineData("""<bpmn:conditionalEventDefinition id="ed"><bpmn:condition>${ok}</bpmn:condition></bpmn:conditionalEventDefinition>""", "Conditional")]
+    public void A_start_event_that_needs_an_event_subprocess_is_refused_at_process_level(
+        string definitionXml, string noun)
+    {
+        var result = WorkflowBpmnXml.ValidateProcess(StartEventDiagram(definitionXml, inEventSubProcess: false));
+
+        var error = Assert.Single(result.Errors, e => e.StartsWith(noun, StringComparison.Ordinal));
+
+        // Names the step, says where it may live, and says what the cost is —
+        // an author who reads "invalid event definition" from the engine has no
+        // way to know their whole workflow failed because of this one node.
+        Assert.Contains("Starts it", error, StringComparison.Ordinal);
+        Assert.Contains("event subprocess", error, StringComparison.Ordinal);
+        Assert.Contains("whole deployment", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>The complement, and the one that stops this refusing #162's work.</summary>
+    /// <remarks>
+    /// A rule written as "refuse these definitions on a start event" rather than
+    /// "refuse them outside an event subprocess" would refuse every event
+    /// subprocess this milestone shipped. That is a bigger regression than the bug
+    /// it fixes, and the positive test above cannot detect it.
+    /// </remarks>
+    [Theory]
+    [InlineData("""<bpmn:errorEventDefinition id="ed" errorRef="Err_1" />""")]
+    [InlineData("""<bpmn:escalationEventDefinition id="ed" escalationRef="Esc_1" />""")]
+    [InlineData("""<bpmn:conditionalEventDefinition id="ed"><bpmn:condition>${ok}</bpmn:condition></bpmn:conditionalEventDefinition>""")]
+    public void The_same_start_event_inside_an_event_subprocess_is_accepted(string definitionXml)
+    {
+        var result = WorkflowBpmnXml.ValidateProcess(StartEventDiagram(definitionXml, inEventSubProcess: true));
+
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Contains("cannot start a process", StringComparison.Ordinal));
+    }
+
+    /// <summary>A plain start event is untouched by the placement rule.</summary>
+    [Fact]
+    public void A_start_event_with_no_event_definition_is_not_refused_anywhere()
+    {
+        // The rule keys on the definition child, so a start event with none must
+        // fall straight through -- otherwise every process in the product breaks.
+        var result = WorkflowBpmnXml.ValidateProcess(StartEventDiagram("", inEventSubProcess: false));
+
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Contains("cannot start a process", StringComparison.Ordinal));
+    }
+
 }

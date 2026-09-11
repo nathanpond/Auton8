@@ -58,7 +58,42 @@ internal static class FlowableDeploymentSweep
     // deployed its own `e2e-…` fixture directly instead of going through the
     // publish path the suite uses. The engine reached 1,306 deployments.
     //
-    internal static async Task<int> SweepAsync(HttpClient client)
+    /// <summary>
+    /// Deployments created at or after this instant are never swept (#297).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Set once, at the moment the suite starts. The prefix says <b>this suite</b>
+    /// made it; this says <b>an earlier run</b> made it. Both are needed, because
+    /// "the suite made it" is true of a run happening right now on the same engine.
+    /// </para>
+    /// <para>
+    /// #248 named two halves and only one was fixed. The database half became a
+    /// per-run <c>autonate_e2e_&lt;guid&gt;</c>; this half kept deleting every
+    /// <c>e2e-*</c> deployment with <c>cascade=true</c> at fixture startup, on the
+    /// reasoning that they were "from earlier runs". They are not necessarily from
+    /// earlier runs. A verifier watched a live <c>boom</c> job vanish from the
+    /// jobs, timer-jobs and dead-letter tables mid-retry because another agent's
+    /// suite had just started — the same test passed in 39 s once the engine was
+    /// quiet.
+    /// </para>
+    /// <para>
+    /// That matters here more than it would elsewhere: this milestone's execution
+    /// evidence is CI-excluded by design, so the local run is the only thing that
+    /// exercises it, and it has been verified six times by parallel agents — which
+    /// is exactly the workload the unscoped sweep destroys.
+    /// </para>
+    /// </remarks>
+    internal static readonly DateTimeOffset RunStartedAt = DateTimeOffset.UtcNow;
+
+    internal static async Task<int> SweepAsync(HttpClient client) =>
+        await SweepAsync(client, RunStartedAt);
+
+    /// <param name="createdBefore">
+    /// Only deployments older than this are swept. Injected so the tests can prove
+    /// the cut-off rather than race it.
+    /// </param>
+    internal static async Task<int> SweepAsync(HttpClient client, DateTimeOffset createdBefore)
     {
         List<(string Id, string Name)> deployments;
         try
@@ -75,11 +110,28 @@ internal static class FlowableDeploymentSweep
             deployments = document.RootElement.GetProperty("data").EnumerateArray()
                 .Select(element => (
                     Id: element.GetProperty("id").GetString() ?? string.Empty,
-                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty))
+                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
+                    CreatedAt: element.TryGetProperty("deploymentTime", out var deployedAt)
+                        && DateTimeOffset.TryParse(
+                            deployedAt.GetString(),
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.AdjustToUniversal
+                                | System.Globalization.DateTimeStyles.AssumeUniversal,
+                            out var parsed)
+                        ? parsed
+                        : (DateTimeOffset?)null))
                 // Only what the suite deployed. A deployment this rule does not
                 // match is somebody's work, at any age.
                 .Where(deployment =>
                     deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
+                // #297. And only what already existed when this run began. A
+                // deployment created since is a CONCURRENT run's, and deleting it
+                // cascades away its live instances, jobs and history.
+                //
+                // A deployment with no readable time is left alone rather than
+                // swept: the whole point is that we could not tell whose it is.
+                .Where(deployment => deployment.CreatedAt is { } createdAt
+                                     && createdAt < createdBefore)
                 .Select(deployment => (deployment.Id, deployment.Name))
                 .ToList();
         }

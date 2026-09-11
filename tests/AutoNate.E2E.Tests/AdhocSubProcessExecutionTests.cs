@@ -313,4 +313,111 @@ public sealed class AdhocSubProcessExecutionTests : E2ETestBase
         Assert.Fail($"Timed out waiting for {what}. Tasks were: {string.Join(", ", names)}");
         return names;
     }
+
+    /// <summary>
+    /// Completing an ad-hoc sub-process releases a conditional catch after it (#293).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable never re-evaluates a conditional event on its own, so a catch whose
+    /// condition is <b>already true</b> when the token arrives parks forever. Auton8
+    /// nudges it after every delivery it makes — and three of its own endpoints were
+    /// not doing so: <c>move-state</c> and both ad-hoc routes.
+    /// </para>
+    /// <para>
+    /// Outcome 10's qualification excused the gap on the grounds that Auton8 "can
+    /// only ask for writes it can see". These are writes Auton8 makes itself, so the
+    /// excuse does not reach them, and neither does #271's engine-side listener.
+    /// </para>
+    /// <para>
+    /// This one matters most of the three: ad-hoc completion is the <b>ordinary</b>
+    /// way case-work advances in the sub-process #163 shipped, so the catch parks on
+    /// the normal path rather than an exceptional one. The condition is set true
+    /// BEFORE the token can reach the catch, which is the shape the engine never
+    /// re-checks — a test that set it afterwards would pass through the variable
+    /// route that already nudges, and prove nothing about this one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Completing_the_subprocess_releases_a_conditional_catch_waiting_after_it()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"adhc{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, ConditionalAfterAdhocDiagram(key));
+
+        // `ready` is true from the start, so by the time the token reaches the
+        // catch the condition is already satisfied and nothing will ever change
+        // it again. Only an explicit evaluate-conditions can release it.
+        var start = await api.PostAsync($"/api/workflows/{key}/start", new APIRequestContextOptions
+        {
+            DataObject = new { variables = new { ready = true, done = false } }
+        });
+        Assert.True(start.Ok, $"Starting failed: {start.Status} {await start.TextAsync()}");
+        var instance = JsonDocument.Parse(await start.TextAsync())
+            .RootElement.GetProperty("id").GetString()!;
+
+        var state = await AdhocStateAsync(api, instance);
+        var executionId = state.GetProperty("executionId").GetString()!;
+
+        var completed = await api.PostAsync(
+            $"/api/executions/{instance}/adhoc/{executionId}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(completed.Ok,
+            $"Completing the ad-hoc sub-process failed: {completed.Status} {await completed.TextAsync()}");
+
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("After the condition"),
+            "the conditional catch to release after the ad-hoc sub-process completed");
+
+        Assert.Contains("After the condition", names);
+    }
+
+    private static string ConditionalAfterAdhocDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Case work then a condition" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="adhoc" />
+            <bpmn:adHocSubProcess id="adhoc" name="Case work" ordering="Parallel">
+              <bpmn:userTask id="a1" name="Call the customer" />
+              <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${done == true}</bpmn:completionCondition>
+            </bpmn:adHocSubProcess>
+            <bpmn:sequenceFlow id="f1" sourceRef="adhoc" targetRef="wait" />
+            <bpmn:intermediateCatchEvent id="wait" name="Wait for ready">
+              <bpmn:conditionalEventDefinition id="cd">
+                <bpmn:condition xsi:type="bpmn:tFormalExpression">${ready == true}</bpmn:condition>
+              </bpmn:conditionalEventDefinition>
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="f2" sourceRef="wait" targetRef="after" />
+            <bpmn:userTask id="after" name="After the condition" />
+            <bpmn:sequenceFlow id="f3" sourceRef="after" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1"
+                              xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                              xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{{key}}">
+              <bpmndi:BPMNShape id="Shape_s" bpmnElement="s">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_adhoc" bpmnElement="adhoc">
+                <dc:Bounds x="200" y="60" width="300" height="200" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_wait" bpmnElement="wait">
+                <dc:Bounds x="560" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_after" bpmnElement="after">
+                <dc:Bounds x="640" y="78" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_e" bpmnElement="e">
+                <dc:Bounds x="780" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </bpmn:definitions>
+        """;
 }

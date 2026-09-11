@@ -1187,10 +1187,32 @@ public static partial class WorkflowBpmnXml
         {
             if (use.Roots.Count != 1 || use.Root is null) continue;
 
-            var carried = InterpretSignalScope(use.Root.Attribute(FlowableNamespace + "scope")?.Value);
-            if (carried is SignalScopeDeclaration.Instance or SignalScopeDeclaration.Global)
+            var rawCarried = use.Root.Attribute(FlowableNamespace + "scope")?.Value;
+            switch (InterpretSignalScope(rawCarried))
             {
-                Declare(use, carried, $"the signal '{name}' itself");
+                case SignalScopeDeclaration.Instance:
+                    Declare(use, SignalScopeDeclaration.Instance, $"the signal '{name}' itself");
+                    break;
+                case SignalScopeDeclaration.Global:
+                    Declare(use, SignalScopeDeclaration.Global, $"the signal '{name}' itself");
+                    break;
+
+                // #291. This case used to fall out of an `if` and be forgotten, so
+                // a typo on the ROOT published clean and Flowable answered
+                // HTTP 500 flowable-signal-invalid-scope ("Only values 'global'
+                // and 'processInstance' are supported") — while the identical
+                // string on an EVENT was refused with a helpful message.
+                //
+                // The root is not an exotic place for it: publish writes
+                // flowable:scope onto the root, so a published-then-reopened
+                // diagram carries it there and nowhere else (see #281).
+                case SignalScopeDeclaration.Unrecognised:
+                    use.Unrecognised.Add(($"the signal '{name}' itself", rawCarried!.Trim()));
+                    break;
+
+                case SignalScopeDeclaration.Unspecified:
+                    // The ordinary case: the root carries no scope of its own.
+                    break;
             }
         }
 
@@ -1558,7 +1580,7 @@ public static partial class WorkflowBpmnXml
             // #158: a conditional start event is legal only inside an event
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
-            errors.AddRange(BuildConditionalStartPlacementErrors(document));
+            errors.AddRange(BuildStartEventPlacementErrors(document));
             // #157: a timer boundary with no time set never fires.
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
@@ -3959,17 +3981,71 @@ public static partial class WorkflowBpmnXml
         return errors;
     }
 
-    private static IReadOnlyList<string> BuildConditionalStartPlacementErrors(XDocument document)
+    /// <summary>
+    /// Start events that are legal only inside an event subprocess (#289).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Error, escalation and conditional start events all react to something that
+    /// happens <b>while a process is already running</b>, so BPMN allows them only
+    /// inside <c>&lt;subProcess triggeredByEvent="true"&gt;</c>. Flowable enforces
+    /// that, and enforces it brutally: a misplaced one is
+    /// <c>flowable-start-event-invalid-event-definition</c> and the <b>whole
+    /// deployment</b> is refused, not just its branch. An author's entire workflow
+    /// fails to publish behind a green studio.
+    /// </para>
+    /// <para>
+    /// This rule covered <b>conditional only</b> until #289. Error and escalation
+    /// start events carry <c>studio: supported</c> manifest rows — correctly, since
+    /// #162 ships them inside event subprocesses — so
+    /// <c>BuildUnsupportedElementErrors</c> matched the row, found
+    /// <c>engine: executes</c>, and passed them at any placement:
+    /// </para>
+    /// <code>
+    /// ESCPROBE errors=0 warnings=0
+    /// engine  -> flowable-start-event-invalid-event-definition
+    /// </code>
+    /// <para>
+    /// The structural point, recorded because it will recur: the manifest keys on
+    /// <c>(localName, eventDefinition)</c> and has <b>no container axis</b>, so a
+    /// legal element in an illegal place is invisible to every guard built on it —
+    /// including #282's, which asserts a row exists and this element's row is
+    /// correct. Placement is a separate axis and needs separate rules; this is the
+    /// one place they live.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildStartEventPlacementErrors(XDocument document)
     {
+        // definition local name -> how an author says it, and what to do instead.
+        var eventSubProcessOnly = new Dictionary<string, (string Noun, string Remedy)>(StringComparer.Ordinal)
+        {
+            ["conditionalEventDefinition"] = (
+                "Conditional",
+                "To start a process when a condition holds, start it another way and wait on " +
+                "an intermediate catch conditional event instead."),
+            ["errorEventDefinition"] = (
+                "Error",
+                "An error start event catches an error raised inside the process it belongs to, " +
+                "so it needs a process already running. To react to an error from elsewhere, " +
+                "catch it on a boundary event or inside an event subprocess."),
+            ["escalationEventDefinition"] = (
+                "Escalation",
+                "An escalation start event catches an escalation raised inside the process it " +
+                "belongs to, so it needs a process already running. To react to one from " +
+                "elsewhere, catch it on a boundary event or inside an event subprocess."),
+        };
+
         var errors = new List<string>();
 
-        foreach (var definition in document.Descendants(BpmnNamespace + "conditionalEventDefinition"))
+        foreach (var start in document.Descendants(BpmnNamespace + "startEvent"))
         {
-            var start = definition.Parent;
-            if (start is null || start.Name != BpmnNamespace + "startEvent") continue;
+            var definition = start.Elements()
+                .FirstOrDefault(child => child.Name.Namespace == BpmnNamespace
+                    && eventSubProcessOnly.ContainsKey(child.Name.LocalName));
+            if (definition is null) continue;
 
             // An event subprocess is a subProcess carrying triggeredByEvent, which
-            // is the one container where this start event is legal.
+            // is the one container where these start events are legal.
             var container = start.Parent;
             var inEventSubProcess = container is not null
                 && container.Name == BpmnNamespace + "subProcess"
@@ -3980,13 +4056,14 @@ public static partial class WorkflowBpmnXml
 
             if (inEventSubProcess) continue;
 
-            var label = start.Attribute("name")?.Value ?? start.Attribute("id")?.Value ?? "(unnamed)";
+            var (noun, remedy) = eventSubProcessOnly[definition.Name.LocalName];
+            var label = LabelOf(start);
+
             errors.Add(
-                $"Conditional start event '{label}' cannot start a process. BPMN allows a " +
-                "conditional start event only inside an event subprocess, where it reacts to a " +
-                "condition becoming true while the process is already running. To start a " +
-                "process when a condition holds, start it another way and wait on an " +
-                "intermediate catch conditional event instead.");
+                $"{noun} start event '{label}' cannot start a process. BPMN allows it only " +
+                "inside an event subprocess, where it reacts to something that happens while " +
+                $"the process is already running. {remedy} Left where it is, Flowable refuses " +
+                "the whole deployment, not just this step.");
         }
 
         return errors;

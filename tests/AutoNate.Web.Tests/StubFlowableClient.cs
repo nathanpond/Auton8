@@ -126,11 +126,20 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult<IReadOnlyList<WorkflowExecutionSummary>>(Executions.ToArray());
     }
 
+    // #294. Settable so a test can supply the id-bearing surfaces; an empty
+    // detail by default, which is what every existing test assumes.
+    //
+    // It used to be hard-coded to `new WorkflowExecutionDiagramDetail()`, so the
+    // cancelled, failed, error-map and history mappings could not be exercised at
+    // all -- and `ExpansionSourceMap` beside it was never set by any test, in any
+    // file. Four of #218's five id surfaces were unasserted as a result.
+    public WorkflowExecutionDiagramDetail DiagramDetail { get; set; } = new();
+
     public Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"Diagram:{processInstanceId}");
-        return Task.FromResult(new WorkflowExecutionDiagramDetail());
+        return Task.FromResult(DiagramDetail);
     }
 
     // #218. Settable so a test can supply a mapping; empty by default, which is

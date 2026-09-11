@@ -452,7 +452,8 @@ public sealed class SignalScopeCasesTests
             var refused = WorkflowBpmnXml.ValidateProcess(xml).Errors
                 .Any(e => e.Contains("the.signal", StringComparison.Ordinal));
 
-            var emitted = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml))
+            var expandedXml = WorkflowBpmnXml.ExpandForDeployment(xml);
+            var emitted = XDocument.Parse(expandedXml)
                 .Descendants(Bpmn + "signal")
                 .Single()
                 .Attribute(Flowable + "scope")?.Value;
@@ -464,10 +465,39 @@ public sealed class SignalScopeCasesTests
 
             if (refused)
             {
+                // #290. `emitted == carried` was satisfiable by COINCIDENCE in
+                // every refused cell this grid contains, so an expansion that
+                // half-applied a scope on exactly the diagrams the validator
+                // refuses stayed green:
+                //
+                //     var agreed = use.Agreed ?? (use.DeclaredBy.ContainsKey(Instance)
+                //         ? Instance : Global);        // -> 30/30 passing
+                //
+                // Byte-identical is the honest claim. "Left alone" is what the
+                // expansion must do with a diagram about to be refused; "ended up
+                // equal" is what it happened to do.
                 Assert.True(emitted == carried,
                     $"{because}: refused at publish, but the expansion still wrote " +
                     $"scope='{emitted ?? "(none)"}' where the diagram carried " +
                     $"'{carried ?? "(none)"}'.");
+
+                // NOTE, because this is where #290 hid: the assertion above is
+                // NOT discriminating on its own. `carried` has only two possible
+                // values and so does `emitted`, so an expansion that writes the
+                // wrong thing can still land on the right one by coincidence —
+                // and in a SINGLE-EVENT grid it always does, because a plain-root
+                // contradiction cannot exist when there is nothing for a lone
+                // event to contradict.
+                //
+                // `The_two_paths_never_disagree_with_two_events_either` is the
+                // grid that discriminates, and it is where the mutation proving
+                // this property goes. Deleting it puts this file back to passing
+                // against a half-applying expansion.
+                //
+                // A byte-identical assertion was tried here and is wrong:
+                // ExpandForDeployment legitimately rewrites signal END events into
+                // a service task, so "unchanged" is false for reasons that have
+                // nothing to do with scope.
                 checkedCells++;
                 continue;
             }
@@ -499,6 +529,160 @@ public sealed class SignalScopeCasesTests
         // A cross-product that silently collapsed to nothing would pass every
         // assertion above. 8 declarations x 5 kinds x 2 roots.
         Assert.Equal(80, checkedCells);
+    }
+
+
+    /// <summary>
+    /// The same property, with TWO events per diagram (#290).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="The_two_paths_never_disagree"/> is single-event, and that is the
+    /// axis it froze. A plain-root contradiction — the one shape where a broken
+    /// expansion would write <c>processInstance</c> against a carried
+    /// <c>null</c> — <b>cannot exist</b> with one event, because with no carried
+    /// scope there is nothing for a lone event to contradict. So every refused
+    /// cell in that grid happened to satisfy <c>emitted == carried</c> whatever
+    /// the expansion did, and a half-applying expansion stayed 30/30 green.
+    /// </para>
+    /// <para>
+    /// Two events is where the disagreements actually live: #273 (a scoped catch
+    /// beside an unscoped throw), #274 (an event-subprocess start), #279 (a
+    /// pre-scoped root crossed with two events — never tested anywhere before
+    /// this). 6 declarations x 6 declarations x 2 roots = 72 cells, and the
+    /// second event is a boundary so that the pair is always legal BPMN.
+    /// </para>
+    /// <para>
+    /// The lesson is not "add arity". It is that an enumerated grid freezes
+    /// whatever its author did not think of, twice running now — vocabulary in
+    /// #278, arity in #290 — so the assertions are written to be discriminating
+    /// on their own rather than relying on the cells to be complete.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_two_paths_never_disagree_with_two_events_either()
+    {
+        string?[] declarations = [null, "instance", "processInstance", "global", "GLOBAL", "instnace"];
+        (string Label, string Roots)[] roots = [("plain", PlainRoot), ("pre-scoped", PreScopedRoot)];
+
+        var checkedCells = 0;
+
+        foreach (var first in declarations)
+        foreach (var second in declarations)
+        foreach (var (rootLabel, rootXml) in roots)
+        {
+            var xml = Diagram(
+                Event("intermediateCatchEvent", "c", first)
+                    + Event("boundaryEvent", "b", second, " attachedToRef=\"t\""),
+                rootXml);
+
+            var because = $"catch '{first ?? "(nothing)"}' + boundary " +
+                          $"'{second ?? "(nothing)"}' on a {rootLabel} root";
+
+            var refused = WorkflowBpmnXml.ValidateProcess(xml).Errors
+                .Any(e => e.Contains("the.signal", StringComparison.Ordinal));
+
+            var expandedXml = WorkflowBpmnXml.ExpandForDeployment(xml);
+            var expanded = XDocument.Parse(expandedXml);
+
+            // Two roots of one name is the 500 (#270). Never, on any input.
+            Assert.Single(expanded.Descendants(Bpmn + "signal"));
+
+            var emitted = expanded.Descendants(Bpmn + "signal")
+                .Single().Attribute(Flowable + "scope")?.Value;
+
+            if (refused)
+            {
+                // Byte-identical, for the reason given on the single-event grid:
+                // "ended up equal" is satisfiable by coincidence, "unchanged" is not.
+                Assert.True(
+                    XNode.DeepEquals(XDocument.Parse(xml), XDocument.Parse(expandedXml)),
+                    $"{because}: refused at publish, and the expansion CHANGED the " +
+                    "document rather than leaving it alone.");
+                checkedCells++;
+                continue;
+            }
+
+            // Accepted, so the two declarations agree or one of them is silent.
+            // Whichever spoke decides; silence defers to the root.
+            var carried = rootLabel == "pre-scoped" ? "processInstance" : null;
+
+            static string? Meaning(string? raw) => (raw ?? "").Trim().ToLowerInvariant() switch
+            {
+                "instance" or "processinstance" => "processInstance",
+                "global" => null,
+                _ => "SILENT"
+            };
+
+            var firstMeaning = Meaning(first);
+            var secondMeaning = Meaning(second);
+            var spoke = firstMeaning != "SILENT" ? firstMeaning
+                      : secondMeaning != "SILENT" ? secondMeaning
+                      : carried;
+
+            Assert.True(emitted == spoke,
+                $"{because}: published clean, but the engine gets scope=" +
+                $"'{emitted ?? "(none)"}' where the declarations mean " +
+                $"'{spoke ?? "(none)"}'.");
+            checkedCells++;
+        }
+
+        // 6 x 6 x 2. A cross-product that collapsed would pass every assertion.
+        Assert.Equal(72, checkedCells);
+    }
+
+
+    /// <summary>A typo on the ROOT is refused, like a typo on an event (#291).</summary>
+    /// <remarks>
+    /// <para>
+    /// #278 made <c>InterpretSignalScope</c> the one place a spelling is judged.
+    /// <c>CollectSignalScopeUses</c> called it for the root's carried scope and
+    /// then discarded the answer it did not have a branch for — the
+    /// <c>Unrecognised</c> case fell out of an <c>if</c>. So the shared
+    /// interpretation was consulted and ignored, which is the third time that
+    /// exact shape has produced a defect in #156's history.
+    /// </para>
+    /// <para>
+    /// The root is where publish itself writes the scope, so a
+    /// published-then-reopened diagram carries it there and nowhere else. Flowable
+    /// answers <c>HTTP 500 flowable-signal-invalid-scope</c>: "Only values 'global'
+    /// and 'processInstance' are supported".
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("instnace")]
+    [InlineData("process-instance")]
+    [InlineData("local")]
+    public void A_typo_on_the_signal_root_is_refused_and_quoted_back(string typo)
+    {
+        var roots = $"""<bpmn:signal id="Sig_1" name="the.signal" flowable:scope="{typo}" />""";
+        var xml = Diagram(Event("intermediateCatchEvent", "c", null), roots);
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains(typo, StringComparison.Ordinal));
+
+        // Named as the signal itself, not as one of the events referencing it —
+        // that distinction is #279's, and an author told "'Await' asks for..."
+        // would go and look at an event that says nothing.
+        Assert.Contains("the.signal", error, StringComparison.Ordinal);
+        Assert.Contains("'instance'", error, StringComparison.Ordinal);
+        Assert.Contains("'global'", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("processInstance")]
+    [InlineData("global")]
+    public void A_spelling_the_root_carries_that_we_do_recognise_is_not_refused(string spelling)
+    {
+        // The complement. A refusal rule written as "the root carries a scope"
+        // rather than "the root carries a scope we do not recognise" would refuse
+        // every diagram publish has ever produced, since publish writes this
+        // attribute itself.
+        var roots = $"""<bpmn:signal id="Sig_1" name="the.signal" flowable:scope="{spelling}" />""";
+        var xml = Diagram(Event("intermediateCatchEvent", "c", null), roots);
+
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(xml).Errors);
     }
 
 }

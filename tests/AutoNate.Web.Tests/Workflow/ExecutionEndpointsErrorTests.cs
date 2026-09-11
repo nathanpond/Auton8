@@ -93,6 +93,141 @@ public sealed class ExecutionEndpointsErrorTests
         Assert.Equal(3, row.ErrorCount);
     }
 
+
+    /// <summary>
+    /// The gateway's generated ids are mapped back on EVERY id-bearing surface (#294).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #218's AC names five: completed, cancelled, failed, the error map, and
+    /// history. The code does all five. Until now the only assertion anywhere was
+    /// on <c>completedActivityIds</c>, in one E2E test —
+    /// <c>StubFlowableClient.ExpansionSourceMap</c> existed for exactly this and
+    /// was never set by any test in any file, so deleting the history mapping, or
+    /// the error-map mapping, or the failed-ids mapping broke nothing.
+    /// </para>
+    /// <para>
+    /// The failed and error-map surfaces are the ones an operator reads when a
+    /// routing script has just gone wrong — precisely the moment the raw
+    /// <c>cg__autonateRoute</c> id is least useful and most likely to appear.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task DiagramEndpoint_MapsGeneratedIdsBackOnEverySurface()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+
+        var processId = $"proc-{Guid.NewGuid():N}";
+        const string generated = "cg__autonateRoute";
+        const string authored = "cg";
+
+        factory.FlowableStub.ExpansionSourceMap =
+            new Dictionary<string, string>(StringComparer.Ordinal) { [generated] = authored };
+
+        factory.FlowableStub.DiagramDetail = new WorkflowExecutionDiagramDetail
+        {
+            ExecutionId = processId,
+            CompletedActivityIds = [generated, "userTask_1"],
+            CurrentActivityIds = [generated],
+            CancelledActivityIds = [generated],
+            // The DIAGRAM endpoint maps from this property on the detail; the
+            // HISTORY endpoint maps from IFlowableClient.GetExpansionSourceMapAsync.
+            // Two sources for one mapping, which is why a test that set only the
+            // client-side one (as the first version of this test did) sees the
+            // history mapping work and the diagram mapping not.
+            ExpansionSourceIds = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [generated] = authored
+            },
+        };
+
+        // The failed ids and the error map are built from this table, not the stub.
+        await SeedErrorsAsync(factory, processId,
+            (generated, "the routing script blew up", "trace", "2026-05-05T10:00:00Z"));
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var detail = await client.GetFromJsonAsync<WorkflowExecutionDiagramDetail>(
+            $"/api/executions/{processId}/diagram");
+
+        Assert.NotNull(detail);
+
+        // All five, each asserted both ways: the author's id present AND the
+        // generated one absent. Presence alone would pass on a surface that
+        // emitted both, which is a diagram highlighting a node the author cannot
+        // see beside one they can.
+        foreach (var (surface, ids) in new (string, IReadOnlyList<string>)[]
+        {
+            ("completed", detail!.CompletedActivityIds),
+            ("current", detail.CurrentActivityIds),
+            ("cancelled", detail.CancelledActivityIds),
+            ("failed", detail.FailedActivityIds),
+        })
+        {
+            Assert.True(ids.Contains(authored),
+                $"The '{surface}' surface does not carry the author's gateway id '{authored}'. " +
+                $"It has: {string.Join(", ", ids)}");
+            Assert.True(!ids.Contains(generated),
+                $"The '{surface}' surface still carries the generated id '{generated}', which " +
+                "names a node the author never drew and cannot find in their diagram.");
+        }
+
+        Assert.True(detail.ErrorMessagesByActivityId.ContainsKey(authored),
+            "The error map is keyed by the generated id, so an operator reading why the " +
+            "gateway failed finds the message filed under a node that is not in the diagram.");
+        Assert.False(detail.ErrorMessagesByActivityId.ContainsKey(generated),
+            "The error map carries the generated id as well as the author's.");
+
+        // The untouched id must survive, or a mapping that rewrote everything to
+        // the same value would pass every assertion above.
+        Assert.Contains("userTask_1", detail.CompletedActivityIds);
+    }
+
+    [Fact]
+    public async Task HistoryEndpoint_MapsGeneratedIdsBackToTheAuthoredGateway()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+
+        var processId = $"proc-{Guid.NewGuid():N}";
+        const string generated = "cg__autonateRoute";
+
+        factory.FlowableStub.ExpansionSourceMap =
+            new Dictionary<string, string>(StringComparer.Ordinal) { [generated] = "cg" };
+
+        factory.FlowableStub.HistoryByInstance[processId] =
+        [
+            new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = generated,
+                ActivityName = "Route (script)",
+                ActivityType = "scriptTask",
+                StartedAtUtc = DateTimeOffset.UtcNow
+            },
+            new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = "userTask_1",
+                ActivityName = "Approve",
+                ActivityType = "userTask",
+                StartedAtUtc = DateTimeOffset.UtcNow
+            },
+        ];
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var history = await client.GetFromJsonAsync<List<WorkflowExecutionHistoryEvent>>(
+            $"/api/executions/{processId}/history");
+
+        Assert.NotNull(history);
+        var ids = history!.Select(e => e.ActivityId).ToList();
+
+        Assert.Contains("cg", ids);
+        Assert.DoesNotContain(generated, ids);
+        // Untouched rows survive, so a mapping that rewrote every id fails here.
+        Assert.Contains("userTask_1", ids);
+    }
+
     private static async Task SeedErrorsAsync(
         AutoNateWebApplicationFactory factory,
         string processId,

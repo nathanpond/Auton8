@@ -424,4 +424,89 @@ public sealed class CompensationExecutionTests : E2ETestBase
         Assert.Fail($"Timed out after 45s waiting for {what}. Tasks were: {string.Join(", ", names)}");
         return names;
     }
+
+    /// <summary>
+    /// An intermediate throw-compensate throws AND the process carries on (#294).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #115's criterion distinguishes two shapes: a compensation <b>end</b> event
+    /// ends the process and throws; an <b>intermediate throw</b> throws and
+    /// <b>carries on</b>. The end half had tests. The distinguishing half had
+    /// none — <c>grep compensateEventDefinition tests/</c> found it only in
+    /// end-event fixtures and in a palette placement assertion, so nothing in the
+    /// repo ever deployed an author-drawn intermediate throw-compensate.
+    /// </para>
+    /// <para>
+    /// It is also unobservable in the expansion's own output, because there the
+    /// generated throw is followed immediately by a generated none end event. Only
+    /// running it can tell the two apart, which is why this is an engine test and
+    /// not a tree assertion.
+    /// </para>
+    /// <para>
+    /// Both halves asserted: the handler ran (it threw) AND the process reached a
+    /// step after it (it carried on). Asserting only the first passes for an end
+    /// event, which is the opposite element.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_intermediate_throw_compensates_and_the_process_carries_on()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cmpthr{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, CarriesOnDiagram(key));
+
+        var instance = await StartAsync(api, key);
+        await EventuallyAsync(api, instance, n => n.Contains("Take payment"), "the compensable step");
+        await CompleteFirstTaskAsync(api, instance, "Take payment");
+
+        // Carried on: a task AFTER the throw exists. An end event would have
+        // ended the instance here and this would time out.
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("After compensation"),
+            "the process to continue past the intermediate throw");
+        Assert.Contains("After compensation", names);
+
+        // And it really did compensate on the way through, so "carries on" is not
+        // satisfied by a throw that quietly did nothing.
+        var variables = await VariablesAsync(api, instance);
+        Assert.True(variables.ContainsKey("refunded"),
+            "The intermediate throw carried on without running the handler, so it " +
+            "is a no-op rather than a compensation throw. Present: " +
+            string.Join(", ", variables.Keys));
+    }
+
+    private static string CarriesOnDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Undo and continue" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="throw" />
+            <bpmn:intermediateThrowEvent id="throw" name="Undo the payment">
+              <bpmn:compensateEventDefinition />
+            </bpmn:intermediateThrowEvent>
+            <bpmn:sequenceFlow id="f2" sourceRef="throw" targetRef="after" />
+            <bpmn:userTask id="after" name="After compensation" />
+            <bpmn:sequenceFlow id="f3" sourceRef="after" targetRef="done" />
+            <bpmn:endEvent id="done" />
+
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:scriptTask id="h1" name="Refund payment" isForCompensation="true"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('refunded', true);</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+          </bpmn:process>
+          {{Di(key, "s", "t1", "throw", "after", "done", "h1")}}
+        </bpmn:definitions>
+        """;
+
 }

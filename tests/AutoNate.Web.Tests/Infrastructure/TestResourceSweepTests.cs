@@ -166,18 +166,143 @@ public sealed class TestResourceSweepTests
         }
     }
 
+    /// <summary>
+    /// Every class reports a real count, proved by planting one of each (#299).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to assert only that the summary string contained the substrings
+    /// <c>roles=</c>, <c>schemas=</c> and <c>directories=</c>. With the schema pass
+    /// <b>and</b> the directory pass both disabled it still passed — which is
+    /// precisely the failure its own AC names: "so one category can't quietly do
+    /// nothing".
+    /// </para>
+    /// <para>
+    /// Labels are not counts. It plants one sweepable item per class and asserts
+    /// each count moved, so a pass that stops working fails here rather than
+    /// reporting <c>schemas=0</c> in a string nobody reads.
+    /// </para>
+    /// </remarks>
     [Fact]
     public async Task Each_class_reports_its_own_count()
     {
-        // "Cleaned up 400 things" can hide one category doing nothing, which is how
-        // a sweep silently stops working. The counts are separate and the string
-        // names each one.
-        var counts = await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
 
-        Assert.Contains("roles=", counts.ToString(), StringComparison.Ordinal);
-        Assert.Contains("schemas=", counts.ToString(), StringComparison.Ordinal);
-        Assert.Contains("directories=", counts.ToString(), StringComparison.Ordinal);
+        var role = $"plg_cnt{Guid.NewGuid():N}"[..20];
+        var directory = Path.Combine(Path.GetTempPath(), $"autonate-pgtests-{Guid.NewGuid():N}");
+        // Old enough to be swept, unlike the run's own content roots.
+        var (database, schema) = await PlantOldSuiteDatabaseWithSchemaAsync();
+
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+        Directory.CreateDirectory(directory);
+        Directory.SetCreationTimeUtc(directory, DateTime.UtcNow.AddHours(-3));
+
+        try
+        {
+            var counts = await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            // The numbers, not the labels.
+            Assert.True(counts.Roles > 0, $"The role pass reported nothing: {counts}");
+            Assert.True(counts.Schemas > 0, $"The schema pass reported nothing: {counts}");
+            Assert.True(counts.Directories > 0, $"The directory pass reported nothing: {counts}");
+
+            // And the planted items are actually gone, so a count that increments
+            // without doing anything fails too.
+            Assert.False(await RoleExistsAsync(role), "An orphaned plugin role survived.");
+            Assert.False(Directory.Exists(directory), "An old temp directory survived.");
+            Assert.False(await SchemaExistsAsync(database, schema),
+                "A plugin schema in an abandoned suite database survived.");
+
+            // The string still names each class, because that is what a human reads
+            // in the log when one of the numbers above is zero.
+            Assert.Contains("roles=", counts.ToString(), StringComparison.Ordinal);
+            Assert.Contains("schemas=", counts.ToString(), StringComparison.Ordinal);
+            Assert.Contains("directories=", counts.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            await ExecuteOnPostgresAsync($"drop database if exists \"{database}\" with (force);");
+        }
     }
+
+    /// <summary>
+    /// A live suite database keeps its plugin schema (#300).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The schema pass had no age check and no liveness check: it dropped
+    /// <c>plg_*</c> schemas from every suite-owned database. Reproduced before the
+    /// fix — a fresh, stamped, LIVE database's schema went in a single
+    /// <c>SweepAsync</c> call, and <c>SweepAsync</c> runs four times per suite run,
+    /// so a plugin test in parallel could lose its schema mid-test.
+    /// </para>
+    /// <para>
+    /// This is the rule the DATABASE sweep learned in #191, one axis over. The
+    /// complement — an old, abandoned database really does lose its schema — is
+    /// asserted by <c>Each_class_reports_its_own_count</c> above, so the pass
+    /// cannot satisfy this one by simply never sweeping.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_live_suite_database_keeps_its_plugin_schema()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        // Stamped NOW, so it is a run in progress by every rule the sweep has.
+        var (database, schema) = await PlantSuiteDatabaseWithSchemaAsync(DateTimeOffset.UtcNow);
+
+        try
+        {
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "the fixture did not create the schema, so the assertion below is vacuous");
+
+            await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "The sweep dropped a plugin schema from a database a live run owns. " +
+                "SweepAsync runs four times per suite run, so this destroys a " +
+                "concurrent plugin test's state mid-test.");
+        }
+        finally
+        {
+            await ExecuteOnPostgresAsync($"drop database if exists \"{database}\" with (force);");
+        }
+    }
+
+    // ── Helpers for the two tests above ─────────────────────────────────────
+
+    private static Task<(string Database, string Schema)> PlantOldSuiteDatabaseWithSchemaAsync() =>
+        PlantSuiteDatabaseWithSchemaAsync(DateTimeOffset.UtcNow.AddHours(-3));
+
+    /// <summary>
+    /// A suite-shaped database carrying a `plg_*` schema, stamped as at <paramref name="createdAt"/>.
+    /// </summary>
+    /// <remarks>
+    /// The stamp is the COMMENT ON DATABASE the real create writes; the sweep reads
+    /// it to decide whether a run still owns the database, so planting it is what
+    /// makes age testable without waiting three hours.
+    /// </remarks>
+    private static async Task<(string Database, string Schema)> PlantSuiteDatabaseWithSchemaAsync(
+        DateTimeOffset createdAt)
+    {
+        var database = $"autonate_test_{Guid.NewGuid():N}";
+        var schema = $"plg_probe{Guid.NewGuid():N}"[..18];
+
+        await ExecuteOnPostgresAsync($"create database \"{database}\";");
+        // The stamp the real create writes. The sweep reads it to decide whether a
+        // run still owns the database, so planting it makes age testable without
+        // waiting three hours.
+        await ExecuteOnPostgresAsync(
+            $"comment on database \"{database}\" is '{createdAt:O}';");
+        await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+        return (database, schema);
+    }
+
+    private static async Task ExecuteOnPostgresAsync(string sql) =>
+        await ExecuteAsync("postgres", sql);
 
     [Fact]
     public async Task A_recent_temp_directory_is_left_alone()

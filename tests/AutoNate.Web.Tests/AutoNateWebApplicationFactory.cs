@@ -17,15 +17,30 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     private readonly IReadOnlyDictionary<string, string?> _extraConfig;
     private readonly bool _ownsDatabase;
 
+    /// <summary>
+    /// Extra service registrations, for tests that need the host itself to
+    /// misbehave (#299).
+    /// </summary>
+    /// <remarks>
+    /// The only caller registers a hosted service whose <c>StopAsync</c> throws,
+    /// so that <c>base.DisposeAsync()</c> fails the way a real badly-torn-down
+    /// host fails. #191's AC asks for "a test that forces a throw", and without a
+    /// hook there was no honest way to force one — the test double-disposed and
+    /// hoped, which is how it came to pass against the pre-fix code.
+    /// </remarks>
+    private readonly Action<IServiceCollection>? _configureServices;
+
     private AutoNateWebApplicationFactory(
         PostgresTestDatabase database,
         IReadOnlyDictionary<string, string?>? extraConfig,
         string? webRoot,
-        bool ownsDatabase = true)
+        bool ownsDatabase = true,
+        Action<IServiceCollection>? configureServices = null)
     {
         _webRoot = webRoot;
         _database = database;
         _ownsDatabase = ownsDatabase;
+        _configureServices = configureServices;
         _extraConfig = extraConfig ?? new Dictionary<string, string?>();
         // Skip the startup Dapr probe — it would block the host from starting in tests.
         Environment.SetEnvironmentVariable("AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR", "true");
@@ -33,7 +48,8 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 
     public static async Task<AutoNateWebApplicationFactory> CreateAsync(
         IReadOnlyDictionary<string, string?>? extraConfig = null,
-        string? webRoot = null)
+        string? webRoot = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         // seedLocalAdmin: false — this factory boots the real host, so the
         // application's own first-admin bootstrap creates the account from the
@@ -41,7 +57,8 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
         // local_users non-empty, the bootstrap would correctly skip, and the
         // suites that exercise it would be testing the fixture instead.
         var database = await PostgresTestDatabase.CreateAsync(seedLocalAdmin: false);
-        return new AutoNateWebApplicationFactory(database, extraConfig, webRoot);
+        return new AutoNateWebApplicationFactory(
+            database, extraConfig, webRoot, configureServices: configureServices);
     }
 
     // A second host over a database another factory already created and still
@@ -175,6 +192,9 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
             services.AddSingleton<IAuditEventPublisher>(_ => new RecordingAuditEventPublisher());
             services.RemoveAll<IRecordEventPublisher>();
             services.AddSingleton<IRecordEventPublisher>(_ => new RecordingRecordEventPublisher());
+
+            // Last, so a test can replace anything above it (#299).
+            _configureServices?.Invoke(services);
         });
     }
 

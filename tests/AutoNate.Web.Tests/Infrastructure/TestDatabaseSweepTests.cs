@@ -1,4 +1,6 @@
 using AutoNate.Web.Tests;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Xunit;
 using Xunit.Abstractions;
@@ -153,16 +155,35 @@ public sealed class TestDatabaseSweepTests
         // The leak's own path. `DisposeAsync` called `base.DisposeAsync()` first with
         // nothing between them, so anything the host threw on teardown stranded the
         // database — invisibly, until someone counted.
-        var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        // #299. A hosted service whose StopAsync throws, so the host tears down
+        // badly for real — the shape the leak actually had. This replaces a
+        // double-dispose that HOPED the second call would throw; it did not
+        // (the test printed `second dispose threw: False`), so the test asserted
+        // only that the database was gone, which is true on the happy path. The
+        // production fix could be reverted to its pre-#191 shape with this green.
+        var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            configureServices: services =>
+                services.AddSingleton<IHostedService, ThrowsOnStopHostedService>());
+
         var database = factory.Database;
         _ = factory.CreateClient();
 
-        // Force the failure: disposing the service provider out from under the base
-        // implementation makes its own teardown throw.
+        // #299. Force the failure for real.
+        //
+        // This used to dispose twice and HOPE the second call threw. It does not —
+        // the test printed `second dispose threw: False` and then asserted only
+        // that the database was gone, which is true on the happy path too. Reverting
+        // the production fix to its pre-#191 shape (drop AFTER `base.DisposeAsync()`,
+        // no try/finally) left this test passing. It could not fail on its own AC,
+        // which asks for "a test that forces a throw".
+        //
+        // Disposing the host's service provider first is what actually does it:
+        // `base.DisposeAsync()` then tears down against a provider that is already
+        // gone and throws ObjectDisposedException. That is the shape of the real
+        // leak — a host that tore down badly — rather than a proxy for it.
         var thrown = false;
         try
         {
-            await factory.DisposeAsync();
             await factory.DisposeAsync();
         }
         catch
@@ -170,10 +191,22 @@ public sealed class TestDatabaseSweepTests
             thrown = true;
         }
 
-        // Whether or not the second disposal threw, the database must be gone.
+        // The forcing function is itself asserted. If a future ASP.NET Core makes
+        // base disposal tolerant of a disposed provider, this test would quietly
+        // go back to proving nothing -- so it fails loudly instead, and whoever
+        // sees it has to find a new way to make teardown fail.
+        Assert.True(thrown,
+            "base.DisposeAsync() did not throw, so this test is back to exercising " +
+            "the happy path and proves nothing about #191. The hosted service above " +
+            "is meant to make host shutdown fail — find another way to make teardown " +
+            "throw rather than deleting this assertion.");
+
+        // The criterion: the drop happened ANYWAY.
         Assert.False(await ExistsAsync(database),
-            $"The database survived disposal (second dispose threw: {thrown}).");
-        _output.WriteLine($"second dispose threw: {thrown}");
+            "The database survived a disposal whose base teardown threw. That is " +
+            "the leak #191 fixed: the drop must be in a finally, not after the await.");
+
+        _output.WriteLine($"base disposal threw: {thrown}");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -208,4 +241,19 @@ public sealed class TestDatabaseSweepTests
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync();
     }
+}
+
+
+/// <summary>A hosted service that fails on shutdown, and only on shutdown (#299).</summary>
+/// <remarks>
+/// Starting must succeed — a host that never starts would not reach the disposal
+/// path under test, and the test would pass for the wrong reason.
+/// </remarks>
+internal sealed class ThrowsOnStopHostedService : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StopAsync(CancellationToken cancellationToken) =>
+        throw new InvalidOperationException(
+            "Deliberate teardown failure from ThrowsOnStopHostedService (#299).");
 }
