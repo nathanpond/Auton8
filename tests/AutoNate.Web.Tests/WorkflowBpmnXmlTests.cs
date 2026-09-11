@@ -4243,4 +4243,271 @@ public sealed class WorkflowBpmnXmlTests
             e.Contains("cannot start a process", StringComparison.Ordinal));
     }
 
+
+    // ── #316: configuration state, which the manifest has no column for ─────
+
+    private static string UnnamedTriggerDiagram(string body) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="D" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_Unnamed" />
+          <bpmn:message id="Msg_Unnamed" />
+          <bpmn:signal id="Sig_Named" name="the.signal" />
+          <bpmn:message id="Msg_Named" name="the.message" />
+          <bpmn:process id="p" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
+            <bpmn:userTask id="t" name="Work" />
+        {body}
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    /// <summary>
+    /// An event whose trigger is not named yet is refused, at every position (#316).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the state the palette produces: place a signal catch, a message
+    /// boundary, a signal end, and before the author opens the panel and types a
+    /// name the diagram is undeployable. Flowable refuses the <b>whole
+    /// deployment</b> — <c>flowable-signal-event-missing-signal-ref</c> /
+    /// <c>flowable-message-event-missing-message-ref</c> — and publish said nothing.
+    /// </para>
+    /// <para>
+    /// A rule existed for signal <b>start</b> only. That is the tell this issue
+    /// turned on: it was written for the position someone happened to test, and its
+    /// four siblings had none. The rule now walks positions rather than listing
+    /// them, so a position added later is covered by construction — and these rows
+    /// are the evidence it reaches all of them.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("intermediateCatchEvent", "signalEventDefinition", "signalRef", "Catch event", "signal")]
+    [InlineData("intermediateThrowEvent", "signalEventDefinition", "signalRef", "Throw event", "signal")]
+    [InlineData("endEvent", "signalEventDefinition", "signalRef", "End event", "signal")]
+    [InlineData("intermediateCatchEvent", "messageEventDefinition", "messageRef", "Catch event", "message")]
+    [InlineData("startEvent", "messageEventDefinition", "messageRef", "Start event", "message")]
+    public void An_event_whose_trigger_has_no_name_is_refused_at_any_position(
+        string position, string definition, string refAttribute, string noun, string trigger)
+    {
+        var refId = trigger == "signal" ? "Sig_Unnamed" : "Msg_Unnamed";
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Not named yet"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:{position}>""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+
+        // Names the position an author sees, the thing to set, and the cost.
+        Assert.StartsWith(noun, error, StringComparison.Ordinal);
+        Assert.Contains("Not named yet", error, StringComparison.Ordinal);
+        Assert.Contains($"no {trigger} name yet", error, StringComparison.Ordinal);
+        Assert.Contains("whole deployment", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>A boundary event too — it needs its task, so it gets its own row.</summary>
+    [Theory]
+    [InlineData("signalEventDefinition", "signalRef", "Sig_Unnamed", "signal")]
+    [InlineData("messageEventDefinition", "messageRef", "Msg_Unnamed", "message")]
+    public void A_boundary_event_whose_trigger_has_no_name_is_refused(
+        string definition, string refAttribute, string refId, string trigger)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:boundaryEvent id="x" name="Not named yet" attachedToRef="t"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:boundaryEvent>""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+        Assert.StartsWith("Boundary event", error, StringComparison.Ordinal);
+        Assert.Contains($"no {trigger} name yet", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The complement: a named trigger is not refused, at any position.
+    /// </summary>
+    /// <remarks>
+    /// Without this, a rule written as "refuse every signal/message event" would
+    /// pass every row above while refusing the entire feature — which is a bigger
+    /// regression than the bug it fixes, and the positive rows cannot detect it.
+    /// </remarks>
+    [Theory]
+    [InlineData("intermediateCatchEvent", "signalEventDefinition", "signalRef", "Sig_Named")]
+    [InlineData("intermediateThrowEvent", "signalEventDefinition", "signalRef", "Sig_Named")]
+    [InlineData("endEvent", "signalEventDefinition", "signalRef", "Sig_Named")]
+    [InlineData("intermediateCatchEvent", "messageEventDefinition", "messageRef", "Msg_Named")]
+    [InlineData("startEvent", "messageEventDefinition", "messageRef", "Msg_Named")]
+    public void A_named_trigger_is_accepted_at_any_position(
+        string position, string definition, string refAttribute, string refId)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Named"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:{position}>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A send task the studio cannot configure is refused (#316).
+    /// </summary>
+    /// <remarks>
+    /// The worst cell of #316, because it is the element's <b>default state</b>
+    /// rather than a misconfiguration: a Send Task placed from the palette with no
+    /// edits published with zero errors and Flowable refused the whole deployment.
+    /// And no state of it worked — the studio cannot write the behaviour key the
+    /// expansion needs, so every send task an author could place was undeployable
+    /// while the manifest read <c>studio: supported</c>.
+    /// </remarks>
+    [Fact]
+    public void A_send_task_with_nothing_to_send_with_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:sendTask id="x" name="Send it" />""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Send task", StringComparison.Ordinal));
+
+        Assert.Contains("Send it", error, StringComparison.Ordinal);
+        Assert.Contains("nothing to send with", error, StringComparison.Ordinal);
+        // Says what to do instead, because "withdrawn" without an alternative is
+        // just a wall.
+        Assert.Contains("service task", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""flowable:type="mail" """)]
+    [InlineData("""flowable:behaviorKey="autonate.send-message" """)]
+    public void A_send_task_that_names_how_it_sends_is_accepted(string wiring)
+    {
+        // The complement, and the one that stops this refusing Flowable's own
+        // wirings and Auton8's expansion. `ExpandForDeployment_LeavesASendTaskItDoesNotOwnAlone`
+        // covers the mail case downstream; this asserts publish lets it through.
+        var xml = UnnamedTriggerDiagram($"""<bpmn:sendTask id="x" name="Send it" {wiring}/>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Send task", StringComparison.Ordinal));
+    }
+
+
+    // ── #318: two rules that were correct by construction and unguarded ─────
+
+    /// <summary>
+    /// A gateway-only workflow still reaches the JavaScript capability check (#318).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #218's AC says the check still runs for a workflow whose only script is the
+    /// one the complex-gateway expansion generates. It does — but only because
+    /// `WorkflowEndpoints` expands the model *before* handing it to the client, and
+    /// `ContainsScriptTask` then matches the generated `bpmn:scriptTask`.
+    /// </para>
+    /// <para>
+    /// That ordering was wholly unguarded: exempting gateway-generated script tasks
+    /// from `ContainsScriptTask` left **122 targeted Web.Tests and 15 live-engine
+    /// E2E cases green**. Reordering the expansion, or narrowing the match, broke
+    /// nothing visible.
+    /// </para>
+    /// <para>
+    /// Asserted here at the seam that matters: the XML the client is asked to
+    /// deploy contains a script task, so the capability check has something to
+    /// find. An author-drawn complex gateway carries no `bpmn:scriptTask` at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_gateway_only_workflow_carries_a_script_task_after_expansion()
+    {
+        const string gatewayOnly = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="D" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="p" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+                <bpmn:complexGateway id="cg" name="Route">
+                  <bpmn:extensionElements>
+                    <autonate:routingScript><![CDATA[return 'fa';]]></autonate:routingScript>
+                  </bpmn:extensionElements>
+                </bpmn:complexGateway>
+                <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="a" />
+                <bpmn:userTask id="a" name="Route A" />
+                <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="b" />
+                <bpmn:userTask id="b" name="Route B" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        // The author's diagram has no script task. If the capability check ran on
+        // THIS, a gateway-only workflow would deploy JavaScript without the check.
+        var authored = XDocument.Parse(gatewayOnly);
+        Assert.Empty(authored.Descendants(Bpmn218 + "scriptTask"));
+
+        // The deployable does, which is what the check is given.
+        var deployed = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(gatewayOnly));
+        Assert.NotEmpty(deployed.Descendants(Bpmn218 + "scriptTask"));
+    }
+
+    /// <summary>
+    /// The expansion source map is built from the deployed XML (#318).
+    /// </summary>
+    /// <remarks>
+    /// `BuildExpansionSourceMap` is what maps a generated `cg__autonateRoute` back
+    /// to the author's gateway on every execution surface. It had **no test at
+    /// all** — every test injected a map by hand, so emptying it left 642/642
+    /// green and #218's whole id-mapping feature could be disabled invisibly.
+    /// </remarks>
+    [Fact]
+    public void The_expansion_source_map_maps_a_generated_id_to_the_authored_gateway()
+    {
+        const string gatewayOnly = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="D" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="p" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+                <bpmn:complexGateway id="cg" name="Route">
+                  <bpmn:extensionElements>
+                    <autonate:routingScript><![CDATA[return 'fa';]]></autonate:routingScript>
+                  </bpmn:extensionElements>
+                </bpmn:complexGateway>
+                <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="a" />
+                <bpmn:userTask id="a" name="Route A" />
+                <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="b" />
+                <bpmn:userTask id="b" name="Route B" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var map = WorkflowBpmnXml.BuildExpansionSourceMap(
+            WorkflowBpmnXml.ExpandForDeployment(gatewayOnly));
+
+        // The expansion generates more than one node (the routing script task and
+        // the flow into it), and EVERY generated id must map back, or a half-mapped
+        // diagram highlights one node the author drew and one they did not.
+        Assert.NotEmpty(map);
+        Assert.All(map, entry =>
+        {
+            Assert.Contains("__autonateRoute", entry.Key, StringComparison.Ordinal);
+            Assert.Equal("cg", entry.Value);
+        });
+        Assert.Contains("cg__autonateRoute", map.Keys);
+
+        // Empty on a diagram with nothing generated, so a map that returned a
+        // constant would fail here rather than reading as success.
+        Assert.Empty(WorkflowBpmnXml.BuildExpansionSourceMap("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="p" isExecutable="true"><bpmn:startEvent id="s" /></bpmn:process>
+            </bpmn:definitions>
+            """));
+    }
+
 }

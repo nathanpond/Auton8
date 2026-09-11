@@ -1589,6 +1589,10 @@ public static partial class WorkflowBpmnXml
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
             errors.AddRange(BuildStartEventPlacementErrors(document));
+            // #316: an event whose trigger is not named yet, at any position.
+            errors.AddRange(BuildUnnamedEventTriggerErrors(document));
+            // #316: a send task the studio cannot configure and the engine refuses.
+            errors.AddRange(BuildSendTaskErrors(document));
             // #157: a timer boundary with no time set never fires.
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
@@ -2829,6 +2833,150 @@ public static partial class WorkflowBpmnXml
 
         return errors;
     }
+
+    /// <summary>
+    /// An event whose trigger is not named yet, at any position (#316).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>signalEventDefinition</c> or <c>messageEventDefinition</c> whose ref is
+    /// unset, or points at a root with no name, is refused by Flowable at
+    /// deployment — <c>flowable-signal-event-missing-signal-ref</c> /
+    /// <c>flowable-message-event-missing-message-ref</c> — and it fails the
+    /// <b>whole deployment</b>, not just that element.
+    /// </para>
+    /// <para>
+    /// **That is the state the palette produces.** Place a signal catch, a message
+    /// boundary, a signal end — anything but a start event — and before the author
+    /// opens the panel and types a name, the diagram is undeployable. Publish said
+    /// nothing about it.
+    /// </para>
+    /// <para>
+    /// A rule existed for <b>signal start</b> only, which is the tell: it was
+    /// written for the position someone happened to test, and its four siblings —
+    /// catch, throw, boundary, end — had none, and there was no message rule at any
+    /// position. Rather than add the missing seven by hand, this walks every
+    /// position, because the next position added to the product is then covered by
+    /// construction.
+    /// </para>
+    /// <para>
+    /// Deliberately <b>not</b> a placement rule: where the element may sit is
+    /// <c>BuildStartEventPlacementErrors</c>'s question. This one is about
+    /// configuration state, which is a different axis and — per #324 — one the
+    /// manifest has no column for either.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildUnnamedEventTriggerErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        // definition local name -> (root element, ref attribute, what an author calls it)
+        var triggers = new (string Definition, string Root, string RefAttribute, string Noun)[]
+        {
+            ("signalEventDefinition", "signal", "signalRef", "signal"),
+            ("messageEventDefinition", "message", "messageRef", "message"),
+        };
+
+        foreach (var (definitionName, rootName, refAttribute, noun) in triggers)
+        {
+            var rootsById = document.Descendants(BpmnNamespace + rootName)
+                .Where(root => !string.IsNullOrWhiteSpace(root.Attribute("id")?.Value))
+                .ToDictionary(root => root.Attribute("id")!.Value, root => root, StringComparer.Ordinal);
+
+            foreach (var definition in document.Descendants(BpmnNamespace + definitionName))
+            {
+                var owner = definition.Parent;
+                if (owner is null || owner.Name.Namespace != BpmnNamespace) continue;
+
+                // A throw/end event may legitimately carry a messageRef the
+                // expansion replaces, but it still needs a NAME to replace it with,
+                // so every position is treated the same.
+                var reference = definition.Attribute(refAttribute)?.Value;
+                var named = !string.IsNullOrWhiteSpace(reference)
+                            && rootsById.TryGetValue(reference!, out var root)
+                            && !string.IsNullOrWhiteSpace(root.Attribute("name")?.Value);
+
+                if (named) continue;
+
+                errors.Add(
+                    $"{DescribeEventPosition(owner)} '{LabelOf(owner)}' has no {noun} name yet. " +
+                    $"Open it and set the {noun} it should use — the name is what matches one end " +
+                    "to the other. Left unset, Flowable refuses the whole deployment, not just " +
+                    "this step.");
+            }
+        }
+
+        return errors;
+    }
+
+    /// <summary>
+    /// A send task Auton8 cannot turn into something deployable (#316).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable requires <c>type</c> or <c>operation</c> on a <c>sendTask</c> and
+    /// refuses the <b>whole deployment</b> otherwise
+    /// (<c>flowable-sendtask-invalid-implementation</c>). Auton8's expansion
+    /// converts one to a service task when it carries
+    /// <c>flowable:behaviorKey="autonate.send-message"</c>, and otherwise leaves it
+    /// exactly as authored.
+    /// </para>
+    /// <para>
+    /// **The studio cannot write that key onto a send task.** `updateServiceTaskProperties`
+    /// throws unless the element is a `bpmn:ServiceTask`, and selecting a send task
+    /// routes to the message editor, whose only write is the message name. So every
+    /// send task an author could place was undeployable, publish said nothing, and
+    /// the element's manifest row said `studio: supported` / `engine: executes`.
+    /// </para>
+    /// <para>
+    /// The row is now <c>studio: withdrawn</c> — the engine really does run a
+    /// correctly configured send task, so the engine axis is unchanged, and it is
+    /// the authorability claim that was false. This rule is the publish half:
+    /// an imported diagram can still carry one, and it is refused rather than
+    /// deployed into a failure.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildSendTaskErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var sendTask in document.Descendants(BpmnNamespace + "sendTask"))
+        {
+            // Any of the three makes it deployable: Flowable's own two wirings, or
+            // ours, which the expansion turns into a service task.
+            var deployable =
+                !string.IsNullOrWhiteSpace(sendTask.Attribute(FlowableNamespace + "type")?.Value)
+                || !string.IsNullOrWhiteSpace(sendTask.Attribute(FlowableNamespace + "operation")?.Value)
+                || string.Equals(
+                    sendTask.Attribute(FlowableNamespace + "behaviorKey")?.Value,
+                    SendMessageBehaviorKey,
+                    StringComparison.Ordinal);
+
+            if (deployable) continue;
+
+            errors.Add(
+                $"Send task '{LabelOf(sendTask)}' has nothing to send with. Flowable needs a " +
+                "send task to name how it sends — and Auton8's studio cannot configure one, " +
+                "which is why Send Task is withdrawn from the palette. Replace it with a " +
+                "service task, or an intermediate throw message event if you want Auton8 to " +
+                "send the message. Left as it is, Flowable refuses the whole deployment.");
+        }
+
+        return errors;
+    }
+
+    /// <summary>How an author would refer to the element carrying a definition.</summary>
+    private static string DescribeEventPosition(XElement owner) => owner.Name.LocalName switch
+    {
+        "startEvent" => "Start event",
+        "endEvent" => "End event",
+        "boundaryEvent" => "Boundary event",
+        "intermediateCatchEvent" => "Catch event",
+        "intermediateThrowEvent" => "Throw event",
+        "receiveTask" => "Receive task",
+        "sendTask" => "Send task",
+        _ => owner.Name.LocalName,
+    };
 
     private static IReadOnlyList<string> BuildRecordTypeFilterMisplacementErrors(XDocument document)
     {
@@ -4092,7 +4240,16 @@ public static partial class WorkflowBpmnXml
             {
                 "", "messageEventDefinition", "timerEventDefinition", "signalEventDefinition",
                 "conditionalEventDefinition", "errorEventDefinition", "escalationEventDefinition",
-                "compensateEventDefinition"
+
+                // #321. `compensateEventDefinition` was here and the engine refuses
+                // it -- `flowable-event-subprocess-invalid-start-event-definition`,
+                // measured. The row was wrong from the day it was written, and the
+                // differential test could not see it because the manifest already
+                // withdraws Compensation Start Event for an unrelated reason (#107),
+                // so an unrelated refusal satisfied the oracle.
+                //
+                // Promoting that one manifest row -- one word, no code -- would have
+                // turned this into a live missed refusal. The cell now exists.
             },
 
             // A plain embedded subprocess is entered by a token arriving on a
@@ -4182,6 +4339,12 @@ public static partial class WorkflowBpmnXml
                     "subprocess."),
             };
 
+            // The phrase "cannot start " is this rule's signature, and
+            // StartEventPlacementDifferentialTests matches on it. It is deliberately
+            // narrower than "start event": the #115 descope message reads
+            // "Compensation Start Event ('x') cannot be deployed: ...", which
+            // satisfied the old substring and made four cells pass on an unrelated
+            // refusal (#321). Keep the phrase stable, or fix the test with it.
             errors.Add(
                 $"{noun} start event '{LabelOf(start)}' cannot {where}. {remedy} Left where it " +
                 "is, Flowable refuses the whole deployment, not just this step.");

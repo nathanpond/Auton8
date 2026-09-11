@@ -147,6 +147,47 @@ public sealed class RetryPointExecutionTests : E2ETestBase
             names => names.Contains("Step two"), "the unmarked process to reach step two");
 
         Assert.Equal(plainNames.OrderBy(n => n), markedNames.OrderBy(n => n));
+
+        // #319. The assertion above cannot fail on its own: both lists can only ever
+        // be ["Step two"], so it passes whether the attribute did anything or
+        // nothing. Combined with the fixture marking a userTask -- an element the
+        // retry-point control is never offered on and the backend never dispatches
+        // for -- it asserted "provably free" for something that was never applied.
+        //
+        // So: assert the mark REACHED the engine. A marked async step becomes a job;
+        // an unmarked one does not. If the attribute is inert the counts are equal
+        // and this fails, which is the whole claim.
+        // The mark reached the ENGINE. Asserted against the deployed resource rather
+        // than by counting jobs: a succeeding async step completes before any poll
+        // can see its job, so a job count is zero for both and proves nothing.
+        var markedXml = await DeployedXmlAsync(markedInstance);
+        var plainXml = await DeployedXmlAsync(plainInstance);
+
+        Assert.Contains("flowable:async=\"true\"", markedXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("flowable:async=\"true\"", plainXml, StringComparison.Ordinal);
+    }
+
+    /// <summary>The BPMN Flowable is actually running for this instance.</summary>
+    /// <remarks>
+    /// #319. The equality assertion above cannot fail on its own — both task lists
+    /// can only ever be ["Step two"] — so it passes whether the mark did anything
+    /// or nothing. Reading the deployed resource is what makes "provably free"
+    /// a claim about a setting that was actually applied.
+    /// </remarks>
+    private static async Task<string> DeployedXmlAsync(string processInstanceId)
+    {
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var instance = await client.GetStringAsync(
+            $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}");
+        using var instanceDocument = JsonDocument.Parse(instance);
+        var definitionId = instanceDocument.RootElement.GetProperty("processDefinitionId").GetString()!;
+
+        return await client.GetStringAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata");
     }
 
     // start -> "Step one" (user task) -> failing service task -> end.
@@ -178,8 +219,18 @@ public sealed class RetryPointExecutionTests : E2ETestBase
             """;
     }
 
-    // start -> "Step one" -> "Step two" -> end. No service task, so nothing fails
-    // and the only variable is the attribute.
+    // start -> "Step one" -> a SUCCEEDING service task -> "Step two" -> end.
+    //
+    // #319. The marked element is a serviceTask, not a userTask. The retry-point
+    // control is offered only on `bpmn:ServiceTask` (WorkflowStudio.tsx) and the
+    // backend dispatches RetryPoint only for `localName == "serviceTask"`
+    // (WorkflowBpmnXml.cs), so a marked userTask is silently ignored. This fixture
+    // used one, which meant "the setting is provably free in the happy path" was
+    // asserted for an element an author cannot mark, with an assertion comparing
+    // two lists that could only ever be equal.
+    //
+    // The service task succeeds (`${true}`), so the happy path is still a happy
+    // path, and the mark now has an observable effect: async makes it a job.
     private static string HappyPathXml(string key, bool retryPoint)
     {
         var async = retryPoint ? " flowable:async=\"true\"" : string.Empty;
@@ -192,12 +243,15 @@ public sealed class RetryPointExecutionTests : E2ETestBase
                 <bpmn:startEvent id="s" />
                 <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="one" />
                 <bpmn:userTask id="one" name="Step one" />
-                <bpmn:sequenceFlow id="f1" sourceRef="one" targetRef="two" />
-                <bpmn:userTask id="two" name="Step two"{{async}} />
+                <bpmn:sequenceFlow id="f1" sourceRef="one" targetRef="mark" />
+                <bpmn:serviceTask id="mark" name="Marked step"
+                                  flowable:expression="${true}"{{async}} />
+                <bpmn:sequenceFlow id="fm" sourceRef="mark" targetRef="two" />
+                <bpmn:userTask id="two" name="Step two" />
                 <bpmn:sequenceFlow id="f2" sourceRef="two" targetRef="e" />
                 <bpmn:endEvent id="e" />
               </bpmn:process>
-              {{Di(key, "s", "one", "two", "e")}}
+              {{Di(key, "s", "one", "mark", "two", "e")}}
             </bpmn:definitions>
             """;
     }

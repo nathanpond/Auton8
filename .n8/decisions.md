@@ -4953,3 +4953,72 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   same as lowering the bar on what remains. The 76 closed M4 stories were not
   touched — they are history.
   **Issue:** #40, #115, #156, #159, #218, #323, #324, #325
+
+## 2026-09-11 — Round 8: the four engine-axis blockers, after the replan
+
+  **Rule 1 throughout.** These are the four M4 kept when the replan narrowed it to
+  its engine axis. All four are engine-axis correctness, so narrowing the claim
+  did not lower the bar on them.
+
+  **#321 — my own differential test had a factually wrong oracle.** Three fixes:
+  1. `compensateEventDefinition` removed from the event-subprocess allow-list. The
+     engine refuses it (`flowable-event-subprocess-invalid-start-event-definition`)
+     and the table said otherwise; the product was saved only because the manifest
+     withdraws Compensation Start Event for an unrelated reason.
+  2. **The oracle split in two.** AGREEMENT is now rule-agnostic (any error), because
+     the question "does publish refuse what the engine refuses" does not care which
+     rule refused — narrowing it to one phrase made cells another rule legitimately
+     owns fail. ATTRIBUTION is rule-specific and asks "did the PLACEMENT rule fire",
+     which is what stops the rule being deleted unnoticed. It is only asked where
+     the placement rule should be the one firing, and **that is derived from the
+     manifest**, not enumerated: an element the manifest withdraws is refused by
+     `BuildUnsupportedElementErrors` first, and that is correct.
+  3. Departures now assert BOTH sides and carry the phrase that proves their own
+     refusal — a departure is refused by a DIFFERENT rule than this test is about,
+     so matching the placement phrase there asserted the wrong thing. The dead
+     `_ = checkedDeparture;` line is gone; it was theatre.
+  Also added the multiple-start cell the round-7 PR claimed existed (deleting that
+  rule had left 541/541 green) and a `compensate` row, which had been missing
+  entirely — which is why restoring a wrong allow-list row stayed green.
+  **A limit I could not close and recorded in the test:** while a definition is
+  withdrawn, a wrong allow-list row is masked by the manifest refusal. The row is
+  still wrong and becomes live the moment the manifest promotes it — that scenario
+  IS red. Closing it properly means deriving the table from the manifest, which is
+  #324 in M4b.
+
+  **#316 — one rule over positions, not a fifth per-element rule.**
+  `BuildUnnamedEventTriggerErrors` walks every `signalEventDefinition` and
+  `messageEventDefinition` wherever it sits. A rule existed for signal START only,
+  which is the tell: written for the position someone tested, with four siblings
+  uncovered and no message rule at any position. Walking positions means the next
+  position added is covered by construction.
+  **Send Task withdrawn, with the engine axis untouched.** Flowable runs a
+  correctly configured send task, so `engine: executes` stays true; what was false
+  was `studio: supported`, which the manifest's own `$fields` define as "Authorable
+  in the studio today". No state the studio can produce deploys. `BuildSendTaskErrors`
+  is the publish half, since an imported diagram can still carry one. Making it
+  authorable again is #328 in M4b, where a test runner can prove it.
+
+  **#319 — the guard marked an element the control never applies to.** The
+  retry-point control is offered only on `bpmn:ServiceTask` and the backend
+  dispatches only for `localName == "serviceTask"`, so the fixture's marked
+  `userTask` was silently ignored — and the assertion compared two task-name lists
+  that could only ever be equal. Now a succeeding service task, with the mark's
+  effect asserted against the DEPLOYED resource.
+  Counting jobs was tried first and is wrong: a succeeding async step completes
+  before any poll can see its job, so both counts are zero and it proves nothing.
+  That is the third time in this milestone a sampled measurement has read as a
+  guard, and the lesson each time is the same — assert something that cannot have
+  finished before you look.
+
+  **#318 — two rules correct by construction and unguarded.** The JS capability
+  check works only because the endpoint expands before calling the client;
+  exempting gateway script tasks from `ContainsScriptTask` left 122 Web.Tests and
+  15 E2E cases green. `BuildExpansionSourceMap` had no test at all — emptying it
+  disabled #218's whole id-mapping feature with 642/642 green. Both guarded now,
+  the first at the seam (the deployable carries a script task; the authored diagram
+  does not).
+  The eight unmapped surfaces outside the execution view are #327 in M5 — the
+  replan narrowed #218's AC to the execution view, so they are no longer a claim
+  this milestone makes.
+  **Issue:** #316, #318, #319, #321
