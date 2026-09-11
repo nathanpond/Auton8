@@ -5085,3 +5085,34 @@ mutation now fails exactly one test, the one written for it.
 This is the third instance of the same substitution in this milestone (#292,
 #319), which is why the fix is at the call level rather than one more assertion
 about the XML.
+
+**#314 — the frozen container axis (Rule 1).** The generated signal-scope
+property placed every event directly in `<bpmn:process>`, so `ForcesGlobalSignal`'s
+only discriminator — is there an event-subprocess ancestor? — was never varied,
+and reverting it to "every startEvent is global" passed 3/3. The generator now
+chooses a container per start event, the independent oracle models the
+distinction from #274's measured behaviour rather than by calling the code, and
+a coverage floor asserts both containers actually appear so the axis cannot
+silently re-freeze. Only start events vary: a signal start event in a plain
+embedded subprocess is refused by the placement rule, which would make refusals
+in this property mean two different things. The named regression now fails all
+three seeds.
+
+**#330 — no test guarded any manifest total (Rule 2).** Flipping one row left
+214/214 green, while the milestone description claimed
+"Guarded going forward by BpmnSupportManifestTests, which counts the manifest
+rather than trusting prose". That sentence was false when written, and the sum
+drifted again two commits later (#316 withdrew Send Task; the description read
+55/10/4 against a file holding 54/11/4). The tallies are now pinned as literals,
+with a failure message pointing at the coverage map so the two move together,
+plus partition checks so a new status cannot slip in under a stable total. The
+guard deliberately does not check the numbers are *right* — only that changing
+them is noticed.
+
+**#331 — a free-text excuse off the palette (Rule 2).** `notOnThePalette` let any
+supported element be removed from the palette and excused with arbitrary prose,
+in the class the coverage claim cites as its credibility guard. Membership is now
+pinned, the same shape the engine axis uses for declared departures. It does not
+verify the reasons are true — two are known false (`dataInput`/`dataOutput` cite
+an editor that does not exist in the SPA) and proving that needs #323's runner
+and #324's authorability column; #265 keeps that half.

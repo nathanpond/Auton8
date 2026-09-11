@@ -749,6 +749,8 @@ public sealed class SignalScopeCasesTests
 
         var refusedSeen = 0;
         var acceptedSeen = 0;
+        var startsAtProcessLevel = 0;
+        var startsInEventSubProcess = 0;
 
         for (var iteration = 0; iteration < 400; iteration++)
         {
@@ -760,20 +762,44 @@ public sealed class SignalScopeCasesTests
             // three and four are shapes no grid has ever contained.
             var eventCount = random.Next(1, 5);
             var body = new System.Text.StringBuilder();
-            var chosen = new List<(string Kind, string? Declared)>();
+            var chosen = new List<(string Kind, string? Declared, bool InEventSubProcess)>();
 
             for (var e = 0; e < eventCount; e++)
             {
                 var (localName, extra) = kinds[random.Next(kinds.Length)];
                 var declared = declarations[random.Next(declarations.Length)];
-                chosen.Add((localName, declared));
-                body.Append(Event(localName, $"e{e}", declared, extra));
+
+                // #314: the CONTAINER axis. Every earlier version of this
+                // generator put the whole body directly in <bpmn:process>, so
+                // every start event was process-level and `ForcesGlobalSignal`'s
+                // one discriminator -- is there an event-subprocess ancestor? --
+                // was never varied. Reverting that method to "every startEvent is
+                // global" passed this property 3/3.
+                //
+                // Only start events vary: a signal start event in a PLAIN embedded
+                // subprocess is refused by a different rule (placement), which
+                // would make refusals here mean two different things.
+                var inEventSub = localName == "startEvent" && random.Next(2) == 0;
+                chosen.Add((localName, declared, inEventSub));
+
+                var element = Event(localName, $"e{e}", declared, extra);
+                body.Append(inEventSub
+                    ? $"""
+                        <bpmn:subProcess id="es{e}" name="Handler {e}" triggeredByEvent="true">
+                        {element}
+                        </bpmn:subProcess>
+                      """
+                    : element);
             }
+
+            startsAtProcessLevel += chosen.Count(c => c.Kind == "startEvent" && !c.InEventSubProcess);
+            startsInEventSubProcess += chosen.Count(c => c.Kind == "startEvent" && c.InEventSubProcess);
 
             var xml = Diagram(body.ToString(), rootXml);
             var because =
                 $"seed {seed}, iteration {iteration}: root={(preScoped ? "pre-scoped" : "plain")}, " +
-                string.Join(" + ", chosen.Select(c => $"{c.Kind}('{c.Declared ?? "(null)"}')"));
+                string.Join(" + ", chosen.Select(c =>
+                    $"{c.Kind}('{c.Declared ?? "(null)"}')" + (c.InEventSubProcess ? "@eventSubProcess" : "@process")));
 
             var refused = WorkflowBpmnXml.ValidateProcess(xml).Errors
                 .Any(er => er.Contains("the.signal", StringComparison.Ordinal));
@@ -830,6 +856,16 @@ public sealed class SignalScopeCasesTests
         // assertion above while testing half of it.
         Assert.True(refusedSeen > 20, $"seed {seed} generated only {refusedSeen} refused diagrams.");
         Assert.True(acceptedSeen > 20, $"seed {seed} generated only {acceptedSeen} accepted diagrams.");
+
+        // #314: and the container axis was actually varied. Without this, a later
+        // edit that stops emitting event subprocesses -- or a `kinds` table that
+        // drops startEvent -- silently returns this property to the frozen state
+        // it shipped in, and every assertion above still passes.
+        Assert.True(startsAtProcessLevel > 20,
+            $"seed {seed} generated only {startsAtProcessLevel} process-level start events.");
+        Assert.True(startsInEventSubProcess > 20,
+            $"seed {seed} generated only {startsInEventSubProcess} start events inside an event " +
+            "subprocess — the container that distinguishes #274's fix from its bug.");
     }
 
     /// <summary>
@@ -842,19 +878,24 @@ public sealed class SignalScopeCasesTests
     /// vocabulary.
     /// </remarks>
     private static (bool ShouldRefuse, string? Scope) ExpectedVerdict(
-        IReadOnlyList<(string Kind, string? Declared)> events, string? carried)
+        IReadOnlyList<(string Kind, string? Declared, bool InEventSubProcess)> events, string? carried)
     {
         var wants = new HashSet<string>(StringComparer.Ordinal);
 
         // The root's own carried scope is a declaration by the SIGNAL, counted once.
         if (carried is not null) wants.Add("processInstance");
 
-        foreach (var (kind, declared) in events)
+        foreach (var (kind, declared, inEventSubProcess) in events)
         {
-            // A process-level start event is global by nature whatever it says --
-            // and in this generator every start event is at process level, since
-            // Diagram puts the body directly in <bpmn:process>.
-            if (kind == "startEvent")
+            // A PROCESS-LEVEL start event is global by nature whatever it says: it
+            // exists to be triggered from outside any instance. A start event
+            // inside an event subprocess is not one of these -- it is an
+            // in-instance handler, and it may share an instance-scoped signal
+            // quite happily (#274, measured: that shape deploys and runs).
+            //
+            // This distinction is the whole of `ForcesGlobalSignal`, and until
+            // #314 this generator could not express it.
+            if (kind == "startEvent" && !inEventSubProcess)
             {
                 wants.Add("global");
                 continue;
