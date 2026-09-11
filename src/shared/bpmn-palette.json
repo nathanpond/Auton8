@@ -523,6 +523,7 @@
       "description": "Pool/participant",
       "group": "Collaboration",
       "className": "bpmn-icon-participant",
+      "type": "bpmn:Participant",
       "createFactory": "participant",
       "localName": "participant",
       "eventDefinition": null,

@@ -760,4 +760,80 @@ public sealed class BpmnPaletteManifestTests
             string.Join(Environment.NewLine + "  ", unmatched));
     }
 
+
+    /// <summary>
+    /// Every catalog entry carries a `type`, or it escapes the filter (#312).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>isWithheldMenuEntry</c> judges by <c>target.type</c> where an entry has
+    /// one. An entry with no <c>type</c> makes <c>targetKeyOf</c> return null, so
+    /// it drops out of <c>WITHHELD_TARGET_KEYS</c> entirely.
+    /// </para>
+    /// <para>
+    /// <c>create.participant</c> had exactly that hole, and it escaped all three
+    /// deny mechanisms at once: no target key (missing <c>type</c>), no
+    /// <c>menuEntryIds</c>, and a className nothing supported shares — so
+    /// <c>A_withheld_element_sharing_a_glyph_carries_an_entry_id_key</c> did not
+    /// fire either. A <c>coming-soon</c> Pool sat one click away in the Create
+    /// popup through two rounds that were specifically about that filter.
+    /// </para>
+    /// <para>
+    /// The hole was a <b>missing field</b>, and nothing asserted the field was
+    /// present. That is the general shape worth guarding: every other rule here
+    /// checks what a value IS, and none checked that it exists.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_catalog_entry_carries_a_target_type()
+    {
+        using var document = PaletteDocument();
+
+        var missing = new List<string>();
+
+        foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray())
+        {
+            var id = entry.GetProperty("id").GetString()!;
+
+            var hasType = entry.TryGetProperty("type", out var type)
+                          && type.ValueKind == JsonValueKind.String
+                          && !string.IsNullOrWhiteSpace(type.GetString());
+            if (hasType) continue;
+
+            // An activity MARKER is not a placeable element -- it attaches to an
+            // activity that is already there, so there is no `bpmn:Type` for it to
+            // become and bpmn-js offers it as a header toggle with no `target`.
+            // The manifest keys those on the marker alone (`localName: "*"`), and
+            // the className path is the only one that can reach them.
+            var isMarker = entry.TryGetProperty("localName", out var localName)
+                           && localName.GetString() == "*";
+
+            if (isMarker)
+            {
+                // But it still needs SOME deny key, or it is as reachable as
+                // create.participant was.
+                var hasClassName = entry.TryGetProperty("className", out var className)
+                                   && !string.IsNullOrWhiteSpace(className.GetString());
+                var hasMenuIds = entry.TryGetProperty("menuEntryIds", out var ids)
+                                 && ids.ValueKind == JsonValueKind.Array
+                                 && ids.EnumerateArray().Any();
+
+                if (hasClassName || hasMenuIds) continue;
+
+                missing.Add($"{id} (a marker with neither className nor menuEntryIds)");
+                continue;
+            }
+
+            missing.Add(id);
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            "Catalog entries with no usable target key. isWithheldMenuEntry judges by " +
+            "target.type, so an entry without one drops out of WITHHELD_TARGET_KEYS and " +
+            "cannot be denied on the replace menu at all -- which is how a coming-soon Pool " +
+            $"stayed one click away through two rounds about that filter:{Environment.NewLine}  " +
+            string.Join(Environment.NewLine + "  ", missing));
+    }
+
 }

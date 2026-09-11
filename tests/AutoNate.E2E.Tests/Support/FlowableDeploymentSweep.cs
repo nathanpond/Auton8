@@ -59,41 +59,48 @@ internal static class FlowableDeploymentSweep
     // publish path the suite uses. The engine reached 1,306 deployments.
     //
     /// <summary>
-    /// Deployments created at or after this instant are never swept (#297).
+    /// How old a suite deployment must be before the sweep will take it (#304).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Set once, at the moment the suite starts. The prefix says <b>this suite</b>
-    /// made it; this says <b>an earlier run</b> made it. Both are needed, because
-    /// "the suite made it" is true of a run happening right now on the same engine.
+    /// Two hours, matching <c>PostgresTestDatabase.SweepAbandonedDatabasesAsync</c>
+    /// — the sibling sweep that has used exactly this rule, for exactly this
+    /// reason, since #191. A two-hour-old <c>e2e-*</c> deployment cannot belong to
+    /// a live run; a two-minute-old one might.
     /// </para>
     /// <para>
-    /// #248 named two halves and only one was fixed. The database half became a
-    /// per-run <c>autonate_e2e_&lt;guid&gt;</c>; this half kept deleting every
-    /// <c>e2e-*</c> deployment with <c>cascade=true</c> at fixture startup, on the
-    /// reasoning that they were "from earlier runs". They are not necessarily from
-    /// earlier runs. A verifier watched a live <c>boom</c> job vanish from the
-    /// jobs, timer-jobs and dead-letter tables mid-retry because another agent's
-    /// suite had just started — the same test passed in 39 s once the engine was
-    /// quiet.
+    /// <b>#297's cut-off was wrong twice over and this replaces it.</b> It was
+    /// <c>static readonly DateTimeOffset RunStartedAt = DateTimeOffset.UtcNow</c>,
+    /// and a static initialiser runs on first access to the TYPE — which here is
+    /// <c>CreateClient</c> on the line above the sweep call. Measured: the field
+    /// was set 1206 ms after a marker placed before that line, i.e. it recorded
+    /// when the sweep ran, not when the run began. And even set correctly, "older
+    /// than the moment I started" only spares runs that started AFTER me — the
+    /// runs it destroys are the ones already going, which is the whole population
+    /// #297 was about.
     /// </para>
     /// <para>
-    /// That matters here more than it would elsewhere: this milestone's execution
-    /// evidence is CI-excluded by design, so the local run is the only thing that
-    /// exercises it, and it has been verified six times by parallel agents — which
-    /// is exactly the workload the unscoped sweep destroys.
+    /// #257's history is not an argument against age. It records that sweeping by
+    /// <b>age alone</b> deleted a developer's real work, because at that time the
+    /// prefix matched nothing and age was the only signal available. Age AND a
+    /// prefix that now genuinely matches is the combination that was never
+    /// available before.
     /// </para>
     /// </remarks>
-    internal static readonly DateTimeOffset RunStartedAt = DateTimeOffset.UtcNow;
+    internal static readonly TimeSpan MinimumAge = TimeSpan.FromHours(2);
 
     internal static async Task<int> SweepAsync(HttpClient client) =>
-        await SweepAsync(client, RunStartedAt);
+        await SweepAsync(client, DateTimeOffset.UtcNow - MinimumAge);
 
-    /// <param name="createdBefore">
-    /// Only deployments older than this are swept. Injected so the tests can prove
-    /// the cut-off rather than race it.
+    /// <param name="onlyNamed">
+    /// When given, only deployments whose name contains this survive the prefix
+    /// filter (#308). The sweep's own tests use it so they exercise the real
+    /// predicate against a population they created, instead of cascade-deleting
+    /// every <c>e2e-*</c> deployment on a shared engine — which is the destruction
+    /// #297 was filed about, committed by the file that guards the rule.
     /// </param>
-    internal static async Task<int> SweepAsync(HttpClient client, DateTimeOffset createdBefore)
+    internal static async Task<int> SweepAsync(
+        HttpClient client, DateTimeOffset createdBefore, string? onlyNamed = null)
     {
         List<(string Id, string Name)> deployments;
         try
@@ -124,14 +131,17 @@ internal static class FlowableDeploymentSweep
                 // match is somebody's work, at any age.
                 .Where(deployment =>
                     deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
-                // #297. And only what already existed when this run began. A
-                // deployment created since is a CONCURRENT run's, and deleting it
-                // cascades away its live instances, jobs and history.
+                // #297/#304. And only what is old enough that no live run can own
+                // it. A deployment younger than this may be a CONCURRENT run's, and
+                // deleting it cascades away its live instances, jobs and history.
                 //
                 // A deployment with no readable time is left alone rather than
                 // swept: the whole point is that we could not tell whose it is.
                 .Where(deployment => deployment.CreatedAt is { } createdAt
                                      && createdAt < createdBefore)
+                // #308. A test's own plants, when it says so.
+                .Where(deployment => onlyNamed is null
+                                     || deployment.Name.Contains(onlyNamed, StringComparison.Ordinal))
                 .Select(deployment => (deployment.Id, deployment.Name))
                 .ToList();
         }

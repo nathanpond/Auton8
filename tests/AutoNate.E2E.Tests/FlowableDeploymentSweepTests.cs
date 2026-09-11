@@ -21,8 +21,9 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         using var client = FlowableDeploymentSweep.CreateClient(
             "http://localhost:8080/flowable-rest", "rest-admin", "test");
 
-        var mine = $"e2e-sweep-probe-{Guid.NewGuid():N}"[..28];
-        var theirs = $"someones-real-work-{Guid.NewGuid():N}"[..28];
+        var probeTag = $"p{Guid.NewGuid():N}"[..9];
+        var mine = $"e2e-{probeTag}-mine";
+        var theirs = $"{probeTag}-theirs";
 
         await DeployAsync(client, mine);
         await DeployAsync(client, theirs);
@@ -36,7 +37,12 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             // and the default cut-off spares exactly that. The axis under test here
             // is the NAME, so the clock is moved out of the way -- the cut-off has
             // its own pair of tests below, in both directions.
-            var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
+            // #308. Scoped to this test's own plants. Without `onlyNamed` a cut-off
+            // of "now" cascade-deletes every pre-existing e2e-* deployment on the
+            // shared engine -- a concurrent run's live instances and jobs included,
+            // which is the destruction #297 exists to stop.
+            var deleted = await FlowableDeploymentSweep.SweepAsync(
+                client, DateTimeOffset.UtcNow, onlyNamed: probeTag);
 
             Assert.True(deleted > 0, "The sweep reported deleting nothing.");
             Assert.False(await ExistsAsync(client, mine), "A suite deployment survived the sweep.");
@@ -161,52 +167,42 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         // is under test here is the name matching, so the clock is moved out of
         // the way rather than raced -- the cut-off's own behaviour has its own
         // test below.
-        var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
+        // #308. Scoped to this key, so the engine's other deployments are untouched.
+        var deleted = await FlowableDeploymentSweep.SweepAsync(
+            client, DateTimeOffset.UtcNow, onlyNamed: key);
         Assert.True(deleted > 0, "The sweep reported deleting nothing.");
         Assert.False(await ExistsAsync(client, deployedAs),
             "The sweep did not remove a deployment the app itself published.");
     }
 
     /// <summary>
-    /// A deployment made after the run began is never swept (#297).
+    /// A freshly deployed suite deployment survives the DEFAULT sweep (#304).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// #248 named two halves. The database half became a per-run
-    /// <c>autonate_e2e_&lt;guid&gt;</c>; this half went on deleting every
-    /// <c>e2e-*</c> deployment with <c>cascade=true</c> at fixture startup, on the
-    /// reasoning that they were "from earlier runs".
+    /// This is the test #297 should have been. Its version injected a cut-off, so
+    /// the overload the fixture actually calls was never exercised — and that
+    /// overload was broken two ways: its <c>RunStartedAt</c> was set at first type
+    /// access rather than run start, and "older than when I started" spares only
+    /// runs that began later, not the ones already going.
     /// </para>
     /// <para>
-    /// They are not necessarily from earlier runs. A verifier watched a live
-    /// <c>boom</c> job vanish from the jobs, timer-jobs and dead-letter tables
-    /// <b>mid-retry</b> because another agent's suite had just started; the same
-    /// test passed in 39 s once the engine was quiet. Cascade takes the
-    /// definitions, instances, jobs and history with it, so a concurrent run does
-    /// not fail cleanly — it fails as a timeout somewhere unrelated.
-    /// </para>
-    /// <para>
-    /// This is the assertion the previous fix lacked: it is not enough that the
-    /// sweep matches only the suite's own names, because a run happening right now
-    /// uses those same names.
+    /// Deliberately <b>no cut-off argument</b>. A deployment made moments ago is
+    /// what a concurrent run's looks like, and the default must spare it.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task The_sweep_leaves_a_deployment_made_after_the_run_began()
+    public async Task The_default_sweep_leaves_a_deployment_made_moments_ago()
     {
         using var client = FlowableDeploymentSweep.CreateClient(
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
 
-        // Named exactly as the suite names its own, so the PREFIX rule matches it
-        // and only the cut-off can save it. A name outside the convention would
-        // pass this test for the wrong reason.
+        // Named exactly as the suite names its own, so the PREFIX rule matches and
+        // only the age rule can save it. A name outside the convention would pass
+        // for the wrong reason.
         var key = FlowableDeploymentSweep.SuiteDeploymentPrefix + $"cc{Guid.NewGuid():N}"[..18];
-
-        // "The run began" a moment ago; the deployment is made after it.
-        var runStartedAt = DateTimeOffset.UtcNow;
-        await Task.Delay(1100);   // the engine's deploymentTime has ms precision
         await DeployAsync(client, key);
 
         try
@@ -214,12 +210,13 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             Assert.True(await ExistsAsync(client, key),
                 "the fixture did not deploy, so the assertion below would be vacuous");
 
-            var deleted = await FlowableDeploymentSweep.SweepAsync(client, runStartedAt);
+            // THE DEFAULT OVERLOAD. This is the whole point of the test.
+            var deleted = await FlowableDeploymentSweep.SweepAsync(client);
 
             Assert.True(await ExistsAsync(client, key),
-                $"The sweep removed a deployment created after the run began — it " +
-                $"deleted {deleted}. On a shared engine that is a CONCURRENT run's " +
-                "live work, and cascade takes its instances and jobs with it.");
+                $"The default sweep removed a deployment made moments ago — it deleted " +
+                $"{deleted}. On a shared engine that is a CONCURRENT run's live work, and " +
+                "cascade takes its instances and jobs with it.");
         }
         finally
         {
@@ -234,7 +231,7 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
     /// the whole of M4 removing nothing while its test stayed green.
     /// </remarks>
     [Fact]
-    public async Task A_deployment_that_predates_the_run_is_still_swept()
+    public async Task A_deployment_older_than_the_threshold_is_still_swept()
     {
         using var client = FlowableDeploymentSweep.CreateClient(
             Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
@@ -244,7 +241,10 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         var key = FlowableDeploymentSweep.SuiteDeploymentPrefix + $"cp{Guid.NewGuid():N}"[..18];
         await DeployAsync(client, key);
 
-        // Deployed first, so "the run began" after it — the shape of a leftover.
+        // The shape of a leftover: a cut-off after it, standing in for the two
+        // hours the default would wait. The injected overload is used here BECAUSE
+        // the alternative is a two-hour test; the default's own behaviour is
+        // covered by The_default_sweep_leaves_a_deployment_made_moments_ago above.
         await Task.Delay(1100);
         var runStartedAt = DateTimeOffset.UtcNow;
 
@@ -254,7 +254,10 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             Assert.True(await ExistsAsync(client, key),
                 "the fixture did not deploy, so the assertion below would be vacuous");
 
-            await FlowableDeploymentSweep.SweepAsync(client, runStartedAt);
+            // #308. Scoped: without onlyNamed this cut-off sweeps every e2e-*
+            // deployment older than a moment ago, which on a shared engine is a
+            // concurrent run's live work.
+            await FlowableDeploymentSweep.SweepAsync(client, runStartedAt, onlyNamed: key);
 
             swept = !await ExistsAsync(client, key);
             Assert.True(swept,

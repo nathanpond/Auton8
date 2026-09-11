@@ -1069,9 +1069,17 @@ public static partial class WorkflowBpmnXml
     /// </code>
     /// <para>
     /// Five point fixes did not converge, because each one repaired a
-    /// disagreement without removing the ability to disagree. Both callers now
-    /// consume this function's answer and nothing else, so a new spelling is
-    /// added in one place or in none.
+    /// disagreement without removing the ability to disagree. The expansion and
+    /// the validator both consume this function's answer and nothing else.
+    ///
+    /// <b>Two readers remain outside it</b>, and saying so here is the point --
+    /// an earlier version of this comment claimed "a new spelling is added in one
+    /// place or in none", which was false and is why nobody went looking for the
+    /// others (#311). They are <c>interpretSignalScope</c> in
+    /// <c>src/AutoNate.Spa/src/lib/bpmn/workflow.js</c>, which cannot call into
+    /// this assembly and mirrors its states deliberately, and
+    /// <c>FlowableClient.IsSignalGlobalAsync</c>, which reads the DEPLOYED
+    /// diagram rather than an authored one. A new spelling goes in all three.
     /// <c>SignalScopeCasesTests.The_two_paths_never_disagree</c> is the guard.
     /// </para>
     /// </remarks>
