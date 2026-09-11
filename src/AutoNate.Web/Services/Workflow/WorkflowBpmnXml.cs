@@ -4014,56 +4014,192 @@ public static partial class WorkflowBpmnXml
     /// one place they live.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<string> BuildStartEventPlacementErrors(XDocument document)
+    /// <summary>
+    /// Which container a start event may carry which event definition in (#309).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Placement is a <b>two-dimensional</b> constraint and every previous version
+    /// of this rule modelled one dimension. #158 handled `conditional × process
+    /// level`. #289 widened the definition axis to `{error, escalation,
+    /// conditional}` and left the container axis binary — process-level vs event
+    /// subprocess — so a **plain embedded subprocess** was neither, and fell
+    /// through as though it were legal.
+    /// </para>
+    /// <para>
+    /// The cell that bit is <c>{message, timer, signal} × plain subProcess</c>:
+    /// `errors=0` from publish, and Flowable refuses the <b>whole deployment</b>
+    /// with <c>flowable-subprocess-start-event-event-definition-not-allowed</c>.
+    /// Reachable in four clicks, every step <c>studio: supported</c> — place a
+    /// sub-process, morph it to an event sub-process, give its start event a
+    /// timer, morph the container back. <b>The container morphs and the start
+    /// event does not.</b>
+    /// </para>
+    /// <para>
+    /// So the rule is a table keyed on the container, and the exhaustiveness is
+    /// checked by <c>StartEventPlacementDifferentialTests</c>, which deploys every
+    /// cell to a live engine and asserts this function agrees with it. That test
+    /// enumerates nothing by hand, which is the property three hand-written
+    /// versions of this rule did not have.
+    /// </para>
+    /// </remarks>
+    private enum StartEventContainer
     {
-        // definition local name -> how an author says it, and what to do instead.
-        var eventSubProcessOnly = new Dictionary<string, (string Noun, string Remedy)>(StringComparer.Ordinal)
+        /// <summary>Directly in a <c>&lt;bpmn:process&gt;</c>.</summary>
+        Process,
+
+        /// <summary><c>&lt;subProcess triggeredByEvent="true"&gt;</c>.</summary>
+        EventSubProcess,
+
+        /// <summary>
+        /// Any other container — a plain embedded subprocess, an ad-hoc
+        /// subprocess, a transaction. Flowable allows a **bare** start event here
+        /// and nothing else.
+        /// </summary>
+        Embedded
+    }
+
+    /// <summary>Event definitions each container permits on a start event.</summary>
+    /// <remarks>
+    /// Established by deploying every cell to Flowable 8.0.0 rather than from the
+    /// specification, because the engine is what refuses the deployment. An empty
+    /// local name means a bare start event with no definition at all.
+    /// </remarks>
+    private static readonly Dictionary<StartEventContainer, HashSet<string>> StartEventDefinitionsAllowed =
+        new()
         {
-            ["conditionalEventDefinition"] = (
-                "Conditional",
-                "To start a process when a condition holds, start it another way and wait on " +
-                "an intermediate catch conditional event instead."),
-            ["errorEventDefinition"] = (
-                "Error",
-                "An error start event catches an error raised inside the process it belongs to, " +
-                "so it needs a process already running. To react to an error from elsewhere, " +
-                "catch it on a boundary event or inside an event subprocess."),
-            ["escalationEventDefinition"] = (
-                "Escalation",
-                "An escalation start event catches an escalation raised inside the process it " +
-                "belongs to, so it needs a process already running. To react to one from " +
-                "elsewhere, catch it on a boundary event or inside an event subprocess."),
+            // A process is started from outside, so it may react to arriving
+            // messages, clocks and signals -- and to nothing that only exists
+            // once an instance is already running.
+            [StartEventContainer.Process] = new(StringComparer.Ordinal)
+            {
+                "", "messageEventDefinition", "timerEventDefinition", "signalEventDefinition"
+            },
+
+            // An event subprocess is triggered from INSIDE a running instance, so
+            // it is the one container that takes error, escalation and
+            // conditional. A bare start event there would never trigger at all,
+            // and BuildEventSubProcessErrors refuses that separately.
+            [StartEventContainer.EventSubProcess] = new(StringComparer.Ordinal)
+            {
+                "", "messageEventDefinition", "timerEventDefinition", "signalEventDefinition",
+                "conditionalEventDefinition", "errorEventDefinition", "escalationEventDefinition",
+                "compensateEventDefinition"
+            },
+
+            // A plain embedded subprocess is entered by a token arriving on a
+            // sequence flow. There is nothing for a start event to react to, so
+            // Flowable permits only a bare one.
+            [StartEventContainer.Embedded] = new(StringComparer.Ordinal) { "" },
         };
 
+    /// <summary>How an author refers to each definition, and where it may live.</summary>
+    private static readonly Dictionary<string, string> StartEventDefinitionNouns =
+        new(StringComparer.Ordinal)
+        {
+            ["messageEventDefinition"] = "Message",
+            ["timerEventDefinition"] = "Timer",
+            ["signalEventDefinition"] = "Signal",
+            ["conditionalEventDefinition"] = "Conditional",
+            ["errorEventDefinition"] = "Error",
+            ["escalationEventDefinition"] = "Escalation",
+            ["compensateEventDefinition"] = "Compensation",
+        };
+
+    internal static StartEventContainerKind ContainerKindOf(XElement start) =>
+        (StartEventContainerKind)(int)ContainerOf(start);
+
+    private static StartEventContainer ContainerOf(XElement start)
+    {
+        var container = start.Parent;
+        if (container is null || container.Name == BpmnNamespace + "process")
+        {
+            return StartEventContainer.Process;
+        }
+
+        if (container.Name == BpmnNamespace + "subProcess"
+            && string.Equals(
+                container.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return StartEventContainer.EventSubProcess;
+        }
+
+        return StartEventContainer.Embedded;
+    }
+
+    /// <summary>Public mirror of <see cref="StartEventContainer"/>, for the tests.</summary>
+    internal enum StartEventContainerKind
+    {
+        Process = 0,
+        EventSubProcess = 1,
+        Embedded = 2
+    }
+
+    private static IReadOnlyList<string> BuildStartEventPlacementErrors(XDocument document)
+    {
         var errors = new List<string>();
 
         foreach (var start in document.Descendants(BpmnNamespace + "startEvent"))
         {
             var definition = start.Elements()
                 .FirstOrDefault(child => child.Name.Namespace == BpmnNamespace
-                    && eventSubProcessOnly.ContainsKey(child.Name.LocalName));
-            if (definition is null) continue;
+                    && child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal));
 
-            // An event subprocess is a subProcess carrying triggeredByEvent, which
-            // is the one container where these start events are legal.
-            var container = start.Parent;
-            var inEventSubProcess = container is not null
-                && container.Name == BpmnNamespace + "subProcess"
-                && string.Equals(
-                    container.Attribute("triggeredByEvent")?.Value,
-                    "true",
-                    StringComparison.OrdinalIgnoreCase);
+            var localName = definition?.Name.LocalName ?? "";
+            var container = ContainerOf(start);
 
-            if (inEventSubProcess) continue;
+            if (StartEventDefinitionsAllowed[container].Contains(localName)) continue;
 
-            var (noun, remedy) = eventSubProcessOnly[definition.Name.LocalName];
-            var label = LabelOf(start);
+            // A definition we have no noun for is still refused -- silence about an
+            // element we do not recognise is how #282 and #289 both happened -- but
+            // it is named by its raw type so the message stays honest.
+            var noun = StartEventDefinitionNouns.GetValueOrDefault(
+                localName, localName.Length == 0 ? "Plain" : localName);
+
+            var (where, remedy) = container switch
+            {
+                StartEventContainer.Process => (
+                    "start a process",
+                    "It reacts to something that only exists once an instance is running, so it " +
+                    "belongs inside an event subprocess. To start a process this way, start it " +
+                    "another way and wait on an intermediate catch event instead."),
+                StartEventContainer.EventSubProcess => (
+                    "start an event subprocess",
+                    "Choose a trigger an event subprocess can react to."),
+                _ => (
+                    "start an embedded subprocess",
+                    "A subprocess is entered by a token arriving on a sequence flow, so its start " +
+                    "event has nothing to react to and Flowable allows only a plain one. Move the " +
+                    "trigger to a boundary event on the subprocess, or make the container an event " +
+                    "subprocess."),
+            };
 
             errors.Add(
-                $"{noun} start event '{label}' cannot start a process. BPMN allows it only " +
-                "inside an event subprocess, where it reacts to something that happens while " +
-                $"the process is already running. {remedy} Left where it is, Flowable refuses " +
-                "the whole deployment, not just this step.");
+                $"{noun} start event '{LabelOf(start)}' cannot {where}. {remedy} Left where it " +
+                "is, Flowable refuses the whole deployment, not just this step.");
+        }
+
+        // #309. Flowable also refuses a plain subprocess with MORE THAN ONE start
+        // event (`flowable-subprocess-multiple-start-event`), and that is the same
+        // class of whole-deployment failure.
+        foreach (var subProcess in document.Descendants(BpmnNamespace + "subProcess"))
+        {
+            // An event subprocess may legitimately carry several start events --
+            // one per trigger it reacts to -- so the rule is for plain ones only.
+            if (string.Equals(
+                    subProcess.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var starts = subProcess.Elements(BpmnNamespace + "startEvent").ToList();
+            if (starts.Count <= 1) continue;
+
+            errors.Add(
+                $"Subprocess '{LabelOf(subProcess)}' has {starts.Count} start events. A subprocess " +
+                "is entered once, by a token arriving on a sequence flow, so Flowable allows it " +
+                "exactly one — and refuses the whole deployment otherwise. Keep one and join the " +
+                "others to it with sequence flows.");
         }
 
         return errors;

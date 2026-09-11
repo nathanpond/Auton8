@@ -685,4 +685,195 @@ public sealed class SignalScopeCasesTests
         Assert.Empty(WorkflowBpmnXml.ValidateProcess(xml).Errors);
     }
 
+
+    // ── #306: the instrument, rather than another set of cells ──────────────
+
+    /// <summary>
+    /// The property, on diagrams nobody chose (#306).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Three rounds running, this file was fixed by unfreezing the axis just
+    /// found and freezing another:</b>
+    /// </para>
+    /// <list type="table">
+    /// <item><term>#278</term><description>vocabulary — only ever spelt "instance"</description></item>
+    /// <item><term>#290</term><description>arity — one event per cell, so a plain-root contradiction could not exist</description></item>
+    /// <item><term>#306</term><description>kind — always (catch, boundary), so a start-event contradiction could not exist</description></item>
+    /// </list>
+    /// <para>
+    /// Each version was complete with respect to the defect already known and
+    /// blind to the next. That is what hand-enumerated grids do, and adding the
+    /// missing cells a fourth time would buy one more round.
+    /// </para>
+    /// <para>
+    /// The property under test needs no cases at all:
+    /// </para>
+    /// <para>
+    /// <b>For any diagram: if <c>ValidateProcess</c> refuses it, the expansion
+    /// writes no scope that was not already there; and if it accepts, the engine
+    /// gets the scope the declarations mean.</b>
+    /// </para>
+    /// <para>
+    /// So the diagrams are generated — event count, kinds, declarations and root
+    /// state all drawn from their full ranges. A cell nobody thought of is still
+    /// generated, which is the property the grids never had. The seed is fixed so
+    /// a failure is reproducible, and printed so a failure can be replayed.
+    /// </para>
+    /// <para>
+    /// The expected value is computed from an independent model below, NOT from
+    /// the production enum — a test that asks the code what it should do proves
+    /// only that it is consistent with itself.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(20260911)]
+    [InlineData(1)]
+    [InlineData(6306)]
+    public void The_two_paths_never_disagree_on_generated_diagrams(int seed)
+    {
+        var random = new Random(seed);
+
+        string?[] declarations =
+            [null, "", "instance", "processInstance", "PROCESSINSTANCE", "Instance", "  instance  ",
+             "global", "GLOBAL", "instnace", "process-instance", "local", "true"];
+
+        (string LocalName, string Extra)[] kinds =
+        [
+            ("intermediateCatchEvent", ""),
+            ("intermediateThrowEvent", ""),
+            ("boundaryEvent", " attachedToRef=\"t\""),
+            ("endEvent", ""),
+            ("startEvent", ""),
+        ];
+
+        var refusedSeen = 0;
+        var acceptedSeen = 0;
+
+        for (var iteration = 0; iteration < 400; iteration++)
+        {
+            var preScoped = random.Next(2) == 0;
+            var rootXml = preScoped ? PreScopedRoot : PlainRoot;
+            var carried = preScoped ? "processInstance" : null;
+
+            // One to four events. One is the shape #278 lived in; two is #290's;
+            // three and four are shapes no grid has ever contained.
+            var eventCount = random.Next(1, 5);
+            var body = new System.Text.StringBuilder();
+            var chosen = new List<(string Kind, string? Declared)>();
+
+            for (var e = 0; e < eventCount; e++)
+            {
+                var (localName, extra) = kinds[random.Next(kinds.Length)];
+                var declared = declarations[random.Next(declarations.Length)];
+                chosen.Add((localName, declared));
+                body.Append(Event(localName, $"e{e}", declared, extra));
+            }
+
+            var xml = Diagram(body.ToString(), rootXml);
+            var because =
+                $"seed {seed}, iteration {iteration}: root={(preScoped ? "pre-scoped" : "plain")}, " +
+                string.Join(" + ", chosen.Select(c => $"{c.Kind}('{c.Declared ?? "(null)"}')"));
+
+            var refused = WorkflowBpmnXml.ValidateProcess(xml).Errors
+                .Any(er => er.Contains("the.signal", StringComparison.Ordinal));
+
+            var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+
+            // Two roots of one name is the 500 (#270). Never, on any input.
+            Assert.True(expanded.Descendants(Bpmn + "signal").Count() == 1,
+                $"{because}: the expansion emitted more than one <bpmn:signal> root, which " +
+                "Flowable refuses with flowable-signal-duplicate-name.");
+
+            var emitted = expanded.Descendants(Bpmn + "signal").Single()
+                .Attribute(Flowable + "scope")?.Value;
+
+            var (shouldRefuse, expected) = ExpectedVerdict(chosen, carried);
+
+            // TWO-SIDED, and this is the half the first version of this test
+            // omitted. Asserting only "what a refused diagram writes" lets a
+            // product that refuses too much pass: with the #278 vocabulary gap
+            // reintroduced, `processInstance` became Unrecognised, the diagram was
+            // refused, and the refused branch was satisfied. The model has to be
+            // held to the DECISION as well as to the value.
+            Assert.True(refused == shouldRefuse,
+                shouldRefuse
+                    ? $"{because}: should have been REFUSED — the declarations either " +
+                      "contradict each other or include a spelling nothing recognises — and " +
+                      "publish accepted it."
+                    : $"{because}: should have been ACCEPTED — the declarations agree and every " +
+                      "spelling is one the product claims to know — and publish refused it. A " +
+                      "refusal an author cannot act on is as bad as a missing one.");
+
+            if (refused)
+            {
+                refusedSeen++;
+
+                // A refused diagram gets nothing written. This is where #290 lived:
+                // the old assertion compared two values from a two-element set and
+                // was satisfiable by coincidence.
+                Assert.True(emitted == carried,
+                    $"{because}: refused at publish, but the expansion wrote " +
+                    $"scope='{emitted ?? "(none)"}' where the diagram carried '{carried ?? "(none)"}'. " +
+                    "A refused diagram must be left exactly as authored.");
+                continue;
+            }
+
+            acceptedSeen++;
+
+            Assert.True(emitted == expected,
+                $"{because}: published clean, but the engine gets scope='{emitted ?? "(none)"}' " +
+                $"where the declarations mean '{expected ?? "(none)"}'.");
+        }
+
+        // A generator that produced only one side of the property would pass every
+        // assertion above while testing half of it.
+        Assert.True(refusedSeen > 20, $"seed {seed} generated only {refusedSeen} refused diagrams.");
+        Assert.True(acceptedSeen > 20, $"seed {seed} generated only {acceptedSeen} accepted diagrams.");
+    }
+
+    /// <summary>
+    /// What a set of declarations MEANS, modelled independently of the product.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a call into <c>InterpretSignalScope</c>. A test that asks
+    /// the code what it should do proves only self-consistency, which is exactly
+    /// what three versions of the grid did when they reused the production
+    /// vocabulary.
+    /// </remarks>
+    private static (bool ShouldRefuse, string? Scope) ExpectedVerdict(
+        IReadOnlyList<(string Kind, string? Declared)> events, string? carried)
+    {
+        var wants = new HashSet<string>(StringComparer.Ordinal);
+
+        // The root's own carried scope is a declaration by the SIGNAL, counted once.
+        if (carried is not null) wants.Add("processInstance");
+
+        foreach (var (kind, declared) in events)
+        {
+            // A process-level start event is global by nature whatever it says --
+            // and in this generator every start event is at process level, since
+            // Diagram puts the body directly in <bpmn:process>.
+            if (kind == "startEvent")
+            {
+                wants.Add("global");
+                continue;
+            }
+
+            switch ((declared ?? "").Trim().ToLowerInvariant())
+            {
+                case "": break;                                  // said nothing
+                case "instance" or "processinstance": wants.Add("processInstance"); break;
+                case "global": wants.Add("global"); break;
+                default: return (true, null);                    // a typo: refused
+            }
+        }
+
+        if (wants.Count > 1) return (true, null);                 // a contradiction
+
+        return (false, wants.Count == 0
+            ? carried                                             // nobody spoke
+            : wants.Single() == "global" ? null : "processInstance");
+    }
+
 }
