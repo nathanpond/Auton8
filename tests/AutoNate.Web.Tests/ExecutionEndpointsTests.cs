@@ -433,10 +433,23 @@ public sealed class ExecutionEndpointsTests
             new { variables = new[] { new { name = "escalate", value = "true", type = "string" } } });
 
         // Flowable classified this correctly. Re-wrapping it as a 500 threw that
-        // away and turned a typo into an incident.
+        // away and turned a typo into an incident. That is what this row is for,
+        // and it still holds.
         Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Contains("already present", await response.Content.ReadAsStringAsync(),
-            StringComparison.Ordinal);
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        // #350 changed what the BODY carries. It used to be the engine's entire
+        // HTTP response -- the same field that has been observed carrying a JDBC
+        // URL with its password -- so it is now described rather than forwarded.
+        Assert.DoesNotContain("Flowable could not", body, StringComparison.Ordinal);
+        Assert.Contains("server log", body, StringComparison.Ordinal);
+
+        // The cost is real and is NOT waved away: "Variable 'escalate' is already
+        // present" was a good message and the caller no longer sees it, because
+        // EngineRefusal only maps DEPLOYMENT validation codes and a runtime
+        // conflict carries none. Tracked as its own follow-up rather than
+        // absorbed here -- #354.
     }
 
     [Fact]

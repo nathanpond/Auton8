@@ -5475,3 +5475,18 @@ and doing it blind with no SPA test runner (#323) would trade one silent regress
 for thirty-four. Verified by `tsc -b --force` (clean) and `npm run lint` (0 errors,
 98 warnings — exactly the ratchet). That is inspection plus typecheck, not a test,
 and it stays that way until #323 lands.
+
+**A real cost of #350, filed rather than absorbed (#354).** `EngineRefusal` maps
+deployment validation codes; runtime errors carry none, so
+`"Variable 'escalate' is already present on execution 'proc-1'"` became
+`"The workflow engine refused this request. The reason is in the server log."`
+The status still classifies correctly, so this is usability, not correctness.
+
+Not reverted, because "a 409 body is harmless" is exactly the reasoning that leaked
+three times — each of #334, #339 and #344 decided some subset of engine text was
+safe to forward and each was wrong about a shape nobody had imagined. The other half
+of the work is mapping the runtime classes the execution routes actually produce,
+captured from a live engine the way the deployment table was.
+
+The existing test now records the loss in a comment rather than quietly asserting
+the new behaviour as though it were the goal.
