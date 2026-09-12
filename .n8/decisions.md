@@ -5383,3 +5383,56 @@ not the whole sentence, so wording can improve, but the *fact* each asserts,
 because that is the evidence a descope happened. Plus the row set itself, and the
 two provenance fields (`flowableVersion`, `generatedFrom`) which could both be
 rewritten with nothing failing.
+
+## Round 12 — 2026-09-12 (during /n8-exec M4)
+
+**#350 — the leak was never only on publish (Rule 2).** Three rounds fixed the raw
+Flowable body reaching a browser, all three on the *publish route*, because that is
+where the issue in front of them said it was. Four routes in `ExecutionEndpoints.cs`
+returned `new { message = exception.Message }` the whole time — the engine's entire
+HTTP body, Spring's `trace` included — to anyone who can interact with a running
+process instance. Two were not gated on `IsCallerError`, so a Flowable 5xx went
+straight through.
+
+My own comment in #344 said "the raw text never reaches the browser". One
+`grep -rn 'exception.Message' src/AutoNate.Web/Endpoints/` would have shown that was
+false, in any of the three rounds.
+
+Extracted `EngineRefusal` so every endpoint can reach one describer, routed all five
+sites through it, and log the raw text at Warning at each.
+
+**The guard is the point, not the five fixes.** `NoEndpointReturnsARawEngineMessageTests`
+scans `FlowableRequestException` catch blocks for a message reaching a response, and
+separately requires every such block that answers a caller to log. A unit test proves
+one describer is correct; it cannot notice a route that never calls it.
+
+Scoped to Flowable catch blocks deliberately: a first version scanned for any
+`ex.Message` in a response and flagged eight unrelated sites — AQL parse errors,
+code-transformer failures, projection errors — where the message IS the useful thing
+and is written by our own code. Flagging those would have made the guard noise
+someone edits away. **Those eight are a genuine separate question and are not
+touched here** (outside this story's scope).
+
+**#349 — the shape was never enough (Rule 1).** #344 echoed any code matching
+`flowable-[a-z0-9-]+`, reasoning the shape cannot express a path or a credential.
+True, and beside the point: the marker is author-reachable. A schema refusal carries
+no genuine `Problem:` marker and Xerces echoes invalid attribute values, so
+`signalRef="Problem: 'flowable-call-it-support-on-555-0100'"` put the author's own
+sentence into a *publisher's* error banner — 5,092 characters of it.
+
+The allowlist is now the table, not the regex. Cost: a genuinely new engine code
+reads generically until someone adds it, which the log makes recoverable.
+
+Three more #349 items:
+- **Parse failures returned 502** — a truncated document or a bad QName carries no
+  marker, so the whole family was attributed to the engine. `IsTheDiagramsFault` now
+  recognises the parser's own signatures. A parse failure is always the diagram.
+- **Three table keys were near-miss spellings** and one (`flowable-bpmn-parse-failure`)
+  was invented and can never fire. Corrected against captured refusals, with the old
+  spellings named in comments so nobody "fixes" them back.
+- **The cap test was a stub** — its payload was `'A' x 40000` and uppercase can never
+  match `[a-z0-9-]`, so it passed while the real bound was 5,092 characters.
+
+Two mutations that were green are now caught: last-match-instead-of-first (the
+`Extra info` tail carries author-controlled text, so ordering is load-bearing), and
+deleting the logger.
