@@ -5282,3 +5282,104 @@ row LEAVING supported necessarily enters one of these lists.
 Six of seven DESCOPED lines still lack the owner's quoted words. Not fixed —
 inventing quotations is worse than the gap, and only the owner can supply them.
 Reported.
+
+## Round 11 — 2026-09-12 (during /n8-exec M4)
+
+**#344 — stop forwarding engine prose at all (Rule 2).** Third design for this,
+and the first two failed the same way: I tried to decide what to *remove* from
+text written by a system that can see the filesystem, the database URL and the
+container's environment.
+
+- #334 truncated on real control characters; the body is JSON, so the escapes are
+  two characters and it never fired.
+- #339 extracted bounded prose and discarded it if it "looked like" internals. 22
+  of 32 adversarial payloads walked past — a full JDBC URL with password,
+  credentials, internal hostnames and container ids, paths with spaces, UNC
+  paths, URL-encoded and unicode separators, three spellings of the
+  `- [Extra info` bound, and a problem code smuggled in from the tail. It was
+  also too aggressive: `.bpmn20.xml` is the filename we deploy under, so genuine
+  reasons were destroyed.
+
+**Now nothing the engine wrote is forwarded.** Only the problem code travels, and
+only after matching `flowable-[a-z0-9-]+` — a shape that cannot express a path, a
+hostname, a credential or a stack frame. The sentence is ours, chosen from a
+table keyed by that code, with a generic fallback that still shows the code
+because the code is safe and searchable. The raw message is logged at Warning.
+
+The cost is real — an unmapped refusal reads generically — and it is the right
+trade. A denylist over hostile text is not a thing that can be got right by
+iteration, which is what two rounds of trying demonstrated.
+
+**Also fixed the status, which was backwards.** The old code branched on
+`IsCallerError`. Measured: Flowable answers a *validation* refusal — a diagram the
+author drew badly — with HTTP **500**. So `IsCallerError` was false for the
+dominant case, the author got 502 for their own mistake, and the 400 branch never
+ran. One branch now, keyed on whether the engine named a problem code, which is
+the thing that actually says "your diagram".
+
+**And the route is tested for the first time.** Every earlier test called the pure
+function, so reverting the whole of #334 left the suite green at 44/44.
+`StubFlowableClient.DeployThrows` makes the branches drivable; deleting the entire
+catch now fails 2.
+
+**#345 — the sixth axis: the oracle read one signal (Rule 1).** #341 taught the
+generator to *make* two signals and the oracle to reason about Sig_1; it never
+taught it to *look at* Sig_2. Three mutations survived at 609/609. All three now
+fail 3:
+
+| mutation | was | now |
+|---|---|---|
+| write side `.Take(1)` — Sig_2 gets no scope at all | green | 3 red |
+| root's own `global` declaration dropped | green | 3 red |
+| carried scope read off `Descendants(signal).First()` | green | 3 red |
+
+N1 was a real defect: a signal an author narrowed to one instance was broadcast
+engine-wide. The other two needed generator shapes that did not exist — a root
+declaring `global` (PreScopedRoot only ever carried `processInstance`) and a
+two-root diagram where the first root carries a scope.
+
+Both were built against **measured** behaviour rather than assumption: a global
+root with nobody disagreeing has its scope attribute *removed* (global is the
+absence of a scope); contradicted, it is refused and left as authored; and with
+two roots the second correctly gets nothing.
+
+Replaced the `twoSignalDiagrams` floor, which could never fire alone —
+`usesSecond` requires `twoSignals`, so zeroing the shape zeroed
+`eventsOnSecondSignal` too and that floor asserted first. A floor that cannot fail
+is precisely what this milestone keeps finding. Two floors that can replace it.
+
+Also removed `RepoRootAnchorTests.GitMarkerDeclaration`, which was declared,
+commented, and referenced nowhere.
+
+**#346 — the pointers, not the counts (Rule 1).** The arithmetic is right; what was
+wrong was everything else the map asserts.
+
+- `Lane -> #170` and `Message Flow -> #171` were **swapped**, in both the claim
+  block and the Map. Confirmed against the issues: #170 is "Send a message from
+  one pool to another", #171 is "Default task assignment from the lane". Five
+  rounds re-read this block and checked the counts.
+- Re-measured the CI exclusion myself with the runner the description names:
+  **169 of 339 = 49.9%**, against a stated 131 of 301 / 43.5% and a claim of
+  "stable at ~42% throughout". The excluded share has grown, because this
+  milestone's new evidence is almost all engine evidence. The instruction now says
+  to re-measure rather than carry the number forward.
+- "41 delivered" means the manifest says supported; for 11 of the 41 the owning
+  story (#115, #156, #159, #218) is open with unticked ACs. I did not close them —
+  their criteria genuinely are not met — so the Map now says what the number
+  measures instead of implying delivery.
+
+Six DESCOPED lines still lack the owner's quoted words. Not fixed: inventing
+quotations is worse than the gap.
+
+**#347 — guards that read the file they check (Rule 2).** `reason` is quoted to the
+author at publish and is the whole of Outcome 2's "saying why", and it was
+unguarded: rewriting it to "Not supported." on five rows left 612/612 green,
+because `Every_element_the_engine_cannot_run_is_refused_by_name` asserts the error
+contains `element.Reason` **read from the same file being mutated**. It moves with
+the mutation.
+
+Now a distinctive fragment of each cannot-execute reason is pinned as a literal —
+not the whole sentence, so wording can improve, but the *fact* each asserts,
+because that is the evidence a descope happened. Plus the row set itself, and the
+two provenance fields (`flowableVersion`, `generatedFrom`) which could both be
+rewritten with nothing failing.

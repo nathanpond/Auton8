@@ -85,6 +85,35 @@ public sealed class SignalScopeCasesTests
     /// the floors below make a silent re-freeze fail loudly.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// A root declaring <c>global</c> — the other half of the carried-scope axis (#345).
+    /// </summary>
+    /// <remarks>
+    /// <c>PreScopedRoot</c> only ever carried <c>processInstance</c>, so the root's
+    /// own <c>global</c> declaration was never generated and dropping it from
+    /// <c>CollectSignalScopeUses</c> left 609/609 green — while silently NARROWING
+    /// a signal the diagram explicitly declared global.
+    /// Measured: a global root with nobody disagreeing is emitted with its scope
+    /// attribute <b>removed</b> (global is the absence of a scope); a global root
+    /// contradicted by an instance declaration is refused and left as authored.
+    /// </remarks>
+    private const string GlobalRoot =
+        """<bpmn:signal id="Sig_1" name="the.signal" flowable:scope="global" />""";
+
+    /// <summary>
+    /// Two signals where the FIRST carries a scope (#345).
+    /// </summary>
+    /// <remarks>
+    /// The (carried scope × two signals) cell was empty everywhere, so reading the
+    /// carried scope off <c>Descendants(signal).First()</c> instead of the signal's
+    /// own root left 609/609 green — and made Sig_2 inherit Sig_1's scope.
+    /// Measured: Sig_1 keeps <c>processInstance</c>, Sig_2 gets nothing.
+    /// </remarks>
+    private const string TwoRootsFirstScoped = """
+          <bpmn:signal id="Sig_1" name="the.signal" flowable:scope="processInstance" />
+          <bpmn:signal id="Sig_2" name="other.signal" />
+        """;
+
     private const string TwoIndependentRoots = """
           <bpmn:signal id="Sig_1" name="the.signal" />
           <bpmn:signal id="Sig_2" name="other.signal" />
@@ -779,18 +808,31 @@ public sealed class SignalScopeCasesTests
         var startsAtProcessLevel = 0;
         var startsInEventSubProcess = 0;
         var eventsOnSecondSignal = 0;
-        var twoSignalDiagrams = 0;
+        var globalRootDiagrams = 0;
+        var twoRootsWithCarriedScope = 0;
 
         for (var iteration = 0; iteration < 400; iteration++)
         {
-            // #341: a third root shape -- two INDEPENDENT signals. Events then
-            // split across them, so `signalRef` resolution is exercised and a
-            // scope declared on one signal must not leak onto the other.
-            var rootChoice = random.Next(3);
-            var twoSignals = rootChoice == 2;
-            var preScoped = rootChoice == 1;
-            var rootXml = twoSignals ? TwoIndependentRoots : preScoped ? PreScopedRoot : PlainRoot;
-            var carried = preScoped ? "processInstance" : null;
+            // Five root shapes. #341 added the two-signal one; #345 added the
+            // global-carrying root and the two-signal-with-a-carried-scope shape,
+            // which were the two empty cells three surviving mutations lived in.
+            var rootChoice = random.Next(5);
+            var twoSignals = rootChoice is 3 or 4;
+            var rootXml = rootChoice switch
+            {
+                1 => PreScopedRoot,
+                2 => GlobalRoot,
+                3 => TwoIndependentRoots,
+                4 => TwoRootsFirstScoped,
+                _ => PlainRoot,
+            };
+            // What Sig_1's root carries as authored. Sig_2 never carries one.
+            var carried = rootChoice switch
+            {
+                1 or 4 => "processInstance",
+                2 => "global",
+                _ => null,
+            };
 
             // One to four events. One is the shape #278 lived in; two is #290's;
             // three and four are shapes no grid has ever contained.
@@ -831,14 +873,15 @@ public sealed class SignalScopeCasesTests
                     : element);
             }
 
-            if (twoSignals) twoSignalDiagrams++;
+            if (rootChoice == 2) globalRootDiagrams++;
+            if (rootChoice == 4) twoRootsWithCarriedScope++;
             eventsOnSecondSignal += chosen.Count(c => c.UsesSecondSignal);
             startsAtProcessLevel += chosen.Count(c => c.Kind == "startEvent" && !c.InEventSubProcess);
             startsInEventSubProcess += chosen.Count(c => c.Kind == "startEvent" && c.InEventSubProcess);
 
             var xml = Diagram(body.ToString(), rootXml);
             var because =
-                $"seed {seed}, iteration {iteration}: root={(twoSignals ? "two-signals" : preScoped ? "pre-scoped" : "plain")}, " +
+                $"seed {seed}, iteration {iteration}: root={rootChoice switch { 1 => "pre-scoped", 2 => "global-root", 3 => "two-signals", 4 => "two-signals-first-scoped", _ => "plain" }}, " +
                 string.Join(" + ", chosen.Select(c =>
                     $"{c.Kind}('{c.Declared ?? "(null)"}')"
                     + (c.InEventSubProcess ? "@eventSubProcess" : "@process")
@@ -868,13 +911,17 @@ public sealed class SignalScopeCasesTests
             Assert.True(emittedRoots.Count == (twoSignals ? 2 : 1),
                 $"{because}: expected {(twoSignals ? 2 : 1)} signal root(s), got {emittedRoots.Count}.");
 
-            // The scope under test is the one on the signal the events actually
-            // reference. With two roots, Sig_2's scope must not be read for Sig_1.
-            var emitted = emittedRoots
-                .First(r => (r.Attribute("id")?.Value ?? "") == "Sig_1")
-                .Attribute(Flowable + "scope")?.Value;
+            // BOTH roots, not just Sig_1 (#345). Reading only the first meant the
+            // product could write anything at all to the second -- or nothing --
+            // and this property could not tell.
+            string? ScopeOf(string id) => emittedRoots
+                .FirstOrDefault(r => (r.Attribute("id")?.Value ?? "") == id)
+                ?.Attribute(Flowable + "scope")?.Value;
 
-            var (shouldRefuse, expected, firstSignalIsTheProblem) = ExpectedVerdict(chosen, carried);
+            var emitted = ScopeOf("Sig_1");
+            var emittedSecond = twoSignals ? ScopeOf("Sig_2") : null;
+
+            var (shouldRefuse, expected, expectedSecond, firstSignalIsTheProblem) = ExpectedVerdict(chosen, carried);
 
             // TWO-SIDED, and this is the half the first version of this test
             // omitted. Asserting only "what a refused diagram writes" lets a
@@ -917,6 +964,15 @@ public sealed class SignalScopeCasesTests
             Assert.True(emitted == expected,
                 $"{because}: published clean, but the engine gets scope='{emitted ?? "(none)"}' " +
                 $"where the declarations mean '{expected ?? "(none)"}'.");
+
+            // #345: and the second signal's own answer, which nothing checked.
+            if (twoSignals)
+            {
+                Assert.True(emittedSecond == expectedSecond,
+                    $"{because}: published clean, but Sig_2 gets scope='{emittedSecond ?? "(none)"}' " +
+                    $"where ITS declarations mean '{expectedSecond ?? "(none)"}'. A scope the author " +
+                    "narrowed to one instance, dropped, is broadcast engine-wide.");
+            }
         }
 
         // A generator that produced only one side of the property would pass every
@@ -947,8 +1003,22 @@ public sealed class SignalScopeCasesTests
         Assert.True(eventsOnSecondSignal > 20,
             $"seed {seed} generated only {eventsOnSecondSignal} events pointing at a second, " +
             "independent signal — the axis that exercises signalRef resolution at all.");
-        Assert.True(twoSignalDiagrams > 20,
-            $"seed {seed} generated only {twoSignalDiagrams} diagrams declaring two signals.");
+
+        // #345. The two CARRIED-scope cells, each of which held a mutation that
+        // survived at 609/609:
+        //   a root declaring `global` (not just `processInstance`), and
+        //   a carried scope in a diagram that has two roots.
+        //
+        // `twoSignalDiagrams` used to sit here and could never fire alone —
+        // `usesSecond` requires `twoSignals`, so zeroing the shape zeroed
+        // `eventsOnSecondSignal` too and that floor asserted first. A floor that
+        // cannot fail is the thing this milestone keeps finding, so it is gone.
+        Assert.True(globalRootDiagrams > 20,
+            $"seed {seed} generated only {globalRootDiagrams} diagrams whose ROOT declares " +
+            "global — without them, dropping the product's handling of a global root is invisible.");
+        Assert.True(twoRootsWithCarriedScope > 20,
+            $"seed {seed} generated only {twoRootsWithCarriedScope} diagrams with two roots AND a " +
+            "carried scope — the cell where reading the scope off the wrong root hides.");
     }
 
     /// <summary>
@@ -960,7 +1030,7 @@ public sealed class SignalScopeCasesTests
     /// what three versions of the grid did when they reused the production
     /// vocabulary.
     /// </remarks>
-    private static (bool ShouldRefuse, string? Scope, bool FirstSignalIsTheProblem) ExpectedVerdict(
+    private static (bool ShouldRefuse, string? Scope, string? SecondScope, bool FirstSignalIsTheProblem) ExpectedVerdict(
         IReadOnlyList<(string Kind, string? Declared, bool InEventSubProcess, bool UsesSecondSignal)> events,
         string? carried)
     {
@@ -976,8 +1046,11 @@ public sealed class SignalScopeCasesTests
         var secondUnrecognised = false;
 
         // The root's own carried scope is a declaration by the SIGNAL, counted
-        // once, and it is only ever carried by Sig_1 (PreScopedRoot).
-        if (carried is not null) wants.Add("processInstance");
+        // once, and only ever by Sig_1. It may be EITHER value: #345 added the
+        // global-carrying root, and until then this line hardcoded
+        // "processInstance", so a root declaring global was unmodelled and
+        // dropping the product's handling of it left 609/609 green.
+        if (carried is not null) wants.Add(carried);
 
         foreach (var (kind, declared, inEventSubProcess, usesSecondSignal) in events)
         {
@@ -1022,17 +1095,30 @@ public sealed class SignalScopeCasesTests
         // Computed only once Sig_1 is known not to contradict itself -- `Single()`
         // throws on a two-element set, and evaluating it eagerly meant a diagram
         // whose Sig_1 conflicts crashed the oracle instead of being judged by it.
-        if (firstConflicted) return (true, carried, true);
+        // #345. Sig_2's own answer, modelled the same way. The generator has made
+        // two signals since #341; the oracle only ever read Sig_1, so everything
+        // the product computes for the second was unchecked in BOTH directions --
+        // what gets written to it, and what gets read from it. Three mutations
+        // survived on that, one of which broadcast an instance-scoped signal
+        // engine-wide.
+        //
+        // Sig_2 never carries a root scope: PreScopedRoot is a single-root shape.
+        // Global is the ABSENCE of a scope attribute, not the string "global" --
+        // measured: a global root with nobody disagreeing is emitted with the
+        // attribute removed. The carried value is already folded into `w`, so
+        // there is no second source to reconcile.
+        static string? Resolve(HashSet<string> w) =>
+            w.Count == 0 || w.Single() == "global" ? null : "processInstance";
 
-        var firstScope = wants.Count == 0
-            ? carried                                             // nobody spoke
-            : wants.Single() == "global" ? null : "processInstance";
+        if (firstConflicted) return (true, carried, secondConflicted ? null : Resolve(otherWants), true);
 
-        if (secondConflicted) return (true, firstScope, false);
+        var firstScope = Resolve(wants);
+
+        if (secondConflicted) return (true, firstScope, null, false);
 
         // The answer is Sig_1's alone. If this returned otherWants' value for a
         // Sig_1-quiet diagram, that would be the leak this axis exists to catch.
-        return (false, firstScope, false);
+        return (false, firstScope, Resolve(otherWants), false);
     }
 
 }

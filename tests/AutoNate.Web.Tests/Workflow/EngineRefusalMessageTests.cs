@@ -6,285 +6,155 @@ using Xunit;
 namespace AutoNate.Web.Tests.Workflow;
 
 /// <summary>
-/// What an author is told when the engine refuses a deployment (#334).
+/// What an author is told when the engine refuses a deployment (#334, #339, #344).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Epic #40 AC3 says an element that cannot execute is "refused at deployment
-/// <b>with a reason</b>". What publish actually did was let the
-/// <see cref="FlowableRequestException"/> escape, so the author got HTTP 500
-/// carrying a Java stack trace and absolute filesystem paths.
+/// Two designs failed before this one, and both failures were in the tests as
+/// much as the code:
 /// </para>
+/// <list type="number">
+/// <item>#334 truncated on real control characters while the caller supplies
+/// JSON, where the escapes are two characters. The tests hand-wrote unescaped
+/// strings, so they asserted against a shape no caller produces.</item>
+/// <item>#339 extracted bounded prose and discarded it if it "looked like"
+/// internals. 22 of 32 adversarial payloads walked past that check. The tests
+/// covered the shapes I had imagined.</item>
+/// </list>
 /// <para>
-/// Publish validation catches what Auton8 knows about (#316, #333), but the
-/// engine will always refuse things we do not predict. This is what happens
-/// then, and it is the difference between AC3 being true of the API and true of
-/// the product.
+/// So the rule now forwards <b>nothing</b> the engine wrote, and the payload
+/// table below is the one that beat the previous version — kept as rows rather
+/// than deleted, because the design changed specifically to defeat them.
 /// </para>
 /// </remarks>
 public sealed class EngineRefusalMessageTests
 {
-    private static FlowableRequestException Refusal(string message) =>
-        new(HttpStatusCode.BadRequest, "deploy process", message);
-
-    /// <summary>The real shapes, copied from live 8.0.0 refusals.</summary>
-    private const string ServiceTaskRefusal =
-        "[Validation set: 'flowable-executable-process' | Problem: "
-        + "'flowable-servicetask-missing-implementation'] : Service task does not have an "
-        + "implementation defined - [Extra info : processDefinitionId = z1 | id = st ] "
-        + "( line: 4, column: 82)";
-
-    [Fact]
-    public void The_engine_problem_code_and_its_sentence_both_survive()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(Refusal(ServiceTaskRefusal));
-
-        // The prose, because it is what an author can act on.
-        Assert.Contains("Service task does not have an implementation defined", described, StringComparison.Ordinal);
-        // The code, because it is stable and searchable.
-        Assert.Contains("flowable-servicetask-missing-implementation", described, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_diagnostic_tail_with_ids_and_positions_is_dropped()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(Refusal(ServiceTaskRefusal));
-
-        Assert.DoesNotContain("Extra info", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("processDefinitionId", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("line: 4", described, StringComparison.Ordinal);
-    }
-
     /// <summary>
-    /// No filesystem path reaches the author, whatever the engine said.
+    /// Built the way <c>FlowableClient.EnsureSuccessAsync</c> builds it:
+    /// <c>$"Flowable could not {operation}. HTTP {code} {reason}. {rawResponseBody}"</c>.
     /// </summary>
-    /// <remarks>
-    /// The half of #334 that is a leak rather than a usability problem. A stack
-    /// trace with absolute paths should not reach a browser regardless of how
-    /// readable the rest is.
-    /// </remarks>
-    [Theory]
-    [InlineData("org.flowable.common.engine.api.FlowableException: boom\n\tat org.flowable.Foo.bar(Foo.java:42)\n\tat /Users/someone/app/src/Thing.cs:17")]
-    [InlineData("Problem at /opt/flowable/webapps/ROOT/WEB-INF/classes/process.bpmn20.xml")]
-    public void No_stack_frame_or_absolute_path_is_passed_through(string raw)
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(Refusal(raw));
-
-        Assert.DoesNotContain("\tat ", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("/opt/", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Built the way the CALLER builds it, which is what #339 turned on.
-    /// </summary>
-    /// <remarks>
-    /// <c>FlowableClient.EnsureSuccessAsync</c> throws
-    /// <c>$"Flowable could not {operation}. HTTP {code} {reason}. {rawResponseBody}"</c>
-    /// — and the raw body is JSON, so a stack trace arrives with the
-    /// two-character escapes <c>\n</c> and <c>\t</c>, not real control
-    /// characters. The first version of these tests hand-wrote unescaped strings
-    /// and therefore asserted against a shape no caller ever produces: the
-    /// sanitiser never fired in production and the tests could not tell.
-    /// </remarks>
     private static FlowableRequestException AsTheClientBuildsIt(string rawResponseBody) =>
-        new(HttpStatusCode.BadRequest, "deploy process",
-            $"Flowable could not deploy process. HTTP 400 Bad Request. {rawResponseBody}");
+        new(HttpStatusCode.InternalServerError, "deploy process",
+            $"Flowable could not deploy process. HTTP 500 Internal Server Error. {rawResponseBody}");
 
-    [Fact]
-    public void A_json_escaped_java_trace_does_not_reach_the_caller()
-    {
-        // The exact body shape Flowable/Spring returns, escapes and all.
-        var body = "{\"timestamp\":\"2026-09-12\",\"status\":400,\"error\":\"Bad Request\","
-            + "\"trace\":\"org.flowable.common.engine.api.FlowableException: Error parsing XML"
-            + "\\n\\tat org.flowable.bpmn.converter.BpmnXMLConverter.convertToBpmnModel(BpmnXMLConverter.java:198)"
-            + "\\n\\tat org.flowable.engine.impl.bpmn.deployer.ParsedDeploymentBuilder.build(ParsedDeploymentBuilder.java:61)\\n\","
-            + "\"path\":\"/flowable-rest/service/repository/deployments\"}";
-
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
-
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("\tat ", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("\\n\\tat", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("/flowable-rest/", described, StringComparison.Ordinal);
-        Assert.Contains("could not be shown safely", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Every shape a verifier got a leak through, as a table (#339).
-    /// </summary>
+    /// <summary>Everything that defeated the #339 post-condition (#344).</summary>
     /// <remarks>
-    /// The previous implementation redacted dangerous substrings and passed the
-    /// remainder through. These are the inputs that beat it — relative paths, a
-    /// <c>../</c> prefix, a space inside a path segment, a one-line frame, and a
-    /// filesystem path smuggled through the problem-code slot. Redaction is a
-    /// losing game; the rule now extracts an allowlist and applies a
-    /// post-condition, discarding anything that still looks like internals.
+    /// Each row is prefixed with the genuine marker, so the extraction path is
+    /// the real one. None of this text may appear in the output — not redacted,
+    /// not truncated: absent, because prose is never forwarded.
     /// </remarks>
     [Theory]
-    // one-line Java frames, no newline and no tab anywhere
-    [InlineData("org.flowable.common.engine.api.FlowableException: boom at org.flowable.engine.impl.bpmn.deployer.BpmnDeployer.deploy(BpmnDeployer.java:142)")]
-    // a RELATIVE path -- the old regex's lookbehind never masked one
-    [InlineData("Could not parse src/main/resources/org/flowable/secret.bpmn20.xml")]
-    // a ../ prefix, so the leading separator is preceded by a dot
-    [InlineData("Resource ../../Users/npond/RiderProjects/AutoNate/secret.bpmn could not be read")]
-    // a space inside a segment leaked the remainder
-    [InlineData("Failed reading /Users/npond/My Projects/AutoNate/process.bpmn20.xml")]
-    // a Windows drive
-    [InlineData(@"Failed reading C:\Users\npond\AppData\flowable\process.bpmn20.xml")]
-    public void No_internals_reach_the_caller_whatever_the_engine_said(string body)
+    // secrets and infrastructure
+    [InlineData("Could not acquire a connection: jdbc:postgresql://flowable-db.internal:5432/flowabledb?user=flowable&password=Hunter2!", "Hunter2")]
+    [InlineData("Authentication failed for user 'flowable_admin' with password 'S3cr3t!'", "S3cr3t")]
+    [InlineData("FLOWABLE_DATASOURCE_PASSWORD=hunter2 was rejected by the pool", "hunter2")]
+    [InlineData("Could not reach 10.0.3.17:5432 from container flowable-rest-7d9c", "10.0.3.17")]
+    [InlineData("Deployment rejected by engine node flowable-node-3.prod.internal:8080", "prod.internal")]
+    // paths the old regex could not see
+    [InlineData("Failed reading /My Documents/My Projects/process definition", "My Documents")]
+    [InlineData(@"Failed reading \\file server\shared docs\keystore", "shared docs")]
+    [InlineData("Failed reading c:/temp", "c:/temp")]
+    [InlineData("Could not read /secretstore.pem", "secretstore")]
+    [InlineData("Could not read %2Fopt%2Fflowable%2Fsecrets%2Fkeystore.p12", "keystore")]
+    [InlineData("Could not read \u2215Users\u2215npond\u2215.ssh\u2215id_rsa", "id_rsa")]
+    // the Extra-info tail, in all three spellings
+    [InlineData("Service task has no implementation -[Extra info : processDefinitionId = secretProc:3:9f2c | id = st7 ]", "secretProc")]
+    [InlineData("Service task has no implementation -  [Extra info : processDefinitionId = secretProc:3:9f2c ]", "secretProc")]
+    [InlineData("Service task has no implementation [Extra info : processDefinitionId = secretProc:3:9f2c ]", "secretProc")]
+    // source files, FQCNs, ids
+    [InlineData("Script1.groovy: 12: unexpected token in /srv", "groovy")]
+    [InlineData("Could not load flowable-secrets.properties from the classpath", "secrets")]
+    [InlineData("org.flowable.common.engine.api.FlowableObjectNotFoundException: no deployed process with key 'internal-secret-key'", "internal-secret-key")]
+    [InlineData("Caused by: java.lang.OutOfMemoryError: Java heap space", "OutOfMemoryError")]
+    [InlineData("Process definition secretProc:3:9f2c1a44-8b1e-11ef-9a1b-0242ac120002 is gone", "9f2c1a44")]
+    public void Nothing_the_engine_wrote_is_ever_forwarded(string body, string mustNotAppear)
     {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            $"[Validation set: 'flowable-executable-process' | Problem: 'flowable-bpmn-parse-failure'] : {body}"));
 
-        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(@"C:\", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("src/main", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("RiderProjects", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(".bpmn", described, StringComparison.Ordinal);
+        Assert.DoesNotContain(mustNotAppear, described, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// Internals inside the RECOGNISED prose are discarded, not redacted (#339).
+    /// The complement: a mapped code still produces a useful sentence (#344).
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// This is the row that makes the post-condition load-bearing, and writing it
-    /// is how I found that the first set of #339 rows did not: every one of those
-    /// bodies lacks the <c>] :</c> marker, so prose extraction found nothing and
-    /// they all reached the generic by the empty path. Removing the
-    /// post-condition entirely left them green.
-    /// </para>
-    /// <para>
-    /// A test that passes for the right outcome by a path the change does not
-    /// touch is not a guard — which is the same lesson as #336 and #292, arrived
-    /// at from the opposite direction.
-    /// </para>
+    /// A rule that emits a constant would pass every row above while making the
+    /// feature worthless. This is what stops that.
     /// </remarks>
     [Theory]
-    [InlineData("Failed reading /Users/npond/secrets/process.bpmn20.xml")]
-    [InlineData("Parse failed at org.flowable.bpmn.converter.BpmnXMLConverter.convert(BpmnXMLConverter.java:198)")]
-    [InlineData("Could not open src/main/resources/flowable/thing.xml")]
-    [InlineData(@"Could not open C:\Users\npond\flowable\thing.xml")]
-    public void Internals_inside_a_recognised_reason_discard_the_whole_reason(string prose)
+    [InlineData("flowable-servicetask-missing-implementation", "no behaviour chosen")]
+    [InlineData("flowable-multi-instance-missing-collection", "nothing to repeat over")]
+    [InlineData("flowable-signal-missing-name", "has no name")]
+    [InlineData("flowable-signal-duplicate-name", "share a name")]
+    [InlineData("flowable-mailtask-no-recipient", "no recipient")]
+    public void A_known_refusal_is_explained_in_our_own_words(string code, string expected)
     {
         var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            $"[Validation set: 'flowable-executable-process' | Problem: 'flowable-bpmn-parse-failure'] : {prose}"));
+            $"[Validation set: 'flowable-executable-process' | Problem: '{code}'] : "
+            + "some engine prose that must not travel"));
 
-        // The code survives -- it is shaped so it cannot carry anything.
-        Assert.Contains("flowable-bpmn-parse-failure", described, StringComparison.Ordinal);
-        // The prose does not.
-        Assert.Contains("could not be shown safely", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(@"C:\", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("src/main", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// An escaped trace inside recognised prose is caught too (#339).
-    /// </summary>
-    /// <remarks>
-    /// Without the escape normalisation the literal <c>\n</c> is not a line break,
-    /// so <c>[^\r\n]+</c> swallows the whole trace into the "reason". The
-    /// post-condition then has to catch it — and this row asserts the two work
-    /// together rather than assuming either does alone.
-    /// </remarks>
-    [Fact]
-    public void An_escaped_trace_inside_a_recognised_reason_is_discarded()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            "[Validation set: 'flowable-executable-process' | Problem: 'flowable-bpmn-parse-failure'] : "
-            + "Error parsing XML\\n\\tat org.flowable.bpmn.converter.BpmnXMLConverter.convert(BpmnXMLConverter.java:198)"));
-
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("\\n\\tat", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("org.flowable.bpmn.converter", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The escape normalisation earns its place — readability, not safety (#339).
-    /// </summary>
-    /// <remarks>
-    /// Removing the normalisation leaves every *safety* row here green, because
-    /// the post-condition catches anything it would have truncated. So this is
-    /// the row that makes it not-dead-code, and the docstring on
-    /// <c>DescribeEngineRefusal</c> says plainly which of the two is the guard.
-    /// Claiming a defence that another line is actually providing is how #339
-    /// happened in the first place.
-    /// </remarks>
-    [Fact]
-    public void An_escaped_newline_does_not_drag_its_continuation_into_the_reason()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            "[Validation set: 'flowable-executable-process' | Problem: 'flowable-bpmn-parse-failure'] : "
-            + "The element is not allowed here\\n  and some continuation nobody needs"));
-
-        Assert.Contains("The element is not allowed here", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("continuation nobody needs", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("\\n", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The problem-code slot cannot smuggle a path (#339).
-    /// </summary>
-    /// <remarks>
-    /// It was appended verbatim from <c>'[^']+'</c>, so anything between quotes
-    /// travelled. The pattern is now <c>flowable-[a-z0-9-]+</c>, which a path
-    /// cannot satisfy.
-    /// </remarks>
-    [Fact]
-    public void A_path_in_the_problem_code_slot_is_not_emitted()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            "[Validation set: 'x' | Problem: '/Users/npond/secrets/keys.java:31'] : Something broke"));
-
-        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
-        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The real refusal still reads well — the point of all this.
-    /// </summary>
-    /// <remarks>
-    /// A post-condition that discards everything would pass every row above while
-    /// making the feature useless. This is the row that stops that.
-    /// </remarks>
-    [Fact]
-    public void A_real_refusal_still_names_the_problem_and_reads_as_a_sentence()
-    {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            "[Validation set: 'flowable-executable-process' | Problem: "
-            + "'flowable-servicetask-missing-implementation'] : Service task does not have an "
-            + "implementation defined - [Extra info : processDefinitionId = z1 | id = st ] "
-            + "( line: 4, column: 82)"));
-
-        Assert.Contains("Service task does not have an implementation defined", described, StringComparison.Ordinal);
-        Assert.Contains("flowable-servicetask-missing-implementation", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("Extra info", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("line: 4", described, StringComparison.Ordinal);
-        Assert.DoesNotContain("could not be shown safely", described, StringComparison.Ordinal);
+        Assert.Contains(expected, described, StringComparison.Ordinal);
+        Assert.Contains(code, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("must not travel", described, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void A_refusal_in_no_recognised_shape_is_still_reported()
+    public void An_unmapped_code_still_travels_because_its_shape_is_safe()
     {
-        // Silence is the failure mode this milestone keeps finding. An
-        // unrecognised refusal is passed through rather than swallowed.
-        // Not passed through any more (#339) -- pass-through is what leaked. The
-        // caller is told a refusal happened and where the full text lives.
-        var described = WorkflowEndpoints.DescribeEngineRefusal(Refusal("Something else went wrong"));
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            "[Validation set: 'x' | Problem: 'flowable-something-new'] : /Users/npond/secret.pem"));
 
-        Assert.Contains("refused this workflow", described, StringComparison.Ordinal);
+        Assert.Contains("flowable-something-new", described, StringComparison.Ordinal);
         Assert.Contains("server log", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void An_empty_refusal_still_says_something()
+    public void A_refusal_with_no_code_at_all_says_so()
     {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(Refusal("   "));
+        var described = WorkflowEndpoints.DescribeEngineRefusal(
+            AsTheClientBuildsIt("something entirely unstructured with /Users/npond/secret in it"));
 
-        Assert.Contains("refused this workflow", described, StringComparison.Ordinal);
+        Assert.Contains("server log", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A code cannot be smuggled from the tail into something dangerous (#344).
+    /// </summary>
+    /// <remarks>
+    /// #339 matched the code against the whole message, so the Extra-info tail
+    /// could supply one. That still holds here — and it no longer matters, because
+    /// the code's own shape admits nothing but <c>[a-z0-9-]</c>. This row pins
+    /// that the shape is what makes it safe, not where it was found.
+    /// </remarks>
+    [Theory]
+    [InlineData("Problem: '/Users/npond/secrets/keys.java:31'")]
+    [InlineData("Problem: 'jdbc:postgresql://host/db?password=hunter2'")]
+    [InlineData("Problem: 'flowable-ok' | Problem: '/etc/shadow'")]
+    public void A_path_cannot_pose_as_a_problem_code(string problem)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            $"[Validation set: 'x' | {problem}] : reason"));
+
+        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("/etc/", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", described, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>There is no length by which a refusal can grow (#344).</summary>
+    /// <remarks>
+    /// The previous version had no cap at all — 4000 characters in, 4090 out.
+    /// A code-only design caps by construction, and this says so out loud.
+    /// </remarks>
+    [Fact]
+    public void The_output_is_bounded_however_long_the_engine_was()
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(
+            AsTheClientBuildsIt(new string('A', 40_000)));
+
+        Assert.True(described.Length < 300, $"output was {described.Length} characters");
     }
 }
