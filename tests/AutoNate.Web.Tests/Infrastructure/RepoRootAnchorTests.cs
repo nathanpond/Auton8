@@ -49,11 +49,6 @@ public sealed class RepoRootAnchorTests
         + @"|new\s+DirectoryInfo\([^;]{0,200}?(?:\.git""|GitMarker|GitDir)[^;]{0,80}?\)\s*\.Exists",
         RegexOptions.Compiled);
 
-    // A marker constant is only a problem when something tests it as a
-    // DIRECTORY, so the constant's own declaration is not itself a hit.
-    private static readonly Regex GitMarkerDeclaration = new(
-        @"(?:const\s+string|static\s+readonly\s+string)\s+(?:GitMarker|GitDir)\s*=",
-        RegexOptions.Compiled);
 
     [Fact]
     public void No_test_source_anchors_the_repo_root_on_a_git_directory()

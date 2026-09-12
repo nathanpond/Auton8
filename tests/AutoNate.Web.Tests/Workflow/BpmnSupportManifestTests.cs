@@ -197,6 +197,100 @@ public sealed class BpmnSupportManifestTests
     }
 
     /// <summary>
+    /// Every <c>cannot-execute</c> row's <c>reason</c> says something specific (#347).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>reason</c> is load-bearing, not decoration: <c>$fields</c> says
+    /// <c>cannot-execute</c> means "Refused at publish, quoting <c>reason</c>",
+    /// and Outcome 2 is literally "refused at publish, naming it <b>and saying
+    /// why</b>". So <c>reason</c> IS the why.
+    /// </para>
+    /// <para>
+    /// It was completely unguarded. Rewriting it to <c>"Not supported."</c> on five
+    /// rows left the whole workflow suite green at 612/612, because the test that
+    /// looks like it covers this —
+    /// <c>Every_element_the_engine_cannot_run_is_refused_by_name</c> — asserts the
+    /// error contains <c>element.Reason</c> <b>read from the same file being
+    /// mutated</b>. It moves with the mutation. Only the rows that happened to have
+    /// literal assertions elsewhere survived.
+    /// </para>
+    /// <para>
+    /// This pins a distinctive fragment of each, as a literal here. It is
+    /// deliberately not the whole sentence — the wording should be free to improve
+    /// — but the <em>fact</em> each reason asserts is not, because it is the
+    /// evidence a descope actually happened.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_cannot_execute_reason_still_says_what_it_said()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        // name -> a fragment that cannot survive the reason being replaced.
+        var required = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Compensation Start Event"] = "EventSubProcessCompensationStartEventActivityBehavior",
+            ["Intermediate Throw (Link)"] = "no link event type",
+            ["Intermediate Catch (Link)"] = "no link event type",
+            ["Cancel Boundary"] = "#220",
+            ["Cancel End"] = "#220",
+            ["Transaction"] = "#220",
+            ["Boundary Event (None)"] = "#282",
+            ["Business Rule Task"] = "DMN",
+            ["Loop Marker"] = "#159",
+        };
+
+        var cannotExecute = elements
+            .Where(e => e!["engine"]!.GetValue<string>() == "cannot-execute")
+            .ToDictionary(
+                e => e!["name"]!.GetValue<string>(),
+                e => e!["reason"]?.GetValue<string>() ?? "",
+                StringComparer.Ordinal);
+
+        // The set itself, so a row silently leaving cannot-execute is caught here
+        // rather than only by the tallies.
+        Assert.Equal(
+            required.Keys.Order(StringComparer.Ordinal),
+            cannotExecute.Keys.Order(StringComparer.Ordinal));
+
+        var gutted = required
+            .Where(pair => !cannotExecute[pair.Key].Contains(pair.Value, StringComparison.Ordinal))
+            .Select(pair => $"{pair.Key}: reason no longer mentions '{pair.Value}' — now \"{cannotExecute[pair.Key]}\"")
+            .ToList();
+
+        Assert.True(
+            gutted.Count == 0,
+            "A cannot-execute element's reason no longer says what it said.\n  "
+            + string.Join("\n  ", gutted)
+            + "\n\nThis text is quoted to the author at publish and is the whole of "
+            + "\"saying why\". If the finding genuinely changed, update this guard too (#347).");
+    }
+
+    /// <summary>
+    /// The manifest's own provenance is asserted (#347).
+    /// </summary>
+    /// <remarks>
+    /// The entire file is a claim about one engine version, produced by deploying
+    /// to it. Both statements of that could be rewritten — <c>"8.0.0"</c> to
+    /// <c>"9.9.9"</c>, <c>generatedFrom</c> to <c>"guessed from memory"</c> — with
+    /// 612/612 green.
+    /// </remarks>
+    [Fact]
+    public void The_manifest_still_claims_to_come_from_a_real_engine_run()
+    {
+        var manifest = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!;
+
+        Assert.Equal("8.0.0", manifest["flowableVersion"]?.GetValue<string>());
+
+        var generatedFrom = manifest["generatedFrom"]?.GetValue<string>() ?? "";
+        Assert.False(
+            string.IsNullOrWhiteSpace(generatedFrom),
+            "The manifest no longer says where it came from.");
+        Assert.Contains("deploy", generatedFrom, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The guard above can actually fail (#330).
     /// </summary>
     /// <remarks>

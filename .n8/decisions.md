@@ -5321,3 +5321,65 @@ the thing that actually says "your diagram".
 function, so reverting the whole of #334 left the suite green at 44/44.
 `StubFlowableClient.DeployThrows` makes the branches drivable; deleting the entire
 catch now fails 2.
+
+**#345 — the sixth axis: the oracle read one signal (Rule 1).** #341 taught the
+generator to *make* two signals and the oracle to reason about Sig_1; it never
+taught it to *look at* Sig_2. Three mutations survived at 609/609. All three now
+fail 3:
+
+| mutation | was | now |
+|---|---|---|
+| write side `.Take(1)` — Sig_2 gets no scope at all | green | 3 red |
+| root's own `global` declaration dropped | green | 3 red |
+| carried scope read off `Descendants(signal).First()` | green | 3 red |
+
+N1 was a real defect: a signal an author narrowed to one instance was broadcast
+engine-wide. The other two needed generator shapes that did not exist — a root
+declaring `global` (PreScopedRoot only ever carried `processInstance`) and a
+two-root diagram where the first root carries a scope.
+
+Both were built against **measured** behaviour rather than assumption: a global
+root with nobody disagreeing has its scope attribute *removed* (global is the
+absence of a scope); contradicted, it is refused and left as authored; and with
+two roots the second correctly gets nothing.
+
+Replaced the `twoSignalDiagrams` floor, which could never fire alone —
+`usesSecond` requires `twoSignals`, so zeroing the shape zeroed
+`eventsOnSecondSignal` too and that floor asserted first. A floor that cannot fail
+is precisely what this milestone keeps finding. Two floors that can replace it.
+
+Also removed `RepoRootAnchorTests.GitMarkerDeclaration`, which was declared,
+commented, and referenced nowhere.
+
+**#346 — the pointers, not the counts (Rule 1).** The arithmetic is right; what was
+wrong was everything else the map asserts.
+
+- `Lane -> #170` and `Message Flow -> #171` were **swapped**, in both the claim
+  block and the Map. Confirmed against the issues: #170 is "Send a message from
+  one pool to another", #171 is "Default task assignment from the lane". Five
+  rounds re-read this block and checked the counts.
+- Re-measured the CI exclusion myself with the runner the description names:
+  **169 of 339 = 49.9%**, against a stated 131 of 301 / 43.5% and a claim of
+  "stable at ~42% throughout". The excluded share has grown, because this
+  milestone's new evidence is almost all engine evidence. The instruction now says
+  to re-measure rather than carry the number forward.
+- "41 delivered" means the manifest says supported; for 11 of the 41 the owning
+  story (#115, #156, #159, #218) is open with unticked ACs. I did not close them —
+  their criteria genuinely are not met — so the Map now says what the number
+  measures instead of implying delivery.
+
+Six DESCOPED lines still lack the owner's quoted words. Not fixed: inventing
+quotations is worse than the gap.
+
+**#347 — guards that read the file they check (Rule 2).** `reason` is quoted to the
+author at publish and is the whole of Outcome 2's "saying why", and it was
+unguarded: rewriting it to "Not supported." on five rows left 612/612 green,
+because `Every_element_the_engine_cannot_run_is_refused_by_name` asserts the error
+contains `element.Reason` **read from the same file being mutated**. It moves with
+the mutation.
+
+Now a distinctive fragment of each cannot-execute reason is pinned as a literal —
+not the whole sentence, so wording can improve, but the *fact* each asserts,
+because that is the evidence a descope happened. Plus the row set itself, and the
+two provenance fields (`flowableVersion`, `generatedFrom`) which could both be
+rewritten with nothing failing.
