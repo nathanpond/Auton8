@@ -249,65 +249,110 @@ public sealed class EngineRefusalMessageTests
     }
 
     /// <summary>
-    /// Runtime refusals get our words too, not "see the log" (#354).
+    /// Runtime refusals get our words, keyed on what Auton8 controls (#354, #357).
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Every body below was <b>captured from a live Flowable 8.0.0</b>, not
-    /// written from memory — that distinction is what #338 was filed for.
-    /// </para>
-    /// <para>
-    /// These carry no problem code, so before #354 they all fell through to "the
-    /// reason is in the server log" — which was the price #350 paid to stop the
-    /// execution routes leaking the raw body, and was worse than what operators
-    /// had.
-    /// </para>
+    /// The key is <c>(Operation, StatusCode)</c> — a literal this codebase passes
+    /// to <c>EnsureSuccessAsync</c>, and the engine's own classification. The
+    /// engine's sentence is not read, so the body below is deliberately hostile
+    /// and irrelevant to the outcome.
     /// </remarks>
     [Theory]
-    [InlineData("""{"message":"Bad request","exception":"No process definition found for key 'x'"}""",
-        "no published workflow has that key")]
-    [InlineData("""{"message":"Not found","exception":"Could not find a task with id 'x'."}""",
-        "already been completed")]
-    [InlineData("""{"message":"Not found","exception":"Could not find a process instance with id 'x'."}""",
-        "already finished")]
-    [InlineData("""{"message":"Not found","exception":"Could not find an execution with id 'x'."}""",
-        "already moved on")]
-    [InlineData("""{"message":"Bad request","exception":"Cannot start process instance by message: no subscription to message with name 'x' found."}""",
-        "waiting for that message")]
-    [InlineData("""{"message":"Bad request","exception":"signalName is required"}""",
-        "without a name")]
-    [InlineData("Variable 'escalate' is already present on execution 'proc-1'.",
-        "already set on this step")]
-    public void A_runtime_refusal_is_explained_in_our_own_words(string body, string expected)
+    [InlineData("create the process variables", HttpStatusCode.Conflict, "already set on this step")]
+    [InlineData("create the process variables", HttpStatusCode.NotFound, "no longer exists")]
+    [InlineData("complete the user task", HttpStatusCode.NotFound, "already been completed")]
+    [InlineData("start the process instance", HttpStatusCode.BadRequest, "no published workflow matches")]
+    [InlineData("query the process instance", HttpStatusCode.NotFound, "already finished")]
+    public void A_runtime_refusal_is_explained_in_our_own_words(
+        string operation, HttpStatusCode status, string expected)
     {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+        var described = WorkflowEndpoints.DescribeEngineRefusal(new FlowableRequestException(
+            status, operation,
+            $"Flowable could not {operation}. HTTP {(int)status}. "
+            + "{\"exception\":\"anything at all, including /Users/npond/secret and hunter2\"}"));
 
         Assert.Contains(expected, described, StringComparison.Ordinal);
         Assert.DoesNotContain("server log", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", described, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// And still nothing the engine wrote — not even the identifier (#354).
+    /// A caller cannot choose which sentence Auton8 says (#357).
     /// </summary>
     /// <remarks>
-    /// Pulling the quoted id out of these would be safe in every case I looked at,
-    /// which is exactly the reasoning that leaked three times. It is also
-    /// unnecessary: the caller already knows which task or instance they asked
-    /// about, because it is in their own request URL.
+    /// <para>
+    /// These are the five that worked. Variable names are caller-supplied and
+    /// Flowable echoes them into its 409, and the old fragment table was
+    /// first-match-wins — so naming a variable after another row's fragment made
+    /// the product confidently say the wrong thing about a variable conflict.
+    /// </para>
+    /// <para>
+    /// #349 bounded the character set of what travels. It did not bound who
+    /// decides what is said, and the two are not the same property.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("""{"exception":"Could not find a task with id 'secret-task-9f2c'."}""", "secret-task-9f2c")]
-    [InlineData("""{"exception":"Could not find an execution with id 'proc-internal-77'."}""", "proc-internal-77")]
-    [InlineData("""{"exception":"No process definition found for key 'payroll_secret'"}""", "payroll_secret")]
-    public void A_runtime_refusal_still_forwards_no_identifier(string body, string mustNotAppear)
+    [InlineData("Could not find a task with id")]
+    [InlineData("No process definition found for key")]
+    [InlineData("Could not find a process instance with id")]
+    [InlineData("Could not find an execution with id")]
+    [InlineData("no subscription to message with name")]
+    public void A_caller_cannot_pick_the_sentence_by_naming_a_variable(string plantedName)
     {
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+        // The real 409 shape, with the caller's variable name echoed by the engine.
+        var described = WorkflowEndpoints.DescribeEngineRefusal(new FlowableRequestException(
+            HttpStatusCode.Conflict, "create the process variables",
+            "Flowable could not create the process variables. HTTP 409 Conflict. "
+            + $"{{\"exception\":\"Variable '{plantedName}' is already present on execution 'proc-1'.\"}}"));
 
-        Assert.DoesNotContain(mustNotAppear, described, StringComparison.Ordinal);
-        Assert.DoesNotContain("exception", described, StringComparison.OrdinalIgnoreCase);
+        // The TRUE answer, every time.
+        Assert.Contains("already set on this step", described, StringComparison.Ordinal);
+        Assert.DoesNotContain(plantedName, described, StringComparison.Ordinal);
     }
 
-    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>
+    /// <summary>
+    /// An author cannot make a publisher read a sentence about their diagram (#357).
+    /// </summary>
+    /// <remarks>
+    /// A schema refusal carries no genuine <c>Problem:</c> marker and Xerces echoes
+    /// an invalid attribute value verbatim, so a bare <c>Problem: '…'</c> match let
+    /// an author supply one — and a <b>publisher</b>, a different person, read
+    /// "a mail task has no recipient" about a diagram with no mail task. The marker
+    /// must now sit inside a real <c>[Validation set: … | Problem: …]</c> envelope.
+    /// </remarks>
+    [Theory]
+    [InlineData("flowable-mailtask-no-recipient", "no recipient")]
+    [InlineData("flowable-signal-duplicate-name", "share a name")]
+    [InlineData("flowable-servicetask-missing-implementation", "no behaviour chosen")]
+    public void An_author_cannot_plant_a_problem_code(string planted, string sentenceItWouldHaveTriggered)
+    {
+        // Exactly what Xerces returns for an invalid QName carrying the payload.
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            $"javax.xml.stream.XMLStreamException: cvc-datatype-valid.1.2.1: "
+            + $"'Problem: '{planted}'' is not a valid value for 'QName'."));
+
+        Assert.DoesNotContain(sentenceItWouldHaveTriggered, described, StringComparison.Ordinal);
+        Assert.DoesNotContain(planted, described, StringComparison.Ordinal);
+    }
+
+    /// <summary>And a genuine envelope still works (#357).</summary>
+    /// <remarks>
+    /// Without this, anchoring the marker could have disabled the whole deployment
+    /// table and every row above would still pass.
+    /// </remarks>
+    [Fact]
+    public void A_real_validation_envelope_is_still_recognised()
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            "[Validation set: 'flowable-executable-process' | Problem: "
+            + "'flowable-servicetask-missing-implementation'] : Service task has no implementation"));
+
+        Assert.Contains("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.Contains("flowable-servicetask-missing-implementation", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>
     /// <remarks>
     /// The previous version had no cap at all — 4000 characters in, 4090 out.
     /// A code-only design caps by construction, and this says so out loud.

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using AutoNate.Web.Services.Flowable;
 
@@ -40,8 +41,17 @@ internal static class EngineRefusal
     /// author-controlled text (an activity name), so a later match may not be the
     /// engine's. Pinned by <c>The_first_marker_wins</c>.
     /// </remarks>
+    /// <remarks>
+    /// Anchored on the full <c>[Validation set: … | Problem: …]</c> envelope
+    /// (#357). Matching a bare <c>Problem: '…'</c> let a diagram author supply one:
+    /// a schema refusal carries no genuine marker, and Xerces echoes an invalid
+    /// attribute value verbatim — so <c>signalRef="Problem: 'flowable-mailtask-no-recipient'"</c>
+    /// made a <b>publisher</b> read "a mail task has no recipient" about a diagram
+    /// with no mail task.
+    /// </remarks>
     internal static readonly Regex ProblemCode = new(
-        @"Problem:\s*'(?<code>flowable-[a-z0-9-]+)'", RegexOptions.Compiled);
+        @"\[Validation set:\s*'[a-z0-9-]+'\s*\|\s*Problem:\s*'(?<code>flowable-[a-z0-9-]+)'\s*\]",
+        RegexOptions.Compiled);
 
     /// <summary>
     /// Our words for the refusals we have actually captured from a live engine.
@@ -93,62 +103,73 @@ internal static class EngineRefusal
         };
 
     /// <summary>
-    /// Runtime refusals, which carry no problem code at all (#354).
+    /// Runtime refusals, keyed on what AUTON8 controls (#354, #357).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The deployment table above is keyed by Flowable's own validation codes.
-    /// Runtime refusals have none — they are a plain sentence in an
-    /// <c>exception</c> field. Captured from a live engine rather than read out of
-    /// Flowable's source:
+    /// #354 keyed these on a fragment of the engine's sentence. That was wrong for
+    /// a reason the text-leak work had already taught and I did not carry over:
+    /// <b>a caller can reach the engine's sentence.</b> Variable names are
+    /// caller-supplied and Flowable echoes them into its 409, so naming a variable
+    /// <c>Could not find a task with id</c> made the product say "that task does
+    /// not exist" about a variable conflict. Five such sentences were confirmed
+    /// against the real body.
     /// </para>
     /// <para>
-    /// <code>
-    ///   400 {"exception":"No process definition found for key 'x'"}
-    ///   404 {"exception":"Could not find a task with id 'x'."}
-    ///   404 {"exception":"Could not find a process instance with id 'x'."}
-    ///   404 {"exception":"Could not find an execution with id 'x'."}
-    ///   400 {"exception":"signalName is required"}
-    ///   400 {"exception":"Cannot start process instance by message: no
-    ///                     subscription to message with name 'x' found."}
-    /// </code>
+    /// The allowlist in #349 bounded the character set of what travels. It did not
+    /// bound <em>who decides what is said</em>, and I treated the second as
+    /// following from the first.
     /// </para>
     /// <para>
-    /// <b>Nothing is extracted from these, not even the identifier.</b> Matching a
-    /// prefix and pulling out a quoted id would be safe in each case I looked at,
-    /// which is precisely the reasoning that leaked three times — and it is
-    /// unnecessary here, because the caller already knows which task or instance
-    /// they asked about: it is in their own request URL.
+    /// So the key is now <c>(Operation, StatusCode)</c>. <c>Operation</c> is a
+    /// literal this codebase passes to <c>EnsureSuccessAsync</c> — "create the
+    /// process variables", "complete the user task" — and the status is the
+    /// engine's own classification. Neither is reachable by a caller, and the
+    /// engine's sentence is not read at all.
     /// </para>
     /// <para>
-    /// This exists because #350 cost something real. Sanitising the execution
-    /// routes turned
-    /// <c>"Variable 'escalate' is already present on execution 'proc-1'"</c> into
-    /// "the reason is in the server log", which is worse than what operators had.
-    /// #354 is the other half of that work.
+    /// Coarser than a fragment, deliberately. Where one pair covers two real
+    /// causes the sentence says what they have in common; where it would be
+    /// misleading there is no row, and the caller gets the generic plus a log
+    /// line. A vague true answer beats a precise false one.
     /// </para>
     /// </remarks>
-    private static readonly (string Fragment, string Reason)[] RuntimeReasons =
+    private static readonly (string Operation, HttpStatusCode Status, string Reason)[] RuntimeReasons =
     [
-        ("No process definition found for key",
-            "no published workflow has that key"),
-        ("Could not find a task with id",
+        ("create the process variables", HttpStatusCode.Conflict,
+            "one of those variables is already set on this step"),
+        ("create the process variables", HttpStatusCode.NotFound,
+            "that step of the workflow run no longer exists"),
+        ("update the process variables", HttpStatusCode.NotFound,
+            "that step of the workflow run no longer exists"),
+        ("fetch process instance variables", HttpStatusCode.NotFound,
+            "that step of the workflow run no longer exists"),
+
+        ("start the process instance", HttpStatusCode.BadRequest,
+            "no published workflow matches that key or message"),
+        ("start the process instance", HttpStatusCode.NotFound,
+            "no published workflow matches that key"),
+
+        ("complete the user task", HttpStatusCode.NotFound,
             "that task does not exist, or has already been completed"),
-        ("Could not find a process instance with id",
+        ("complete the user task", HttpStatusCode.Conflict,
+            "that task was changed by someone else while you were working on it"),
+        ("fetch runtime task", HttpStatusCode.NotFound,
+            "that task does not exist, or has already been completed"),
+        ("reassign the user task", HttpStatusCode.NotFound,
+            "that task does not exist, or has already been completed"),
+        ("update the user task due date", HttpStatusCode.NotFound,
+            "that task does not exist, or has already been completed"),
+
+        ("query the process instance", HttpStatusCode.NotFound,
             "that workflow run does not exist, or has already finished"),
-        ("Could not find an execution with id",
-            "that step of the workflow run does not exist, or has already moved on"),
-        ("no subscription to message with name",
-            "nothing in any published workflow is waiting for that message"),
-        ("is already present on execution",
-            "that variable is already set on this step"),
-        ("signalName is required",
-            "the signal was sent without a name"),
-        ("Process definition null was not found",
-            "a step calls a workflow that is not published"),
+        ("complete the ad-hoc sub-process", HttpStatusCode.NotFound,
+            "that step of the workflow run no longer exists"),
+        ("list the ad-hoc subprocess activities", HttpStatusCode.NotFound,
+            "that step of the workflow run no longer exists"),
     ];
 
-    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>
+    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>
     internal static string? KnownCode(string? message)
     {
         var match = ProblemCode.Match(message ?? string.Empty);
@@ -197,12 +218,12 @@ internal static class EngineRefusal
             return $"The workflow engine refused {what}: {Reasons[code]} ({code}).";
         }
 
-        // A runtime refusal, recognised by its sentence (#354). Nothing from the
-        // engine's text travels -- the fragment only selects which of OUR
-        // sentences to use.
-        foreach (var (fragment, reason) in RuntimeReasons)
+        // A runtime refusal, keyed on (operation, status) -- both ours, neither
+        // reachable by a caller. The engine's sentence is not read at all (#357).
+        foreach (var (operation, status, reason) in RuntimeReasons)
         {
-            if (message.Contains(fragment, StringComparison.Ordinal))
+            if (string.Equals(exception.Operation, operation, StringComparison.Ordinal)
+                && exception.StatusCode == status)
             {
                 return $"The workflow engine refused {what}: {reason}.";
             }

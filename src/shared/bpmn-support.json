@@ -165,7 +165,7 @@
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "message",
-      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
+      "reason": "#112: started by POST /runtime/process-instances with {message}. Verified against Flowable 8.0.0.",
       "evidence": "deployed and started"
     },
     {
@@ -225,7 +225,7 @@
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "message",
-      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
+      "reason": "#112: Flowable 8.0.0 REJECTS this at deployment (flowable-throw-event-invalid-eventdefinition). Publish expands it into a service task on the send behaviour, so it executes as authored.",
       "evidence": "no behaviour class; validator rejects the definition"
     },
     {
@@ -275,7 +275,7 @@
       "engine": "executes",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "message",
-      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
+      "reason": "#112: waits, and is advanced by correlating on a declared process variable. Verified.",
       "evidence": "deployed and started"
     },
     {
@@ -315,7 +315,7 @@
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "message",
-      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
+      "reason": "#112: interrupting and non-interrupting both demonstrated against the engine.",
       "evidence": "deployed and started"
     },
     {
@@ -405,7 +405,7 @@
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "message",
-      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
+      "reason": "#112: on its own this deploys, ends the process, and SENDS NOTHING — a catcher sat at one instance before and after. Publish expands it into a send plus a terminal end event, so it now does what it says.",
       "evidence": "deployed and started"
     },
     {
