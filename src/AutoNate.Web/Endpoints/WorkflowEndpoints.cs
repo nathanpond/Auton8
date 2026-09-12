@@ -378,6 +378,15 @@ public static class WorkflowEndpoints
             {
                 deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
             }
+            catch (FlowableRequestException exception) when (!exception.IsCallerError)
+            {
+                // #339. A Flowable 5xx is not the author's fault, but it still
+                // must not render the Java message, a .NET stack and absolute
+                // paths into a browser. 502: the upstream engine failed.
+                return Results.Json(
+                    new { errors = new[] { DescribeEngineRefusal(exception) } },
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
             catch (FlowableRequestException exception) when (exception.IsCallerError)
             {
                 // #334. Publish validation catches what Auton8 knows about, but the
@@ -637,44 +646,103 @@ public static class WorkflowEndpoints
     /// noise.
     /// </para>
     /// </remarks>
+    /// <summary>The shapes that must never reach a browser (#339).</summary>
+    /// <remarks>
+    /// Used as a POST-CONDITION, not as a filter. The first version of this code
+    /// tried to redact dangerous substrings out of the engine's message and pass
+    /// the remainder through; that is a losing game, and it lost — see the table
+    /// in <c>EngineRefusalMessageTests</c>. Now the extracted sentence is checked
+    /// against this, and anything that still matches is <b>discarded whole</b>
+    /// rather than patched. Losing a diagnostic is cheap; leaking a stack trace
+    /// and a home-directory path to a browser is not.
+    /// </remarks>
+    private static readonly Regex LooksLikeInternals = new(
+        @"\.java:\d+"                     // a Java frame position
+        + @"|(?:^|\s)at\s+[\w.$]+\("      // "at com.foo.Bar(" -- a frame, escaped or not
+        + @"|\bat\s+[\w.$]+\.[\w$]+\("
+        + @"|[/\\][\w.\-]+[/\\]"          // any path with two or more separators
+        + @"|\b[A-Za-z]:\\"               // a Windows drive
+        + @"|\b\w+\.(?:java|cs|xml|jar|class)\b", // a source or artifact filename
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Flowable's refusal, as a sentence rather than a stack trace (#334, #339).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deployment refusals arrive in a machine-readable shape:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   [Validation set: 'flowable-executable-process'
+    ///    | Problem: 'flowable-servicetask-missing-implementation']
+    ///   : Service task does not have an implementation defined - [Extra info : ...
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <b>Allowlist, not denylist.</b> Only two things are ever emitted: the
+    /// problem code, matched against <c>flowable-[a-z0-9-]+</c> so a filesystem
+    /// path can never be mistaken for one, and the prose between <c>] :</c> and
+    /// the <c>- [Extra info</c> tail. Everything else is dropped. If neither is
+    /// found, or if what was found still matches
+    /// <see cref="LooksLikeInternals"/>, the caller gets a generic sentence.
+    /// </para>
+    /// <para>
+    /// <b>Escaped forms are normalised first — for readability, not for safety.</b>
+    /// <c>FlowableClient.EnsureSuccessAsync</c> appends the raw response body,
+    /// which is JSON, so a trace arrives with the two-character escapes
+    /// <c>\n</c> and <c>\t</c> rather than real control characters. The previous
+    /// implementation keyed its *truncation* on the real ones and so never fired
+    /// on an actual refusal — that was #339.
+    /// </para>
+    /// <para>
+    /// Being exact about what now protects what, because overstating it is how
+    /// #339 happened: **the post-condition is the guard.** Removing this
+    /// normalisation leaves every safety row in
+    /// <c>EngineRefusalMessageTests</c> green, because anything it would have
+    /// truncated is caught by <see cref="LooksLikeInternals"/> anyway. What it
+    /// buys is a tidy one-clause reason instead of one carrying a literal
+    /// <c>\n</c> — pinned by
+    /// <c>An_escaped_newline_does_not_drag_its_continuation_into_the_reason</c>,
+    /// so it is not dead code.
+    /// </para>
+    /// </remarks>
     internal static string DescribeEngineRefusal(FlowableRequestException exception)
     {
+        const string Generic = "The workflow engine refused this workflow, and its reason could not be "
+            + "shown safely. The full text is in the server log.";
+
         var message = exception.Message ?? string.Empty;
 
-        // Drop the diagnostic tail, which carries ids and filesystem paths.
-        var extra = message.IndexOf("- [Extra info", StringComparison.OrdinalIgnoreCase);
-        if (extra > 0) message = message[..extra];
+        // Escaped -> real, so everything below sees one representation (#339).
+        message = message
+            .Replace("\\r\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal);
 
-        var problem = Regex.Match(message, @"Problem:\s*'(?<code>[^']+)'");
-        var prose = Regex.Match(message, @"\]\s*:\s*(?<text>.+)", RegexOptions.Singleline);
+        // Strictly shaped, so a path can never be read as a problem code.
+        var problem = Regex.Match(message, @"Problem:\s*'(?<code>flowable-[a-z0-9-]+)'");
+        var code = problem.Success ? problem.Groups["code"].Value : null;
 
-        var sentence = prose.Success ? prose.Groups["text"].Value.Trim() : message.Trim();
+        // The prose the engine writes for an author, bounded at both ends.
+        var tail = message.IndexOf("- [Extra info", StringComparison.OrdinalIgnoreCase);
+        var bounded = tail > 0 ? message[..tail] : message;
 
-        // A stack trace starts at the first frame marker. Everything from there on
-        // is internals, and this is the path an UNRECOGNISED refusal takes -- so it
-        // is exactly where a raw Java dump would otherwise get through.
-        var frame = sentence.IndexOf("\tat ", StringComparison.Ordinal);
-        if (frame < 0) frame = sentence.IndexOf("\n\tat", StringComparison.Ordinal);
-        if (frame > 0) sentence = sentence[..frame];
-
-        // One line. Multi-line engine messages are message-plus-trace.
-        var newline = sentence.IndexOfAny(['\r', '\n']);
-        if (newline > 0) sentence = sentence[..newline];
-
-        // And no absolute path, on any branch. This is the leak half of #334:
-        // filesystem paths must not reach a browser however readable the rest is.
-        sentence = Regex.Replace(sentence, @"(?<![\w.])[/\\](?:[\w.\-]+[/\\])+[\w.\-]*", "<path>");
+        var prose = Regex.Match(bounded, @"\]\s*:\s*(?<text>[^\r\n]+)");
+        var sentence = prose.Success ? prose.Groups["text"].Value.Trim() : string.Empty;
 
         sentence = Regex.Replace(sentence, @"\s+", " ").Trim();
 
-        if (sentence.Length == 0)
+        // The post-condition. Anything still resembling internals is discarded
+        // whole -- not redacted, because redaction is what failed before.
+        if (sentence.Length == 0 || LooksLikeInternals.IsMatch(sentence))
         {
-            sentence = "Flowable refused the deployment and gave no reason.";
+            return code is null ? Generic : $"{Generic} ({code})";
         }
 
-        return problem.Success
-            ? $"The workflow engine refused this workflow: {sentence} ({problem.Groups["code"].Value})"
-            : $"The workflow engine refused this workflow: {sentence}";
+        return code is null
+            ? $"The workflow engine refused this workflow: {sentence}"
+            : $"The workflow engine refused this workflow: {sentence} ({code})";
     }
 
     public sealed record PublishResponse(WorkflowModel Model, WorkflowDeploymentInfo Deployment);

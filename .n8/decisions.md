@@ -5161,3 +5161,65 @@ The studio half — a refusal rendering as "Request failed with status code 400"
 because `WorkflowStudio.tsx` reads `data.message` against an `{errors:[…]}` body
 — is #256, and stays in M4b where the SPA runner can verify it. Until it lands,
 Outcome 2 is true of the API and still not of the product.
+
+## Round 10 — 2026-09-12 (during /n8-exec M4)
+
+**#338 — `behaviorKey` is not an implementation (Rule 1).** Measured, five shapes:
+
+    delegateExpression + behaviorKey  DEPLOYS
+    flowable:class                    DEPLOYS
+    flowable:expression               DEPLOYS
+    flowable:behaviorKey ALONE        REFUSED  servicetask-missing-implementation
+    flowable:type="mail" ALONE        REFUSED  mailtask-no-recipient / no-content
+
+`behaviorKey` is an Auton8 attribute the expansion reads; Flowable has never heard
+of it, so accepting it alone let an imported diagram publish clean and sink the
+deployment. Removed from the `wired` set and now refused, with the complement row
+asserting the delegate+key pair still passes.
+
+`type` stays. The distinction is real: `type="mail"` *does* name an implementation,
+so it passes the missing-implementation rule correctly — the engine refuses it for
+a different constraint (no recipient, no content), which is a genuine uncovered
+member of #333's class. Nothing in the studio writes `flowable:type`; it arrives
+only by import. Recorded in the test's remarks rather than fixed, so the gap is
+visible rather than silently closed-looking.
+
+The defect underneath was a docstring claiming all four rows "measured against
+Flowable 8.0.0 rather than reasoned about" when two were not. That sentence over
+unmeasured rows is worse than the original bug: it tells the next reader not to
+check. Every row in the table above was deployed.
+
+**#339 — the sanitiser never fired, and redaction was the wrong shape (Rule 1).**
+`FlowableClient.EnsureSuccessAsync` appends the raw response body, which is JSON,
+so traces arrive with the two-character escapes `\n` and `\t`. The truncation keyed
+on real control characters and so never fired on an actual refusal; the tests fed
+hand-written unescaped strings and could not see it.
+
+Rewritten from denylist to **allowlist + post-condition**: emit only the problem
+code (matched `flowable-[a-z0-9-]+`, so a path cannot be mistaken for one) and the
+prose between `] :` and the `- [Extra info` tail; then check the result against
+`LooksLikeInternals` and **discard it whole** if it still resembles a path, a frame
+or a source filename. Redacting substrings out of attacker-shaped text is a losing
+game — it lost, on relative paths, `../` prefixes, spaces inside segments, one-line
+frames, and the problem-code slot.
+
+Also added the 5xx branch: a Flowable server error now returns 502 with the same
+treatment instead of escaping as an unhandled exception.
+
+**Worth recording: my first version of the #339 tests did not test the fix.** All
+three mutations passed. Every body in those rows lacks the `] :` marker, so prose
+extraction found nothing and they all reached the generic by the empty path —
+right outcome, untouched code path. Added rows that put internals *inside*
+recognised prose, and the post-condition mutation now fails 4.
+
+And the escape normalisation turned out **not** to be load-bearing for safety —
+removing it left every safety row green, because the post-condition catches what it
+would have truncated. Rather than leave a docstring implying otherwise, it now says
+plainly that the post-condition is the guard and normalisation is for readability,
+pinned by its own row. Overstating which line provides a defence is exactly how
+#339 happened.
+
+**#340 — blocked, not guessed.** Withdrawing five message rows, or building studio
+authorability the round-8 replan explicitly moved to M4b, are both product-scope
+decisions (Rule 4). Options and my lean are on the issue; labelled `blocked` +
+`needs-owner-action`.

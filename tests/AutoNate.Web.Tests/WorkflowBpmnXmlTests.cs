@@ -4580,12 +4580,51 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Contains("Do the thing", error, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A service task carrying one of Flowable's implementation attributes is
+    /// accepted (#333, corrected by #338).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// **What was actually measured, and what was not.** The first version of
+    /// this theory carried four rows under a docstring claiming each verdict
+    /// "was measured against Flowable 8.0.0 rather than reasoned about". Two of
+    /// the four were not measured, and one of those was wrong:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   delegateExpression + behaviorKey  DEPLOYS
+    ///   flowable:class                    DEPLOYS
+    ///   flowable:expression               DEPLOYS
+    ///   flowable:behaviorKey ALONE        REFUSED  servicetask-missing-implementation
+    ///   flowable:type="mail" ALONE        REFUSED  mailtask-no-recipient / no-content
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <c>behaviorKey</c> is an Auton8 attribute the expansion reads; Flowable has
+    /// never heard of it, so it is no longer in the accepted set and a task
+    /// carrying only it is now refused.
+    /// </para>
+    /// <para>
+    /// <c>type</c> stays, and the distinction matters: <c>type="mail"</c> <b>does</b>
+    /// name an implementation, so it passes THIS rule correctly. The engine
+    /// refuses it for a different constraint — no recipient, no content — which
+    /// is a real uncovered member of #333's class and is not this rule's job.
+    /// Nothing in the studio writes <c>flowable:type</c>; it reaches us only by
+    /// import. Recorded here rather than fixed so the gap is visible.
+    /// </para>
+    /// <para>
+    /// Writing "measured" over rows that were not measured is worse than the
+    /// original defect, because it tells the next reader not to check. Every row
+    /// in the table above was deployed to a live engine.
+    /// </para>
+    /// </remarks>
     [Theory]
     [InlineData("""flowable:class="com.example.Thing" """)]
     [InlineData("""flowable:expression="${bean.method()}" """)]
     [InlineData("""flowable:type="mail" """)]
-    [InlineData("""flowable:behaviorKey="autonate.send-message" """)]
-    public void A_service_task_that_names_its_behaviour_is_accepted(string wiring)
+    [InlineData("""flowable:delegateExpression="${autonateBehaviorDelegate}" flowable:behaviorKey="autonate.send-message" """)]
+    public void A_service_task_that_names_its_implementation_is_accepted(string wiring)
     {
         // The complement. Without it, "refuse every service task" passes the row
         // above while refusing the element the whole behaviour system runs on --
@@ -4593,6 +4632,28 @@ public sealed class WorkflowBpmnXmlTests
         var xml = UnnamedTriggerDiagram($"""<bpmn:serviceTask id="x" name="Do" {wiring}/>""");
 
         Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// An Auton8 behaviour key is not a Flowable implementation (#338).
+    /// </summary>
+    /// <remarks>
+    /// Measured: a service task carrying only <c>flowable:behaviorKey</c> is
+    /// REFUSED by the engine with
+    /// <c>flowable-servicetask-missing-implementation</c>. It was in the accepted
+    /// set, so an imported diagram in that state published clean and sank the
+    /// deployment — the exact class #333 exists to close, reopened inside the fix
+    /// for it.
+    /// </remarks>
+    [Fact]
+    public void A_behaviour_key_without_a_delegate_is_not_an_implementation()
+    {
+        var xml = UnnamedTriggerDiagram(
+            """<bpmn:serviceTask id="x" name="Do" flowable:behaviorKey="autonate.send-message" />""");
+
+        Assert.Contains(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
             e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
     }
