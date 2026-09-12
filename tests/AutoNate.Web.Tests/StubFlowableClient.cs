@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
@@ -18,10 +19,23 @@ internal sealed class StubFlowableClient : IFlowableClient
     public Dictionary<string, FlowableProcessInstanceSummary> InstancesById { get; } = new();
     public Dictionary<string, List<FlowableTaskSummary>> TasksByUser { get; } = new();
 
+    /// <summary>
+    /// Set to make the next deploy throw as the real client would (#344).
+    /// </summary>
+    /// <remarks>
+    /// Without this the publish route's engine-refusal branches could not be
+    /// driven at all, and they were not: reverting the whole of #334 — both the
+    /// status mapping and the sanitisation — left the suite green at 44/44,
+    /// because every test of the refusal path called the pure function directly.
+    /// </remarks>
+    public FlowableRequestException? DeployThrows { get; set; }
+
     public Task<WorkflowDeploymentInfo> DeployProcessAsync(
         WorkflowModel model, CancellationToken cancellationToken = default)
     {
         Calls.Add($"Deploy:{model.ProcessKey}");
+        if (DeployThrows is not null) throw DeployThrows;
+
         return Task.FromResult(new WorkflowDeploymentInfo
         {
             DeploymentId = "stub-deployment",

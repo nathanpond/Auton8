@@ -5282,3 +5282,42 @@ row LEAVING supported necessarily enters one of these lists.
 Six of seven DESCOPED lines still lack the owner's quoted words. Not fixed —
 inventing quotations is worse than the gap, and only the owner can supply them.
 Reported.
+
+## Round 11 — 2026-09-12 (during /n8-exec M4)
+
+**#344 — stop forwarding engine prose at all (Rule 2).** Third design for this,
+and the first two failed the same way: I tried to decide what to *remove* from
+text written by a system that can see the filesystem, the database URL and the
+container's environment.
+
+- #334 truncated on real control characters; the body is JSON, so the escapes are
+  two characters and it never fired.
+- #339 extracted bounded prose and discarded it if it "looked like" internals. 22
+  of 32 adversarial payloads walked past — a full JDBC URL with password,
+  credentials, internal hostnames and container ids, paths with spaces, UNC
+  paths, URL-encoded and unicode separators, three spellings of the
+  `- [Extra info` bound, and a problem code smuggled in from the tail. It was
+  also too aggressive: `.bpmn20.xml` is the filename we deploy under, so genuine
+  reasons were destroyed.
+
+**Now nothing the engine wrote is forwarded.** Only the problem code travels, and
+only after matching `flowable-[a-z0-9-]+` — a shape that cannot express a path, a
+hostname, a credential or a stack frame. The sentence is ours, chosen from a
+table keyed by that code, with a generic fallback that still shows the code
+because the code is safe and searchable. The raw message is logged at Warning.
+
+The cost is real — an unmapped refusal reads generically — and it is the right
+trade. A denylist over hostile text is not a thing that can be got right by
+iteration, which is what two rounds of trying demonstrated.
+
+**Also fixed the status, which was backwards.** The old code branched on
+`IsCallerError`. Measured: Flowable answers a *validation* refusal — a diagram the
+author drew badly — with HTTP **500**. So `IsCallerError` was false for the
+dominant case, the author got 502 for their own mistake, and the 400 branch never
+ran. One branch now, keyed on whether the engine named a problem code, which is
+the thing that actually says "your diagram".
+
+**And the route is tested for the first time.** Every earlier test called the pure
+function, so reverting the whole of #334 left the suite green at 44/44.
+`StubFlowableClient.DeployThrows` makes the branches drivable; deleting the entire
+catch now fails 2.

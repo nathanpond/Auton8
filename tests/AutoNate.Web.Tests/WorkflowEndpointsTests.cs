@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
+using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -429,6 +430,96 @@ public sealed class WorkflowEndpointsTests
         response.EnsureSuccessStatusCode();
 
         Assert.Contains("Deploy:publish_me", factory.FlowableStub.Calls);
+    }
+
+    /// <summary>
+    /// The publish ROUTE, not the pure function, on an engine refusal (#344).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every test of this path called <c>DescribeEngineRefusal</c> directly, so
+    /// the route's own behaviour was unguarded: reverting the whole of #334 —
+    /// deleting the catch and letting the raw exception escape as a 500 — left
+    /// the suite green at 44/44. These two rows are what makes that impossible.
+    /// </para>
+    /// <para>
+    /// The status matters and was wrong. Measured: Flowable answers a
+    /// <b>validation</b> refusal — a diagram the author drew badly — with HTTP
+    /// 500. The old code branched on <c>IsCallerError</c>, so the author got 502
+    /// Bad Gateway for their own mistake and the 400 branch never ran. What
+    /// actually distinguishes the two is whether the engine named a problem with
+    /// the diagram.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task PublishWorkflow_WhenTheEngineNamesADiagramProblem_Returns400WithOurWords()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        // Flowable answers validation refusals with 500, which is the case the
+        // old IsCallerError split got backwards.
+        factory.FlowableStub.DeployThrows = new FlowableRequestException(
+            HttpStatusCode.InternalServerError, "deploy process",
+            "Flowable could not deploy process. HTTP 500 Internal Server Error. "
+            + "[Validation set: 'flowable-executable-process' | Problem: "
+            + "'flowable-servicetask-missing-implementation'] : Service task does not have an "
+            + "implementation defined - [Extra info : processDefinitionId = secretProc:3:9f2c ] "
+            + "at org.flowable.bpmn.Foo.bar(Foo.java:198) /Users/npond/secret.bpmn20.xml");
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id, Name = "Refused", ProcessKey = "refused_flow", BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // Our sentence, in the shape the studio's prepare path already renders.
+        Assert.Contains("errors", body, StringComparison.Ordinal);
+        Assert.Contains("no behaviour chosen", body, StringComparison.Ordinal);
+        Assert.Contains("flowable-servicetask-missing-implementation", body, StringComparison.Ordinal);
+
+        // And nothing the engine wrote.
+        Assert.DoesNotContain("Extra info", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("secretProc", body, StringComparison.Ordinal);
+        Assert.DoesNotContain(".java:", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishWorkflow_WhenTheEngineItselfFailed_Returns502AndLeaksNothing()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        // No problem code: we genuinely do not know the caller was at fault.
+        factory.FlowableStub.DeployThrows = new FlowableRequestException(
+            HttpStatusCode.InternalServerError, "deploy process",
+            "Flowable could not deploy process. HTTP 500 Internal Server Error. "
+            + "Could not acquire a connection: jdbc:postgresql://flowable-db.internal:5432/db"
+            + "?user=flowable&password=Hunter2!");
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id, Name = "Engine Down", ProcessKey = "engine_down", BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.DoesNotContain("Hunter2", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("jdbc", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("flowable-db.internal", body, StringComparison.Ordinal);
     }
 
     // #225. Publish used to run only a promoted handful of rules, so every other

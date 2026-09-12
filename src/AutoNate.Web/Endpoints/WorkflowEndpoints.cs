@@ -257,6 +257,7 @@ public static class WorkflowEndpoints
             IAuthorizer authorizer,
             IOptions<WorkflowBehaviorOptions> behaviorOptions,
             ClaimsPrincipal actor,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             if (model.Id != id)
@@ -378,28 +379,36 @@ public static class WorkflowEndpoints
             {
                 deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
             }
-            catch (FlowableRequestException exception) when (!exception.IsCallerError)
+            catch (FlowableRequestException exception)
             {
-                // #339. A Flowable 5xx is not the author's fault, but it still
-                // must not render the Java message, a .NET stack and absolute
-                // paths into a browser. 502: the upstream engine failed.
-                return Results.Json(
-                    new { errors = new[] { DescribeEngineRefusal(exception) } },
-                    statusCode: StatusCodes.Status502BadGateway);
-            }
-            catch (FlowableRequestException exception) when (exception.IsCallerError)
-            {
-                // #334. Publish validation catches what Auton8 knows about, but the
-                // engine will always refuse things we do not predict -- and what the
-                // author used to get for those was a 500 carrying a raw
-                // FlowableRequestException, a Java stack trace and absolute file
-                // paths, straight to the browser.
+                // #344. ONE branch, not two split on IsCallerError.
                 //
-                // A 500 also pages someone, for a diagram that is simply wrong.
-                // Flowable already classified this as a caller error; the status
-                // should say so, and the body should carry the engine's own
-                // sentence rather than its call stack.
-                return Results.BadRequest(new { errors = new[] { DescribeEngineRefusal(exception) } });
+                // That split was wrong in the way that mattered: measured,
+                // Flowable answers a VALIDATION refusal -- a diagram the author
+                // drew badly -- with HTTP 500. So `IsCallerError` was false for
+                // the dominant case and the author got 502 Bad Gateway for their
+                // own mistake, while the 400 branch never ran at all.
+                //
+                // What actually distinguishes the two is whether the engine named
+                // a problem with the DIAGRAM, which is exactly what a problem code
+                // is. No code means we genuinely do not know it was the caller.
+                var described = DescribeEngineRefusal(exception);
+                var isDiagramProblem = FlowableProblemCode.IsMatch(exception.Message ?? "");
+
+                // The raw text never reaches the browser, so this is the only
+                // place it survives. Warning, not Error: a refused diagram is
+                // routine, and paging someone for it is what #334 was about.
+                loggerFactory.CreateLogger("AutoNate.Web.WorkflowPublish").LogWarning(
+                    exception,
+                    "Flowable refused a deployment of workflow {WorkflowId} ({ProcessKey}). "
+                    + "Caller was told: {Described}",
+                    model.Id, model.ProcessKey, described);
+
+                return Results.Json(
+                    new { errors = new[] { described } },
+                    statusCode: isDiagramProblem
+                        ? StatusCodes.Status400BadRequest
+                        : StatusCodes.Status502BadGateway);
             }
 
             var published = await store.PublishAsync(model, deployment, cancellationToken);
@@ -646,103 +655,114 @@ public static class WorkflowEndpoints
     /// noise.
     /// </para>
     /// </remarks>
-    /// <summary>The shapes that must never reach a browser (#339).</summary>
-    /// <remarks>
-    /// Used as a POST-CONDITION, not as a filter. The first version of this code
-    /// tried to redact dangerous substrings out of the engine's message and pass
-    /// the remainder through; that is a losing game, and it lost — see the table
-    /// in <c>EngineRefusalMessageTests</c>. Now the extracted sentence is checked
-    /// against this, and anything that still matches is <b>discarded whole</b>
-    /// rather than patched. Losing a diagnostic is cheap; leaking a stack trace
-    /// and a home-directory path to a browser is not.
-    /// </remarks>
-    private static readonly Regex LooksLikeInternals = new(
-        @"\.java:\d+"                     // a Java frame position
-        + @"|(?:^|\s)at\s+[\w.$]+\("      // "at com.foo.Bar(" -- a frame, escaped or not
-        + @"|\bat\s+[\w.$]+\.[\w$]+\("
-        + @"|[/\\][\w.\-]+[/\\]"          // any path with two or more separators
-        + @"|\b[A-Za-z]:\\"               // a Windows drive
-        + @"|\b\w+\.(?:java|cs|xml|jar|class)\b", // a source or artifact filename
-        RegexOptions.Compiled);
-
     /// <summary>
-    /// Flowable's refusal, as a sentence rather than a stack trace (#334, #339).
+    /// What Auton8 says when Flowable refuses a deployment (#334, #339, #344).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Deployment refusals arrive in a machine-readable shape:
+    /// <b>Nothing the engine wrote is ever forwarded.</b> Only the problem code
+    /// travels, and only after matching <c>flowable-[a-z0-9-]+</c> — a shape that
+    /// cannot express a path, a hostname, a credential or a stack frame. The
+    /// sentence the caller reads is one of ours, chosen by that code.
     /// </para>
     /// <para>
-    /// <code>
-    ///   [Validation set: 'flowable-executable-process'
-    ///    | Problem: 'flowable-servicetask-missing-implementation']
-    ///   : Service task does not have an implementation defined - [Extra info : ...
-    /// </code>
+    /// Two earlier designs failed here, and the second is why this one does not
+    /// try to be clever:
+    /// </para>
+    /// <list type="number">
+    /// <item>#334 truncated the engine's text on real control characters. The
+    /// body is JSON, so the escapes are two characters and it never fired.</item>
+    /// <item>#339 replaced that with "extract the bounded prose, then discard it
+    /// if it looks like internals". I called it an allowlist; the second half is
+    /// a denylist, and 22 of 32 adversarial payloads walked past it — a full JDBC
+    /// URL with password, credentials, internal hostnames and container ids,
+    /// paths with spaces, UNC paths, URL-encoded and unicode separators, three
+    /// spellings of the <c>- [Extra info</c> bound, and a problem code smuggled in
+    /// from the tail. It was simultaneously too aggressive: <c>.bpmn20.xml</c> is
+    /// the filename Auton8 deploys under, so genuine reasons were destroyed.</item>
+    /// </list>
+    /// <para>
+    /// The lesson is not "a better regex". It is that free-form text from a system
+    /// that can see the filesystem, the database URL and the container's
+    /// environment cannot be forwarded to a browser by deciding what to remove.
+    /// So this decides what to <em>keep</em>, and the kept thing is an identifier,
+    /// not prose.
     /// </para>
     /// <para>
-    /// <b>Allowlist, not denylist.</b> Only two things are ever emitted: the
-    /// problem code, matched against <c>flowable-[a-z0-9-]+</c> so a filesystem
-    /// path can never be mistaken for one, and the prose between <c>] :</c> and
-    /// the <c>- [Extra info</c> tail. Everything else is dropped. If neither is
-    /// found, or if what was found still matches
-    /// <see cref="LooksLikeInternals"/>, the caller gets a generic sentence.
-    /// </para>
-    /// <para>
-    /// <b>Escaped forms are normalised first — for readability, not for safety.</b>
-    /// <c>FlowableClient.EnsureSuccessAsync</c> appends the raw response body,
-    /// which is JSON, so a trace arrives with the two-character escapes
-    /// <c>\n</c> and <c>\t</c> rather than real control characters. The previous
-    /// implementation keyed its *truncation* on the real ones and so never fired
-    /// on an actual refusal — that was #339.
-    /// </para>
-    /// <para>
-    /// Being exact about what now protects what, because overstating it is how
-    /// #339 happened: **the post-condition is the guard.** Removing this
-    /// normalisation leaves every safety row in
-    /// <c>EngineRefusalMessageTests</c> green, because anything it would have
-    /// truncated is caught by <see cref="LooksLikeInternals"/> anyway. What it
-    /// buys is a tidy one-clause reason instead of one carrying a literal
-    /// <c>\n</c> — pinned by
-    /// <c>An_escaped_newline_does_not_drag_its_continuation_into_the_reason</c>,
-    /// so it is not dead code.
+    /// The cost is real: an unmapped refusal reads generically. That is why the
+    /// raw message is logged at Warning on the way past, and why the table below
+    /// is worth extending as codes turn up. A generic sentence plus a searchable
+    /// code beats a leak, and beats the Java stack trace this started as.
     /// </para>
     /// </remarks>
+    private static readonly Regex FlowableProblemCode = new(
+        @"Problem:\s*'(?<code>flowable-[a-z0-9-]+)'", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Our words for the refusals we have actually seen, keyed by Flowable's code.
+    /// </summary>
+    /// <remarks>
+    /// Every entry here is a refusal publish validation should ideally have caught
+    /// first — reaching this table means something got past it, which is worth
+    /// knowing. The text is written for the person who drew the diagram.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> EngineRefusalReasons =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["flowable-servicetask-missing-implementation"] =
+                "a service task has no behaviour chosen",
+            ["flowable-multi-instance-missing-collection"] =
+                "a repeating step has nothing to repeat over",
+            ["flowable-signal-missing-name"] =
+                "a signal in this workflow has no name",
+            ["flowable-signal-event-missing-signal-ref"] =
+                "an event does not say which signal it uses",
+            ["flowable-signal-invalid-signal-ref"] =
+                "an event points at a signal this workflow does not declare",
+            ["flowable-message-event-missing-message-ref"] =
+                "an event does not say which message it uses",
+            ["flowable-message-event-invalid-message-ref"] =
+                "an event points at a message this workflow does not declare",
+            ["flowable-signal-duplicate-name"] =
+                "two signals in this workflow share a name",
+            ["flowable-message-duplicate-name"] =
+                "two messages in this workflow share a name",
+            ["flowable-sendtask-invalid-implementation"] =
+                "a send task has no way to send",
+            ["flowable-mailtask-no-recipient"] =
+                "a mail task has no recipient",
+            ["flowable-mailtask-no-content"] =
+                "a mail task has nothing to send",
+            ["flowable-eventsubprocess-invalid-start-event-definition"] =
+                "an event subprocess starts with something that cannot trigger it",
+            ["flowable-subprocess-multiple-start-events"] =
+                "a subprocess has more than one start event",
+            ["flowable-executable-process"] =
+                "this workflow is not executable as drawn",
+            ["flowable-bpmn-parse-failure"] =
+                "the diagram could not be read as BPMN",
+        };
+
+    /// <summary>
+    /// Flowable's refusal, as a sentence of ours (#344).
+    /// </summary>
     internal static string DescribeEngineRefusal(FlowableRequestException exception)
     {
-        const string Generic = "The workflow engine refused this workflow, and its reason could not be "
-            + "shown safely. The full text is in the server log.";
+        var code = FlowableProblemCode.Match(exception.Message ?? string.Empty) is { Success: true } m
+            ? m.Groups["code"].Value
+            : null;
 
-        var message = exception.Message ?? string.Empty;
-
-        // Escaped -> real, so everything below sees one representation (#339).
-        message = message
-            .Replace("\\r\\n", "\n", StringComparison.Ordinal)
-            .Replace("\\n", "\n", StringComparison.Ordinal)
-            .Replace("\\t", "\t", StringComparison.Ordinal);
-
-        // Strictly shaped, so a path can never be read as a problem code.
-        var problem = Regex.Match(message, @"Problem:\s*'(?<code>flowable-[a-z0-9-]+)'");
-        var code = problem.Success ? problem.Groups["code"].Value : null;
-
-        // The prose the engine writes for an author, bounded at both ends.
-        var tail = message.IndexOf("- [Extra info", StringComparison.OrdinalIgnoreCase);
-        var bounded = tail > 0 ? message[..tail] : message;
-
-        var prose = Regex.Match(bounded, @"\]\s*:\s*(?<text>[^\r\n]+)");
-        var sentence = prose.Success ? prose.Groups["text"].Value.Trim() : string.Empty;
-
-        sentence = Regex.Replace(sentence, @"\s+", " ").Trim();
-
-        // The post-condition. Anything still resembling internals is discarded
-        // whole -- not redacted, because redaction is what failed before.
-        if (sentence.Length == 0 || LooksLikeInternals.IsMatch(sentence))
+        if (code is not null && EngineRefusalReasons.TryGetValue(code, out var reason))
         {
-            return code is null ? Generic : $"{Generic} ({code})";
+            return $"The workflow engine refused this workflow: {reason} ({code}).";
         }
 
+        // Unmapped, or no code at all. The code itself is safe to show -- its
+        // shape admits nothing else -- and it is what someone would search for.
         return code is null
-            ? $"The workflow engine refused this workflow: {sentence}"
-            : $"The workflow engine refused this workflow: {sentence} ({code})";
+            ? "The workflow engine refused this workflow. The reason is in the server log."
+            : $"The workflow engine refused this workflow ({code}). "
+              + "The full reason is in the server log.";
     }
 
     public sealed record PublishResponse(WorkflowModel Model, WorkflowDeploymentInfo Deployment);
