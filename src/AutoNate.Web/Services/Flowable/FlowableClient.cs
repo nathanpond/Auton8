@@ -2290,6 +2290,12 @@ public sealed class FlowableClient(
         }
 
         var document = XDocument.Parse(bpmnXml);
+
+        // Descendants, NOT Elements-of-process. A script task inside a
+        // <bpmn:subProcess> is an entirely ordinary diagram, and narrowing this
+        // to process-level children left the whole suite green while such a
+        // diagram deployed JavaScript with no capability check at all (#341).
+        // Guarded by DeployProcessAsync_ProbesScriptTaskSupport_ForANestedScriptTask.
         return document.Descendants(BpmnNamespace + "scriptTask").Any();
     }
 

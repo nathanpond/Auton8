@@ -32,17 +32,39 @@ namespace AutoNate.Web.Tests.Infrastructure;
 /// </remarks>
 public sealed class RepoRootAnchorTests
 {
-    // Directory.Exists(...) applied to something ending in ".git" -- the
-    // File.Exists form is fine, and so is Directory.Exists on any other path.
+    // Any directory-existence test against a ".git" marker, however it is
+    // spelled. The first version matched one literal form and three natural
+    // rephrasings of the identical defect sailed through it (#341):
+    //
+    //   const string GitMarker = ".git"; ... Directory.Exists(Combine(dir, GitMarker))
+    //   Directory.Exists(dir.FullName + "/.git")
+    //   new DirectoryInfo(Combine(dir, ".git")).Exists
+    //
+    // So this matches on the two halves separately -- a ".git" literal or a
+    // marker constant holding one, anywhere near a directory-existence test --
+    // rather than on one arrangement of them. The File.Exists form stays fine,
+    // and so does Directory.Exists on any other path.
     private static readonly Regex GitDirectoryAnchor = new(
-        @"Directory\.Exists\([^)]*""\.git""[^)]*\)",
+        @"Directory\.Exists\([^;]{0,200}?(?:\.git""|GitMarker|GitDir)"
+        + @"|new\s+DirectoryInfo\([^;]{0,200}?(?:\.git""|GitMarker|GitDir)[^;]{0,80}?\)\s*\.Exists",
+        RegexOptions.Compiled);
+
+    // A marker constant is only a problem when something tests it as a
+    // DIRECTORY, so the constant's own declaration is not itself a hit.
+    private static readonly Regex GitMarkerDeclaration = new(
+        @"(?:const\s+string|static\s+readonly\s+string)\s+(?:GitMarker|GitDir)\s*=",
         RegexOptions.Compiled);
 
     [Fact]
     public void No_test_source_anchors_the_repo_root_on_a_git_directory()
     {
-        var offenders = Directory
-            .EnumerateFiles(Path.Combine(RepoRoot.Path, "tests"), "*.cs", SearchOption.AllDirectories)
+        // Both trees. A helper under src/ resolving the root this way breaks in a
+        // worktree exactly as a test one does, and the first version scanned only
+        // tests/ (#341).
+        var offenders = new[] { "tests", "src" }
+            .Select(dir => Path.Combine(RepoRoot.Path, dir))
+            .Where(Directory.Exists)
+            .SelectMany(dir => Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             // This file names the pattern in order to forbid it.
@@ -73,6 +95,15 @@ public sealed class RepoRootAnchorTests
             """while (root is not null && !Directory.Exists(Path.Combine(root.FullName, ".git")))""";
 
         Assert.Matches(GitDirectoryAnchor, TheBugAsItShipped);
+
+        // The three rephrasings that beat the first version of this regex. Each
+        // is the same defect and each is false in a worktree (#341).
+        Assert.Matches(GitDirectoryAnchor,
+            """Directory.Exists(Path.Combine(dir.FullName, GitMarker))""");
+        Assert.Matches(GitDirectoryAnchor,
+            """Directory.Exists(root.FullName + "/.git")""");
+        Assert.Matches(GitDirectoryAnchor,
+            """new DirectoryInfo(Path.Combine(dir.FullName, ".git")).Exists""");
 
         // And it does not fire on the correct forms, so the guard cannot be
         // satisfied by deleting legitimate code.

@@ -1360,6 +1360,59 @@ public sealed class FlowableClientTests
         Assert.DoesNotContain(stub.Requests, r => r.Url.Contains("scriptTaskSupport", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A script task nested in a subprocess still reaches the check (#341).
+    /// </summary>
+    /// <remarks>
+    /// Narrowing <c>ContainsScriptTask</c> from <c>Descendants</c> to
+    /// <c>Descendants(process).Elements(scriptTask)</c> left <c>FlowableClientTests</c>
+    /// green at 75/75, including both rows #336 added — because
+    /// <c>BpmnWithScriptTask</c> and the gateway-only expansion both put the
+    /// script task as a direct child of <c>&lt;bpmn:process&gt;</c>. Nesting was
+    /// unexercised, so an ordinary diagram would deploy JavaScript with no
+    /// capability check at all. Same class of gap as #336, one level down.
+    /// </remarks>
+    [Fact]
+    public async Task DeployProcessAsync_ProbesScriptTaskSupport_ForANestedScriptTask()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "actuator/scriptTaskSupport",
+            new { javaScriptSupported = true, engineNames = new[] { "JavaScript" } });
+        stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-n" });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions",
+            new { data = new[] { new { id = "pd-n", key = "k", name = "n", version = 1, deploymentId = "dep-n" } } });
+
+        await client.DeployProcessAsync(new WorkflowModel
+        {
+            Id = Guid.NewGuid(), ProcessKey = "k", Name = "n", BpmnXml = NestedScriptTaskWorkflow
+        });
+
+        Assert.Contains(stub.Requests, r => r.Url.Contains("scriptTaskSupport", StringComparison.Ordinal));
+    }
+
+    /// <summary>A script task one level down, inside an embedded subprocess.</summary>
+    private const string NestedScriptTaskWorkflow = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="nested" name="Nested" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+            <bpmn:subProcess id="sub" name="Inner">
+              <bpmn:startEvent id="is" />
+              <bpmn:sequenceFlow id="f1" sourceRef="is" targetRef="script" />
+              <bpmn:scriptTask id="script" name="Compute" scriptFormat="javascript">
+                <bpmn:script>return 1;</bpmn:script>
+              </bpmn:scriptTask>
+              <bpmn:sequenceFlow id="f2" sourceRef="script" targetRef="ie" />
+              <bpmn:endEvent id="ie" />
+            </bpmn:subProcess>
+            <bpmn:sequenceFlow id="f3" sourceRef="sub" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     /// <summary>A complex gateway and nothing else scripted — #218's shape.</summary>
     private const string GatewayOnlyWorkflow = """
         <?xml version="1.0" encoding="UTF-8"?>

@@ -4580,12 +4580,51 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Contains("Do the thing", error, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A service task carrying one of Flowable's implementation attributes is
+    /// accepted (#333, corrected by #338).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// **What was actually measured, and what was not.** The first version of
+    /// this theory carried four rows under a docstring claiming each verdict
+    /// "was measured against Flowable 8.0.0 rather than reasoned about". Two of
+    /// the four were not measured, and one of those was wrong:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   delegateExpression + behaviorKey  DEPLOYS
+    ///   flowable:class                    DEPLOYS
+    ///   flowable:expression               DEPLOYS
+    ///   flowable:behaviorKey ALONE        REFUSED  servicetask-missing-implementation
+    ///   flowable:type="mail" ALONE        REFUSED  mailtask-no-recipient / no-content
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <c>behaviorKey</c> is an Auton8 attribute the expansion reads; Flowable has
+    /// never heard of it, so it is no longer in the accepted set and a task
+    /// carrying only it is now refused.
+    /// </para>
+    /// <para>
+    /// <c>type</c> stays, and the distinction matters: <c>type="mail"</c> <b>does</b>
+    /// name an implementation, so it passes THIS rule correctly. The engine
+    /// refuses it for a different constraint — no recipient, no content — which
+    /// is a real uncovered member of #333's class and is not this rule's job.
+    /// Nothing in the studio writes <c>flowable:type</c>; it reaches us only by
+    /// import. Recorded here rather than fixed so the gap is visible.
+    /// </para>
+    /// <para>
+    /// Writing "measured" over rows that were not measured is worse than the
+    /// original defect, because it tells the next reader not to check. Every row
+    /// in the table above was deployed to a live engine.
+    /// </para>
+    /// </remarks>
     [Theory]
     [InlineData("""flowable:class="com.example.Thing" """)]
     [InlineData("""flowable:expression="${bean.method()}" """)]
     [InlineData("""flowable:type="mail" """)]
-    [InlineData("""flowable:behaviorKey="autonate.send-message" """)]
-    public void A_service_task_that_names_its_behaviour_is_accepted(string wiring)
+    [InlineData("""flowable:delegateExpression="${autonateBehaviorDelegate}" flowable:behaviorKey="autonate.send-message" """)]
+    public void A_service_task_that_names_its_implementation_is_accepted(string wiring)
     {
         // The complement. Without it, "refuse every service task" passes the row
         // above while refusing the element the whole behaviour system runs on --
@@ -4593,6 +4632,28 @@ public sealed class WorkflowBpmnXmlTests
         var xml = UnnamedTriggerDiagram($"""<bpmn:serviceTask id="x" name="Do" {wiring}/>""");
 
         Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// An Auton8 behaviour key is not a Flowable implementation (#338).
+    /// </summary>
+    /// <remarks>
+    /// Measured: a service task carrying only <c>flowable:behaviorKey</c> is
+    /// REFUSED by the engine with
+    /// <c>flowable-servicetask-missing-implementation</c>. It was in the accepted
+    /// set, so an imported diagram in that state published clean and sank the
+    /// deployment — the exact class #333 exists to close, reopened inside the fix
+    /// for it.
+    /// </remarks>
+    [Fact]
+    public void A_behaviour_key_without_a_delegate_is_not_an_implementation()
+    {
+        var xml = UnnamedTriggerDiagram(
+            """<bpmn:serviceTask id="x" name="Do" flowable:behaviorKey="autonate.send-message" />""");
+
+        Assert.Contains(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
             e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
     }
@@ -4669,6 +4730,94 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Contains("Run the sub-flow", error, StringComparison.Ordinal);
         // Says what actually happens, because "it deploys" is the surprising part.
         Assert.Contains("every run fails", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An empty or whitespace target is refused too (#341).
+    /// </summary>
+    /// <remarks>
+    /// No row used an empty <c>calledElement</c>, so the whole-string check was
+    /// unpinned: <c>IsNullOrWhiteSpace</c> → <c>is not null</c> left 188/188
+    /// green. Measured — <c>calledElement=""</c> <b>deploys</b> and every start
+    /// fails 400 <c>Process definition null was not found</c>, which is the
+    /// founding complaint of this milestone, reachable through the guard written
+    /// against it.
+    /// </remarks>
+    [Theory]
+    [InlineData("""calledElement="" """)]
+    [InlineData("""calledElement="   " """)]
+    public void A_call_activity_whose_target_is_blank_is_refused(string attribute)
+    {
+        var xml = UnnamedTriggerDiagram($"""<bpmn:callActivity id="x" name="Run it" {attribute}/>""");
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The repeat rule applies to every activity, not just user tasks (#341).
+    /// </summary>
+    /// <remarks>
+    /// <c>toggle-parallel-mi</c> puts the marker on any activity, and the engine
+    /// refuses MI-without-collection on <c>subProcess</c>, <c>callActivity</c> and
+    /// <c>receiveTask</c> as well (measured). Narrowing the rule to
+    /// <c>bpmn:userTask</c> left 188/188 green.
+    /// </remarks>
+    [Theory]
+    [InlineData("""
+        <bpmn:subProcess id="x" name="Each one">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+          <bpmn:startEvent id="is" />
+        </bpmn:subProcess>
+        """)]
+    [InlineData("""
+        <bpmn:callActivity id="x" name="Each one" calledElement="child">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:callActivity>
+        """)]
+    [InlineData("""
+        <bpmn:receiveTask id="x" name="Each one">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:receiveTask>
+        """)]
+    [InlineData("""
+        <bpmn:serviceTask id="x" name="Each one" flowable:class="com.example.T">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:serviceTask>
+        """)]
+    public void A_repeat_with_nothing_to_repeat_over_is_refused_on_any_activity(string element)
+    {
+        var xml = UnnamedTriggerDiagram(element);
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The message column reaches throw and end too (#341).
+    /// </summary>
+    /// <remarks>
+    /// The position theory carried <c>endEvent</c> for signals only; the message
+    /// rows stopped at catch and start. Dropping the refusal for message
+    /// <c>endEvent</c>/<c>intermediateThrowEvent</c> left 188/188 green, and the
+    /// engine <b>does</b> refuse <c>end</c> + message + absent ref (measured).
+    /// Both the code and its remarks claim the rule "walks positions rather than
+    /// listing them" — that property was unguarded for half the table.
+    /// </remarks>
+    [Theory]
+    [InlineData("endEvent")]
+    [InlineData("intermediateThrowEvent")]
+    public void A_message_throw_or_end_with_no_message_set_is_refused(string position)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Tell them"><bpmn:messageEventDefinition /></bpmn:{position}>""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+        Assert.Contains("no message set yet", error, StringComparison.Ordinal);
     }
 
     [Fact]

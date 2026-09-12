@@ -42,8 +42,8 @@ public sealed class SignalScopeCasesTests
     private static readonly XNamespace Bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
     private static readonly XNamespace Flowable = "http://flowable.org/bpmn";
 
-    /// <summary>An event referencing signal `Sig_1`, optionally declaring a scope.</summary>
-    private static string Event(string localName, string id, string? scope, string extra = "")
+    /// <summary>An event referencing a signal, optionally declaring a scope.</summary>
+    private static string Event(string localName, string id, string? scope, string extra = "", string signalRef = "Sig_1")
     {
         var ext = scope is null
             ? ""
@@ -55,13 +55,40 @@ public sealed class SignalScopeCasesTests
         return $"""
               <bpmn:{localName} id="{id}" name="{id}"{extra}>
                 {ext}
-                <bpmn:signalEventDefinition signalRef="Sig_1" />
+                <bpmn:signalEventDefinition signalRef="{signalRef}" />
               </bpmn:{localName}>
             """;
     }
 
     /// <summary>The ordinary single root, carrying no scope of its own.</summary>
     private const string PlainRoot = """<bpmn:signal id="Sig_1" name="the.signal" />""";
+
+    /// <summary>
+    /// Two INDEPENDENT signals, so <c>signalRef</c> resolution is exercised (#341).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The generator built exactly one root and pointed every event at it, and
+    /// the property asserted <c>Descendants(signal).Count() == 1</c> — so a
+    /// two-signal diagram was structurally unreachable. Production keys scope by
+    /// signal <b>name</b> (<c>SignalScopeUse</c>), and that keying was
+    /// unexercised: replacing the <c>signalRef</c> lookup with
+    /// <c>.FirstOrDefault()</c> left <c>FullyQualifiedName~Workflow</c> green at
+    /// 585/585, while a diagram with two independent signals was <em>refused</em>
+    /// with a message naming the wrong one.
+    /// </para>
+    /// <para>
+    /// That was the <b>fifth</b> consecutive frozen axis in this one generator —
+    /// vocabulary (#278), arity (#290), kind (#306), container (#314), identity.
+    /// The pattern is that it varies whatever the last bug was about. Two signals
+    /// is not a complete answer to that, but it removes the specific freeze and
+    /// the floors below make a silent re-freeze fail loudly.
+    /// </para>
+    /// </remarks>
+    private const string TwoIndependentRoots = """
+          <bpmn:signal id="Sig_1" name="the.signal" />
+          <bpmn:signal id="Sig_2" name="other.signal" />
+        """;
 
     internal static string Diagram(string body, string roots = PlainRoot) => $"""
         <?xml version="1.0" encoding="UTF-8"?>
@@ -751,18 +778,25 @@ public sealed class SignalScopeCasesTests
         var acceptedSeen = 0;
         var startsAtProcessLevel = 0;
         var startsInEventSubProcess = 0;
+        var eventsOnSecondSignal = 0;
+        var twoSignalDiagrams = 0;
 
         for (var iteration = 0; iteration < 400; iteration++)
         {
-            var preScoped = random.Next(2) == 0;
-            var rootXml = preScoped ? PreScopedRoot : PlainRoot;
+            // #341: a third root shape -- two INDEPENDENT signals. Events then
+            // split across them, so `signalRef` resolution is exercised and a
+            // scope declared on one signal must not leak onto the other.
+            var rootChoice = random.Next(3);
+            var twoSignals = rootChoice == 2;
+            var preScoped = rootChoice == 1;
+            var rootXml = twoSignals ? TwoIndependentRoots : preScoped ? PreScopedRoot : PlainRoot;
             var carried = preScoped ? "processInstance" : null;
 
             // One to four events. One is the shape #278 lived in; two is #290's;
             // three and four are shapes no grid has ever contained.
             var eventCount = random.Next(1, 5);
             var body = new System.Text.StringBuilder();
-            var chosen = new List<(string Kind, string? Declared, bool InEventSubProcess)>();
+            var chosen = new List<(string Kind, string? Declared, bool InEventSubProcess, bool UsesSecondSignal)>();
 
             for (var e = 0; e < eventCount; e++)
             {
@@ -780,9 +814,14 @@ public sealed class SignalScopeCasesTests
                 // subprocess is refused by a different rule (placement), which
                 // would make refusals here mean two different things.
                 var inEventSub = localName == "startEvent" && random.Next(2) == 0;
-                chosen.Add((localName, declared, inEventSub));
 
-                var element = Event(localName, $"e{e}", declared, extra);
+                // Which signal this event points at. Only meaningful when the
+                // diagram declares two; otherwise everything uses Sig_1.
+                var usesSecond = twoSignals && random.Next(2) == 0;
+                chosen.Add((localName, declared, inEventSub, usesSecond));
+
+                var element = Event(localName, $"e{e}", declared, extra,
+                    signalRef: usesSecond ? "Sig_2" : "Sig_1");
                 body.Append(inEventSub
                     ? $"""
                         <bpmn:subProcess id="es{e}" name="Handler {e}" triggeredByEvent="true">
@@ -792,29 +831,50 @@ public sealed class SignalScopeCasesTests
                     : element);
             }
 
+            if (twoSignals) twoSignalDiagrams++;
+            eventsOnSecondSignal += chosen.Count(c => c.UsesSecondSignal);
             startsAtProcessLevel += chosen.Count(c => c.Kind == "startEvent" && !c.InEventSubProcess);
             startsInEventSubProcess += chosen.Count(c => c.Kind == "startEvent" && c.InEventSubProcess);
 
             var xml = Diagram(body.ToString(), rootXml);
             var because =
-                $"seed {seed}, iteration {iteration}: root={(preScoped ? "pre-scoped" : "plain")}, " +
+                $"seed {seed}, iteration {iteration}: root={(twoSignals ? "two-signals" : preScoped ? "pre-scoped" : "plain")}, " +
                 string.Join(" + ", chosen.Select(c =>
-                    $"{c.Kind}('{c.Declared ?? "(null)"}')" + (c.InEventSubProcess ? "@eventSubProcess" : "@process")));
+                    $"{c.Kind}('{c.Declared ?? "(null)"}')"
+                    + (c.InEventSubProcess ? "@eventSubProcess" : "@process")
+                    + (c.UsesSecondSignal ? "->Sig_2" : "->Sig_1")));
 
+            // Either signal's name -- a conflict on Sig_2 is still a refusal, and
+            // filtering on "the.signal" alone reported one as an acceptance (#341).
             var refused = WorkflowBpmnXml.ValidateProcess(xml).Errors
-                .Any(er => er.Contains("the.signal", StringComparison.Ordinal));
+                .Any(er => er.Contains("the.signal", StringComparison.Ordinal)
+                           || er.Contains("other.signal", StringComparison.Ordinal));
 
             var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
 
-            // Two roots of one name is the 500 (#270). Never, on any input.
-            Assert.True(expanded.Descendants(Bpmn + "signal").Count() == 1,
-                $"{because}: the expansion emitted more than one <bpmn:signal> root, which " +
-                "Flowable refuses with flowable-signal-duplicate-name.");
+            // Two roots of one NAME is the 500 (#270). Two roots of different
+            // names is legal and is now generated, so the invariant is stated as
+            // what it always meant: no duplicate names.
+            var emittedRoots = expanded.Descendants(Bpmn + "signal").ToList();
+            var duplicateNames = emittedRoots
+                .GroupBy(r => r.Attribute("name")?.Value ?? "", StringComparer.Ordinal)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+            Assert.True(duplicateNames.Count == 0,
+                $"{because}: the expansion emitted two <bpmn:signal> roots sharing a name " +
+                $"({string.Join(", ", duplicateNames)}), which Flowable refuses with " +
+                "flowable-signal-duplicate-name.");
+            Assert.True(emittedRoots.Count == (twoSignals ? 2 : 1),
+                $"{because}: expected {(twoSignals ? 2 : 1)} signal root(s), got {emittedRoots.Count}.");
 
-            var emitted = expanded.Descendants(Bpmn + "signal").Single()
+            // The scope under test is the one on the signal the events actually
+            // reference. With two roots, Sig_2's scope must not be read for Sig_1.
+            var emitted = emittedRoots
+                .First(r => (r.Attribute("id")?.Value ?? "") == "Sig_1")
                 .Attribute(Flowable + "scope")?.Value;
 
-            var (shouldRefuse, expected) = ExpectedVerdict(chosen, carried);
+            var (shouldRefuse, expected, firstSignalIsTheProblem) = ExpectedVerdict(chosen, carried);
 
             // TWO-SIDED, and this is the half the first version of this test
             // omitted. Asserting only "what a refused diagram writes" lets a
@@ -835,13 +895,20 @@ public sealed class SignalScopeCasesTests
             {
                 refusedSeen++;
 
-                // A refused diagram gets nothing written. This is where #290 lived:
-                // the old assertion compared two values from a two-element set and
-                // was satisfiable by coincidence.
-                Assert.True(emitted == carried,
-                    $"{because}: refused at publish, but the expansion wrote " +
-                    $"scope='{emitted ?? "(none)"}' where the diagram carried '{carried ?? "(none)"}'. " +
-                    "A refused diagram must be left exactly as authored.");
+                // A diagram refused BECAUSE OF Sig_1 gets nothing written for it.
+                // This is where #290 lived: the old assertion compared two values
+                // from a two-element set and was satisfiable by coincidence.
+                //
+                // A diagram refused because of Sig_2 is a different case, and one
+                // the single-signal generator could not produce: Sig_1's scope was
+                // still resolved correctly and writing it is not a defect. Holding
+                // it to "left exactly as authored" asserted the wrong thing (#341).
+                Assert.True(emitted == expected,
+                    $"{because}: refused at publish, and the expansion wrote " +
+                    $"scope='{emitted ?? "(none)"}' where " +
+                    (firstSignalIsTheProblem
+                        ? $"a diagram refused over Sig_1 must be left exactly as authored ('{carried ?? "(none)"}')."
+                        : $"Sig_1's own declarations mean '{expected ?? "(none)"}' -- the refusal is about Sig_2."));
                 continue;
             }
 
@@ -866,6 +933,22 @@ public sealed class SignalScopeCasesTests
         Assert.True(startsInEventSubProcess > 20,
             $"seed {seed} generated only {startsInEventSubProcess} start events inside an event " +
             "subprocess — the container that distinguishes #274's fix from its bug.");
+
+        // #341: and the IDENTITY axis. Without this, dropping the two-signal root
+        // shape -- or never pointing an event at Sig_2 -- returns this property to
+        // the state where `signalRef` resolution is unexercised and replacing it
+        // with `.FirstOrDefault()` leaves 585/585 green.
+        //
+        // Five axes have now frozen in this one generator: vocabulary (#278),
+        // arity (#290), kind (#306), container (#314), identity (#341). Each floor
+        // below was added after the axis it names had already shipped frozen, so
+        // the honest reading is that a sixth exists and this list is how it gets
+        // found -- not proof that none does.
+        Assert.True(eventsOnSecondSignal > 20,
+            $"seed {seed} generated only {eventsOnSecondSignal} events pointing at a second, " +
+            "independent signal — the axis that exercises signalRef resolution at all.");
+        Assert.True(twoSignalDiagrams > 20,
+            $"seed {seed} generated only {twoSignalDiagrams} diagrams declaring two signals.");
     }
 
     /// <summary>
@@ -877,16 +960,28 @@ public sealed class SignalScopeCasesTests
     /// what three versions of the grid did when they reused the production
     /// vocabulary.
     /// </remarks>
-    private static (bool ShouldRefuse, string? Scope) ExpectedVerdict(
-        IReadOnlyList<(string Kind, string? Declared, bool InEventSubProcess)> events, string? carried)
+    private static (bool ShouldRefuse, string? Scope, bool FirstSignalIsTheProblem) ExpectedVerdict(
+        IReadOnlyList<(string Kind, string? Declared, bool InEventSubProcess, bool UsesSecondSignal)> events,
+        string? carried)
     {
+        // #341. Scope is per-SIGNAL, so the two signals are modelled separately:
+        // `wants` is what Sig_1's users ask for, `otherWants` what Sig_2's do. A
+        // contradiction inside EITHER refuses the diagram, but a scope declared on
+        // Sig_2 must never appear on Sig_1 -- that leak is the defect this axis
+        // exists to catch, and the old model could not express it because every
+        // event pointed at one root.
         var wants = new HashSet<string>(StringComparer.Ordinal);
+        var otherWants = new HashSet<string>(StringComparer.Ordinal);
+        var firstUnrecognised = false;
+        var secondUnrecognised = false;
 
-        // The root's own carried scope is a declaration by the SIGNAL, counted once.
+        // The root's own carried scope is a declaration by the SIGNAL, counted
+        // once, and it is only ever carried by Sig_1 (PreScopedRoot).
         if (carried is not null) wants.Add("processInstance");
 
-        foreach (var (kind, declared, inEventSubProcess) in events)
+        foreach (var (kind, declared, inEventSubProcess, usesSecondSignal) in events)
         {
+            var bucket = usesSecondSignal ? otherWants : wants;
             // A PROCESS-LEVEL start event is global by nature whatever it says: it
             // exists to be triggered from outside any instance. A start event
             // inside an event subprocess is not one of these -- it is an
@@ -897,24 +992,47 @@ public sealed class SignalScopeCasesTests
             // #314 this generator could not express it.
             if (kind == "startEvent" && !inEventSubProcess)
             {
-                wants.Add("global");
+                bucket.Add("global");
                 continue;
             }
 
             switch ((declared ?? "").Trim().ToLowerInvariant())
             {
                 case "": break;                                  // said nothing
-                case "instance" or "processinstance": wants.Add("processInstance"); break;
-                case "global": wants.Add("global"); break;
-                default: return (true, null);                    // a typo: refused
+                case "instance" or "processinstance": bucket.Add("processInstance"); break;
+                case "global": bucket.Add("global"); break;
+
+                // A spelling nothing recognises refuses the document -- but it is
+                // a fact about the signal it was written on. An unrecognised word
+                // on Sig_2 does not make Sig_1's own declarations unreadable, and
+                // production resolves Sig_1 regardless (#341).
+                default:
+                    if (usesSecondSignal) secondUnrecognised = true;
+                    else firstUnrecognised = true;
+                    break;
             }
         }
 
-        if (wants.Count > 1) return (true, null);                 // a contradiction
+        // A contradiction about EITHER signal refuses the whole diagram -- but
+        // WHICH one decides whether Sig_1's own scope was still resolved. A
+        // refusal caused by Sig_2 does not make Sig_1's answer wrong (#341).
+        var firstConflicted = wants.Count > 1 || firstUnrecognised;
+        var secondConflicted = otherWants.Count > 1 || secondUnrecognised;
 
-        return (false, wants.Count == 0
+        // Computed only once Sig_1 is known not to contradict itself -- `Single()`
+        // throws on a two-element set, and evaluating it eagerly meant a diagram
+        // whose Sig_1 conflicts crashed the oracle instead of being judged by it.
+        if (firstConflicted) return (true, carried, true);
+
+        var firstScope = wants.Count == 0
             ? carried                                             // nobody spoke
-            : wants.Single() == "global" ? null : "processInstance");
+            : wants.Single() == "global" ? null : "processInstance";
+
+        if (secondConflicted) return (true, firstScope, false);
+
+        // The answer is Sig_1's alone. If this returned otherWants' value for a
+        // Sig_1-quiet diagram, that would be the leak this axis exists to catch.
+        return (false, firstScope, false);
     }
 
 }

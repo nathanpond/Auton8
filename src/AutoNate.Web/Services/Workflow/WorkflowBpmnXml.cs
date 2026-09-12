@@ -3038,15 +3038,25 @@ public static partial class WorkflowBpmnXml
 
         foreach (var task in document.Descendants(BpmnNamespace + "serviceTask"))
         {
-            // Any of Flowable's wirings, or ours. The expansion writes
-            // delegateExpression onto behaviour tasks, so a prepared diagram
-            // already carries one; this catches the as-placed and imported states.
+            // Flowable's four implementation attributes, and ONLY those.
+            //
+            // `behaviorKey` was in this list and is not an implementation: it is
+            // an Auton8 attribute the expansion reads, and Flowable has never
+            // heard of it. Measured -- a service task carrying only
+            // flowable:behaviorKey is REFUSED with
+            // flowable-servicetask-missing-implementation, while the same task
+            // with delegateExpression alongside DEPLOYS. So accepting it alone
+            // let an imported diagram publish clean and sink the deployment,
+            // which is the exact class this rule exists to close (#338).
+            //
+            // The expansion writes delegateExpression onto behaviour tasks
+            // (WorkflowBpmnXml.cs:225/2012), so a prepared diagram always carries
+            // one; nothing the studio produces relies on behaviorKey alone.
             var wired =
                 !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "delegateExpression")?.Value)
                 || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "class")?.Value)
                 || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "expression")?.Value)
-                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "type")?.Value)
-                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "behaviorKey")?.Value);
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "type")?.Value);
 
             if (wired) continue;
 
@@ -3058,9 +3068,12 @@ public static partial class WorkflowBpmnXml
         foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
         {
             // Flowable takes EITHER a collection to iterate or a fixed cardinality.
+            //
+            // The UNPREFIXED `collection` attribute was also accepted here and is
+            // not a thing: the BPMN XSD rejects it outright, so that branch could
+            // only ever be a false accept (#341). Flowable's is namespaced.
             var hasCollection =
-                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value)
-                || !string.IsNullOrWhiteSpace(loop.Attribute("collection")?.Value);
+                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value);
 
             var hasCardinality = loop
                 .Elements(BpmnNamespace + "loopCardinality")

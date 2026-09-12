@@ -5161,3 +5161,124 @@ The studio half — a refusal rendering as "Request failed with status code 400"
 because `WorkflowStudio.tsx` reads `data.message` against an `{errors:[…]}` body
 — is #256, and stays in M4b where the SPA runner can verify it. Until it lands,
 Outcome 2 is true of the API and still not of the product.
+
+## Round 10 — 2026-09-12 (during /n8-exec M4)
+
+**#338 — `behaviorKey` is not an implementation (Rule 1).** Measured, five shapes:
+
+    delegateExpression + behaviorKey  DEPLOYS
+    flowable:class                    DEPLOYS
+    flowable:expression               DEPLOYS
+    flowable:behaviorKey ALONE        REFUSED  servicetask-missing-implementation
+    flowable:type="mail" ALONE        REFUSED  mailtask-no-recipient / no-content
+
+`behaviorKey` is an Auton8 attribute the expansion reads; Flowable has never heard
+of it, so accepting it alone let an imported diagram publish clean and sink the
+deployment. Removed from the `wired` set and now refused, with the complement row
+asserting the delegate+key pair still passes.
+
+`type` stays. The distinction is real: `type="mail"` *does* name an implementation,
+so it passes the missing-implementation rule correctly — the engine refuses it for
+a different constraint (no recipient, no content), which is a genuine uncovered
+member of #333's class. Nothing in the studio writes `flowable:type`; it arrives
+only by import. Recorded in the test's remarks rather than fixed, so the gap is
+visible rather than silently closed-looking.
+
+The defect underneath was a docstring claiming all four rows "measured against
+Flowable 8.0.0 rather than reasoned about" when two were not. That sentence over
+unmeasured rows is worse than the original bug: it tells the next reader not to
+check. Every row in the table above was deployed.
+
+**#339 — the sanitiser never fired, and redaction was the wrong shape (Rule 1).**
+`FlowableClient.EnsureSuccessAsync` appends the raw response body, which is JSON,
+so traces arrive with the two-character escapes `\n` and `\t`. The truncation keyed
+on real control characters and so never fired on an actual refusal; the tests fed
+hand-written unescaped strings and could not see it.
+
+Rewritten from denylist to **allowlist + post-condition**: emit only the problem
+code (matched `flowable-[a-z0-9-]+`, so a path cannot be mistaken for one) and the
+prose between `] :` and the `- [Extra info` tail; then check the result against
+`LooksLikeInternals` and **discard it whole** if it still resembles a path, a frame
+or a source filename. Redacting substrings out of attacker-shaped text is a losing
+game — it lost, on relative paths, `../` prefixes, spaces inside segments, one-line
+frames, and the problem-code slot.
+
+Also added the 5xx branch: a Flowable server error now returns 502 with the same
+treatment instead of escaping as an unhandled exception.
+
+**Worth recording: my first version of the #339 tests did not test the fix.** All
+three mutations passed. Every body in those rows lacks the `] :` marker, so prose
+extraction found nothing and they all reached the generic by the empty path —
+right outcome, untouched code path. Added rows that put internals *inside*
+recognised prose, and the post-condition mutation now fails 4.
+
+And the escape normalisation turned out **not** to be load-bearing for safety —
+removing it left every safety row green, because the post-condition catches what it
+would have truncated. Rather than leave a docstring implying otherwise, it now says
+plainly that the post-condition is the guard and normalisation is for readability,
+pinned by its own row. Overstating which line provides a defence is exactly how
+#339 happened.
+
+**#340 — blocked, not guessed.** Withdrawing five message rows, or building studio
+authorability the round-8 replan explicitly moved to M4b, are both product-scope
+decisions (Rule 4). Options and my lean are on the issue; labelled `blocked` +
+`needs-owner-action`.
+
+**#341 — six surviving mutations (Rule 1/2).** Each guard added in #337 went red
+on the mutation it was written for; these are the ones it did not catch. All now
+do:
+
+| mutation | before | now |
+|---|---|---|
+| `calledElement` `IsNullOrWhiteSpace` -> `is not null` | 188/188 green | 2 red |
+| MI rule narrowed to `bpmn:userTask` | 188/188 green | 4 red |
+| message `endEvent`/`throw` refusal dropped | 188/188 green | 2 red |
+| `ContainsScriptTask` -> process-level children only | 75/75 green | 1 red |
+| `signalRef` lookup -> `.FirstOrDefault()` | 585/585 green | 3 red |
+| `.git` walk rephrased three ways | all passed | all 3 caught and named |
+
+The `calledElement` one mattered most: measured, `calledElement=""` **deploys**
+and every start fails 400, so the founding complaint was reachable through the
+guard written against it.
+
+**The signal-identity axis was the fifth consecutive freeze** in one generator —
+vocabulary (#278), arity (#290), kind (#306), container (#314), identity (#341).
+It now generates a two-independent-signal root shape and splits events across
+them, with floors so dropping either fails loudly. Doing that forced three
+corrections to my own model, and they are worth recording because each was the
+test being wrong rather than the product:
+
+1. the `root=` label never learned about the new shape, so two-signal diagrams
+   printed as `plain` and I spent a cycle chasing a phantom;
+2. the refusal filter matched only `the.signal`, so a genuine refusal naming
+   `other.signal` was recorded as an acceptance;
+3. "a refused diagram is left exactly as authored" was a single-signal law. A
+   diagram refused over Sig_2 still resolves Sig_1 correctly, and an unrecognised
+   spelling is a fact about the signal it was written on, not the document. The
+   oracle now returns which signal is the problem.
+
+Also removed a dead branch: the rule accepted an unprefixed `collection`
+attribute, which the BPMN XSD rejects outright, so it could only ever be a false
+accept.
+
+`RepoRootAnchorTests` now matches the two halves separately rather than one
+arrangement of them, scans `src/` as well as `tests/`, and self-checks against
+all three rephrasings that beat the first version.
+
+**#342 — the fourth drift, and the blind spot under it (Rule 2).** Corrected
+`covers: 42` -> 41, added Send Task to the `descoped:` list and gave it a
+DESCOPED line with its reason like every other withdrawal, annotated it WITHDRAWN
+in the delivered enumeration, and recorded the fourth drift in the block that
+already records three.
+
+The guard itself was a **total-only ratchet**: swapping Send Task
+withdrawn->supported against Receive Task supported->withdrawn left every tally
+identical and the suite green at 49/49 — so the element #316 withdrew for
+drawing-fine-and-doing-nothing could be silently reinstated. Membership of the
+two non-default statuses is now pinned by name. Only those two: listing all 54
+supported rows would make every addition a two-file edit for no signal, while a
+row LEAVING supported necessarily enters one of these lists.
+
+Six of seven DESCOPED lines still lack the owner's quoted words. Not fixed —
+inventing quotations is worse than the gap, and only the owner can supply them.
+Reported.

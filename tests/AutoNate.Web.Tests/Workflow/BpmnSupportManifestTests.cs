@@ -126,6 +126,77 @@ public sealed class BpmnSupportManifestTests
     }
 
     /// <summary>
+    /// Which elements are withdrawn, not merely how many (#342).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #330's guard is a total-only ratchet, and a tally-preserving swap walks
+    /// straight past it:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   Send Task     withdrawn -> supported
+    ///   Receive Task  supported -> withdrawn
+    ///     -> 54/11/4 unchanged, suite GREEN at 49/49
+    /// </code>
+    /// </para>
+    /// <para>
+    /// So the one element #316 withdrew for drawing-fine-and-doing-nothing could
+    /// be silently reinstated as <c>supported</c> — the precise claim the manifest
+    /// exists to make honest. Counting was never the point; <b>which</b> elements
+    /// is.
+    /// </para>
+    /// <para>
+    /// Only the two non-default statuses are pinned. Listing all 54 supported rows
+    /// would make every addition a two-file edit for no signal, while a row
+    /// LEAVING supported necessarily enters one of these lists.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_withdrawn_and_coming_soon_elements_are_exactly_these()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        IReadOnlyList<string> NamesWith(string studio) => elements
+            .Where(e => e!["studio"]!.GetValue<string>() == studio)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        string[] expectedWithdrawn =
+        [
+            "Boundary Event (None)", "Cancel Boundary", "Cancel End", "Compensation Start Event",
+            "Intermediate Catch (Link)", "Intermediate Throw (Link)", "Loop Marker", "Manual Task",
+            "Send Task", "Task (Generic)", "Transaction",
+        ];
+        string[] expectedComingSoon =
+        [
+            "Business Rule Task", "Lane", "Message Flow", "Pool / Participant",
+        ];
+
+        static string Diff(string label, IEnumerable<string> actual, IEnumerable<string> expected)
+        {
+            var added = actual.Except(expected, StringComparer.Ordinal).ToList();
+            var gone = expected.Except(actual, StringComparer.Ordinal).ToList();
+            if (added.Count == 0 && gone.Count == 0) return "";
+            return $"{Environment.NewLine}  {label}:"
+                + (added.Count == 0 ? "" : $" NOW {label} — {string.Join(", ", added)};")
+                + (gone.Count == 0 ? "" : $" NO LONGER {label} — {string.Join(", ", gone)};");
+        }
+
+        var drift = Diff("withdrawn", NamesWith("withdrawn"), expectedWithdrawn)
+            + Diff("coming-soon", NamesWith("coming-soon"), expectedComingSoon);
+
+        Assert.True(
+            drift.Length == 0,
+            "The manifest's withdrawn / coming-soon membership changed." + drift
+            + $"{Environment.NewLine}{Environment.NewLine}"
+            + "An element moving INTO supported is a claim that an author can configure it and it "
+            + "runs. If that is now true, say so here and in the milestone's coverage map — the "
+            + "totals alone cannot see this edit (#342).");
+    }
+
+    /// <summary>
     /// The guard above can actually fail (#330).
     /// </summary>
     /// <remarks>
