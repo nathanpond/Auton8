@@ -5490,3 +5490,18 @@ captured from a live engine the way the deployment table was.
 
 The existing test now records the loss in a comment rather than quietly asserting
 the new behaviour as though it were the goal.
+
+**Blocker — round 12's PR is not merged.** 21 of 23 checks pass; **Backend
+reconciliation** and **Backend coverage** are stuck `queued` in GitHub's runner
+queue (run 34713439536, `updatedAt` unchanged for ~40 minutes, only one CI run
+queued repo-side). Not a red check, not a repo concurrency block, not something a
+re-run fixes.
+
+Not merged deliberately: those two are exactly the load-bearing gates CLAUDE.md
+names — the test-count reconciliation that fails when the shards do not run every
+discovered test, and `COVERAGE_THRESHOLD`. Merging past those because everything
+else is green is the false green the guards exist to prevent.
+
+Local: 2471/2471, tsc clean, lint 0 errors / 98 warnings (the ratchet). The branch
+is pushed and PR #355 is open; when the queue clears the gates should finish
+unattended.
