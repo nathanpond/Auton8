@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -372,7 +373,26 @@ public static class WorkflowEndpoints
                     behaviorOptions.Value.CallbackBaseUrlOverride)
             };
 
-            var deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
+            WorkflowDeploymentInfo deployment;
+            try
+            {
+                deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // #334. Publish validation catches what Auton8 knows about, but the
+                // engine will always refuse things we do not predict -- and what the
+                // author used to get for those was a 500 carrying a raw
+                // FlowableRequestException, a Java stack trace and absolute file
+                // paths, straight to the browser.
+                //
+                // A 500 also pages someone, for a diagram that is simply wrong.
+                // Flowable already classified this as a caller error; the status
+                // should say so, and the body should carry the engine's own
+                // sentence rather than its call stack.
+                return Results.BadRequest(new { errors = new[] { DescribeEngineRefusal(exception) } });
+            }
+
             var published = await store.PublishAsync(model, deployment, cancellationToken);
             // A fresh deployment is always active in Flowable — null out any
             // stale suspended flag so the SPA shows "Pause" rather than "Resume".
@@ -588,6 +608,73 @@ public static class WorkflowEndpoints
 
         var existing = await flowable.GetHistoricProcessInstanceCountByDefinitionKeyAsync(processKey, cancellationToken);
         return $"{label} ({existing + 1})";
+    }
+
+    /// <summary>
+    /// Flowable's refusal, as a sentence rather than a stack trace (#334).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deployment refusals come back in a machine-readable shape:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   [Validation set: 'flowable-executable-process'
+    ///    | Problem: 'flowable-servicetask-missing-implementation']
+    ///   : Service task does not have an implementation defined - [Extra info : ...
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The problem code is the useful half — it is stable, searchable, and names
+    /// the actual constraint — so it is kept verbatim alongside whatever prose
+    /// follows. Everything after the first <c>- [Extra info</c> is dropped: that is
+    /// where the element ids, line numbers and absolute file paths live.
+    /// </para>
+    /// <para>
+    /// If the message does not match the expected shape the whole thing is passed
+    /// through, trimmed. An unrecognised refusal is still better read than
+    /// swallowed — the failure mode this milestone keeps finding is silence, not
+    /// noise.
+    /// </para>
+    /// </remarks>
+    internal static string DescribeEngineRefusal(FlowableRequestException exception)
+    {
+        var message = exception.Message ?? string.Empty;
+
+        // Drop the diagnostic tail, which carries ids and filesystem paths.
+        var extra = message.IndexOf("- [Extra info", StringComparison.OrdinalIgnoreCase);
+        if (extra > 0) message = message[..extra];
+
+        var problem = Regex.Match(message, @"Problem:\s*'(?<code>[^']+)'");
+        var prose = Regex.Match(message, @"\]\s*:\s*(?<text>.+)", RegexOptions.Singleline);
+
+        var sentence = prose.Success ? prose.Groups["text"].Value.Trim() : message.Trim();
+
+        // A stack trace starts at the first frame marker. Everything from there on
+        // is internals, and this is the path an UNRECOGNISED refusal takes -- so it
+        // is exactly where a raw Java dump would otherwise get through.
+        var frame = sentence.IndexOf("\tat ", StringComparison.Ordinal);
+        if (frame < 0) frame = sentence.IndexOf("\n\tat", StringComparison.Ordinal);
+        if (frame > 0) sentence = sentence[..frame];
+
+        // One line. Multi-line engine messages are message-plus-trace.
+        var newline = sentence.IndexOfAny(['\r', '\n']);
+        if (newline > 0) sentence = sentence[..newline];
+
+        // And no absolute path, on any branch. This is the leak half of #334:
+        // filesystem paths must not reach a browser however readable the rest is.
+        sentence = Regex.Replace(sentence, @"(?<![\w.])[/\\](?:[\w.\-]+[/\\])+[\w.\-]*", "<path>");
+
+        sentence = Regex.Replace(sentence, @"\s+", " ").Trim();
+
+        if (sentence.Length == 0)
+        {
+            sentence = "Flowable refused the deployment and gave no reason.";
+        }
+
+        return problem.Success
+            ? $"The workflow engine refused this workflow: {sentence} ({problem.Groups["code"].Value})"
+            : $"The workflow engine refused this workflow: {sentence}";
     }
 
     public sealed record PublishResponse(WorkflowModel Model, WorkflowDeploymentInfo Deployment);

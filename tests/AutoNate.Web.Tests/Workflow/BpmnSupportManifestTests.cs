@@ -41,6 +41,116 @@ public sealed class BpmnSupportManifestTests
     private static string InventoryRowsPath => Path.Combine(
         RepoRoot.Path, "tests", "fixtures", "bpmn-inventory", "rows.json");
 
+    // ── The totals, which nothing guarded ───────────────────────────────────
+
+    /// <summary>
+    /// The manifest's tallies are pinned (#330).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing asserted any total. Flipping one row's <c>studio</c> value — the
+    /// single most likely edit anyone makes to this file — left the whole suite
+    /// green at 214/214, and the coverage claim in M4's description said
+    /// otherwise:
+    /// </para>
+    /// <para>
+    /// <i>"Guarded going forward by BpmnSupportManifestTests, which counts the
+    /// manifest rather than trusting prose."</i>
+    /// </para>
+    /// <para>
+    /// That sentence was written in the same note that corrected an earlier
+    /// arithmetic drift, and it was false when written: the guard it promises did
+    /// not exist. Two commits later the sum drifted again — Send Task was
+    /// withdrawn (#316) and the totals were not carried, so the description read
+    /// 55/10/4 while the file held 54/11/4.
+    /// </para>
+    /// <para>
+    /// Pinning the numbers is deliberately annoying. Changing the manifest is
+    /// supposed to be a decision with a paper trail, not a silent edit, and the
+    /// failure message says where the paper trail lives. This is the whole of the
+    /// guard's value — it does NOT check that the counts are *right*, only that
+    /// changing them is noticed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_manifest_tallies_are_what_the_coverage_claim_says_they_are()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        int CountBy(string field, string value) =>
+            elements.Count(e => e![field]!.GetValue<string>() == value);
+
+        var actual = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["total"] = elements.Count,
+            ["studio:supported"] = CountBy("studio", "supported"),
+            ["studio:withdrawn"] = CountBy("studio", "withdrawn"),
+            ["studio:coming-soon"] = CountBy("studio", "coming-soon"),
+            ["engine:executes"] = CountBy("engine", "executes"),
+            ["engine:cannot-execute"] = CountBy("engine", "cannot-execute"),
+            ["engine:annotation"] = CountBy("engine", "annotation"),
+        };
+
+        var expected = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["total"] = 69,
+            ["studio:supported"] = 54,
+            ["studio:withdrawn"] = 11,
+            ["studio:coming-soon"] = 4,
+            ["engine:executes"] = 57,
+            ["engine:cannot-execute"] = 9,
+            ["engine:annotation"] = 3,
+        };
+
+        var drifted = expected
+            .Where(pair => actual[pair.Key] != pair.Value)
+            .Select(pair => $"{pair.Key}: manifest has {actual[pair.Key]}, this guard expects {pair.Value}")
+            .ToList();
+
+        Assert.True(
+            drifted.Count == 0,
+            "The BPMN support manifest's tallies changed.\n  "
+            + string.Join("\n  ", drifted)
+            + "\n\nIf that was deliberate, update BOTH this guard and the coverage map in the "
+            + "milestone description that quotes these numbers — they have drifted apart twice "
+            + "already (#330), each time because the manifest moved and the prose did not.");
+
+        // The three studio statuses partition the file: a new status that no
+        // consumer understands would otherwise slip in under a stable total.
+        Assert.Equal(
+            actual["total"],
+            actual["studio:supported"] + actual["studio:withdrawn"] + actual["studio:coming-soon"]);
+        Assert.Equal(
+            actual["total"],
+            actual["engine:executes"] + actual["engine:cannot-execute"] + actual["engine:annotation"]);
+    }
+
+    /// <summary>
+    /// The guard above can actually fail (#330).
+    /// </summary>
+    /// <remarks>
+    /// A tally test whose expectations are computed from the same file it is
+    /// checking passes forever. This asserts the expected numbers are literals
+    /// that disagree with a mutated manifest — the property the previous
+    /// "guarded going forward" claim lacked.
+    /// </remarks>
+    [Fact]
+    public void Flipping_one_row_changes_a_tally()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+        var supported = elements.Count(e => e!["studio"]!.GetValue<string>() == "supported");
+
+        // Flip the first supported row in an in-memory copy.
+        var mutated = elements
+            .Select(e => e!["studio"]!.GetValue<string>())
+            .ToList();
+        var first = mutated.IndexOf("supported");
+        Assert.True(first >= 0, "the manifest has no supported rows, which is itself a defect");
+        mutated[first] = "withdrawn";
+
+        Assert.NotEqual(supported, mutated.Count(v => v == "supported"));
+    }
+
     // ── The manifest is internally coherent ─────────────────────────────────
 
     [Fact]

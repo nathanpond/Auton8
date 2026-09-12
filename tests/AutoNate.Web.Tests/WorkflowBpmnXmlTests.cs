@@ -4246,15 +4246,31 @@ public sealed class WorkflowBpmnXmlTests
 
     // ── #316: configuration state, which the manifest has no column for ─────
 
-    private static string UnnamedTriggerDiagram(string body) => $"""
+    /// <summary>
+    /// The trigger-configuration fixture (#316), with its roots chosen per test
+    /// rather than always-all-four (#335).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first version always declared <c>&lt;bpmn:signal id="Sig_Unnamed" /&gt;</c>.
+    /// That single line makes <b>every</b> diagram built from it undeployable —
+    /// measured: an unnamed signal root, referenced by nothing, in an otherwise
+    /// valid process, is refused by Flowable outright (an unnamed <em>message</em>
+    /// root is not). So <c>A_named_trigger_is_accepted_at_any_position</c>, the
+    /// complement written to prove the rule does not over-refuse, was asserting
+    /// that publish accepts a document the engine rejects.
+    /// </para>
+    /// <para>
+    /// A fixture that is itself invalid turns every "accepted" row into a claim
+    /// about nothing. Roots are now opt-in.
+    /// </para>
+    /// </remarks>
+    private static string UnnamedTriggerDiagram(string body, string roots = NamedRootsOnly) => $"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                           xmlns:flowable="http://flowable.org/bpmn"
                           id="D" targetNamespace="http://autonate.dev/workflows">
-          <bpmn:signal id="Sig_Unnamed" />
-          <bpmn:message id="Msg_Unnamed" />
-          <bpmn:signal id="Sig_Named" name="the.signal" />
-          <bpmn:message id="Msg_Named" name="the.message" />
+        {roots}
           <bpmn:process id="p" isExecutable="true">
             <bpmn:startEvent id="s" />
             <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t" />
@@ -4264,23 +4280,50 @@ public sealed class WorkflowBpmnXmlTests
         </bpmn:definitions>
         """;
 
+    /// <summary>Roots a deployable diagram may carry.</summary>
+    private const string NamedRootsOnly = """
+          <bpmn:signal id="Sig_Named" name="the.signal" />
+          <bpmn:message id="Msg_Named" name="the.message" />
+        """;
+
     /// <summary>
-    /// An event whose trigger is not named yet is refused, at every position (#316).
+    /// Adds the unnamed MESSAGE root. Deployable — the engine accepts it — which
+    /// is why the events pointing at it are a warning rather than an error.
+    /// </summary>
+    private const string WithUnnamedMessageRoot = """
+          <bpmn:signal id="Sig_Named" name="the.signal" />
+          <bpmn:message id="Msg_Named" name="the.message" />
+          <bpmn:message id="Msg_Unnamed" />
+        """;
+
+    /// <summary>
+    /// Adds the unnamed SIGNAL root. NOT deployable on its own — that is the
+    /// point of the rows that use it.
+    /// </summary>
+    private const string WithUnnamedSignalRoot = """
+          <bpmn:signal id="Sig_Named" name="the.signal" />
+          <bpmn:message id="Msg_Named" name="the.message" />
+          <bpmn:signal id="Sig_Unnamed" />
+        """;
+
+    /// <summary>
+    /// An event whose trigger does not resolve is refused, at every position
+    /// (#316), for both triggers.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This is the state the palette produces: place a signal catch, a message
-    /// boundary, a signal end, and before the author opens the panel and types a
-    /// name the diagram is undeployable. Flowable refuses the <b>whole
-    /// deployment</b> — <c>flowable-signal-event-missing-signal-ref</c> /
-    /// <c>flowable-message-event-missing-message-ref</c> — and publish said nothing.
+    /// This half of the rule was always right and matches the engine exactly:
+    /// measured at catch, start and boundary, a <c>signalRef</c>/<c>messageRef</c>
+    /// that is absent, or that points at a root the document does not declare,
+    /// is refused by Flowable for <b>both</b> triggers.
     /// </para>
     /// <para>
-    /// A rule existed for signal <b>start</b> only. That is the tell this issue
-    /// turned on: it was written for the position someone happened to test, and its
-    /// four siblings had none. The rule now walks positions rather than listing
-    /// them, so a position added later is covered by construction — and these rows
-    /// are the evidence it reaches all of them.
+    /// It is the state the palette produces — place a signal catch or a message
+    /// boundary and before the author opens the panel the ref is unset. A rule
+    /// existed for signal <b>start</b> only, which is the tell this issue turned
+    /// on: written for the position someone happened to test. The rule walks
+    /// positions rather than listing them; these rows are the evidence it reaches
+    /// them.
     /// </para>
     /// </remarks>
     [Theory]
@@ -4289,39 +4332,147 @@ public sealed class WorkflowBpmnXmlTests
     [InlineData("endEvent", "signalEventDefinition", "signalRef", "End event", "signal")]
     [InlineData("intermediateCatchEvent", "messageEventDefinition", "messageRef", "Catch event", "message")]
     [InlineData("startEvent", "messageEventDefinition", "messageRef", "Start event", "message")]
-    public void An_event_whose_trigger_has_no_name_is_refused_at_any_position(
+    public void An_event_whose_trigger_does_not_resolve_is_refused_at_any_position(
         string position, string definition, string refAttribute, string noun, string trigger)
     {
-        var refId = trigger == "signal" ? "Sig_Unnamed" : "Msg_Unnamed";
+        // Points at a root the document does not declare. The absent-attribute
+        // case is the row below.
         var xml = UnnamedTriggerDiagram(
-            $"""<bpmn:{position} id="x" name="Not named yet"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:{position}>""");
+            $"""<bpmn:{position} id="x" name="Not set yet"><bpmn:{definition} {refAttribute}="Nothing_Declares_This" /></bpmn:{position}>""");
 
         var error = Assert.Single(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
             e => e.Contains("has no", StringComparison.Ordinal));
 
-        // Names the position an author sees, the thing to set, and the cost.
         Assert.StartsWith(noun, error, StringComparison.Ordinal);
-        Assert.Contains("Not named yet", error, StringComparison.Ordinal);
-        Assert.Contains($"no {trigger} name yet", error, StringComparison.Ordinal);
+        Assert.Contains("Not set yet", error, StringComparison.Ordinal);
+        Assert.Contains($"no {trigger} set yet", error, StringComparison.Ordinal);
         Assert.Contains("whole deployment", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("intermediateCatchEvent", "signalEventDefinition", "signal")]
+    [InlineData("intermediateCatchEvent", "messageEventDefinition", "message")]
+    public void An_event_whose_trigger_ref_is_absent_is_refused(
+        string position, string definition, string trigger)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Not set yet"><bpmn:{definition} /></bpmn:{position}>""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+        Assert.Contains($"no {trigger} set yet", error, StringComparison.Ordinal);
     }
 
     /// <summary>A boundary event too — it needs its task, so it gets its own row.</summary>
     [Theory]
-    [InlineData("signalEventDefinition", "signalRef", "Sig_Unnamed", "signal")]
-    [InlineData("messageEventDefinition", "messageRef", "Msg_Unnamed", "message")]
-    public void A_boundary_event_whose_trigger_has_no_name_is_refused(
-        string definition, string refAttribute, string refId, string trigger)
+    [InlineData("signalEventDefinition", "signalRef", "signal")]
+    [InlineData("messageEventDefinition", "messageRef", "message")]
+    public void A_boundary_event_whose_trigger_does_not_resolve_is_refused(
+        string definition, string refAttribute, string trigger)
     {
         var xml = UnnamedTriggerDiagram(
-            $"""<bpmn:boundaryEvent id="x" name="Not named yet" attachedToRef="t"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:boundaryEvent>""");
+            $"""<bpmn:boundaryEvent id="x" name="Not set yet" attachedToRef="t"><bpmn:{definition} {refAttribute}="Nothing_Declares_This" /></bpmn:boundaryEvent>""");
 
         var error = Assert.Single(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
             e => e.Contains("has no", StringComparison.Ordinal));
         Assert.StartsWith("Boundary event", error, StringComparison.Ordinal);
-        Assert.Contains($"no {trigger} name yet", error, StringComparison.Ordinal);
+        Assert.Contains($"no {trigger} set yet", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A SIGNAL pointing at an unnamed root is refused; a MESSAGE is not (#335).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The asymmetry is the engine's, not a preference. Measured against Flowable
+    /// 8.0.0 at catch, start and boundary — the split is by trigger <em>type</em>,
+    /// and identical at every position:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///                        signal     message
+    ///   ref -> unnamed root  REFUSED    deploys
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The first version of this rule required a name for both, so every message
+    /// event was falsely refused — Auton8 stricter than the engine with no declared
+    /// departure, and with a remedy ("set the message it should use") the studio
+    /// cannot perform, because the Message field is disabled for everything but a
+    /// Send Task. These two rows are what would have caught that.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("intermediateCatchEvent")]
+    [InlineData("endEvent")]
+    [InlineData("startEvent")]
+    public void A_signal_pointing_at_an_unnamed_root_is_refused(string position)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Points at unnamed"><bpmn:signalEventDefinition signalRef="Sig_Unnamed" /></bpmn:{position}>""",
+            WithUnnamedSignalRoot);
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no name", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("intermediateCatchEvent")]
+    [InlineData("startEvent")]
+    public void A_message_pointing_at_an_unnamed_root_is_a_warning_not_an_error(string position)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Points at unnamed"><bpmn:messageEventDefinition messageRef="Msg_Unnamed" /></bpmn:{position}>""",
+            WithUnnamedMessageRoot);
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        // The engine deploys this. Refusing it is a false refusal, and the studio
+        // cannot yet name a message root anyway (#328).
+        Assert.DoesNotContain(result.Errors, e => e.Contains("no name", StringComparison.Ordinal));
+
+        // But it can never correlate, so it is not silence either.
+        Assert.Contains(
+            result.Warnings,
+            w => w.Contains("wait forever", StringComparison.Ordinal)
+                 && w.Contains("Points at unnamed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// An unnamed signal root is refused even when nothing references it (#335).
+    /// </summary>
+    /// <remarks>
+    /// Measured: an orphan unnamed <c>&lt;bpmn:signal&gt;</c> in an otherwise valid
+    /// process is refused by Flowable outright, while an orphan unnamed
+    /// <c>&lt;bpmn:message&gt;</c> deploys. <c>PruneOrphanSignalRoots</c> removes
+    /// these at prepare; publish validates the STORED xml, so a caller that
+    /// publishes without preparing must still meet this.
+    /// </remarks>
+    [Fact]
+    public void An_unnamed_signal_root_is_refused_even_with_no_events_using_it()
+    {
+        var xml = UnnamedTriggerDiagram(string.Empty, WithUnnamedSignalRoot);
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("declares a signal with no name", StringComparison.Ordinal));
+        Assert.Contains("Sig_Unnamed", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_unnamed_message_root_alone_is_not_refused()
+    {
+        // The complement that stops the rule above being widened to messages,
+        // which is the mistake #335 was.
+        var xml = UnnamedTriggerDiagram(string.Empty, WithUnnamedMessageRoot);
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no name", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -4329,8 +4480,9 @@ public sealed class WorkflowBpmnXmlTests
     /// </summary>
     /// <remarks>
     /// Without this, a rule written as "refuse every signal/message event" would
-    /// pass every row above while refusing the entire feature — which is a bigger
-    /// regression than the bug it fixes, and the positive rows cannot detect it.
+    /// pass every row above while refusing the entire feature. The fixture now
+    /// carries only named roots, so this asserts against a diagram the engine
+    /// actually accepts — it previously did not (#335).
     /// </remarks>
     [Theory]
     [InlineData("intermediateCatchEvent", "signalEventDefinition", "signalRef", "Sig_Named")]
@@ -4344,9 +4496,9 @@ public sealed class WorkflowBpmnXmlTests
         var xml = UnnamedTriggerDiagram(
             $"""<bpmn:{position} id="x" name="Named"><bpmn:{definition} {refAttribute}="{refId}" /></bpmn:{position}>""");
 
-        Assert.DoesNotContain(
-            WorkflowBpmnXml.ValidateProcess(xml).Errors,
-            e => e.Contains("has no", StringComparison.Ordinal));
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+        Assert.DoesNotContain(result.Errors, e => e.Contains("has no", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Errors, e => e.Contains("no name", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -4391,6 +4543,143 @@ public sealed class WorkflowBpmnXmlTests
             e => e.Contains("Send task", StringComparison.Ordinal));
     }
 
+
+    // ── #333: refused by the engine, or deployed and inert ──────────────────
+
+    /// <summary>
+    /// Three elements the engine refuses — or silently never runs — for a missing
+    /// required attribute (#333).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each row is the state the palette actually leaves the element in, and each
+    /// verdict was measured against Flowable 8.0.0 rather than reasoned about:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    ///   multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    ///   callActivity, no target         DEPLOYS  then start fails 400
+    ///                                            "Process definition null was not found"
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The call activity is the one that matters most: it is the founding complaint
+    /// verbatim — draws, publishes, deploys, does nothing — and it is the only one
+    /// the engine does not catch for us.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_service_task_with_no_behaviour_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:serviceTask id="x" name="Do the thing" />""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+        Assert.Contains("Do the thing", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""flowable:class="com.example.Thing" """)]
+    [InlineData("""flowable:expression="${bean.method()}" """)]
+    [InlineData("""flowable:type="mail" """)]
+    [InlineData("""flowable:behaviorKey="autonate.send-message" """)]
+    public void A_service_task_that_names_its_behaviour_is_accepted(string wiring)
+    {
+        // The complement. Without it, "refuse every service task" passes the row
+        // above while refusing the element the whole behaviour system runs on --
+        // a far bigger regression than the bug.
+        var xml = UnnamedTriggerDiagram($"""<bpmn:serviceTask id="x" name="Do" {wiring}/>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("no behaviour chosen", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A task on the AutoNate behaviour bridge is NOT accepted by the delegate
+    /// alone — it still needs a behaviour key.
+    /// </summary>
+    /// <remarks>
+    /// <c>BuildServiceTaskValidationErrors</c> has required this since before
+    /// #333, and it is stricter than the engine deliberately: Flowable is happy
+    /// with the delegate on its own, and the delegate with no key then fails at
+    /// run time. Worth a row here because the new rule sits next to it and the
+    /// two must not be collapsed — the new one covers the tasks the old one
+    /// SKIPS, which is every service task not wired to our delegate.
+    /// </remarks>
+    [Fact]
+    public void A_behaviour_bridge_task_still_needs_its_behaviour_key()
+    {
+        var xml = UnnamedTriggerDiagram(
+            """<bpmn:serviceTask id="x" name="Do" flowable:delegateExpression="${autonateBehaviorDelegate}" />""");
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("must have a behavior selected", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_repeat_with_nothing_to_repeat_over_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""
+            <bpmn:userTask id="x" name="Each one">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+            </bpmn:userTask>
+            """);
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+        Assert.Contains("Each one", error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""<bpmn:multiInstanceLoopCharacteristics flowable:collection="items" flowable:elementVariable="i" />""")]
+    [InlineData("""<bpmn:multiInstanceLoopCharacteristics><bpmn:loopCardinality>3</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>""")]
+    public void A_repeat_that_says_what_to_repeat_over_is_accepted(string loop)
+    {
+        // Flowable takes EITHER a collection or a cardinality, so a rule demanding
+        // a collection would refuse a legal fixed-count repeat.
+        var xml = UnnamedTriggerDiagram($"""<bpmn:userTask id="x" name="Each">{loop}</bpmn:userTask>""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The call activity: the only one of the three that DEPLOYS (#333).
+    /// </summary>
+    /// <remarks>
+    /// There is no deployment error to surface for this one, so publish is the
+    /// only place it can be caught. Left alone it draws, publishes, deploys, and
+    /// then fails every run the moment a token reaches it — which is the founding
+    /// complaint this milestone exists for, word for word.
+    /// </remarks>
+    [Fact]
+    public void A_call_activity_with_no_target_is_refused()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:callActivity id="x" name="Run the sub-flow" />""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+        Assert.Contains("Run the sub-flow", error, StringComparison.Ordinal);
+        // Says what actually happens, because "it deploys" is the surprising part.
+        Assert.Contains("every run fails", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_call_activity_that_names_its_target_is_accepted()
+    {
+        var xml = UnnamedTriggerDiagram("""<bpmn:callActivity id="x" name="Run it" calledElement="child" />""");
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+    }
 
     // ── #318: two rules that were correct by construction and unguarded ─────
 

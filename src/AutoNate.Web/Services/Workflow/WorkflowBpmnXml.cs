@@ -1589,10 +1589,16 @@ public static partial class WorkflowBpmnXml
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
             errors.AddRange(BuildStartEventPlacementErrors(document));
-            // #316: an event whose trigger is not named yet, at any position.
-            errors.AddRange(BuildUnnamedEventTriggerErrors(document));
+            // #316/#335: an event whose trigger does not resolve (error, both
+            // triggers) or resolves to an unnamed root (error for signals, which
+            // the engine refuses; warning for messages, which it deploys).
+            var triggerFindings = BuildUnnamedEventTriggerFindings(document);
+            errors.AddRange(triggerFindings.Errors);
             // #316: a send task the studio cannot configure and the engine refuses.
             errors.AddRange(BuildSendTaskErrors(document));
+            // #333: elements the engine refuses -- or silently never runs -- for a
+            // missing required attribute, in the state the palette leaves them.
+            errors.AddRange(BuildMissingRequiredAttributeErrors(document));
             // #157: a timer boundary with no time set never fires.
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
@@ -1626,6 +1632,7 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(conditions.Errors);
 
             var warnings = new List<string>();
+            warnings.AddRange(triggerFindings.Warnings);
             warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
 
@@ -2839,11 +2846,41 @@ public static partial class WorkflowBpmnXml
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A <c>signalEventDefinition</c> or <c>messageEventDefinition</c> whose ref is
-    /// unset, or points at a root with no name, is refused by Flowable at
-    /// deployment — <c>flowable-signal-event-missing-signal-ref</c> /
-    /// <c>flowable-message-event-missing-message-ref</c> — and it fails the
-    /// <b>whole deployment</b>, not just that element.
+    /// <b>What the engine actually does</b>, measured against Flowable 8.0.0 at
+    /// catch, start and boundary — the split is by trigger <em>type</em>, not by
+    /// position, and every cell below was deployed rather than reasoned about:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///                       signal            message
+    ///   ref -> named root   deploys           deploys
+    ///   ref -> UNNAMED root REFUSED           deploys
+    ///   ref absent          REFUSED           REFUSED
+    ///   ref -> missing root REFUSED           REFUSED
+    /// </code>
+    /// </para>
+    /// <para>
+    /// So a signal must be <em>named</em>; a message need only <em>resolve</em>.
+    /// The first version of this rule required a name for both, which made it a
+    /// false refusal on every message event — Auton8 was stricter than the engine
+    /// with no declared departure, in a milestone whose whole method is that such
+    /// departures live in one place (#335).
+    /// </para>
+    /// <para>
+    /// That mistake had a specific cause worth keeping written down: the signal
+    /// half was verified against a live engine and the message half was assumed to
+    /// match. It did not. Nothing here is generalised across the two columns any
+    /// more — the table above is the rule.
+    /// </para>
+    /// <para>
+    /// An unnamed message still cannot be <em>correlated</em>, because correlation
+    /// matches on name — so it deploys and then waits forever. That is a warning,
+    /// not an error: the engine accepts it, and the studio currently offers no way
+    /// to name a message root at all (the Message field is disabled for everything
+    /// but a Send Task, and nothing in the SPA emits a <c>bpmn:message</c>). An
+    /// error whose remedy the product does not offer is worse than none. Making it
+    /// nameable is #328, and the silent-no-op oracle that should own this class of
+    /// defect is #325.
     /// </para>
     /// <para>
     /// **That is the state the palette produces.** Place a signal catch, a message
@@ -2866,18 +2903,23 @@ public static partial class WorkflowBpmnXml
     /// manifest has no column for either.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<string> BuildUnnamedEventTriggerErrors(XDocument document)
+    private static (IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
+        BuildUnnamedEventTriggerFindings(XDocument document)
     {
         var errors = new List<string>();
+        var warnings = new List<string>();
 
-        // definition local name -> (root element, ref attribute, what an author calls it)
-        var triggers = new (string Definition, string Root, string RefAttribute, string Noun)[]
+        // definition local name -> (root element, ref attribute, author's noun,
+        // and whether the ENGINE requires the root to carry a name).
+        // NameRequired is not a style choice: it is the measured column in the
+        // table above. Signals refuse unnamed; messages deploy unnamed (#335).
+        var triggers = new (string Definition, string Root, string RefAttribute, string Noun, bool NameRequired)[]
         {
-            ("signalEventDefinition", "signal", "signalRef", "signal"),
-            ("messageEventDefinition", "message", "messageRef", "message"),
+            ("signalEventDefinition", "signal", "signalRef", "signal", true),
+            ("messageEventDefinition", "message", "messageRef", "message", false),
         };
 
-        foreach (var (definitionName, rootName, refAttribute, noun) in triggers)
+        foreach (var (definitionName, rootName, refAttribute, noun, nameRequired) in triggers)
         {
             var rootsById = document.Descendants(BpmnNamespace + rootName)
                 .Where(root => !string.IsNullOrWhiteSpace(root.Attribute("id")?.Value))
@@ -2888,22 +2930,163 @@ public static partial class WorkflowBpmnXml
                 var owner = definition.Parent;
                 if (owner is null || owner.Name.Namespace != BpmnNamespace) continue;
 
-                // A throw/end event may legitimately carry a messageRef the
-                // expansion replaces, but it still needs a NAME to replace it with,
-                // so every position is treated the same.
                 var reference = definition.Attribute(refAttribute)?.Value;
-                var named = !string.IsNullOrWhiteSpace(reference)
-                            && rootsById.TryGetValue(reference!, out var root)
-                            && !string.IsNullOrWhiteSpace(root.Attribute("name")?.Value);
+                var resolves = !string.IsNullOrWhiteSpace(reference)
+                               && rootsById.TryGetValue(reference!, out _);
+
+                // Unresolvable is refused by the engine for BOTH triggers, at every
+                // position. This half of the rule was always right.
+                if (!resolves)
+                {
+                    errors.Add(
+                        $"{DescribeEventPosition(owner)} '{LabelOf(owner)}' has no {noun} set yet. " +
+                        $"Open it and choose the {noun} it should use — the {noun} is what matches " +
+                        "one end to the other. Left unset, Flowable refuses the whole deployment, " +
+                        "not just this step.");
+                    continue;
+                }
+
+                var named = !string.IsNullOrWhiteSpace(
+                    rootsById[reference!].Attribute("name")?.Value);
 
                 if (named) continue;
 
-                errors.Add(
-                    $"{DescribeEventPosition(owner)} '{LabelOf(owner)}' has no {noun} name yet. " +
-                    $"Open it and set the {noun} it should use — the name is what matches one end " +
-                    "to the other. Left unset, Flowable refuses the whole deployment, not just " +
-                    "this step.");
+                if (nameRequired)
+                {
+                    errors.Add(
+                        $"{DescribeEventPosition(owner)} '{LabelOf(owner)}' points at a {noun} with " +
+                        $"no name. Give the {noun} a name — it is what matches one end to the other. " +
+                        "Left blank, Flowable refuses the whole deployment, not just this step.");
+                }
+                else
+                {
+                    // Deploys, then waits forever, because correlation matches on
+                    // name. Not an error: the engine accepts it and the studio has
+                    // no way to name a message root yet (#328).
+                    warnings.Add(
+                        $"{DescribeEventPosition(owner)} '{LabelOf(owner)}' points at a {noun} with " +
+                        $"no name. It will deploy, but nothing can ever match it, so this step will " +
+                        "wait forever.");
+                }
             }
+        }
+
+        // An unnamed <bpmn:signal> ROOT sinks the whole deployment on its own,
+        // whether or not anything references it -- measured, orphan root in an
+        // otherwise valid diagram: signal REFUSED, message DEPLOYED (#335).
+        //
+        // This is separate from the per-event loop above because the defect is in
+        // the root, not the event: a diagram with no signal events at all still
+        // fails if it carries one. `PruneOrphanSignalRoots` removes these during
+        // prepare, but publish validates the STORED xml and a caller may publish
+        // without preparing, which is exactly the path the endpoint's own comment
+        // says must not get through.
+        foreach (var root in document.Descendants(BpmnNamespace + "signal"))
+        {
+            if (!string.IsNullOrWhiteSpace(root.Attribute("name")?.Value)) continue;
+
+            var id = root.Attribute("id")?.Value;
+            errors.Add(
+                $"This workflow declares a signal with no name{(string.IsNullOrWhiteSpace(id) ? "" : $" ('{id}')")}. " +
+                "Flowable refuses the whole deployment over it even when nothing uses it. " +
+                "Name it, or remove it.");
+        }
+
+        return (errors, warnings);
+    }
+
+    /// <summary>
+    /// Elements the engine's validator refuses for a missing required attribute (#333).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The pattern, stated once because it keeps recurring:</b> if Flowable has a
+    /// "missing required attribute" validation for an element the studio can place,
+    /// publish needs the matching refusal. Without it the element draws, publishes
+    /// and then either sinks the deployment with a Java parser dump or — worse —
+    /// deploys and does nothing.
+    /// </para>
+    /// <para>
+    /// Measured against Flowable 8.0.0, each in the state the palette actually
+    /// leaves it:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    ///   multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    ///   callActivity, no target         DEPLOYS  -- then every start fails 400:
+    ///                                            "Process definition null was not found"
+    /// </code>
+    /// </para>
+    /// <para>
+    /// The call activity is the worst of the three and is the founding complaint
+    /// verbatim: it draws fine, publishes, deploys, and does nothing.
+    /// <c>ExtractCallActivityTargets</c> skips an empty key, so the publish
+    /// endpoint's own comment — "a key resolving to nothing is refused here rather
+    /// than deployed" — did not describe the as-placed state.
+    /// </para>
+    /// <para>
+    /// All three are reachable without hand-editing XML: <c>create.service-task</c>
+    /// sets no properties, <c>toggle-parallel-mi</c> is a header entry the
+    /// manifest-derived filter keeps because the rows are supported, and
+    /// <c>create.call-activity</c> places a bare one.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildMissingRequiredAttributeErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var task in document.Descendants(BpmnNamespace + "serviceTask"))
+        {
+            // Any of Flowable's wirings, or ours. The expansion writes
+            // delegateExpression onto behaviour tasks, so a prepared diagram
+            // already carries one; this catches the as-placed and imported states.
+            var wired =
+                !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "delegateExpression")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "class")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "expression")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "type")?.Value)
+                || !string.IsNullOrWhiteSpace(task.Attribute(FlowableNamespace + "behaviorKey")?.Value);
+
+            if (wired) continue;
+
+            errors.Add(
+                $"Service task '{LabelOf(task)}' has no behaviour chosen yet. Open it and pick what " +
+                "it should do. Left unset, Flowable refuses the whole deployment, not just this step.");
+        }
+
+        foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
+        {
+            // Flowable takes EITHER a collection to iterate or a fixed cardinality.
+            var hasCollection =
+                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value)
+                || !string.IsNullOrWhiteSpace(loop.Attribute("collection")?.Value);
+
+            var hasCardinality = loop
+                .Elements(BpmnNamespace + "loopCardinality")
+                .Any(c => !string.IsNullOrWhiteSpace(c.Value));
+
+            if (hasCollection || hasCardinality) continue;
+
+            var owner = loop.Parent;
+            var label = owner is null ? "this step" : $"'{LabelOf(owner)}'";
+            errors.Add(
+                $"The repeat on {label} has nothing to repeat over. Set the collection it should " +
+                "run once per item of, or a fixed number of times. Left unset, Flowable refuses " +
+                "the whole deployment, not just this step.");
+        }
+
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            if (!string.IsNullOrWhiteSpace(call.Attribute("calledElement")?.Value)) continue;
+
+            // This one DEPLOYS. That is why it needs refusing here rather than
+            // being left to the engine: there is no deployment error to surface,
+            // only an instance that fails the moment a token reaches the call.
+            errors.Add(
+                $"Call activity '{LabelOf(call)}' does not say which workflow to call. Open it and " +
+                "choose one. Left unset this publishes and deploys, and then every run fails the " +
+                "moment it reaches this step — Flowable reports \"Process definition null was not found\".");
         }
 
         return errors;

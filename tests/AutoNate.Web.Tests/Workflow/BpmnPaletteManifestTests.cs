@@ -146,6 +146,79 @@ public sealed class BpmnPaletteManifestTests
             string.Join(Environment.NewLine + "  ", unreachable));
     }
 
+    /// <summary>
+    /// The exclusion list's exact membership is pinned (#331).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Every_supported_element_is_either_on_the_palette_or_excluded_with_a_reason</c>
+    /// checks a reason <em>exists</em>. It cannot check the reason is <em>true</em>
+    /// — fair — but nothing pinned the list's membership either, so any supported
+    /// element could be taken off the palette and excused in the same commit with
+    /// free text and no reviewer signal:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   removed create.group from entries
+    ///   added {"localName":"group","reason":"nonsense excuse"} to notOnThePalette
+    ///   -> Passed! Failed: 0, Passed: 46
+    /// </code>
+    /// </para>
+    /// <para>
+    /// This class is what the milestone's coverage claim cites to make
+    /// <c>studio: supported</c> mean something, so an exclusion mechanism that
+    /// accepts anything is a hole in exactly that argument. Pinning membership is
+    /// the same shape the engine axis already uses for its declared departures.
+    /// </para>
+    /// <para>
+    /// What this does NOT do is verify the reasons. Two entries here are known to
+    /// be false — <c>dataInput</c>/<c>dataOutput</c> cite "the element data editor",
+    /// and <c>grep -rn "dataInput\|dataOutput\|ioSpecification" src/AutoNate.Spa/src</c>
+    /// returns nothing. Proving a reason needs the SPA test runner (#323) and the
+    /// manifest's authorability column (#324). This guard makes the <em>list</em>
+    /// deliberate; #265 owns making the reasons true.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_exclusion_list_is_exactly_these_entries()
+    {
+        var actual = Exclusions()
+            .Select(exclusion => Key(exclusion.LocalName, exclusion.EventDefinition))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        // Every line is a decision someone made once, on the record. Adding one
+        // means editing this list, which means a reviewer sees it.
+        string[] expected =
+        [
+            "* isForCompensation",
+            "* multiInstanceLoopCharacteristics:parallel",
+            "* multiInstanceLoopCharacteristics:sequential",
+            "association ",
+            "dataInput ",
+            "dataOutput ",
+            "lane ",
+            "messageFlow ",
+            "sequenceFlow ",
+            "startEvent error",
+            "startEvent escalation",
+        ];
+
+        var added = actual.Except(expected, StringComparer.Ordinal).ToList();
+        var removed = expected.Except(actual, StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            added.Count == 0 && removed.Count == 0,
+            "The notOnThePalette list changed."
+            + (added.Count == 0 ? "" : $"{Environment.NewLine}  ADDED (an element left the palette): "
+                + string.Join(", ", added))
+            + (removed.Count == 0 ? "" : $"{Environment.NewLine}  REMOVED: " + string.Join(", ", removed))
+            + $"{Environment.NewLine}{Environment.NewLine}"
+            + "Taking a supported element off the palette is a product decision, not a line of "
+            + "prose. If it is deliberate, update this list too — that edit is the reviewer's "
+            + "signal, which is the whole point (#331).");
+    }
+
     [Fact]
     public void Every_exclusion_names_a_manifest_element_that_is_not_also_on_the_palette()
     {

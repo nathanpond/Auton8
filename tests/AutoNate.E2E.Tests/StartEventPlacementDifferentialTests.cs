@@ -290,13 +290,10 @@ public sealed class StartEventPlacementDifferentialTests : E2ETestBase
 
     private static HashSet<string> LoadWithdrawnStartDefinitions()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !Directory.Exists(Path.Combine(root.FullName, ".git")))
-        {
-            root = root.Parent;
-        }
-
-        var path = Path.Combine(root!.FullName, "src", "shared", "bpmn-support.json");
+        // Anchored on AutoNate.sln via the shared helper, NOT on a ".git"
+        // directory: in a worktree ".git" is a file, so the old walk ran off the
+        // top of the filesystem and threw from this static initialiser (#332).
+        var path = Path.Combine(RepoRoot.Path, "src", "shared", "bpmn-support.json");
         using var document = JsonDocument.Parse(File.ReadAllText(path));
 
         return document.RootElement.GetProperty("elements").EnumerateArray()

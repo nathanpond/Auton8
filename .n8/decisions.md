@@ -5022,3 +5022,142 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   replan narrowed #218's AC to the execution view, so they are no longer a claim
   this milestone makes.
   **Issue:** #316, #318, #319, #321
+
+## Round 9 — 2026-09-11 (during /n8-exec M4)
+
+**#332 — the repo-root walk (Rule 1).** `StartEventPlacementDifferentialTests`
+resolved the manifest path by walking up for a `.git` *directory*. In a git
+worktree `.git` is a file, so the walk ran off the top and the class threw at
+static init — 33 cells collapsed to `Failed: 1, Passed: 1, Total: 2`, and
+`/n8-verify` runs in worktrees, so the milestone's headline instrument had never
+executed in any verification round. Measured side by side at the same commit:
+33/33 in a clone, 1 error in a worktree. Fixed by anchoring on `AutoNate.sln`
+through a new `AutoNate.E2E.Tests.Support.RepoRoot` (mirroring the two helpers
+that already did it correctly), and guarded by `RepoRootAnchorTests`, which
+fails the build if any test source reintroduces the `.git`-directory form. The
+guard carries its own self-check, so a regex that stopped matching cannot report
+a clean tree.
+
+**#335 — my own false refusal (Rule 1).** Round 8's unnamed-trigger rule
+required a *name* for both signals and messages. I had verified the signal half
+against the engine and assumed the message half matched. It does not. Measured
+against Flowable 8.0.0 at catch, start and boundary — the split is by trigger
+type, identical at every position:
+
+    ref -> named root     signal deploys   message deploys
+    ref -> UNNAMED root   signal REFUSED   message DEPLOYS
+    ref absent            signal REFUSED   message REFUSED
+    ref -> missing root   signal REFUSED   message REFUSED
+
+and, for a root declared but referenced by nothing: unnamed signal REFUSED,
+unnamed message DEPLOYS.
+
+So the rule now splits: unresolvable ref is an error for both; an unnamed root
+is an error for signals and a **warning** for messages. Warning rather than
+error because the engine accepts it and the studio offers no way to name a
+message root (the Message field is disabled for everything but a Send Task, and
+nothing in the SPA emits a `bpmn:message`) — an error whose remedy the product
+does not offer is worse than none. Authorability is #328; the silent-no-op
+oracle that should own "deploys, then waits forever" is #325.
+
+Also added the missing rule the probe exposed: an unnamed `bpmn:signal` root
+sinks the deployment even when nothing references it, so publish refuses it.
+`PruneOrphanSignalRoots` handles this at prepare, but publish validates the
+stored XML.
+
+And fixed the fixture. `UnnamedTriggerDiagram` always emitted
+`<bpmn:signal id="Sig_Unnamed" />`, which makes *every* diagram built from it
+undeployable — so `A_named_trigger_is_accepted_at_any_position`, the complement
+written to prove the rule did not over-refuse, was asserting that publish
+accepts a document the engine rejects. Roots are now opt-in per test.
+
+Three mutations confirm the new rows: reinstating the false refusal fails 2;
+removing the orphan-root rule fails 3; widening it to messages fails 3.
+
+**#336 — asserting a precondition instead of the behaviour (Rule 1).** #318's
+guard asserted that the *expansion* puts a script task in the deployable. It
+never called `ContainsScriptTask`, so exempting expansion-generated ids left the
+whole suite green at 2386/2386 with the AC broken. Replaced with two rows
+through `DeployProcessAsync` that watch for the capability probe request itself,
+plus the complement that a script-free workflow does not probe. The named
+mutation now fails exactly one test, the one written for it.
+
+This is the third instance of the same substitution in this milestone (#292,
+#319), which is why the fix is at the call level rather than one more assertion
+about the XML.
+
+**#314 — the frozen container axis (Rule 1).** The generated signal-scope
+property placed every event directly in `<bpmn:process>`, so `ForcesGlobalSignal`'s
+only discriminator — is there an event-subprocess ancestor? — was never varied,
+and reverting it to "every startEvent is global" passed 3/3. The generator now
+chooses a container per start event, the independent oracle models the
+distinction from #274's measured behaviour rather than by calling the code, and
+a coverage floor asserts both containers actually appear so the axis cannot
+silently re-freeze. Only start events vary: a signal start event in a plain
+embedded subprocess is refused by the placement rule, which would make refusals
+in this property mean two different things. The named regression now fails all
+three seeds.
+
+**#330 — no test guarded any manifest total (Rule 2).** Flipping one row left
+214/214 green, while the milestone description claimed
+"Guarded going forward by BpmnSupportManifestTests, which counts the manifest
+rather than trusting prose". That sentence was false when written, and the sum
+drifted again two commits later (#316 withdrew Send Task; the description read
+55/10/4 against a file holding 54/11/4). The tallies are now pinned as literals,
+with a failure message pointing at the coverage map so the two move together,
+plus partition checks so a new status cannot slip in under a stable total. The
+guard deliberately does not check the numbers are *right* — only that changing
+them is noticed.
+
+**#331 — a free-text excuse off the palette (Rule 2).** `notOnThePalette` let any
+supported element be removed from the palette and excused with arbitrary prose,
+in the class the coverage claim cites as its credibility guard. Membership is now
+pinned, the same shape the engine axis uses for declared departures. It does not
+verify the reasons are true — two are known false (`dataInput`/`dataOutput` cite
+an editor that does not exist in the SPA) and proving that needs #323's runner
+and #324's authorability column; #265 keeps that half.
+
+**#333 — three more publish-clean/engine-refuses defects (Rule 2).** Verified
+each against the live engine in the state the palette leaves it, rather than
+trusting the filing:
+
+    serviceTask, no implementation  REFUSED  flowable-servicetask-missing-implementation
+    multiInstance, no collection    REFUSED  flowable-multi-instance-missing-collection
+    callActivity, no target         DEPLOYS  then start fails 400
+                                             "Process definition null was not found"
+
+The call activity is the founding complaint verbatim — draws, publishes,
+deploys, does nothing — and the only one the engine does not catch for us, so
+publish is the only place it can be caught. Written as one rule over the class
+with the pattern stated in the code: *if the engine has a "missing required
+attribute" validation for an element the studio can place, publish needs the
+matching refusal.*
+
+Two things the work turned up that the filing did not have. The multi-instance
+rule accepts a `loopCardinality` as well as a collection — a rule demanding a
+collection would refuse a legal fixed-count repeat. And `BuildServiceTaskValidationErrors`
+already refuses a task on the AutoNate behaviour bridge with no behaviour key;
+it skips every service task *not* wired to our delegate, which is exactly the
+gap. My first complement row asserted the wrong thing and the pre-existing rule
+caught it — that is the rule working, and the row is now a positive assertion of
+it instead.
+
+Each of the three rules, disabled in turn, fails exactly one test.
+
+**#334 — a Java stack trace to the browser (Rule 2).** Publish had no catch
+around `DeployProcessAsync`, so an engine refusal reached the author as HTTP 500
+carrying a raw `FlowableRequestException`, a stack trace and absolute file
+paths. Now a 400 in the same `{errors:[…]}` shape publish already uses, carrying
+Flowable's problem code and its own sentence.
+
+Worth recording that my first version of this fix leaked. The recognised-shape
+branch was clean, and the fallback passed unrecognised messages through
+wholesale — which is the branch a raw Java dump actually takes. The tests I
+wrote for the leak caught my own fix, which is the first time this milestone a
+test has failed for the right reason before the code shipped. Stack frames and
+absolute paths are now stripped on every branch.
+
+The studio half — a refusal rendering as "Request failed with status code 400"
+because `WorkflowStudio.tsx` reads `data.message` against an `{errors:[…]}` body
+— is #256, and stays in M4b where the SPA runner can verify it. Until it lands,
+Outcome 2 is true of the API and still not of the product.
