@@ -5554,3 +5554,80 @@ tell which they are looking at. The remaining lines either already quoted the ow
 
 Map arithmetic follows: `covers: 36`, `withdrawn=14`, `49 + 16 + 4 = 69`, and
 13 baseline + 36 delivered = 49 supported.
+
+## Round 13 — 2026-09-12 (during /n8-exec M4)
+
+**#356 — a fixed-count multi-instance could not be published (Rule 1).** Mine, from
+round 9, live for four rounds. The studio writes `autonate:loopCardinality` as an
+attribute (bpmn-js has no Flowable moddle extension); `ExpandForDeployment`
+converts it to the child element; **validation runs on the stored diagram, before
+that conversion**. My publish gate read only the child element, so the error told
+the author to set what they had set.
+
+Three readers of that fact existed. There is now **one** — `DeclaresCardinality` /
+`DeclaresCollection` — because two readers disagreeing is the family this milestone
+has spent thirteen rounds on, and I reproduced it while writing a rule to prevent a
+different one.
+
+**The important part is where the guard lives.** The only test that caught this
+carries `RequiresService=Flowable`, which CI excludes, so it was red for four
+rounds without ever turning a build red. The new
+`MultiInstanceReaderAgreementTests` needs **no engine** — the rule is a pure
+function over XML, and making its guard depend on a running Flowable is what let
+this survive. It also scans the source to pin that nothing re-inlines a spelling,
+scoped by *method name* rather than line number, because adding the helpers shifted
+every line and a numeric window is a guard that quietly stops guarding.
+
+Verified: backend mutation (restore the child-only read) → 2 red; live
+`MultiInstanceExecutionTests` → **9/9**, up from 8/9.
+
+**#357 — a caller could choose which sentence Auton8 says (Rule 1).** #349 bounded
+the character set of what travels; it did not bound *who decides what is said*, and
+I treated the second as following from the first.
+
+Variable names are caller-supplied and Flowable echoes them into its 409, and the
+#354 table was first-match-wins over fragments of the engine's sentence — so naming
+a variable `Could not find a task with id` made the product confidently say the
+wrong thing. Five confirmed against the real body.
+
+Runtime refusals are now keyed on **`(Operation, StatusCode)`** — a literal this
+codebase passes to `EnsureSuccessAsync`, and the engine's own classification.
+Neither is caller-reachable, and the engine's sentence is not read at all. Coarser
+on purpose: where one pair covers two causes the sentence says what they share;
+where that would mislead there is no row and the caller gets the generic plus a log
+line. A vague true answer beats a precise false one.
+
+Deployment side: the `Problem:` marker must now sit inside a full
+`[Validation set: … | Problem: …]` envelope. A bare match let an author write
+`signalRef="Problem: 'flowable-mailtask-no-recipient'"` and make a **publisher**
+read that about a diagram with no mail task.
+
+**#358 — I conflated the axes while implementing a decision about axes (Rule 1).**
+`reason` on the five message rows carried the #112 **engine-axis** finding and I
+overwrote it with studio-axis prose, destroying the sentence that explains why
+Intermediate Throw (Message) reads `engine: executes` beside an evidence note
+saying the validator rejects it. Restored verbatim from `2eeb526~1`. The studio
+rationale already lives in full in the Map's DESCOPED line, which is where it
+belongs — so no new field was needed.
+
+The withdrawal also created a hole: the create/append popups fall back to
+`className`, and two non-interrupting message variants had classNames nobody
+denied. Message was the only typed event whose interrupting form is withheld while
+its siblings ship, so the hole was **new**. Both classNames verified present in the
+vendored bundle (5 occurrences each) before being added as deny keys — a deny key
+that matches nothing fails silently, which is what `Every_denied_icon_class_actually_occurs_in_the_vendored_bundle`
+exists for.
+
+**#359 / #360 — the description.** The sixth arithmetic drift (`11 of the 41` →
+`36`). The Loop Marker line carried the RATIONALE AS RECORDED label with no
+quotation behind it — relabelled. The `#6` line claimed "the owner's words" for
+text at `:1320` that is the planner's write-up marked "(owner-approved)" — the one
+place the convention marked the distinction backwards. And the Compensation Start
+Event quotation is not corroborated anywhere in the tree; flagged in place rather
+than rewritten, because silently downgrading a line the owner may well have said is
+its own kind of falsification.
+
+Outcomes 9 and 3 gained the qualifications they lacked. Outcome 10's locator now
+names **both** entry points — five rounds of it naming only one, which excluded the
+two routes the next sentence enumerated — and `BroadcastSignalAsync` is recorded as
+a delivery Auton8 makes that cannot nudge, which was in neither list.

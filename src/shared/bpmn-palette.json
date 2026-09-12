@@ -101,7 +101,10 @@
       "type": "bpmn:StartEvent",
       "eventDefinitionType": "bpmn:MessageEventDefinition",
       "localName": "startEvent",
-      "eventDefinition": "message"
+      "eventDefinition": "message",
+      "menuClassNames": [
+        "bpmn-icon-start-event-non-interrupting-message"
+      ]
     },
     {
       "id": "create.start-event-timer",
@@ -586,7 +589,10 @@
       "type": "bpmn:BoundaryEvent",
       "eventDefinitionType": "bpmn:MessageEventDefinition",
       "localName": "boundaryEvent",
-      "eventDefinition": "message"
+      "eventDefinition": "message",
+      "menuClassNames": [
+        "bpmn-icon-intermediate-event-catch-non-interrupting-message"
+      ]
     },
     {
       "id": "append.boundary-timer",

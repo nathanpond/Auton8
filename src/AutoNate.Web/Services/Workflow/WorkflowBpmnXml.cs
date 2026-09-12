@@ -414,6 +414,46 @@ public static partial class WorkflowBpmnXml
     /// <summary>A fixed instance count, as the author wrote it (#245).</summary>
     internal const string LoopCardinalityAttribute = "loopCardinality";
 
+    /// <summary>
+    /// Does this loop say how many times to run — in EITHER spelling (#356)?
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There are two, and that is not optional: the studio writes
+    /// <c>autonate:loopCardinality</c> as an <b>attribute</b>
+    /// (<c>workflow.js:3257</c>) because bpmn-js has no Flowable moddle extension
+    /// and cannot create the child element; <c>ExpandForDeployment</c> converts it
+    /// to <c>&lt;bpmn:loopCardinality&gt;</c> on the way to the engine. Validation
+    /// runs on the <b>stored</b> diagram, before that conversion.
+    /// </para>
+    /// <para>
+    /// So any rule that reads only the child element is wrong for every diagram
+    /// the studio produces. <c>BuildMissingRequiredAttributeErrors</c> did exactly
+    /// that from #333 until #356, and a fixed-count multi-instance could not be
+    /// published — the error told the author to set the thing they had set. It was
+    /// red for four rounds because CI excludes the Flowable suite.
+    /// </para>
+    /// <para>
+    /// One reader now, because two readers of one thing disagreeing is the defect
+    /// family this milestone has spent thirteen rounds on. <c>MultiInstanceReaderAgreementTests</c>
+    /// pins that every reader goes through here.
+    /// </para>
+    /// </remarks>
+    internal static bool DeclaresCardinality(XElement loop) =>
+        Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value) is not null
+        || loop.Elements(BpmnNamespace + "loopCardinality")
+            .Any(c => !string.IsNullOrWhiteSpace(c.Value));
+
+    /// <summary>Does this loop say what to iterate over (#356)?</summary>
+    /// <remarks>
+    /// <c>flowable:collection</c> is namespaced; an unprefixed <c>collection</c>
+    /// attribute is rejected by the BPMN XSD outright and was a dead branch (#341).
+    /// <c>loopDataInputRef</c> is the spec's own element form.
+    /// </remarks>
+    internal static bool DeclaresCollection(XElement loop) =>
+        Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value) is not null
+        || loop.Element(BpmnNamespace + "loopDataInputRef") is not null;
+
     /// <summary>Where each run's result is collected, and from which variable (#245).</summary>
     internal const string AggregateTargetAttribute = "aggregateTarget";
 
@@ -3067,19 +3107,11 @@ public static partial class WorkflowBpmnXml
 
         foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
         {
-            // Flowable takes EITHER a collection to iterate or a fixed cardinality.
-            //
-            // The UNPREFIXED `collection` attribute was also accepted here and is
-            // not a thing: the BPMN XSD rejects it outright, so that branch could
-            // only ever be a false accept (#341). Flowable's is namespaced.
-            var hasCollection =
-                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value);
-
-            var hasCardinality = loop
-                .Elements(BpmnNamespace + "loopCardinality")
-                .Any(c => !string.IsNullOrWhiteSpace(c.Value));
-
-            if (hasCollection || hasCardinality) continue;
+            // Flowable takes EITHER a collection to iterate or a fixed cardinality,
+            // and both have two spellings. Through the shared readers, always --
+            // this rule read only the child element and so refused every
+            // fixed-count multi-instance the studio could produce (#356).
+            if (DeclaresCollection(loop) || DeclaresCardinality(loop)) continue;
 
             var owner = loop.Parent;
             var label = owner is null ? "this step" : $"'{LabelOf(owner)}'";
@@ -4012,12 +4044,8 @@ public static partial class WorkflowBpmnXml
         {
             var owner = LabelOf(loop.Parent) ?? "a step";
 
-            var hasCollection = Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value) is not null
-                || loop.Element(BpmnNamespace + "loopDataInputRef") is not null;
-            var hasCardinality =
-                Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + LoopCardinalityAttribute)?.Value)
-                    is not null
-                || loop.Element(BpmnNamespace + "loopCardinality") is not null;
+            var hasCollection = DeclaresCollection(loop);
+            var hasCardinality = DeclaresCardinality(loop);
 
             if (hasCollection && hasCardinality)
             {
