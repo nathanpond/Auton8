@@ -441,15 +441,18 @@ public sealed class ExecutionEndpointsTests
 
         // #350 changed what the BODY carries. It used to be the engine's entire
         // HTTP response -- the same field that has been observed carrying a JDBC
-        // URL with its password -- so it is now described rather than forwarded.
+        // URL with its password -- so it is described rather than forwarded.
         Assert.DoesNotContain("Flowable could not", body, StringComparison.Ordinal);
-        Assert.Contains("server log", body, StringComparison.Ordinal);
 
-        // The cost is real and is NOT waved away: "Variable 'escalate' is already
-        // present" was a good message and the caller no longer sees it, because
-        // EngineRefusal only maps DEPLOYMENT validation codes and a runtime
-        // conflict carries none. Tracked as its own follow-up rather than
-        // absorbed here -- #354.
+        // And #354 gave that description real content again. For one round this
+        // read "the reason is in the server log", which was the price of the
+        // sanitisation and was worse than what operators had.
+        Assert.Contains("already set on this step", body, StringComparison.Ordinal);
+
+        // Still nothing the engine wrote -- not even the execution id, which the
+        // caller already knows because it is in their own request URL.
+        Assert.DoesNotContain("proc-1'", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("escalate'", body, StringComparison.Ordinal);
     }
 
     [Fact]

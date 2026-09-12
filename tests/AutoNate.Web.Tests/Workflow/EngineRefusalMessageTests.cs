@@ -248,6 +248,65 @@ public sealed class EngineRefusalMessageTests
         Assert.DoesNotContain("no recipient", described, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Runtime refusals get our words too, not "see the log" (#354).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every body below was <b>captured from a live Flowable 8.0.0</b>, not
+    /// written from memory — that distinction is what #338 was filed for.
+    /// </para>
+    /// <para>
+    /// These carry no problem code, so before #354 they all fell through to "the
+    /// reason is in the server log" — which was the price #350 paid to stop the
+    /// execution routes leaking the raw body, and was worse than what operators
+    /// had.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"message":"Bad request","exception":"No process definition found for key 'x'"}""",
+        "no published workflow has that key")]
+    [InlineData("""{"message":"Not found","exception":"Could not find a task with id 'x'."}""",
+        "already been completed")]
+    [InlineData("""{"message":"Not found","exception":"Could not find a process instance with id 'x'."}""",
+        "already finished")]
+    [InlineData("""{"message":"Not found","exception":"Could not find an execution with id 'x'."}""",
+        "already moved on")]
+    [InlineData("""{"message":"Bad request","exception":"Cannot start process instance by message: no subscription to message with name 'x' found."}""",
+        "waiting for that message")]
+    [InlineData("""{"message":"Bad request","exception":"signalName is required"}""",
+        "without a name")]
+    [InlineData("Variable 'escalate' is already present on execution 'proc-1'.",
+        "already set on this step")]
+    public void A_runtime_refusal_is_explained_in_our_own_words(string body, string expected)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+
+        Assert.Contains(expected, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("server log", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And still nothing the engine wrote — not even the identifier (#354).
+    /// </summary>
+    /// <remarks>
+    /// Pulling the quoted id out of these would be safe in every case I looked at,
+    /// which is exactly the reasoning that leaked three times. It is also
+    /// unnecessary: the caller already knows which task or instance they asked
+    /// about, because it is in their own request URL.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"exception":"Could not find a task with id 'secret-task-9f2c'."}""", "secret-task-9f2c")]
+    [InlineData("""{"exception":"Could not find an execution with id 'proc-internal-77'."}""", "proc-internal-77")]
+    [InlineData("""{"exception":"No process definition found for key 'payroll_secret'"}""", "payroll_secret")]
+    public void A_runtime_refusal_still_forwards_no_identifier(string body, string mustNotAppear)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+
+        Assert.DoesNotContain(mustNotAppear, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("exception", described, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>
     /// <remarks>
     /// The previous version had no cap at all — 4000 characters in, 4090 out.

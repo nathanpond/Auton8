@@ -5505,3 +5505,52 @@ else is green is the false green the guards exist to prevent.
 Local: 2471/2471, tsc clean, lint 0 errors / 98 warnings (the ratchet). The branch
 is pushed and PR #355 is open; when the queue clears the gates should finish
 unattended.
+
+## Round 12b — 2026-09-12 (owner decisions answered)
+
+The owner answered the three open questions directly.
+
+**#340 — "Withdraw the five rows."** Chosen over building studio authorability now,
+on the grounds that it is the decision already made for the identical situation
+(#316, Send Task) and does not re-widen a scope that was deliberately narrowed.
+
+Message Start Event, Intermediate Throw (Message), Intermediate Catch (Message),
+Message Boundary and Message End are now `studio: withdrawn`, each carrying the
+reason. The **engine axis is untouched** — all five remain `engine: executes`,
+message correlation works, and every E2E test seeds its `<bpmn:message>` roots
+through the API, so Outcome 4 is unaffected. Making them authorable is M4b,
+alongside #328.
+
+Evidence that the engine axis really is untouched: withdrawing them broke exactly
+two tests — the tally guard and the membership guard, both of which exist to notice
+this — and nothing else in 635.
+
+**#354 — fix it before closing.** Captured the real runtime refusals from a live
+engine rather than reading Flowable's source:
+
+    400 {"exception":"No process definition found for key 'x'"}
+    404 {"exception":"Could not find a task with id 'x'."}
+    404 {"exception":"Could not find a process instance with id 'x'."}
+    404 {"exception":"Could not find an execution with id 'x'."}
+    400 {"exception":"signalName is required"}
+    400 {"exception":"Cannot start process instance by message: no subscription…"}
+
+These carry no problem code, so they all fell through to "the reason is in the
+server log" — the price #350 paid, and worse than what operators had. They are now
+recognised by sentence fragment and answered in our own words.
+
+**Nothing is extracted from them, not even the identifier.** Pulling the quoted id
+out would be safe in every case I looked at, which is exactly the reasoning that
+leaked three times — and it is unnecessary, because the caller already knows which
+task or instance they asked about: it is in their own request URL.
+
+**DESCOPED provenance — "quote the decisions ledger."** Chosen over waiving the
+requirement. Seven of eight lines carried only an attribution; four now quote
+`.n8/decisions.md` as written at the time, and the block carries a header saying
+plainly that this is **sourcing, not the owner speaking**, so a later reader can
+tell which they are looking at. The remaining lines either already quoted the owner
+(Compensation Start Event) or point at the ledger (#6), and the two new ones
+(Send Task, the message rows) record the decision that was actually made.
+
+Map arithmetic follows: `covers: 36`, `withdrawn=14`, `49 + 16 + 4 = 69`, and
+13 baseline + 36 delivered = 49 supported.

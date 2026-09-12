@@ -92,6 +92,62 @@ internal static class EngineRefusal
                 "a signal declares a scope Flowable does not recognise",
         };
 
+    /// <summary>
+    /// Runtime refusals, which carry no problem code at all (#354).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deployment table above is keyed by Flowable's own validation codes.
+    /// Runtime refusals have none — they are a plain sentence in an
+    /// <c>exception</c> field. Captured from a live engine rather than read out of
+    /// Flowable's source:
+    /// </para>
+    /// <para>
+    /// <code>
+    ///   400 {"exception":"No process definition found for key 'x'"}
+    ///   404 {"exception":"Could not find a task with id 'x'."}
+    ///   404 {"exception":"Could not find a process instance with id 'x'."}
+    ///   404 {"exception":"Could not find an execution with id 'x'."}
+    ///   400 {"exception":"signalName is required"}
+    ///   400 {"exception":"Cannot start process instance by message: no
+    ///                     subscription to message with name 'x' found."}
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <b>Nothing is extracted from these, not even the identifier.</b> Matching a
+    /// prefix and pulling out a quoted id would be safe in each case I looked at,
+    /// which is precisely the reasoning that leaked three times — and it is
+    /// unnecessary here, because the caller already knows which task or instance
+    /// they asked about: it is in their own request URL.
+    /// </para>
+    /// <para>
+    /// This exists because #350 cost something real. Sanitising the execution
+    /// routes turned
+    /// <c>"Variable 'escalate' is already present on execution 'proc-1'"</c> into
+    /// "the reason is in the server log", which is worse than what operators had.
+    /// #354 is the other half of that work.
+    /// </para>
+    /// </remarks>
+    private static readonly (string Fragment, string Reason)[] RuntimeReasons =
+    [
+        ("No process definition found for key",
+            "no published workflow has that key"),
+        ("Could not find a task with id",
+            "that task does not exist, or has already been completed"),
+        ("Could not find a process instance with id",
+            "that workflow run does not exist, or has already finished"),
+        ("Could not find an execution with id",
+            "that step of the workflow run does not exist, or has already moved on"),
+        ("no subscription to message with name",
+            "nothing in any published workflow is waiting for that message"),
+        ("is already present on execution",
+            "that variable is already set on this step"),
+        ("signalName is required",
+            "the signal was sent without a name"),
+        ("Process definition null was not found",
+            "a step calls a workflow that is not published"),
+    ];
+
     /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>
     internal static string? KnownCode(string? message)
     {
@@ -133,11 +189,23 @@ internal static class EngineRefusal
     /// <summary>Flowable's refusal, as a sentence of ours.</summary>
     internal static string Describe(FlowableRequestException exception, string what = "this workflow")
     {
-        var code = KnownCode(exception.Message);
+        var message = exception.Message ?? string.Empty;
 
-        if (code is not null)
+        // A deployment validation code, if the engine named one we know.
+        if (KnownCode(message) is { } code)
         {
             return $"The workflow engine refused {what}: {Reasons[code]} ({code}).";
+        }
+
+        // A runtime refusal, recognised by its sentence (#354). Nothing from the
+        // engine's text travels -- the fragment only selects which of OUR
+        // sentences to use.
+        foreach (var (fragment, reason) in RuntimeReasons)
+        {
+            if (message.Contains(fragment, StringComparison.Ordinal))
+            {
+                return $"The workflow engine refused {what}: {reason}.";
+            }
         }
 
         return $"The workflow engine refused {what}. The reason is in the server log.";
