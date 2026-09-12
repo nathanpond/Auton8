@@ -603,6 +603,7 @@ public static class ExecutionEndpoints
             UpdateProcessVariablesRequest request,
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             // #226. `variables` missing from the body deserialises to null, and the
@@ -626,8 +627,16 @@ public static class ExecutionEndpoints
                 // already exists, 400 for a value its converter cannot take.
                 // Re-wrapping it as a 500 loses that and pages someone about a
                 // typo. Its 5xx is not caught: that one really is a fault.
+                // #350. The raw body carries the engine's whole HTTP response --
+                // JDBC URLs, hostnames, absolute paths, Java frames. Three rounds
+                // fixed this on the publish route while these four handed it to a
+                // wider audience. The raw text survives here and nowhere else.
+                loggerFactory.CreateLogger("AutoNate.Web.Executions").LogWarning(
+                    exception, "Flowable refused a request. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this request"));
+
                 return Results.Json(
-                    new { message = exception.Message },
+                    new { message = EngineRefusal.Describe(exception, "this request") },
                     statusCode: (int)exception.StatusCode);
             }
             // #158: Flowable does not re-evaluate conditional events when a variable
@@ -655,6 +664,7 @@ public static class ExecutionEndpoints
             UpdateProcessVariablesRequest request,
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             // #226. `variables` missing from the body deserialises to null, and the
@@ -678,8 +688,16 @@ public static class ExecutionEndpoints
                 // already exists, 400 for a value its converter cannot take.
                 // Re-wrapping it as a 500 loses that and pages someone about a
                 // typo. Its 5xx is not caught: that one really is a fault.
+                // #350. The raw body carries the engine's whole HTTP response --
+                // JDBC URLs, hostnames, absolute paths, Java frames. Three rounds
+                // fixed this on the publish route while these four handed it to a
+                // wider audience. The raw text survives here and nowhere else.
+                loggerFactory.CreateLogger("AutoNate.Web.Executions").LogWarning(
+                    exception, "Flowable refused a request. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this request"));
+
                 return Results.Json(
-                    new { message = exception.Message },
+                    new { message = EngineRefusal.Describe(exception, "this request") },
                     statusCode: (int)exception.StatusCode);
             }
             // #158: Flowable does not re-evaluate conditional events when a variable
@@ -730,6 +748,7 @@ public static class ExecutionEndpoints
             string activityId,
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             try
@@ -749,8 +768,15 @@ public static class ExecutionEndpoints
                 // a defined response carrying the engine's own sentence, rather
                 // than escaping as an unhandled exception and rendering as
                 // "Could not complete 'adhoc'." with no reason at all.
+                // #350. The raw body carries the engine's whole HTTP response --
+                // JDBC URLs, hostnames, absolute paths, Java frames. The raw text
+                // survives here and nowhere else.
+                loggerFactory.CreateLogger("AutoNate.Web.Executions").LogWarning(
+                    exception, "Flowable refused a request. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this request"));
+
                 return Results.Json(
-                    new { message = exception.Message },
+                    new { message = EngineRefusal.Describe(exception, "this request") },
                     statusCode: exception.IsCallerError
                         ? (int)exception.StatusCode
                         : StatusCodes.Status502BadGateway);
@@ -775,6 +801,7 @@ public static class ExecutionEndpoints
             string executionId,
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             try
@@ -790,8 +817,15 @@ public static class ExecutionEndpoints
                 // which is neither defined nor documented -- the two things #163's
                 // AC7 requires of it. The engine now classifies it 409; either
                 // way its sentence reaches the operator.
+                // #350. The raw body carries the engine's whole HTTP response --
+                // JDBC URLs, hostnames, absolute paths, Java frames. The raw text
+                // survives here and nowhere else.
+                loggerFactory.CreateLogger("AutoNate.Web.Executions").LogWarning(
+                    exception, "Flowable refused a request. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this request"));
+
                 return Results.Json(
-                    new { message = exception.Message },
+                    new { message = EngineRefusal.Describe(exception, "this request") },
                     statusCode: exception.IsCallerError
                         ? (int)exception.StatusCode
                         : StatusCodes.Status502BadGateway);

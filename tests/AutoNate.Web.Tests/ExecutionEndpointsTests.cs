@@ -433,10 +433,26 @@ public sealed class ExecutionEndpointsTests
             new { variables = new[] { new { name = "escalate", value = "true", type = "string" } } });
 
         // Flowable classified this correctly. Re-wrapping it as a 500 threw that
-        // away and turned a typo into an incident.
+        // away and turned a typo into an incident. That is what this row is for,
+        // and it still holds.
         Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Contains("already present", await response.Content.ReadAsStringAsync(),
-            StringComparison.Ordinal);
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        // #350 changed what the BODY carries. It used to be the engine's entire
+        // HTTP response -- the same field that has been observed carrying a JDBC
+        // URL with its password -- so it is described rather than forwarded.
+        Assert.DoesNotContain("Flowable could not", body, StringComparison.Ordinal);
+
+        // And #354 gave that description real content again. For one round this
+        // read "the reason is in the server log", which was the price of the
+        // sanitisation and was worse than what operators had.
+        Assert.Contains("already set on this step", body, StringComparison.Ordinal);
+
+        // Still nothing the engine wrote -- not even the execution id, which the
+        // caller already knows because it is in their own request URL.
+        Assert.DoesNotContain("proc-1'", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("escalate'", body, StringComparison.Ordinal);
     }
 
     [Fact]

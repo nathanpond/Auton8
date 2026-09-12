@@ -10,13 +10,13 @@
     "engine": {
       "$doc": "What Flowable actually does with it, established by deploying it (#103). Drives publish validation and nothing else.",
       "executes": "Deploys and runs.",
-      "annotation": "Deploys and carries no execution semantics BY DESIGN \u2014 a BPMN artifact, not a gap. Never refused.",
+      "annotation": "Deploys and carries no execution semantics BY DESIGN — a BPMN artifact, not a gap. Never refused.",
       "cannot-execute": "Deploys into silence, or is rejected by the engine. Refused at publish, quoting `reason`."
     },
     "$invariant": "studio=supported implies engine is not cannot-execute. The studio may not claim support for something the engine will not run; BpmnSupportManifestTests enforces it."
   },
   "flowableVersion": "8.0.0",
-  "generatedFrom": "#103 inventory \u2014 every verdict produced by deploying to a running engine",
+  "generatedFrom": "#103 inventory — every verdict produced by deploying to a running engine",
   "elements": [
     {
       "name": "Start Event (None)",
@@ -161,11 +161,11 @@
     {
       "name": "Message Start Event",
       "category": "Start Events",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "message",
-      "reason": "#112: started by POST /runtime/process-instances with {message}. Verified against Flowable 8.0.0.",
+      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
       "evidence": "deployed and started"
     },
     {
@@ -221,11 +221,11 @@
     {
       "name": "Intermediate Throw (Message)",
       "category": "Intermediate Events",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "message",
-      "reason": "#112: Flowable 8.0.0 REJECTS this at deployment (flowable-throw-event-invalid-eventdefinition). Publish expands it into a service task on the send behaviour, so it executes as authored.",
+      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
       "evidence": "no behaviour class; validator rejects the definition"
     },
     {
@@ -255,7 +255,7 @@
       "engine": "cannot-execute",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead \u2014 BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {
@@ -265,17 +265,17 @@
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: verified against 8.0.0. Compensation runs the handlers for activities that actually completed, in REVERSE order, and the throw waits for them before the process continues \u2014 measured with a recorded trail ('h3;h1;after;'), not by reading timestamps. A handler failure propagates rather than being swallowed.",
+      "reason": "#115: verified against 8.0.0. Compensation runs the handlers for activities that actually completed, in REVERSE order, and the throw waits for them before the process continues — measured with a recorded trail ('h3;h1;after;'), not by reading timestamps. A handler failure propagates rather than being swallowed.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
       "name": "Intermediate Catch (Message)",
       "category": "Intermediate Events",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "message",
-      "reason": "#112: waits, and is advanced by correlating on a declared process variable. Verified.",
+      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
       "evidence": "deployed and started"
     },
     {
@@ -305,17 +305,17 @@
       "engine": "cannot-execute",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead \u2014 BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {
       "name": "Message Boundary",
       "category": "Boundary Events",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "message",
-      "reason": "#112: interrupting and non-interrupting both demonstrated against the engine.",
+      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
       "evidence": "deployed and started"
     },
     {
@@ -355,7 +355,7 @@
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "error",
-      "reason": "#114: catches a matching error code and interrupts the attached activity. Verified end to end \u2014 the boundary path ran and the normal path did not.",
+      "reason": "#114: catches a matching error code and interrupts the attached activity. Verified end to end — the boundary path ran and the normal path did not.",
       "evidence": "deployed and started"
     },
     {
@@ -365,7 +365,7 @@
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "escalation",
-      "reason": "#114: interrupting and non-interrupting both verified \u2014 non-interrupting leaves the attached activity running.",
+      "reason": "#114: interrupting and non-interrupting both verified — non-interrupting leaves the attached activity running.",
       "evidence": "deployed and started"
     },
     {
@@ -385,7 +385,7 @@
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: the boundary event plus a <association> to an activity marked isForCompensation is what Flowable runs. Only activities that completed are compensated \u2014 an activity skipped by a gateway never had its handler run. A handler that WAITS (a user task or receive task) is refused at publish: Flowable fails its own transaction with an act_fk_exe_parent violation when such a handler is compensated during a task completion, and the task can then never be completed.",
+      "reason": "#115: the boundary event plus a <association> to an activity marked isForCompensation is what Flowable runs. Only activities that completed are compensated — an activity skipped by a gateway never had its handler run. A handler that WAITS (a user task or receive task) is refused at publish: Flowable fails its own transaction with an act_fk_exe_parent violation when such a handler is compensated during a task completion, and the task can then never be completed.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -395,17 +395,17 @@
       "engine": "cannot-execute",
       "localName": "boundaryEvent",
       "eventDefinition": null,
-      "reason": "#282: a boundary event with no event definition has nothing to wait for. Flowable refuses the deployment outright \u2014 [Validation set: 'flowable-executable-process' | Problem: 'flowable-boundary-event-no-event-definition'] \u2014 so it is withdrawn from the palette and refused at publish, naming the step. It had no row at all until #282, which meant the popup filter had no deny key for it and publish had nothing to match: it was placeable, published with zero errors, and failed at the engine.",
+      "reason": "#282: a boundary event with no event definition has nothing to wait for. Flowable refuses the deployment outright — [Validation set: 'flowable-executable-process' | Problem: 'flowable-boundary-event-no-event-definition'] — so it is withdrawn from the palette and refused at publish, naming the step. It had no row at all until #282, which meant the popup filter had no deny key for it and publish had nothing to match: it was placeable, published with zero errors, and failed at the engine.",
       "evidence": "deployed against a live 8.0.0 engine and refused: flowable-boundary-event-no-event-definition"
     },
     {
       "name": "Message End",
       "category": "End Events",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "message",
-      "reason": "#112: on its own this deploys, ends the process, and SENDS NOTHING \u2014 a catcher sat at one instance before and after. Publish expands it into a send plus a terminal end event, so it now does what it says.",
+      "reason": "#340: the studio cannot name the message. `updateMessageElementProperties` (workflow.js) writes only autonateCorrelationKey / autonateTargetProcessKey / autonateMessageName -- never messageRef -- and nothing in the SPA creates a <bpmn:message> root; contrast ensureSignalRootElement, which exists for signals. WorkflowStudio.tsx gates the Message field on selection.type === 'bpmn:SendTask' and renders it disabled otherwise. So a message event placed from the palette has no messageRef, cannot be given one, and publish refuses it with a remedy the product does not offer. The ENGINE axis is untouched: Flowable runs a correctly configured message event, and message correlation works -- every E2E test seeds its <bpmn:message> roots through the API, so Outcome 4 is unaffected. What was false was the authorability claim, exactly as it was for Send Task in #316. Making these authorable is M4b.",
       "evidence": "deployed and started"
     },
     {
@@ -455,7 +455,7 @@
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: executes by publish-time expansion. The raw element ends the process and compensates NOTHING \u2014 verified, the handler trail came back empty \u2014 the same silent-decoration shape as Message End (#112) and Signal End (#156). Publish rewrites the deployed copy into an intermediate throw followed by a none end event; the authored diagram keeps the end event.",
+      "reason": "#115: executes by publish-time expansion. The raw element ends the process and compensates NOTHING — verified, the handler trail came back empty — the same silent-decoration shape as Message End (#112) and Signal End (#156). Publish rewrites the deployed copy into an intermediate throw followed by a none end event; the authored diagram keeps the end event.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -485,7 +485,7 @@
       "engine": "executes",
       "localName": "manualTask",
       "eventDefinition": null,
-      "reason": "A manual task does not wait \u2014 the engine passes straight through it, creating no task and pausing nowhere. The studio converts it to a user task at design time (#167).",
+      "reason": "A manual task does not wait — the engine passes straight through it, creating no task and pausing nowhere. The studio converts it to a user task at design time (#167).",
       "evidence": "deployed, started, and observed NOT to wait: the process reached the next activity immediately"
     },
     {
@@ -495,8 +495,8 @@
       "engine": "cannot-execute",
       "localName": "businessRuleTask",
       "eventDefinition": null,
-      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) \u2014 see #105.",
-      "evidence": "NoClassDefFoundError org/kie/api \u2014 rules engine absent from the image (#105)"
+      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) — see #105.",
+      "evidence": "NoClassDefFoundError org/kie/api — rules engine absent from the image (#105)"
     },
     {
       "name": "Call Activity",
@@ -505,7 +505,7 @@
       "engine": "executes",
       "localName": "callActivity",
       "eventDefinition": null,
-      "reason": "#113: the author picks a published workflow; publish resolves that key to the definition that exists then and pins the deployed copy by id, because Flowable otherwise resolves the key at run time to whatever is latest \u2014 verified, an unchanged parent picked up a child version published after it.",
+      "reason": "#113: the author picks a published workflow; publish resolves that key to the definition that exists then and pins the deployed copy by id, because Flowable otherwise resolves the key at run time to whatever is latest — verified, an unchanged parent picked up a child version published after it.",
       "evidence": "first probe named a callee that did not exist; with a real callee, executes"
     },
     {
@@ -545,7 +545,7 @@
       "engine": "executes",
       "localName": "adHocSubProcess",
       "eventDefinition": null,
-      "reason": "#163: Flowable runs it and exposes NO REST surface for it. AdhocSubProcessActivityBehavior ships in 8.0.0 and RuntimeService carries the commands, but flowable-rest exposes none of them, so the extension adds actuator endpoints for listing enabled activities, starting one, and completing the subprocess. Verified: nothing auto-starts, the enabled activities come back with their names, and starting one twice produces two live instances of it \u2014 the repeatability that distinguishes this element from a parallel subprocess. Publish refuses an ad-hoc subprocess with no completion condition, which would otherwise deploy and then never finish.",
+      "reason": "#163: Flowable runs it and exposes NO REST surface for it. AdhocSubProcessActivityBehavior ships in 8.0.0 and RuntimeService carries the commands, but flowable-rest exposes none of them, so the extension adds actuator endpoints for listing enabled activities, starting one, and completing the subprocess. Verified: nothing auto-starts, the enabled activities come back with their names, and starting one twice produces two live instances of it — the repeatability that distinguishes this element from a parallel subprocess. Publish refuses an ad-hoc subprocess with no completion condition, which would otherwise deploy and then never finish.",
       "evidence": "deployed and started; enabled activities listed and started twice"
     },
     {
@@ -555,7 +555,7 @@
       "engine": "executes",
       "localName": "eventBasedGateway",
       "eventDefinition": null,
-      "reason": "#164: the first event to arrive takes its path and the others are cancelled \u2014 verified both ways round, with the loser asserted cancelled rather than merely not taken. Publish refuses a gateway with one path (which Flowable deploys happily) and one pointing at a receive task (which BPMN allows and this engine does not).",
+      "reason": "#164: the first event to arrive takes its path and the others are cancelled — verified both ways round, with the loser asserted cancelled rather than merely not taken. Publish refuses a gateway with one path (which Flowable deploys happily) and one pointing at a receive task (which BPMN allows and this engine does not).",
       "evidence": "deployed and started"
     },
     {
@@ -565,7 +565,7 @@
       "engine": "executes",
       "localName": "complexGateway",
       "eventDefinition": null,
-      "reason": "#218: executes by publish-time expansion. Flowable has no ComplexGatewayActivityBehavior, so the element's own activation condition is never evaluated \u2014 but it is NOT inert, and #103's \"passes the token straight through\" understates it. Verified against 8.0.0: it is recorded as activityType exclusiveGateway, it evaluates conditionExpression on its outgoing flows, it honours `default`, and with two conditions true it takes the first match. So a hand-authored complex gateway silently picks a branch. Publish now puts an author-written routing script in front of it and conditions its routes on the result, and the script must return one of the routes it was given.",
+      "reason": "#218: executes by publish-time expansion. Flowable has no ComplexGatewayActivityBehavior, so the element's own activation condition is never evaluated — but it is NOT inert, and #103's \"passes the token straight through\" understates it. Verified against 8.0.0: it is recorded as activityType exclusiveGateway, it evaluates conditionExpression on its outgoing flows, it honours `default`, and with two conditions true it takes the first match. So a hand-authored complex gateway silently picks a branch. Publish now puts an author-written routing script in front of it and conditions its routes on the result, and the script must return one of the routes it was given.",
       "evidence": "deployed and started; routing verified both ways round"
     },
     {
@@ -575,7 +575,7 @@
       "engine": "cannot-execute",
       "localName": "*",
       "eventDefinition": "standardLoopCharacteristics",
-      "reason": "#159: it does NOTHING. Measured against a control on the same task, every spelling of standardLoopCharacteristics ran the activity once \u2014 loopCondition ${true} with loopMaximum=3, ${loopCounter < 3}, and flowable:testBefore \u2014 while multiInstanceLoopCharacteristics with cardinality 3 on that same task ran it three times. So the marker is not mis-set and the measurement is not wrong: Flowable 8.0.0 has no standard loop. #103 recorded 'executes', which is wrong. Refused at publish, pointing at multi-instance, which does what an author reaching for a loop almost always wants.",
+      "reason": "#159: it does NOTHING. Measured against a control on the same task, every spelling of standardLoopCharacteristics ran the activity once — loopCondition ${true} with loopMaximum=3, ${loopCounter < 3}, and flowable:testBefore — while multiInstanceLoopCharacteristics with cardinality 3 on that same task ran it three times. So the marker is not mis-set and the measurement is not wrong: Flowable 8.0.0 has no standard loop. #103 recorded 'executes', which is wrong. Refused at publish, pointing at multi-instance, which does what an author reaching for a loop almost always wants.",
       "evidence": "deployed and started; one iteration against a three-iteration control"
     },
     {
@@ -605,7 +605,7 @@
       "engine": "executes",
       "localName": "*",
       "eventDefinition": "isForCompensation",
-      "reason": "#115: isForCompensation is what makes an activity a handler rather than a step nothing can reach. It survives the studio round trip untouched, along with the association \u2014 asserted, because bpmn-js drops what its moddle does not model.",
+      "reason": "#115: isForCompensation is what makes an activity a handler rather than a step nothing can reach. It survives the studio round trip untouched, along with the association — asserted, because bpmn-js drops what its moddle does not model.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -645,7 +645,7 @@
       "engine": "executes",
       "localName": "dataObjectReference",
       "eventDefinition": null,
-      "reason": "#166: a declaration that executes. Verified against 8.0.0 \u2014 a <dataObject> creates a real process variable with its declared type (amount = 42.5, type=double) and a gateway condition reads it. Stored as autonate:dataType and rewritten at publish into itemSubjectRef, because NEITHER BPMN spelling does both jobs: the bare QName types the variable but bpmn-js drops it (moddle resolves itemSubjectRef as a reference and a bare QName names nothing), while an itemDefinition indirection survives the modeller and leaves the engine producing string for everything. The declared type is NOT enforced at run time \u2014 assigning a string to an xsd:double variable replaces both value and type silently \u2014 so the declaration is a design-time contract, not a runtime guarantee.",
+      "reason": "#166: a declaration that executes. Verified against 8.0.0 — a <dataObject> creates a real process variable with its declared type (amount = 42.5, type=double) and a gateway condition reads it. Stored as autonate:dataType and rewritten at publish into itemSubjectRef, because NEITHER BPMN spelling does both jobs: the bare QName types the variable but bpmn-js drops it (moddle resolves itemSubjectRef as a reference and a bare QName names nothing), while an itemDefinition indirection survives the modeller and leaves the engine producing string for everything. The declared type is NOT enforced at run time — assigning a string to an xsd:double variable replaces both value and type silently — so the declaration is a design-time contract, not a runtime guarantee.",
       "evidence": "deployed and started; declared type observed on the process variable"
     },
     {

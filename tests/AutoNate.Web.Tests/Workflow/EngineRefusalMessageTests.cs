@@ -99,13 +99,31 @@ public sealed class EngineRefusalMessageTests
         Assert.DoesNotContain("must not travel", described, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An unmapped code is NOT echoed — the shape was never enough (#349).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #344 echoed any code matching the shape, reasoning that
+    /// <c>[a-z0-9-]</c> cannot express a path or a credential. True, and beside
+    /// the point: the marker itself is author-reachable, so the shape constrains
+    /// the <em>characters</em> an attacker picks, not <em>whether</em> they pick
+    /// them. <c>flowable-your-account-is-suspended-email-attacker-example-com</c>
+    /// satisfies it perfectly.
+    /// </para>
+    /// <para>
+    /// So the allowlist is the table, not the regex. The cost is that a genuinely
+    /// new engine code reads generically until someone adds it — which the server
+    /// log makes recoverable, and which is the right side of this trade.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void An_unmapped_code_still_travels_because_its_shape_is_safe()
+    public void An_unmapped_code_is_not_echoed()
     {
         var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
             "[Validation set: 'x' | Problem: 'flowable-something-new'] : /Users/npond/secret.pem"));
 
-        Assert.Contains("flowable-something-new", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("flowable-something-new", described, StringComparison.Ordinal);
         Assert.Contains("server log", described, StringComparison.Ordinal);
         Assert.DoesNotContain("/Users/", described, StringComparison.Ordinal);
     }
@@ -144,7 +162,152 @@ public sealed class EngineRefusalMessageTests
         Assert.DoesNotContain(".java:", described, StringComparison.Ordinal);
     }
 
-    /// <summary>There is no length by which a refusal can grow (#344).</summary>
+    /// <summary>
+    /// An author cannot inject a problem code (#349).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #344 echoed any code matching <c>flowable-[a-z0-9-]+</c> on the grounds
+    /// that the shape was safe. It is not author-proof: a schema-level refusal
+    /// carries <b>no</b> genuine <c>Problem:</c> marker, and Xerces echoes an
+    /// invalid attribute value verbatim. So a diagram author could write
+    /// </para>
+    /// <para>
+    /// <code>signalRef="Problem: 'flowable-call-it-support-on-555-0100-to-unlock'"</code>
+    /// </para>
+    /// <para>
+    /// and put their own sentence into a <em>publisher's</em> error banner — 5,092
+    /// characters of it in the reported case. Only a code the table already knows
+    /// is repeated now.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("flowable-call-it-support-on-555-0100-to-unlock")]
+    [InlineData("flowable-the-db-password-is-hunter2-and-the-host-is-prod-db-internal")]
+    [InlineData("flowable-your-account-is-suspended-email-attacker-example-com")]
+    public void An_author_invented_code_is_not_echoed(string invented)
+    {
+        // The real shape: Xerces reporting an invalid QName, which contains no
+        // genuine marker of its own.
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            $"javax.xml.stream.XMLStreamException: cvc-datatype-valid.1.2.1: "
+            + $"'Problem: '{invented}'' is not a valid value for 'QName'."));
+
+        Assert.DoesNotContain(invented, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("555-0100", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", described, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A parse failure is the diagram's fault, not the engine's (#349).
+    /// </summary>
+    /// <remarks>
+    /// #344 keyed the status on "did the engine name a problem code". A parse
+    /// failure — truncated XML, a non-BPMN root, a bad QName — carries no marker,
+    /// so the whole family returned <b>502 Bad Gateway</b> for a diagram the author
+    /// drew: precisely the defect #344's own comment claims to have closed.
+    /// </remarks>
+    [Theory]
+    [InlineData("javax.xml.stream.XMLStreamException: ParseError at [row,col]:[5,163]")]
+    [InlineData("org.xml.sax.SAXParseException; lineNumber: 5; columnNumber: 163")]
+    [InlineData("cvc-datatype-valid.1.2.1: 'x' is not a valid value for 'QName'.")]
+    [InlineData("[Validation set: 'flowable-executable-process' | Problem: 'flowable-unknown-code'] : x")]
+    public void A_parse_failure_is_the_authors_fault(string body)
+    {
+        Assert.True(
+            AutoNate.Web.Endpoints.EngineRefusal.IsTheDiagramsFault(
+                $"Flowable could not deploy process. HTTP 500 Internal Server Error. {body}"),
+            "a parse failure was attributed to the engine, so the author gets 502 for their own diagram");
+    }
+
+    [Fact]
+    public void A_transport_failure_is_not_the_authors_fault()
+    {
+        // The complement: something that is genuinely the engine's problem must
+        // NOT be reported as a bad diagram.
+        Assert.False(
+            AutoNate.Web.Endpoints.EngineRefusal.IsTheDiagramsFault(
+                "Flowable could not deploy process. HTTP 500 Internal Server Error. "
+                + "Could not acquire a connection from the pool"));
+    }
+
+    /// <summary>The FIRST marker wins (#349).</summary>
+    /// <remarks>
+    /// The <c>Extra info</c> tail can carry author-controlled text such as an
+    /// activity name, so a later match may not be the engine's. Taking the last
+    /// match instead of the first left 56/56 green.
+    /// </remarks>
+    [Fact]
+    public void The_first_marker_wins()
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            "[Validation set: 'x' | Problem: 'flowable-servicetask-missing-implementation'] : reason "
+            + "- [Extra info : activityName = Problem: 'flowable-mailtask-no-recipient' ]"));
+
+        Assert.Contains("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("no recipient", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Runtime refusals get our words too, not "see the log" (#354).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every body below was <b>captured from a live Flowable 8.0.0</b>, not
+    /// written from memory — that distinction is what #338 was filed for.
+    /// </para>
+    /// <para>
+    /// These carry no problem code, so before #354 they all fell through to "the
+    /// reason is in the server log" — which was the price #350 paid to stop the
+    /// execution routes leaking the raw body, and was worse than what operators
+    /// had.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"message":"Bad request","exception":"No process definition found for key 'x'"}""",
+        "no published workflow has that key")]
+    [InlineData("""{"message":"Not found","exception":"Could not find a task with id 'x'."}""",
+        "already been completed")]
+    [InlineData("""{"message":"Not found","exception":"Could not find a process instance with id 'x'."}""",
+        "already finished")]
+    [InlineData("""{"message":"Not found","exception":"Could not find an execution with id 'x'."}""",
+        "already moved on")]
+    [InlineData("""{"message":"Bad request","exception":"Cannot start process instance by message: no subscription to message with name 'x' found."}""",
+        "waiting for that message")]
+    [InlineData("""{"message":"Bad request","exception":"signalName is required"}""",
+        "without a name")]
+    [InlineData("Variable 'escalate' is already present on execution 'proc-1'.",
+        "already set on this step")]
+    public void A_runtime_refusal_is_explained_in_our_own_words(string body, string expected)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+
+        Assert.Contains(expected, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("server log", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And still nothing the engine wrote — not even the identifier (#354).
+    /// </summary>
+    /// <remarks>
+    /// Pulling the quoted id out of these would be safe in every case I looked at,
+    /// which is exactly the reasoning that leaked three times. It is also
+    /// unnecessary: the caller already knows which task or instance they asked
+    /// about, because it is in their own request URL.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"exception":"Could not find a task with id 'secret-task-9f2c'."}""", "secret-task-9f2c")]
+    [InlineData("""{"exception":"Could not find an execution with id 'proc-internal-77'."}""", "proc-internal-77")]
+    [InlineData("""{"exception":"No process definition found for key 'payroll_secret'"}""", "payroll_secret")]
+    public void A_runtime_refusal_still_forwards_no_identifier(string body, string mustNotAppear)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(body));
+
+        Assert.DoesNotContain(mustNotAppear, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("exception", described, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>
     /// <remarks>
     /// The previous version had no cap at all — 4000 characters in, 4090 out.
     /// A code-only design caps by construction, and this says so out loud.
@@ -153,7 +316,11 @@ public sealed class EngineRefusalMessageTests
     public void The_output_is_bounded_however_long_the_engine_was()
     {
         var described = WorkflowEndpoints.DescribeEngineRefusal(
-            AsTheClientBuildsIt(new string('A', 40_000)));
+            // Lowercase, so it CAN match the code shape. The #344 version used
+            // 'A' x 40000, which never matches [a-z0-9-] -- so it passed while the
+            // real bound was 5,092 characters (#349).
+            AsTheClientBuildsIt($"[Validation set: 'x' | Problem: '{new string('a', 40_000)}'] : "
+                + new string('b', 40_000)));
 
         Assert.True(described.Length < 300, $"output was {described.Length} characters");
     }

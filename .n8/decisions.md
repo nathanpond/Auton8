@@ -5383,3 +5383,174 @@ not the whole sentence, so wording can improve, but the *fact* each asserts,
 because that is the evidence a descope happened. Plus the row set itself, and the
 two provenance fields (`flowableVersion`, `generatedFrom`) which could both be
 rewritten with nothing failing.
+
+## Round 12 — 2026-09-12 (during /n8-exec M4)
+
+**#350 — the leak was never only on publish (Rule 2).** Three rounds fixed the raw
+Flowable body reaching a browser, all three on the *publish route*, because that is
+where the issue in front of them said it was. Four routes in `ExecutionEndpoints.cs`
+returned `new { message = exception.Message }` the whole time — the engine's entire
+HTTP body, Spring's `trace` included — to anyone who can interact with a running
+process instance. Two were not gated on `IsCallerError`, so a Flowable 5xx went
+straight through.
+
+My own comment in #344 said "the raw text never reaches the browser". One
+`grep -rn 'exception.Message' src/AutoNate.Web/Endpoints/` would have shown that was
+false, in any of the three rounds.
+
+Extracted `EngineRefusal` so every endpoint can reach one describer, routed all five
+sites through it, and log the raw text at Warning at each.
+
+**The guard is the point, not the five fixes.** `NoEndpointReturnsARawEngineMessageTests`
+scans `FlowableRequestException` catch blocks for a message reaching a response, and
+separately requires every such block that answers a caller to log. A unit test proves
+one describer is correct; it cannot notice a route that never calls it.
+
+Scoped to Flowable catch blocks deliberately: a first version scanned for any
+`ex.Message` in a response and flagged eight unrelated sites — AQL parse errors,
+code-transformer failures, projection errors — where the message IS the useful thing
+and is written by our own code. Flagging those would have made the guard noise
+someone edits away. **Those eight are a genuine separate question and are not
+touched here** (outside this story's scope).
+
+**#349 — the shape was never enough (Rule 1).** #344 echoed any code matching
+`flowable-[a-z0-9-]+`, reasoning the shape cannot express a path or a credential.
+True, and beside the point: the marker is author-reachable. A schema refusal carries
+no genuine `Problem:` marker and Xerces echoes invalid attribute values, so
+`signalRef="Problem: 'flowable-call-it-support-on-555-0100'"` put the author's own
+sentence into a *publisher's* error banner — 5,092 characters of it.
+
+The allowlist is now the table, not the regex. Cost: a genuinely new engine code
+reads generically until someone adds it, which the log makes recoverable.
+
+Three more #349 items:
+- **Parse failures returned 502** — a truncated document or a bad QName carries no
+  marker, so the whole family was attributed to the engine. `IsTheDiagramsFault` now
+  recognises the parser's own signatures. A parse failure is always the diagram.
+- **Three table keys were near-miss spellings** and one (`flowable-bpmn-parse-failure`)
+  was invented and can never fire. Corrected against captured refusals, with the old
+  spellings named in comments so nobody "fixes" them back.
+- **The cap test was a stub** — its payload was `'A' x 40000` and uppercase can never
+  match `[a-z0-9-]`, so it passed while the real bound was 5,092 characters.
+
+Two mutations that were green are now caught: last-match-instead-of-first (the
+`Extra info` tail carries author-controlled text, so ordering is load-bearing), and
+deleting the logger.
+
+**#351 — the seventh axis, and two more root cells (Rule 1).** The generator had
+been built from what previous bugs looked like rather than from what the producer
+emits. `<flowable:autonateSignalScope>` was the **sole child** of
+`extensionElements` in every diagram this repo has ever tested, and
+`workflow.js:1193-1206` does `values: [...keptExtensions, scopeElement]` — it
+*appends*. Any event with an execution listener puts the scope second, which is the
+shape the studio actually produces and the one nothing tested.
+
+Four mutations were green; all four now fail 3 seeds:
+
+| mutation | was | now |
+|---|---|---|
+| `RawSignalScope` → bare `.FirstOrDefault()` | green | 3 red |
+| root loop `uses.Take(1)` | green | 3 red |
+| root's spelling read by a second hand-rolled switch | green | 3 red |
+| (re-confirmed) the three #345 catches | red | red |
+
+The last of those is the "two readers drift apart" shape #278's refactor exists to
+prevent, surviving seven rounds because the root's scope was only ever spelled the
+one canonical way. Measured before modelling: `instance`, `Instance`,
+`PROCESSINSTANCE` and `  processInstance  ` on a root are all accepted today and
+normalise to `processInstance`; `GLOBAL` normalises to no attribute; `local` is
+refused and left as authored.
+
+Three new floors so none of the cells can silently re-empty.
+
+**#352 — the fix landed on one of 36 copies (Rule 2).** `describeError` was fixed in
+`pages/workflow-executions/utils.ts`; the publish path uses
+`WorkflowStudio.tsx`'s own local copy, which still read `data.message` and rendered
+axios's "Request failed with status code 400". Moved the implementation to
+`lib/describeError.ts`, pointed both at it, and left the re-export so existing
+importers keep working.
+
+**The other 34 copies are not touched.** Consolidating them is a refactor of its own,
+and doing it blind with no SPA test runner (#323) would trade one silent regression
+for thirty-four. Verified by `tsc -b --force` (clean) and `npm run lint` (0 errors,
+98 warnings — exactly the ratchet). That is inspection plus typecheck, not a test,
+and it stays that way until #323 lands.
+
+**A real cost of #350, filed rather than absorbed (#354).** `EngineRefusal` maps
+deployment validation codes; runtime errors carry none, so
+`"Variable 'escalate' is already present on execution 'proc-1'"` became
+`"The workflow engine refused this request. The reason is in the server log."`
+The status still classifies correctly, so this is usability, not correctness.
+
+Not reverted, because "a 409 body is harmless" is exactly the reasoning that leaked
+three times — each of #334, #339 and #344 decided some subset of engine text was
+safe to forward and each was wrong about a shape nobody had imagined. The other half
+of the work is mapping the runtime classes the execution routes actually produce,
+captured from a live engine the way the deployment table was.
+
+The existing test now records the loss in a comment rather than quietly asserting
+the new behaviour as though it were the goal.
+
+**Blocker — round 12's PR is not merged.** 21 of 23 checks pass; **Backend
+reconciliation** and **Backend coverage** are stuck `queued` in GitHub's runner
+queue (run 34713439536, `updatedAt` unchanged for ~40 minutes, only one CI run
+queued repo-side). Not a red check, not a repo concurrency block, not something a
+re-run fixes.
+
+Not merged deliberately: those two are exactly the load-bearing gates CLAUDE.md
+names — the test-count reconciliation that fails when the shards do not run every
+discovered test, and `COVERAGE_THRESHOLD`. Merging past those because everything
+else is green is the false green the guards exist to prevent.
+
+Local: 2471/2471, tsc clean, lint 0 errors / 98 warnings (the ratchet). The branch
+is pushed and PR #355 is open; when the queue clears the gates should finish
+unattended.
+
+## Round 12b — 2026-09-12 (owner decisions answered)
+
+The owner answered the three open questions directly.
+
+**#340 — "Withdraw the five rows."** Chosen over building studio authorability now,
+on the grounds that it is the decision already made for the identical situation
+(#316, Send Task) and does not re-widen a scope that was deliberately narrowed.
+
+Message Start Event, Intermediate Throw (Message), Intermediate Catch (Message),
+Message Boundary and Message End are now `studio: withdrawn`, each carrying the
+reason. The **engine axis is untouched** — all five remain `engine: executes`,
+message correlation works, and every E2E test seeds its `<bpmn:message>` roots
+through the API, so Outcome 4 is unaffected. Making them authorable is M4b,
+alongside #328.
+
+Evidence that the engine axis really is untouched: withdrawing them broke exactly
+two tests — the tally guard and the membership guard, both of which exist to notice
+this — and nothing else in 635.
+
+**#354 — fix it before closing.** Captured the real runtime refusals from a live
+engine rather than reading Flowable's source:
+
+    400 {"exception":"No process definition found for key 'x'"}
+    404 {"exception":"Could not find a task with id 'x'."}
+    404 {"exception":"Could not find a process instance with id 'x'."}
+    404 {"exception":"Could not find an execution with id 'x'."}
+    400 {"exception":"signalName is required"}
+    400 {"exception":"Cannot start process instance by message: no subscription…"}
+
+These carry no problem code, so they all fell through to "the reason is in the
+server log" — the price #350 paid, and worse than what operators had. They are now
+recognised by sentence fragment and answered in our own words.
+
+**Nothing is extracted from them, not even the identifier.** Pulling the quoted id
+out would be safe in every case I looked at, which is exactly the reasoning that
+leaked three times — and it is unnecessary, because the caller already knows which
+task or instance they asked about: it is in their own request URL.
+
+**DESCOPED provenance — "quote the decisions ledger."** Chosen over waiving the
+requirement. Seven of eight lines carried only an attribution; four now quote
+`.n8/decisions.md` as written at the time, and the block carries a header saying
+plainly that this is **sourcing, not the owner speaking**, so a later reader can
+tell which they are looking at. The remaining lines either already quoted the owner
+(Compensation Start Event) or point at the ledger (#6), and the two new ones
+(Send Task, the message rows) record the decision that was actually made.
+
+Map arithmetic follows: `covers: 36`, `withdrawn=14`, `49 + 16 + 4 = 69`, and
+13 baseline + 36 delivered = 49 supported.

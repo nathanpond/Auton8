@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { describeError } from "@/lib/describeError";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
@@ -5462,13 +5463,6 @@ function formatTimestamp(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    const response = (error as { response?: { data?: { message?: string } } }).response;
-    return response?.data?.message ?? error.message;
-  }
-  return String(error);
-}
 
 // Minimal BPMN starter diagram that the server-side prepare endpoint will patch up with the
 // correct process key and name via WorkflowBpmnXml.ApplyProcessMetadata.

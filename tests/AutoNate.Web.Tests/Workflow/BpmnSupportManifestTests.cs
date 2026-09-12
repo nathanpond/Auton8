@@ -94,8 +94,11 @@ public sealed class BpmnSupportManifestTests
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["total"] = 69,
-            ["studio:supported"] = 54,
-            ["studio:withdrawn"] = 11,
+            // 54/11 until #340 withdrew the five message rows: the studio cannot
+            // create or name a <bpmn:message> root, so they were never authorable.
+            // The engine axis is unchanged -- all five still `engine: executes`.
+            ["studio:supported"] = 49,
+            ["studio:withdrawn"] = 16,
             ["studio:coming-soon"] = 4,
             ["engine:executes"] = 57,
             ["engine:cannot-execute"] = 9,
@@ -166,8 +169,9 @@ public sealed class BpmnSupportManifestTests
         string[] expectedWithdrawn =
         [
             "Boundary Event (None)", "Cancel Boundary", "Cancel End", "Compensation Start Event",
-            "Intermediate Catch (Link)", "Intermediate Throw (Link)", "Loop Marker", "Manual Task",
-            "Send Task", "Task (Generic)", "Transaction",
+            "Intermediate Catch (Link)", "Intermediate Catch (Message)", "Intermediate Throw (Link)",
+            "Intermediate Throw (Message)", "Loop Marker", "Manual Task", "Message Boundary",
+            "Message End", "Message Start Event", "Send Task", "Task (Generic)", "Transaction",
         ];
         string[] expectedComingSoon =
         [
