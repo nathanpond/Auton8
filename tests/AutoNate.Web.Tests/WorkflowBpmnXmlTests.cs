@@ -4732,6 +4732,94 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Contains("every run fails", error, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An empty or whitespace target is refused too (#341).
+    /// </summary>
+    /// <remarks>
+    /// No row used an empty <c>calledElement</c>, so the whole-string check was
+    /// unpinned: <c>IsNullOrWhiteSpace</c> → <c>is not null</c> left 188/188
+    /// green. Measured — <c>calledElement=""</c> <b>deploys</b> and every start
+    /// fails 400 <c>Process definition null was not found</c>, which is the
+    /// founding complaint of this milestone, reachable through the guard written
+    /// against it.
+    /// </remarks>
+    [Theory]
+    [InlineData("""calledElement="" """)]
+    [InlineData("""calledElement="   " """)]
+    public void A_call_activity_whose_target_is_blank_is_refused(string attribute)
+    {
+        var xml = UnnamedTriggerDiagram($"""<bpmn:callActivity id="x" name="Run it" {attribute}/>""");
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("Call activity", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The repeat rule applies to every activity, not just user tasks (#341).
+    /// </summary>
+    /// <remarks>
+    /// <c>toggle-parallel-mi</c> puts the marker on any activity, and the engine
+    /// refuses MI-without-collection on <c>subProcess</c>, <c>callActivity</c> and
+    /// <c>receiveTask</c> as well (measured). Narrowing the rule to
+    /// <c>bpmn:userTask</c> left 188/188 green.
+    /// </remarks>
+    [Theory]
+    [InlineData("""
+        <bpmn:subProcess id="x" name="Each one">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+          <bpmn:startEvent id="is" />
+        </bpmn:subProcess>
+        """)]
+    [InlineData("""
+        <bpmn:callActivity id="x" name="Each one" calledElement="child">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:callActivity>
+        """)]
+    [InlineData("""
+        <bpmn:receiveTask id="x" name="Each one">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:receiveTask>
+        """)]
+    [InlineData("""
+        <bpmn:serviceTask id="x" name="Each one" flowable:class="com.example.T">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+        </bpmn:serviceTask>
+        """)]
+    public void A_repeat_with_nothing_to_repeat_over_is_refused_on_any_activity(string element)
+    {
+        var xml = UnnamedTriggerDiagram(element);
+
+        Assert.Contains(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("nothing to repeat over", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The message column reaches throw and end too (#341).
+    /// </summary>
+    /// <remarks>
+    /// The position theory carried <c>endEvent</c> for signals only; the message
+    /// rows stopped at catch and start. Dropping the refusal for message
+    /// <c>endEvent</c>/<c>intermediateThrowEvent</c> left 188/188 green, and the
+    /// engine <b>does</b> refuse <c>end</c> + message + absent ref (measured).
+    /// Both the code and its remarks claim the rule "walks positions rather than
+    /// listing them" — that property was unguarded for half the table.
+    /// </remarks>
+    [Theory]
+    [InlineData("endEvent")]
+    [InlineData("intermediateThrowEvent")]
+    public void A_message_throw_or_end_with_no_message_set_is_refused(string position)
+    {
+        var xml = UnnamedTriggerDiagram(
+            $"""<bpmn:{position} id="x" name="Tell them"><bpmn:messageEventDefinition /></bpmn:{position}>""");
+
+        var error = Assert.Single(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            e => e.Contains("has no", StringComparison.Ordinal));
+        Assert.Contains("no message set yet", error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void A_call_activity_that_names_its_target_is_accepted()
     {

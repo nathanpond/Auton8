@@ -5223,3 +5223,62 @@ pinned by its own row. Overstating which line provides a defence is exactly how
 authorability the round-8 replan explicitly moved to M4b, are both product-scope
 decisions (Rule 4). Options and my lean are on the issue; labelled `blocked` +
 `needs-owner-action`.
+
+**#341 — six surviving mutations (Rule 1/2).** Each guard added in #337 went red
+on the mutation it was written for; these are the ones it did not catch. All now
+do:
+
+| mutation | before | now |
+|---|---|---|
+| `calledElement` `IsNullOrWhiteSpace` -> `is not null` | 188/188 green | 2 red |
+| MI rule narrowed to `bpmn:userTask` | 188/188 green | 4 red |
+| message `endEvent`/`throw` refusal dropped | 188/188 green | 2 red |
+| `ContainsScriptTask` -> process-level children only | 75/75 green | 1 red |
+| `signalRef` lookup -> `.FirstOrDefault()` | 585/585 green | 3 red |
+| `.git` walk rephrased three ways | all passed | all 3 caught and named |
+
+The `calledElement` one mattered most: measured, `calledElement=""` **deploys**
+and every start fails 400, so the founding complaint was reachable through the
+guard written against it.
+
+**The signal-identity axis was the fifth consecutive freeze** in one generator —
+vocabulary (#278), arity (#290), kind (#306), container (#314), identity (#341).
+It now generates a two-independent-signal root shape and splits events across
+them, with floors so dropping either fails loudly. Doing that forced three
+corrections to my own model, and they are worth recording because each was the
+test being wrong rather than the product:
+
+1. the `root=` label never learned about the new shape, so two-signal diagrams
+   printed as `plain` and I spent a cycle chasing a phantom;
+2. the refusal filter matched only `the.signal`, so a genuine refusal naming
+   `other.signal` was recorded as an acceptance;
+3. "a refused diagram is left exactly as authored" was a single-signal law. A
+   diagram refused over Sig_2 still resolves Sig_1 correctly, and an unrecognised
+   spelling is a fact about the signal it was written on, not the document. The
+   oracle now returns which signal is the problem.
+
+Also removed a dead branch: the rule accepted an unprefixed `collection`
+attribute, which the BPMN XSD rejects outright, so it could only ever be a false
+accept.
+
+`RepoRootAnchorTests` now matches the two halves separately rather than one
+arrangement of them, scans `src/` as well as `tests/`, and self-checks against
+all three rephrasings that beat the first version.
+
+**#342 — the fourth drift, and the blind spot under it (Rule 2).** Corrected
+`covers: 42` -> 41, added Send Task to the `descoped:` list and gave it a
+DESCOPED line with its reason like every other withdrawal, annotated it WITHDRAWN
+in the delivered enumeration, and recorded the fourth drift in the block that
+already records three.
+
+The guard itself was a **total-only ratchet**: swapping Send Task
+withdrawn->supported against Receive Task supported->withdrawn left every tally
+identical and the suite green at 49/49 — so the element #316 withdrew for
+drawing-fine-and-doing-nothing could be silently reinstated. Membership of the
+two non-default statuses is now pinned by name. Only those two: listing all 54
+supported rows would make every addition a two-file edit for no signal, while a
+row LEAVING supported necessarily enters one of these lists.
+
+Six of seven DESCOPED lines still lack the owner's quoted words. Not fixed —
+inventing quotations is worse than the gap, and only the owner can supply them.
+Reported.

@@ -3068,9 +3068,12 @@ public static partial class WorkflowBpmnXml
         foreach (var loop in document.Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics"))
         {
             // Flowable takes EITHER a collection to iterate or a fixed cardinality.
+            //
+            // The UNPREFIXED `collection` attribute was also accepted here and is
+            // not a thing: the BPMN XSD rejects it outright, so that branch could
+            // only ever be a false accept (#341). Flowable's is namespaced.
             var hasCollection =
-                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value)
-                || !string.IsNullOrWhiteSpace(loop.Attribute("collection")?.Value);
+                !string.IsNullOrWhiteSpace(loop.Attribute(FlowableNamespace + "collection")?.Value);
 
             var hasCardinality = loop
                 .Elements(BpmnNamespace + "loopCardinality")
