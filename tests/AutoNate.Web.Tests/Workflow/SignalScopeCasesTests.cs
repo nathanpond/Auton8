@@ -43,15 +43,47 @@ public sealed class SignalScopeCasesTests
     private static readonly XNamespace Flowable = "http://flowable.org/bpmn";
 
     /// <summary>An event referencing a signal, optionally declaring a scope.</summary>
-    private static string Event(string localName, string id, string? scope, string extra = "", string signalRef = "Sig_1")
+    /// <summary>
+    /// An event referencing a signal, optionally declaring a scope (#351).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="siblingFirst"/> is the seventh axis. Every diagram this
+    /// repository has ever tested made <c>autonateSignalScope</c> the <b>sole
+    /// child</b> of <c>extensionElements</c> — and the studio never writes it that
+    /// way. <c>workflow.js:1193-1206</c> does
+    /// <c>values: [...keptExtensions, scopeElement]</c>: it <em>appends</em>, so
+    /// any event carrying an execution listener, or imported from another
+    /// modeller, puts the scope second.
+    /// </para>
+    /// <para>
+    /// Pointing <c>RawSignalScope</c> at a bare <c>.FirstOrDefault()</c> left
+    /// 623/623 green while restoring #278 exactly: the same event, the same
+    /// <c>value="instance"</c>, silently loses its scope and runs engine-wide.
+    /// </para>
+    /// <para>
+    /// The generator had been built from what previous bugs looked like rather
+    /// than from what the producer emits. This row exists because the producer
+    /// emits it.
+    /// </para>
+    /// </remarks>
+    private static string Event(
+        string localName, string id, string? scope, string extra = "",
+        string signalRef = "Sig_1", bool siblingFirst = false)
     {
+        // Plain concatenation rather than a nested raw literal: the indentation
+        // rules for those make an interpolated multi-line fragment a trap.
+        var sibling = siblingFirst
+            ? "<flowable:executionListener event=\"start\" "
+              + "delegateExpression=\"${autonateBehaviorDelegate}\" />"
+            : "";
+
         var ext = scope is null
             ? ""
-            : $"""
-                 <bpmn:extensionElements>
-                    <flowable:autonateSignalScope value="{scope}" />
-                  </bpmn:extensionElements>
-               """;
+            : "<bpmn:extensionElements>" + sibling
+              + $"<flowable:autonateSignalScope value=\"{scope}\" />"
+              + "</bpmn:extensionElements>";
+
         return $"""
               <bpmn:{localName} id="{id}" name="{id}"{extra}>
                 {ext}
@@ -112,6 +144,20 @@ public sealed class SignalScopeCasesTests
     private const string TwoRootsFirstScoped = """
           <bpmn:signal id="Sig_1" name="the.signal" flowable:scope="processInstance" />
           <bpmn:signal id="Sig_2" name="other.signal" />
+        """;
+
+    /// <summary>
+    /// Two signals where the SECOND carries the scope (#351).
+    /// </summary>
+    /// <remarks>
+    /// <c>TwoRootsFirstScoped</c> covered only root #1, and the root loop was
+    /// therefore never asked to look past the first entry: <c>uses.Take(1)</c>
+    /// left 623/623 green. Measured — Sig_2 keeps <c>processInstance</c>, Sig_1
+    /// gets nothing.
+    /// </remarks>
+    private const string TwoRootsSecondScoped = """
+          <bpmn:signal id="Sig_1" name="the.signal" />
+          <bpmn:signal id="Sig_2" name="other.signal" flowable:scope="processInstance" />
         """;
 
     private const string TwoIndependentRoots = """
@@ -809,6 +855,9 @@ public sealed class SignalScopeCasesTests
         var startsInEventSubProcess = 0;
         var eventsOnSecondSignal = 0;
         var globalRootDiagrams = 0;
+        var extensionSiblings = 0;
+        var secondRootCarriesScope = 0;
+        var nonCanonicalRootSpellings = 0;
         var twoRootsWithCarriedScope = 0;
 
         for (var iteration = 0; iteration < 400; iteration++)
@@ -816,23 +865,39 @@ public sealed class SignalScopeCasesTests
             // Five root shapes. #341 added the two-signal one; #345 added the
             // global-carrying root and the two-signal-with-a-carried-scope shape,
             // which were the two empty cells three surviving mutations lived in.
-            var rootChoice = random.Next(5);
-            var twoSignals = rootChoice is 3 or 4;
+            var rootChoice = random.Next(6);
+            var twoSignals = rootChoice is 3 or 4 or 5;
+
+            // #351: the ROOT's spelling varies too. It was only ever the two
+            // canonical words, so a hand-rolled second reader of it -- the exact
+            // "two readers drift apart" shape #278's refactor exists to prevent --
+            // left 623/623 green. Measured: every spelling below is accepted today
+            // and normalises to processInstance, except GLOBAL which normalises to
+            // no attribute at all.
+            string[] rootSpellings =
+                ["processInstance", "instance", "Instance", "PROCESSINSTANCE", "  processInstance  "];
+            var spelling = rootSpellings[random.Next(rootSpellings.Length)];
+
             var rootXml = rootChoice switch
             {
-                1 => PreScopedRoot,
+                1 => PreScopedRoot.Replace("processInstance", spelling, StringComparison.Ordinal),
                 2 => GlobalRoot,
                 3 => TwoIndependentRoots,
-                4 => TwoRootsFirstScoped,
+                4 => TwoRootsFirstScoped.Replace("processInstance", spelling, StringComparison.Ordinal),
+                5 => TwoRootsSecondScoped,
                 _ => PlainRoot,
             };
-            // What Sig_1's root carries as authored. Sig_2 never carries one.
+
+            // What Sig_1's root carries, as AUTHORED -- a refused diagram is left
+            // at exactly this, so the raw text matters, not its interpretation.
             var carried = rootChoice switch
             {
-                1 or 4 => "processInstance",
+                1 or 4 => spelling,
                 2 => "global",
                 _ => null,
             };
+            // And Sig_2's, which until #351 was always null.
+            var carriedSecond = rootChoice == 5 ? "processInstance" : null;
 
             // One to four events. One is the shape #278 lived in; two is #290's;
             // three and four are shapes no grid has ever contained.
@@ -860,10 +925,18 @@ public sealed class SignalScopeCasesTests
                 // Which signal this event points at. Only meaningful when the
                 // diagram declares two; otherwise everything uses Sig_1.
                 var usesSecond = twoSignals && random.Next(2) == 0;
+
+                // #351: does anything sit AHEAD of the scope declaration? The
+                // studio always appends, so this is the shape the product
+                // actually produces -- and it was never generated.
+                var siblingFirst = declared is not null && random.Next(2) == 0;
+                if (siblingFirst) extensionSiblings++;
+
                 chosen.Add((localName, declared, inEventSub, usesSecond));
 
                 var element = Event(localName, $"e{e}", declared, extra,
-                    signalRef: usesSecond ? "Sig_2" : "Sig_1");
+                    signalRef: usesSecond ? "Sig_2" : "Sig_1",
+                    siblingFirst: siblingFirst);
                 body.Append(inEventSub
                     ? $"""
                         <bpmn:subProcess id="es{e}" name="Handler {e}" triggeredByEvent="true">
@@ -874,14 +947,16 @@ public sealed class SignalScopeCasesTests
             }
 
             if (rootChoice == 2) globalRootDiagrams++;
-            if (rootChoice == 4) twoRootsWithCarriedScope++;
+            if (rootChoice is 4 or 5) twoRootsWithCarriedScope++;
+            if (rootChoice == 5) secondRootCarriesScope++;
+            if (rootChoice is 1 or 4 && spelling != "processInstance") nonCanonicalRootSpellings++;
             eventsOnSecondSignal += chosen.Count(c => c.UsesSecondSignal);
             startsAtProcessLevel += chosen.Count(c => c.Kind == "startEvent" && !c.InEventSubProcess);
             startsInEventSubProcess += chosen.Count(c => c.Kind == "startEvent" && c.InEventSubProcess);
 
             var xml = Diagram(body.ToString(), rootXml);
             var because =
-                $"seed {seed}, iteration {iteration}: root={rootChoice switch { 1 => "pre-scoped", 2 => "global-root", 3 => "two-signals", 4 => "two-signals-first-scoped", _ => "plain" }}, " +
+                $"seed {seed}, iteration {iteration}: root={rootChoice switch { 1 => $"pre-scoped('{spelling}')", 2 => "global-root", 3 => "two-signals", 4 => $"two-first-scoped('{spelling}')", 5 => "two-second-scoped", _ => "plain" }}, " +
                 string.Join(" + ", chosen.Select(c =>
                     $"{c.Kind}('{c.Declared ?? "(null)"}')"
                     + (c.InEventSubProcess ? "@eventSubProcess" : "@process")
@@ -921,7 +996,7 @@ public sealed class SignalScopeCasesTests
             var emitted = ScopeOf("Sig_1");
             var emittedSecond = twoSignals ? ScopeOf("Sig_2") : null;
 
-            var (shouldRefuse, expected, expectedSecond, firstSignalIsTheProblem) = ExpectedVerdict(chosen, carried);
+            var (shouldRefuse, expected, expectedSecond, firstSignalIsTheProblem) = ExpectedVerdict(chosen, carried, carriedSecond);
 
             // TWO-SIDED, and this is the half the first version of this test
             // omitted. Asserting only "what a refused diagram writes" lets a
@@ -1016,6 +1091,21 @@ public sealed class SignalScopeCasesTests
         Assert.True(globalRootDiagrams > 20,
             $"seed {seed} generated only {globalRootDiagrams} diagrams whose ROOT declares " +
             "global — without them, dropping the product's handling of a global root is invisible.");
+        // #351: and the sibling-ordering axis. The declaration was an only child
+        // in every diagram for seven rounds, while the studio has never written it
+        // as one.
+        Assert.True(extensionSiblings > 20,
+            $"seed {seed} generated only {extensionSiblings} events with something ahead of the " +
+            "scope declaration inside extensionElements — the shape workflow.js actually emits.");
+
+        // #351: the two cells the root loop and the root's own spelling hid in.
+        Assert.True(secondRootCarriesScope > 20,
+            $"seed {seed} generated only {secondRootCarriesScope} diagrams where the SECOND root " +
+            "carries the scope — the cell `uses.Take(1)` hid in.");
+        Assert.True(nonCanonicalRootSpellings > 20,
+            $"seed {seed} generated only {nonCanonicalRootSpellings} roots spelled anything other " +
+            "than the canonical word — the cell a second, hand-rolled reader of the root hid in.");
+
         Assert.True(twoRootsWithCarriedScope > 20,
             $"seed {seed} generated only {twoRootsWithCarriedScope} diagrams with two roots AND a " +
             "carried scope — the cell where reading the scope off the wrong root hides.");
@@ -1032,7 +1122,7 @@ public sealed class SignalScopeCasesTests
     /// </remarks>
     private static (bool ShouldRefuse, string? Scope, string? SecondScope, bool FirstSignalIsTheProblem) ExpectedVerdict(
         IReadOnlyList<(string Kind, string? Declared, bool InEventSubProcess, bool UsesSecondSignal)> events,
-        string? carried)
+        string? carried, string? carriedSecond = null)
     {
         // #341. Scope is per-SIGNAL, so the two signals are modelled separately:
         // `wants` is what Sig_1's users ask for, `otherWants` what Sig_2's do. A
@@ -1046,11 +1136,28 @@ public sealed class SignalScopeCasesTests
         var secondUnrecognised = false;
 
         // The root's own carried scope is a declaration by the SIGNAL, counted
-        // once, and only ever by Sig_1. It may be EITHER value: #345 added the
-        // global-carrying root, and until then this line hardcoded
-        // "processInstance", so a root declaring global was unmodelled and
-        // dropping the product's handling of it left 609/609 green.
-        if (carried is not null) wants.Add(carried);
+        // once. Three things this line has had to learn, one per round:
+        //   #345: it may be global, not only processInstance;
+        //   #351: it is SPELLED as freely as an event's declaration is, so it
+        //         goes through the same interpretation rather than being taken
+        //         literally -- taking it literally is the "two readers drift
+        //         apart" bug #278's refactor exists to prevent;
+        //   #351: Sig_2 can carry one too.
+        static string? Interpret(string? raw) => (raw ?? "").Trim().ToLowerInvariant() switch
+        {
+            "" => null,
+            "instance" or "processinstance" => "processInstance",
+            "global" => "global",
+            _ => "?",                                    // nothing recognises it
+        };
+
+        var carriedFirst = Interpret(carried);
+        if (carriedFirst == "?") return (true, carried, Interpret(carriedSecond), true);
+        if (carriedFirst is not null) wants.Add(carriedFirst);
+
+        var otherCarried = Interpret(carriedSecond);
+        if (otherCarried == "?") return (true, carriedFirst, carriedSecond, false);
+        if (otherCarried is not null) otherWants.Add(otherCarried);
 
         foreach (var (kind, declared, inEventSubProcess, usesSecondSignal) in events)
         {
@@ -1110,11 +1217,11 @@ public sealed class SignalScopeCasesTests
         static string? Resolve(HashSet<string> w) =>
             w.Count == 0 || w.Single() == "global" ? null : "processInstance";
 
-        if (firstConflicted) return (true, carried, secondConflicted ? null : Resolve(otherWants), true);
+        if (firstConflicted) return (true, carried, secondConflicted ? carriedSecond : Resolve(otherWants), true);
 
         var firstScope = Resolve(wants);
 
-        if (secondConflicted) return (true, firstScope, null, false);
+        if (secondConflicted) return (true, firstScope, carriedSecond, false);
 
         // The answer is Sig_1's alone. If this returned otherWants' value for a
         // Sig_1-quiet diagram, that would be the leak this axis exists to catch.

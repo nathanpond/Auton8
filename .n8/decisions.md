@@ -5436,3 +5436,42 @@ Three more #349 items:
 Two mutations that were green are now caught: last-match-instead-of-first (the
 `Extra info` tail carries author-controlled text, so ordering is load-bearing), and
 deleting the logger.
+
+**#351 — the seventh axis, and two more root cells (Rule 1).** The generator had
+been built from what previous bugs looked like rather than from what the producer
+emits. `<flowable:autonateSignalScope>` was the **sole child** of
+`extensionElements` in every diagram this repo has ever tested, and
+`workflow.js:1193-1206` does `values: [...keptExtensions, scopeElement]` — it
+*appends*. Any event with an execution listener puts the scope second, which is the
+shape the studio actually produces and the one nothing tested.
+
+Four mutations were green; all four now fail 3 seeds:
+
+| mutation | was | now |
+|---|---|---|
+| `RawSignalScope` → bare `.FirstOrDefault()` | green | 3 red |
+| root loop `uses.Take(1)` | green | 3 red |
+| root's spelling read by a second hand-rolled switch | green | 3 red |
+| (re-confirmed) the three #345 catches | red | red |
+
+The last of those is the "two readers drift apart" shape #278's refactor exists to
+prevent, surviving seven rounds because the root's scope was only ever spelled the
+one canonical way. Measured before modelling: `instance`, `Instance`,
+`PROCESSINSTANCE` and `  processInstance  ` on a root are all accepted today and
+normalise to `processInstance`; `GLOBAL` normalises to no attribute; `local` is
+refused and left as authored.
+
+Three new floors so none of the cells can silently re-empty.
+
+**#352 — the fix landed on one of 36 copies (Rule 2).** `describeError` was fixed in
+`pages/workflow-executions/utils.ts`; the publish path uses
+`WorkflowStudio.tsx`'s own local copy, which still read `data.message` and rendered
+axios's "Request failed with status code 400". Moved the implementation to
+`lib/describeError.ts`, pointed both at it, and left the re-export so existing
+importers keep working.
+
+**The other 34 copies are not touched.** Consolidating them is a refactor of its own,
+and doing it blind with no SPA test runner (#323) would trade one silent regression
+for thirty-four. Verified by `tsc -b --force` (clean) and `npm run lint` (0 errors,
+98 warnings — exactly the ratchet). That is inspection plus typecheck, not a test,
+and it stays that way until #323 lands.
