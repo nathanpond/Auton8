@@ -6202,3 +6202,42 @@ nobody prunes. The count is a literal so a twelfth is an edit a reviewer sees.
 
 **Still open in M4b:** #325 (the deploy-and-silently-do-nothing oracle) and #328
 (Send Task authorability), plus #399 and #402 filed this round.
+
+## M4b round 3 — 2026-09-13 (during /n8-exec M4b)
+
+**#325 — partially executed, and the part delivered is the part the story calls
+its real output.** AC4 says a green first run means the oracle is not measuring
+anything, and that the list of elements it cannot prove is the deliverable. So
+that list came first.
+
+**57 elements claim `engine: executes`. Seven have no live-engine test that even
+mentions their construct**: End Event (Terminate), Inclusive Gateway (OR), Pool /
+Participant, Lane, Message Flow, Data Store Reference, Data Output. Filed as #404.
+
+The first two are the ones that matter. Terminate's entire distinguishing
+behaviour is *cancelling its siblings* — a deployment proves nothing about that,
+and neither does a token reaching it. That is exactly the shape of the class this
+story exists to catch. Inclusive Gateway has the hardest join semantics in BPMN
+and its `executes` claim rests on a deployment.
+
+**A deliberate limit on what I claimed.** The cross-reference says a test file
+*contains* an element's construct — not that it asserts the element ran. I did not
+call the other 50 proven on that basis, and said so in the artifact's own
+`$status`. Accepting "it deployed" as proof is what produced this story; accepting
+"a test mentions it" would be the same error one notch along.
+
+**The evidence file follows #324's precedent.** `bpmn-execution-evidence.json`,
+not a column on `bpmn-support.json` — an observable effect is an axis the manifest
+does not have, and #324 already rejected bolting a column onto 69 rows to serve a
+subset. Twenty elements have an unambiguous declared effect; 37 are null, which
+AC3 makes a finding rather than a pass. Two of those nulls are the correct answer:
+Manual Task and Task (Generic) have no observable effect *because that is why they
+were withdrawn* (#107), and the file records that rather than inventing one.
+
+**What is NOT done, stated plainly:** AC1 (per-element verification against the
+running engine), AC2 (the test that starts an instance per element), AC5 (anything
+unproven gaining evidence or moving to `cannot-execute`). The 20 declarations are
+a hypothesis for the probe, not a result — and in this story of all stories,
+reasoning is not evidence.
+
+**#328 not started.**

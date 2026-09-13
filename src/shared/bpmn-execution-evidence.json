@@ -1,0 +1,723 @@
+{
+  "$comment": "What would prove each element RAN, not merely deployed (#325). The class this answers has three known members -- Loop Marker ran ONCE where it should have run three times; Manual Task and Task (Generic) pass straight through creating nothing -- and all three were found by a person, not a test.",
+  "$status": "PARTIAL. `declaredEffect` is written for the 20 elements whose observable effect is unambiguous. `liveEngineTestsMentioningIt` is a MECHANICAL cross-reference -- it says a test file contains the element's construct, NOT that the test asserts the element ran. It is a first cut at AC4, and the seven elements with an EMPTY list are the sharp finding: the manifest calls them `executes` and no live-engine test so much as mentions them.",
+  "$why-not-in-bpmn-support": "An observable effect is an axis bpmn-support.json does not have, and #324 already rejected bolting a column onto 69 rows to serve a subset.",
+  "$fields": {
+    "declaredEffect": "task-appears | variable-written | instance-waits | instance-ends, or null where no unambiguous effect has been declared yet -- which AC3 makes a FINDING, not a pass",
+    "liveEngineTestsMentioningIt": "E2E classes whose source contains this element's construct. A mention is weaker than an assertion; an EMPTY list is the strong signal."
+  },
+  "elements": [
+    {
+      "name": "Start Event (None)",
+      "localName": "startEvent",
+      "eventDefinition": null,
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "BehaviorErrorBoundaryExecutionTests",
+        "CallActivityExecutionTests",
+        "CallActivityStudioTests",
+        "CompensationExecutionTests",
+        "ComplexGatewayExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "ConditionalEventExecutionTests",
+        "DataObjectExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "FlowableDeploymentSweepTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "MultiInstanceExecutionTests",
+        "RetryPointExecutionTests",
+        "RetryPointStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "SubProcessExecutionTests",
+        "TaskConversionTests",
+        "TimerBoundaryExecutionTests",
+        "WorkflowBpmnSupportPanelTests",
+        "WorkflowPaletteTests"
+      ]
+    },
+    {
+      "name": "Signal Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "signal",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Timer Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "timer",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "TimerBoundaryExecutionTests"
+      ]
+    },
+    {
+      "name": "Intermediate Catch (Timer)",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "timer",
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "TimerBoundaryExecutionTests"
+      ]
+    },
+    {
+      "name": "End Event (None)",
+      "localName": "endEvent",
+      "eventDefinition": null,
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "CallActivityExecutionTests",
+        "CompensationExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "ConditionalEventExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "MultiInstanceExecutionTests",
+        "RetryPointExecutionTests",
+        "RetryPointStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "SubProcessExecutionTests",
+        "TaskConversionTests",
+        "TimerBoundaryExecutionTests",
+        "WorkflowBpmnSupportPanelTests"
+      ]
+    },
+    {
+      "name": "End Event (Terminate)",
+      "localName": "endEvent",
+      "eventDefinition": "terminate",
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Task (Generic)",
+      "localName": "task",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "TaskConversionTests"
+      ]
+    },
+    {
+      "name": "User Task",
+      "localName": "userTask",
+      "eventDefinition": null,
+      "declaredEffect": "task-appears",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "BehaviorErrorBoundaryExecutionTests",
+        "CallActivityExecutionTests",
+        "CallActivityStudioTests",
+        "CompensationExecutionTests",
+        "ComplexGatewayExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "ConditionalEventExecutionTests",
+        "DataObjectExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "FlowableDeploymentSweepTests",
+        "MessageCorrelationExecutionTests",
+        "MultiInstanceExecutionTests",
+        "RetryPointExecutionTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "SubProcessExecutionTests",
+        "TaskConversionTests",
+        "TimerBoundaryExecutionTests",
+        "WorkflowBpmnSupportPanelTests"
+      ]
+    },
+    {
+      "name": "Script Task",
+      "localName": "scriptTask",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "MultiInstanceExecutionTests"
+      ]
+    },
+    {
+      "name": "Service Task (Behavior)",
+      "localName": "serviceTask",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": [
+        "BehaviorErrorBoundaryExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "RetryPointExecutionTests",
+        "RetryPointStudioTests"
+      ]
+    },
+    {
+      "name": "Exclusive Gateway (XOR)",
+      "localName": "exclusiveGateway",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests"
+      ]
+    },
+    {
+      "name": "Inclusive Gateway (OR)",
+      "localName": "inclusiveGateway",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Parallel Gateway (AND)",
+      "localName": "parallelGateway",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "SignalScopeExecutionTests",
+        "TimerBoundaryExecutionTests"
+      ]
+    },
+    {
+      "name": "Sequence Flow",
+      "localName": "sequenceFlow",
+      "eventDefinition": null,
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "BehaviorErrorBoundaryExecutionTests",
+        "CallActivityExecutionTests",
+        "CallActivityStudioTests",
+        "CompensationExecutionTests",
+        "ComplexGatewayExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "ConditionalEventExecutionTests",
+        "DataObjectExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "FlowableDeploymentSweepTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "MultiInstanceExecutionTests",
+        "RetryPointExecutionTests",
+        "RetryPointStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "SubProcessExecutionTests",
+        "TaskConversionTests",
+        "TimerBoundaryExecutionTests"
+      ]
+    },
+    {
+      "name": "Message Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "message",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Conditional Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "conditional",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "ConditionalEventExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Error Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "error",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "BehaviorErrorBoundaryExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Escalation Start Event",
+      "localName": "startEvent",
+      "eventDefinition": "escalation",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Throw (None)",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": null,
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "TaskConversionTests"
+      ]
+    },
+    {
+      "name": "Intermediate Throw (Message)",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "message",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Throw (Signal)",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "signal",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Throw (Escalation)",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "escalation",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Throw (Compensation)",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "compensate",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "StartEventPlacementDifferentialTests",
+        "WorkflowPaletteTests"
+      ]
+    },
+    {
+      "name": "Intermediate Catch (Message)",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "message",
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Catch (Signal)",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "signal",
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Intermediate Catch (Conditional)",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "conditional",
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "ConditionalEventExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Message Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "message",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Timer Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "timer",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "TimerBoundaryExecutionTests"
+      ]
+    },
+    {
+      "name": "Signal Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "signal",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Conditional Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "conditional",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "ConditionalEventExecutionTests",
+        "EventSubProcessExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Error Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "error",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "BehaviorErrorBoundaryExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Escalation Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "escalation",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Compensation Boundary",
+      "localName": "boundaryEvent",
+      "eventDefinition": "compensate",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "StartEventPlacementDifferentialTests",
+        "WorkflowPaletteTests"
+      ]
+    },
+    {
+      "name": "Message End",
+      "localName": "endEvent",
+      "eventDefinition": "message",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests",
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationExecutionTests",
+        "MessageCorrelationStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Signal End",
+      "localName": "endEvent",
+      "eventDefinition": "signal",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "MessageCorrelationStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Error End",
+      "localName": "endEvent",
+      "eventDefinition": "error",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "BehaviorErrorBoundaryExecutionTests",
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Escalation End",
+      "localName": "endEvent",
+      "eventDefinition": "escalation",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Compensation End",
+      "localName": "endEvent",
+      "eventDefinition": "compensate",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "StartEventPlacementDifferentialTests",
+        "WorkflowPaletteTests"
+      ]
+    },
+    {
+      "name": "Send Task",
+      "localName": "sendTask",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "MessageCorrelationExecutionTests"
+      ]
+    },
+    {
+      "name": "Receive Task",
+      "localName": "receiveTask",
+      "eventDefinition": null,
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "MessageCorrelationExecutionTests"
+      ]
+    },
+    {
+      "name": "Manual Task",
+      "localName": "manualTask",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "TaskConversionTests"
+      ]
+    },
+    {
+      "name": "Call Activity",
+      "localName": "callActivity",
+      "eventDefinition": null,
+      "declaredEffect": "task-appears",
+      "liveEngineTestsMentioningIt": [
+        "CallActivityExecutionTests",
+        "CallActivityStudioTests"
+      ]
+    },
+    {
+      "name": "Sub-Process (Embedded)",
+      "localName": "subProcess",
+      "eventDefinition": null,
+      "declaredEffect": "task-appears",
+      "liveEngineTestsMentioningIt": [
+        "ErrorEscalationExecutionTests",
+        "ErrorEscalationStudioTests",
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests",
+        "SubProcessExecutionTests"
+      ]
+    },
+    {
+      "name": "Event Sub-Process",
+      "localName": "subProcess",
+      "eventDefinition": "triggeredByEvent",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "EventSubProcessExecutionTests",
+        "EventSubProcessStudioTests",
+        "SignalScopeExecutionTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Ad-Hoc Sub-Process",
+      "localName": "adHocSubProcess",
+      "eventDefinition": null,
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "AdhocSubProcessExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "StartEventPlacementDifferentialTests"
+      ]
+    },
+    {
+      "name": "Event-Based Gateway",
+      "localName": "eventBasedGateway",
+      "eventDefinition": null,
+      "declaredEffect": "instance-waits",
+      "liveEngineTestsMentioningIt": [
+        "EventBasedGatewayExecutionTests"
+      ]
+    },
+    {
+      "name": "Complex Gateway",
+      "localName": "complexGateway",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ComplexGatewayExecutionTests",
+        "ComplexGatewayStudioRoundTripTests",
+        "WorkflowBpmnSupportPanelTests"
+      ]
+    },
+    {
+      "name": "Multi-Instance (Parallel)",
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ComplexGatewayStudioRoundTripTests",
+        "MultiInstanceExecutionTests"
+      ]
+    },
+    {
+      "name": "Multi-Instance (Sequential)",
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ComplexGatewayStudioRoundTripTests",
+        "MultiInstanceExecutionTests"
+      ]
+    },
+    {
+      "name": "Compensation Marker",
+      "localName": "*",
+      "eventDefinition": "isForCompensation",
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "CompensationExecutionTests",
+        "ComplexGatewayStudioRoundTripTests"
+      ]
+    },
+    {
+      "name": "Pool / Participant",
+      "localName": "participant",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Lane",
+      "localName": "lane",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Message Flow",
+      "localName": "messageFlow",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Data Object Reference",
+      "localName": "dataObjectReference",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ComplexGatewayStudioRoundTripTests"
+      ]
+    },
+    {
+      "name": "Data Store Reference",
+      "localName": "dataStoreReference",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": []
+    },
+    {
+      "name": "Data Input",
+      "localName": "dataInput",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": [
+        "ComplexGatewayStudioRoundTripTests"
+      ]
+    },
+    {
+      "name": "Data Output",
+      "localName": "dataOutput",
+      "eventDefinition": null,
+      "declaredEffect": null,
+      "liveEngineTestsMentioningIt": []
+    }
+  ]
+}
