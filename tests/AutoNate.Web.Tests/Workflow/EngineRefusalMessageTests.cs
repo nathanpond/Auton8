@@ -535,9 +535,26 @@ public sealed class EngineRefusalMessageTests
     [Fact]
     public void Every_declared_operation_is_one_the_client_actually_passes()
     {
-        var client = File.ReadAllText(Path.Combine(
-            AutoNate.Web.Tests.Infrastructure.RepoRoot.Path,
-            "src", "AutoNate.Web", "Services", "Flowable", "FlowableClient.cs"));
+        // #393: comments STRIPPED, and only the arguments actually passed to
+        // EnsureSuccessAsync are read. The previous version scanned raw file text
+        // for a quoted occurrence anywhere, so a rename that left the old spelling
+        // in a comment -- the normal shape of a rename -- kept 74/74 green while
+        // every publish refusal degraded to the generic fallback.
+        var client = AutoNate.Web.Tests.Infrastructure.SourceText.WithoutComments(
+            File.ReadAllText(Path.Combine(
+                AutoNate.Web.Tests.Infrastructure.RepoRoot.Path,
+                "src", "AutoNate.Web", "Services", "Flowable", "FlowableClient.cs")));
+
+        var passed = System.Text.RegularExpressions.Regex
+            .Matches(client, @"EnsureSuccessAsync\s*\([^;]{0,400}?""(?<op>[^""]+)""")
+            .Select(m => m.Groups["op"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(
+            passed.Count > 10,
+            $"Only {passed.Count} operation literals were found at EnsureSuccessAsync call "
+            + "sites. If the call shape changed, this guard is matching nothing and would "
+            + "report a clean file forever (#393).");
 
         var refusal = typeof(WorkflowEndpoints).Assembly
             .GetType("AutoNate.Web.Endpoints.EngineRefusal")!;
@@ -588,7 +605,7 @@ public sealed class EngineRefusalMessageTests
         Assert.NotEmpty(operations);
 
         var unreachable = operations
-            .Where(op => !client.Contains($"\"{op}\"", StringComparison.Ordinal))
+            .Where(op => !passed.Contains(op))
             .ToList();
 
         Assert.True(
@@ -620,4 +637,35 @@ public sealed class EngineRefusalMessageTests
 
         Assert.True(described.Length < 300, $"output was {described.Length} characters");
     }
+
+    /// <summary>The comment stripper does not eat what it must keep (#393).</summary>
+    /// <remarks>
+    /// A stripper that removed too much would make the guards above pass for a new
+    /// reason, which is the same defect wearing the opposite sign.
+    /// </remarks>
+    [Theory]
+    // Comments go.
+    [InlineData("// was \"deploy the BPMN workflow\"\nvar x = 1;", false, "deploy the BPMN workflow")]
+    [InlineData("/* \"deploy the BPMN workflow\" */ var x = 1;", false, "deploy the BPMN workflow")]
+    [InlineData("var x = 1; // \"gone\"", false, "gone")]
+    // Real code stays.
+    [InlineData("await EnsureSuccessAsync(r, \"deploy the BPMN workflow\");", true, "deploy the BPMN workflow")]
+    // A comment marker inside a string is not a comment.
+    [InlineData("var url = \"http://example.com/kept\";", true, "kept")]
+    [InlineData("var s = \"a /* not a comment */ b\";", true, "not a comment")]
+    public void The_comment_stripper_keeps_code_and_drops_comments(
+        string source, bool shouldSurvive, string needle)
+    {
+        var stripped = AutoNate.Web.Tests.Infrastructure.SourceText.WithoutComments(source);
+
+        if (shouldSurvive)
+        {
+            Assert.Contains(needle, stripped, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain(needle, stripped, StringComparison.Ordinal);
+        }
+    }
+
 }

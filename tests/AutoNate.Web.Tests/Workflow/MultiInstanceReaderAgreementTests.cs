@@ -393,16 +393,29 @@ public sealed class MultiInstanceReaderAgreementTests
         var spa = Path.Combine(
             AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, "src", "AutoNate.Spa", "src");
 
-        var readers = Directory
-            .EnumerateFiles(spa, "*.js", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(spa, "*.ts", SearchOption.AllDirectories))
-            .Concat(Directory.EnumerateFiles(spa, "*.tsx", SearchOption.AllDirectories))
+        // #394: `.jsx` too, and the match below no longer requires the opening
+        // quote. The first version demanded the literal `"collection"`, so the
+        // MODDLE's own spelling -- `loop.get("flowable:collection")`, the way a
+        // properties-panel component naturally reads it -- slipped past, and a
+        // test whose whole job is pinning the EXTENT of a gap under-counted it.
+        var readers = new[] { "*.js", "*.jsx", "*.ts", "*.tsx" }
+            .SelectMany(pattern => Directory.EnumerateFiles(spa, pattern, SearchOption.AllDirectories))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Select(f => (
                 Path: Path.GetRelativePath(AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, f),
                 Text: File.ReadAllText(f)))
-            .Where(f => f.Text.Contains("loopCharacteristics", StringComparison.Ordinal)
-                        && f.Text.Contains("\"collection\"", StringComparison.Ordinal))
+            // Both halves case-INSENSITIVE, and the multi-instance context may be
+            // spelled either way (#394, second miss): `businessObject.loopCharacteristics`
+            // is what workflow.js uses, but a reader keying off the moddle type writes
+            // `"bpmn:MultiInstanceLoopCharacteristics"` -- capital L -- and an Ordinal
+            // Contains walked straight past it. The first widening fixed the collection
+            // half and left this one, which is the same defect one clause over.
+            .Where(f => System.Text.RegularExpressions.Regex.IsMatch(
+                            f.Text, @"loopCharacteristics|multiInstance",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        && System.Text.RegularExpressions.Regex.IsMatch(
+                            f.Text, @"[""':]collection\b|\bcollection[""']",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             .Select(f => f.Path)
             .Order(StringComparer.Ordinal)
             .ToList();

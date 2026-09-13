@@ -1049,7 +1049,13 @@ public sealed class BpmnPaletteManifestTests
     [Fact]
     public void Every_deny_key_family_a_withheld_entry_carries_is_one_palette_js_reads()
     {
-        var source = File.ReadAllText(ProviderPath);
+        // #393: comments stripped. Leaving the removed read in a comment --
+        //   // was: entry.className, ...(entry.menuClassNames ?? [])
+        // -- kept this green while the Pool went back into the Create popup. The
+        // effect is now also asserted directly by BpmnPaletteFilterEffectTests,
+        // which runs the real module; this stays as the cheaper structural check.
+        var source = AutoNate.Web.Tests.Infrastructure.SourceText.WithoutComments(
+            File.ReadAllText(ProviderPath));
 
         // Top-level declarations, each running to the next one's start.
         var starts = Regex.Matches(source, @"^(?:export\s+)?(const|function)\s+(\w+)",
