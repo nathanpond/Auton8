@@ -5705,3 +5705,78 @@ running, the worst defect was found only by running that suite by hand.
 `ComplexGatewayStudioRoundTripTests` cases have been red since round 12. I ruled
 out prepare and validation (both shapes return `errors=0 warnings=0`), so it is the
 studio's save handler. Further diagnosis needs the browser, which is #323.
+
+## Round 15 — 2026-09-13 (during /n8-exec M4)
+
+**#371 — the ordering was the bug (Rule 1).** `Describe` called `KnownCode(message)`
+*before* the `(Operation, Status)` loop. `EnsureSuccessAsync` interpolates the
+operation into the message, and 13 operations interpolate caller data — so a caller
+could put a validation envelope in a **URL route segment** and select one of our
+sentences, with no parser and no diagram. The comment three lines below read
+"neither reachable by a caller": true of the key, false of the check that ran first.
+
+Fixed structurally: `(Operation, Status)` first, and the message is parsed for a
+code **only** on the deploy operation, since nothing else can carry a validation
+envelope. That closes all three channels at once. Also de-interpolated
+`start the ad-hoc activity` so it can key a row, and moved `ParserRefusal` inside
+the `[Extra info` bound — it was scanning the tail where Flowable puts the author's
+`activityName`, so an activity called "cvc-check step" suppressed a genuine code.
+
+The test is now the **channel inventory** — one row per way caller text reaches a
+`FlowableRequestException` — because failing to enumerate those channels is exactly
+what round 14 got wrong.
+
+**#372 — a guard CI cannot run is not a guard (Rule 2).** Deleting #362's 409 row
+left 781/781 green; its only assertion was Flowable-traited. Moved to
+`EngineRefusalMessageTests` (the function is pure — it never needed an engine),
+added the six reachable pairs that fell through, and deleted the
+`list the ad-hoc subprocess activities` row whose route has no try/catch. Added
+`Every_declared_operation_is_one_the_client_actually_passes`, because a row nothing
+can reach reads as coverage — #349 found that shape in the deployment table and
+#372 found it again here.
+
+**#373 — the scan still could not see its own subject (Rule 1).** `"collection"`,
+the studio's primary spelling, was missing from all three previous versions of a
+guard named for that fact. Added it, keyed the allowlist on **file + method**,
+widened `roots` to all of `src/`, and fixed a theory row that asserted two
+fragments while the branch under test emits a third.
+
+On its first run the widened scan found a real divergence:
+`WorkflowConditionValidation.cs` read only `flowable:collection` while
+`DeclaresCollection` also accepts `loopDataInputRef`, so a collection written the
+spec's way produced **no** "nothing sets that variable" warning. Added
+`CollectionName` and pointed both at it.
+
+**#374 — the property, not another list (Rule 2).** Three versions of a per-row
+literal list have gone stale, and #365's left 28 rows gutteable — `Message End`'s
+"SENDS NOTHING" pinned while its twin `Signal End`'s "RAISES NOTHING" was not,
+because #340 happened to touch one. Added a floor over **all 45** reasons: a reason
+must be ≥60 characters and carry evidence of measurement. `"Not supported."` fails
+the pattern; `"#220"` fails the length. Both were the documented ways to destroy one.
+
+The deny-key literal pinned one of the **three** families `palette.js` reads, so
+deleting `bpmn-icon-participant` re-opened the Create-popup hole that file's own
+remarks describe. Now all three, 25 keys.
+
+**#375 — the headline number, wrong a third time.** "46 of 54" is `54 − 8
+cannot-execute` — a correct subtraction answering a different question. Three rows
+are `engine: annotation`, which `$fields` defines as no execution semantics **by
+design**. I matched a coincidental 46 elsewhere in the manifest instead of counting
+over the 54, in the milestone whose subject is making claims match their source.
+
+Now **43 / 3 / 8**, and guarded by `The_engine_split_over_the_in_scope_54_is_what_the_claim_says`,
+which *derives* the 54 rather than restating it. The first draft of that guard read
+57 because three exclusion names were wrong, so it now asserts every exclusion names
+a real row — a typo silently widening the scope is the same failure one level down.
+
+Also added #368 and #369 to "What the green tick does not cover"; a reader judging
+closure from the description could previously see neither.
+
+**#376 — audit before nudge (Rule 1).** Both `/variables` routes ran the throwing
+nudge *before* publishing the audit event, so a nudge failure meant the variables
+were written, the caller got a 500, and nothing recorded the write. Reordered. The
+throwing behaviour is left alone — Outcome 10 documents it as intentional.
+
+**Process note.** I ran a filtered `dotnet test` while the full suite was in flight
+again. It did not corrupt the result this time, but it is the third occurrence and
+the rule is simple: nothing touches the project while a full run is going.

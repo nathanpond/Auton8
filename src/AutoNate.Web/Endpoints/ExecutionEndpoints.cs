@@ -647,7 +647,15 @@ public static class ExecutionEndpoints
             // Unconditional rather than gated on "does this definition have a
             // conditional event": the check would need the diagram, and asking the
             // engine to evaluate an instance with no conditional events is a no-op.
-            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+            // #376: the audit record goes FIRST. The variables are already written
+            // by this point, and this event is the record of that write -- it must
+            // not be contingent on a later step succeeding.
+            //
+            // The nudge below is deliberately the THROWING overload here (see
+            // Outcome 10's note: these two routes differ from the in-client sites
+            // on purpose, so a nudge failure surfaces rather than being swallowed).
+            // Ordered the other way, a nudge failure meant the variables were set,
+            // the caller got a 500, and nothing recorded that the write happened.
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesSet,
@@ -655,6 +663,8 @@ public static class ExecutionEndpoints
                 resource: new { processInstanceId },
                 details: new { variableCount = request.Variables.Count, names = request.Variables.Select(v => v.Name).ToArray() },
                 cancellationToken);
+
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -708,7 +718,7 @@ public static class ExecutionEndpoints
             // Unconditional rather than gated on "does this definition have a
             // conditional event": the check would need the diagram, and asking the
             // engine to evaluate an instance with no conditional events is a no-op.
-            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+            // #376: audit first, for the reason given on the sibling route above.
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesAdded,
@@ -716,6 +726,8 @@ public static class ExecutionEndpoints
                 resource: new { processInstanceId },
                 details: new { variableCount = request.Variables.Count, names = request.Variables.Select(v => v.Name).ToArray() },
                 cancellationToken);
+
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");

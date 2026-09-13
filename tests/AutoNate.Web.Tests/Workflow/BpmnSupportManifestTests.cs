@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using AutoNate.Web.Services.Workflow;
@@ -287,6 +288,142 @@ public sealed class BpmnSupportManifestTests
             + string.Join("\n  ", gutted)
             + "\n\nThis text is quoted to the author at publish and is the whole of "
             + "\"saying why\". If the finding genuinely changed, update this guard too (#347).");
+    }
+
+    /// <summary>
+    /// The engine split over the 54 in-scope elements, pinned (#375).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This number has been wrong in the coverage claim <b>three times</b>: "52",
+    /// then "49", then "46". Each correction was reasoned from a different
+    /// artifact — the engine-facts tables, then a coincidentally-equal total over
+    /// all 69 rows — and none counted over the 54 in-scope elements the claim is
+    /// actually about.
+    /// </para>
+    /// <para>
+    /// The 54 are recoverable exactly: every manifest row except the 14
+    /// baseline-supported ones and <c>Boundary Event (None)</c>, which had no row
+    /// at milestone open (#282). Derived here rather than restated, so it cannot
+    /// drift the way the prose has.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_engine_split_over_the_in_scope_54_is_what_the_claim_says()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        string[] outsideTheScope =
+        [
+            "Boundary Event (None)", "End Event (None)", "End Event (Terminate)",
+            "Exclusive Gateway (XOR)", "Inclusive Gateway (OR)", "Intermediate Catch (Timer)",
+            "Parallel Gateway (AND)", "Script Task", "Sequence Flow", "Service Task (Behavior)",
+            "Signal Start Event", "Start Event (None)", "Task (Generic)",
+            "Timer Start Event", "User Task",
+        ];
+
+        // Every exclusion must name a real row. Without this, a typo silently
+        // widens the scope and the split is measured over the wrong set -- which
+        // is how the first draft of this guard read 57 instead of 54.
+        var allNames = elements.Select(e => e!["name"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        var unknown = outsideTheScope.Where(n => !allNames.Contains(n)).ToList();
+        Assert.True(unknown.Count == 0, $"these exclusions name no manifest row: {string.Join(", ", unknown)}");
+
+        var inScope = elements
+            .Where(e => !outsideTheScope.Contains(e!["name"]!.GetValue<string>(), StringComparer.Ordinal))
+            .ToList();
+
+        Assert.Equal(54, inScope.Count);
+
+        int Count(string engine) =>
+            inScope.Count(e => e!["engine"]!.GetValue<string>() == engine);
+
+        // "43 of the 54 execute; 3 are BPMN artifacts with no execution semantics
+        // by design; 8 cannot execute."
+        Assert.Equal(43, Count("executes"));
+        Assert.Equal(3, Count("annotation"));
+        Assert.Equal(8, Count("cannot-execute"));
+    }
+
+    /// <summary>
+    /// Every reason that records a finding still records one (#374).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Every_cannot_execute_reason_still_says_what_it_said</c> pins a literal
+    /// fragment per row, which is strong but only covers the rows someone thought
+    /// to add. #365 widened it to `studio: withdrawn` and stopped there, leaving
+    /// <b>28</b> `executes`/`supported` rows gutteable: <c>Message End</c>'s
+    /// "SENDS NOTHING" was pinned while its structural twin <c>Signal End</c>'s
+    /// "RAISES NOTHING" was not, because #340 happened to touch one of them.
+    /// </para>
+    /// <para>
+    /// Three versions of that list have gone stale, so this is the <b>property</b>
+    /// instead: a reason exists to record something measured, and the two ways to
+    /// destroy one without deleting it are to make it generic
+    /// (<c>"Not supported."</c>) or to reduce it to a pointer (<c>"#220"</c>).
+    /// Both are caught without naming a single row, so a new element is covered
+    /// the day it is added.
+    /// </para>
+    /// <para>
+    /// The literal-fragment test keeps its job for the rows where the exact
+    /// finding matters. This is the floor under all 45.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_reason_that_exists_still_records_a_measurement()
+    {
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        // An issue, an engine, a version, or a measuring verb. Every one of the
+        // 45 reasons in the file today carries at least one; "Not supported."
+        // carries none.
+        var evidence = new Regex(
+            @"#\d+|Flowable|8\.0\.0|verified|measured|deployed|REST|engine",
+            RegexOptions.IgnoreCase);
+
+        // The shortest real reason is 71 characters. 60 leaves room to tighten
+        // wording without leaving room for a bare pointer.
+        const int Substance = 60;
+
+        var gutted = elements
+            .Select(e => (Name: e!["name"]!.GetValue<string>(),
+                          Reason: (e!["reason"]?.GetValue<string>() ?? "").Trim()))
+            .Where(row => row.Reason.Length > 0)
+            .Where(row => row.Reason.Length < Substance || !evidence.IsMatch(row.Reason))
+            .Select(row => $"{row.Name}: \"{row.Reason}\"")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            gutted.Count == 0,
+            "These reasons no longer record a measurement. A reason is quoted to the "
+            + "author at publish and is the evidence a finding was made; it must say "
+            + "more than a generic phrase or an issue number.\n  "
+            + string.Join("\n  ", gutted)
+            + "\n\n(#374 — three versions of a per-row literal list went stale, so "
+            + "this is the floor under all of them.)");
+    }
+
+    /// <summary>The floor can see both ways a reason gets destroyed (#374).</summary>
+    /// <remarks>
+    /// A property test whose predicate silently stopped matching would report a
+    /// clean file forever — the failure this milestone has found more than any
+    /// other.
+    /// </remarks>
+    [Theory]
+    [InlineData("Not supported.")]
+    [InlineData("#220")]
+    [InlineData("")]
+    [InlineData("Does not work; see the issue.")]
+    public void A_gutted_reason_is_not_a_measurement(string gutted)
+    {
+        var evidence = new Regex(
+            @"#\d+|Flowable|8\.0\.0|verified|measured|deployed|REST|engine",
+            RegexOptions.IgnoreCase);
+
+        var survives = gutted.Trim().Length >= 60 && evidence.IsMatch(gutted);
+        Assert.False(survives, $"\"{gutted}\" would pass the floor");
     }
 
     /// <summary>

@@ -207,25 +207,67 @@ public sealed class BpmnPaletteManifestTests
     public void Every_menu_class_name_deny_key_is_still_declared()
     {
         using var palette = PaletteDocument();
+        // ALL THREE families palette.js denies on, not just one. #374: the literal
+        // pinned `menuClassNames` only, so deleting `"className":
+        // "bpmn-icon-participant"` from the withheld Pool entry left 31/31 green
+        // -- re-opening the exact Create-popup hole this file's own remarks
+        // describe ("a coming-soon Pool sat one click away through two rounds").
+        // Create/Append drop `target`, so for those surfaces the class IS the key.
+        var withheldNames = Manifest()
+            .Where(e => e.Studio != "supported")
+            .Select(e => Key(e.LocalName, e.EventDefinition))
+            .ToHashSet(StringComparer.Ordinal);
+
         var declared = palette.RootElement.GetProperty("entries").EnumerateArray()
-            .SelectMany(entry => entry.TryGetProperty("menuClassNames", out var names)
-                ? names.EnumerateArray().Select(n => n.GetString()!)
-                : [])
+            .Where(entry => withheldNames.Contains(Key(
+                entry.GetProperty("localName").GetString()!,
+                entry.TryGetProperty("eventDefinition", out var ed) ? ed.GetString() : null)))
+            .SelectMany(entry => new[]
+                {
+                    entry.TryGetProperty("className", out var c) ? c.GetString() : null,
+                }
+                .Concat(entry.TryGetProperty("menuClassNames", out var names)
+                    ? names.EnumerateArray().Select(n => n.GetString())
+                    : [])
+                .Concat(entry.TryGetProperty("menuEntryIds", out var ids)
+                    ? ids.EnumerateArray().Select(n => n.GetString())
+                    : []))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!)
             .Order(StringComparer.Ordinal)
             .ToList();
 
+        // Every deny key a WITHHELD entry carries, across all three families
+        // palette.js reads. Deliberately a literal: every other guard here derives
+        // its expectation from this same file, so a deleted key deletes the
+        // assertion that wants it (#365, #374).
         string[] expected =
         [
-            // #264: bpmn-js names this differently in its popups than we do.
             "bpmn-icon-business-rule",
-            // #358: the non-interrupting siblings of the withdrawn message forms.
-            // Message is the only typed event whose interrupting form is withheld
-            // while its siblings ship, so nothing else needed these.
+            "bpmn-icon-business-rule-task",
+            "bpmn-icon-end-event-cancel",
+            "bpmn-icon-end-event-message",
+            "bpmn-icon-intermediate-event-catch-cancel",
+            "bpmn-icon-intermediate-event-catch-link",
+            "bpmn-icon-intermediate-event-catch-message",
             "bpmn-icon-intermediate-event-catch-non-interrupting-message",
+            "bpmn-icon-intermediate-event-none",
+            "bpmn-icon-intermediate-event-throw-link",
+            "bpmn-icon-intermediate-event-throw-message",
             "bpmn-icon-lane",
+            "bpmn-icon-loop-marker",
             "bpmn-icon-manual",
+            "bpmn-icon-manual-task",
+            "bpmn-icon-participant",
             "bpmn-icon-send",
+            "bpmn-icon-send-task",
+            "bpmn-icon-start-event-compensation",
+            "bpmn-icon-start-event-message",
             "bpmn-icon-start-event-non-interrupting-message",
+            "bpmn-icon-task",
+            "bpmn-icon-transaction",
+            "none-boundary-event",
+            "send-task",
         ];
 
         var gone = expected.Except(declared, StringComparer.Ordinal).ToList();

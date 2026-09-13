@@ -136,6 +136,20 @@ internal static class EngineRefusal
     /// </remarks>
     private static readonly (string Operation, HttpStatusCode Status, string Reason)[] RuntimeReasons =
     [
+        // #372: the six pairs the routes can actually produce that had no row.
+        ("update the process variables", HttpStatusCode.Conflict,
+            "one of those variables is already set on this step"),
+        ("update the process variables", HttpStatusCode.BadRequest,
+            "one of those values is not a type the engine can store"),
+        ("create the process variables", HttpStatusCode.BadRequest,
+            "one of those values is not a type the engine can store"),
+        ("start the ad-hoc activity", HttpStatusCode.NotFound,
+            "that step is not available in this section right now"),
+        ("start the ad-hoc activity", HttpStatusCode.Conflict,
+            "that step is already running in this section"),
+        ("start the ad-hoc activity", HttpStatusCode.BadRequest,
+            "that step cannot be started in this section"),
+
         ("create the process variables", HttpStatusCode.Conflict,
             "one of those variables is already set on this step"),
         ("create the process variables", HttpStatusCode.NotFound,
@@ -172,8 +186,9 @@ internal static class EngineRefusal
             "that section still has work in progress — finish or cancel it first"),
         ("complete the ad-hoc sub-process", HttpStatusCode.NotFound,
             "that step of the workflow run no longer exists"),
-        ("list the ad-hoc subprocess activities", HttpStatusCode.NotFound,
-            "that step of the workflow run no longer exists"),
+        // NOTE (#372): `list the ad-hoc subprocess activities` had a row here and
+        // that route has no try/catch, so it could never fire. Removed rather than
+        // left as decoration -- #349 found the same shape in the deployment table.
     ];
 
     /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>    /// <summary>
@@ -222,12 +237,16 @@ internal static class EngineRefusal
     {
         var text = message ?? string.Empty;
 
-        // The parser echoed something. Nothing in here is trustworthy as OURS.
-        if (ParserRefusal.IsMatch(text)) return null;
-
-        // Author-controlled element names and ids live in the tail.
+        // Bound FIRST. #371: `ParserRefusal` scanned the whole message, including
+        // the `[Extra info` tail where Flowable puts the author's activityName --
+        // so an activity called "cvc-check step" or "Handle ParseError" turned a
+        // genuine, correctly-coded validation refusal into "the reason is in the
+        // server log". The two protections disagreed about where the tail was.
         var tail = text.IndexOf("[Extra info", StringComparison.OrdinalIgnoreCase);
         var beforeTail = tail > 0 ? text[..tail] : text;
+
+        // The parser echoed something, so nothing here is trustworthy as ours.
+        if (ParserRefusal.IsMatch(beforeTail)) return null;
 
         var match = ProblemCode.Match(beforeTail);
         if (!match.Success) return null;
@@ -265,18 +284,25 @@ internal static class EngineRefusal
     }
 
     /// <summary>Flowable's refusal, as a sentence of ours.</summary>
+    /// <summary>The one operation whose message may be read for a problem code.</summary>
+    /// <remarks>
+    /// A deployment validation envelope is the ONLY thing worth parsing out of an
+    /// engine message, and it can only appear on a deploy. Consulting the
+    /// deployment table on a runtime refusal is what made #371 possible.
+    /// </remarks>
+    internal const string DeployOperation = "deploy the BPMN workflow";
+
     internal static string Describe(FlowableRequestException exception, string what = "this workflow")
     {
-        var message = exception.Message ?? string.Empty;
-
-        // A deployment validation code, if the engine named one we know.
-        if (KnownCode(message) is { } code)
-        {
-            return $"The workflow engine refused {what}: {Reasons[code]} ({code}).";
-        }
-
-        // A runtime refusal, keyed on (operation, status) -- both ours, neither
-        // reachable by a caller. The engine's sentence is not read at all (#357).
+        // (Operation, Status) FIRST -- both ours, neither caller-reachable.
+        //
+        // #371: this loop used to run SECOND, after `KnownCode(message)`. The
+        // message contains the operation (`EnsureSuccessAsync` interpolates it),
+        // and 13 operations interpolate caller data -- a route segment, a variable
+        // name, a message name. So a caller could put a validation envelope in a
+        // URL path and select one of our sentences, with no parser and no diagram
+        // involved. The comment here read "neither reachable by a caller", which
+        // was true of the KEY and false of the check that ran before it.
         foreach (var (operation, status, reason) in RuntimeReasons)
         {
             if (string.Equals(exception.Operation, operation, StringComparison.Ordinal)
@@ -284,6 +310,14 @@ internal static class EngineRefusal
             {
                 return $"The workflow engine refused {what}: {reason}.";
             }
+        }
+
+        // And the message is parsed for a code ONLY on a deploy. Nothing else can
+        // carry a validation envelope, so nothing else has a reason to look.
+        if (string.Equals(exception.Operation, DeployOperation, StringComparison.Ordinal)
+            && KnownCode(exception.Message) is { } code)
+        {
+            return $"The workflow engine refused {what}: {Reasons[code]} ({code}).";
         }
 
         return $"The workflow engine refused {what}. The reason is in the server log.";
