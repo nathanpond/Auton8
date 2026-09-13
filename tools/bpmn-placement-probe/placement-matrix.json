@@ -1,0 +1,1577 @@
+[
+ {
+  "position": "start",
+  "definition": "none",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "none",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "none",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "none",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "none",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "message",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "message",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "message",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "message",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "message",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "timer",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "timer",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "timer",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "timer",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "timer",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "signal",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "signal",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "signal",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "signal",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "signal",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "conditional",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-start-event-invalid-event-definition"
+ },
+ {
+  "position": "start",
+  "definition": "conditional",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "conditional",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "conditional",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "conditional",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "error",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-start-event-invalid-event-definition"
+ },
+ {
+  "position": "start",
+  "definition": "error",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "error",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "error",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "error",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "escalation",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-start-event-invalid-event-definition"
+ },
+ {
+  "position": "start",
+  "definition": "escalation",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "start",
+  "definition": "escalation",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "escalation",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "escalation",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "compensate",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-start-event-invalid-event-definition"
+ },
+ {
+  "position": "start",
+  "definition": "compensate",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-event-subprocess-invalid-start-event-definition"
+ },
+ {
+  "position": "start",
+  "definition": "compensate",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "compensate",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "start",
+  "definition": "compensate",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-subprocess-start-event-event-definition-not-allowed"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "none",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "none",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "none",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "none",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "none",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "message",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "message",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "message",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "message",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "message",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "timer",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "timer",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "timer",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "timer",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "timer",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "signal",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "signal",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "signal",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "signal",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "signal",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "conditional",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "conditional",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "conditional",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "conditional",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "conditional",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "error",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "error",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "error",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "error",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "error",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "escalation",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "escalation",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "escalation",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "escalation",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "escalation",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "compensate",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "compensate",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "compensate",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "compensate",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "compensate",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "terminate",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "terminate",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "terminate",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "terminate",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "terminate",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "link",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "link",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "link",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "link",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateCatch",
+  "definition": "link",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-intermediate-catch-event-no-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "none",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "none",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "none",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "none",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "none",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "message",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "message",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "message",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "message",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "message",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "timer",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "timer",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "timer",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "timer",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "timer",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "signal",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "signal",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "signal",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "signal",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "signal",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "conditional",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "conditional",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "conditional",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "conditional",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "conditional",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "error",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "error",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "error",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "error",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "error",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-throw-event-invalid-eventdefinition"
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "escalation",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "escalation",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "escalation",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "escalation",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "escalation",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "compensate",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "compensate",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "compensate",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "compensate",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "compensate",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "terminate",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "terminate",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "terminate",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "terminate",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "terminate",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "link",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "link",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "link",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "link",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "intermediateThrow",
+  "definition": "link",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "none",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "none",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "none",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "none",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "none",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "message",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "message",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "message",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "message",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "message",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "timer",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "timer",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "timer",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "timer",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "timer",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "signal",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "signal",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "signal",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "signal",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "signal",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "conditional",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "conditional",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "conditional",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "conditional",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "conditional",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "error",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "error",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "error",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "error",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "error",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "escalation",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "escalation",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "escalation",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "escalation",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "escalation",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "compensate",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "compensate",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "compensate",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "compensate",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "compensate",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "boundary",
+  "definition": "terminate",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "terminate",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "terminate",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "terminate",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "terminate",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "link",
+  "container": "process",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "link",
+  "container": "eventSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "link",
+  "container": "embeddedSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "link",
+  "container": "adHocSubProcess",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "boundary",
+  "definition": "link",
+  "container": "transaction",
+  "accepted": false,
+  "code": "flowable-boundary-event-no-event-definition"
+ },
+ {
+  "position": "end",
+  "definition": "none",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "none",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "none",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "none",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "none",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "message",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "message",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "message",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "message",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "message",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "signal",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "signal",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "signal",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "signal",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "signal",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "error",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "error",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "error",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "error",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "error",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "escalation",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "escalation",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "escalation",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "escalation",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "escalation",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "compensate",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "compensate",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "compensate",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "compensate",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "compensate",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "terminate",
+  "container": "process",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "terminate",
+  "container": "eventSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "terminate",
+  "container": "embeddedSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "terminate",
+  "container": "adHocSubProcess",
+  "accepted": true,
+  "code": ""
+ },
+ {
+  "position": "end",
+  "definition": "terminate",
+  "container": "transaction",
+  "accepted": true,
+  "code": ""
+ }
+]
