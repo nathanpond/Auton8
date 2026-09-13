@@ -216,14 +216,14 @@ public sealed class MultiInstanceReaderAgreementTests
         // any other class was allowlisted by the previous version (#373).
         var mayNameASpelling = new HashSet<string>(StringComparer.Ordinal)
         {
-            "WorkflowBpmnXml.cs:DeclaresCardinality",
-            "WorkflowBpmnXml.cs:DeclaresCollection",
-            "WorkflowBpmnXml.cs:CollectionName",
-            "WorkflowBpmnXml.cs:DeclaresAggregationElement",
-            "WorkflowBpmnXml.cs:AggregationTarget",
-            "WorkflowBpmnXml.cs:AggregationSource",
-            "WorkflowBpmnXml.cs:ExpandMultiInstanceCardinality",
-            "WorkflowBpmnXml.cs:ExpandMultiInstanceAggregation",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresCardinality",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresCollection",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:CollectionName",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresAggregationElement",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationTarget",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationSource",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:ExpandMultiInstanceCardinality",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:ExpandMultiInstanceAggregation",
         };
 
         var roots = new[]
@@ -283,7 +283,12 @@ public sealed class MultiInstanceReaderAgreementTests
                            || line.StartsWith("///", StringComparison.Ordinal)
                            || line.Contains("internal const string", StringComparison.Ordinal);
 
-                var key = current is null ? null : $"{Path.GetFileName(file)}:{current}";
+                // #384: keyed on the REPO-RELATIVE PATH, not the bare filename.
+                // Keyed on the filename, a second `WorkflowBpmnXml.cs` anywhere
+                // under src/ with a method called `CollectionName` was exempt --
+                // proven by putting a divergent reader in
+                // AutoNate.Plugin.Abstractions and watching 16/16 stay green.
+                var key = current is null ? null : $"{relative}:{current}";
 
                 if (!skip
                     && spellings.Any(sp => line.Contains(sp, StringComparison.Ordinal))
@@ -352,4 +357,72 @@ public sealed class MultiInstanceReaderAgreementTests
             "ExpandMultiInstanceCardinality", "ExpandMultiInstanceAggregation",
         });
     }
+
+    /// <summary>
+    /// The studio reads exactly one of the two collection spellings, and it is a gap (#384).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The scan above covers <c>*.cs</c>. The SPA is the <b>third</b> reader of
+    /// these facts and the one an author actually looks at, and it diverges the
+    /// same way <c>WorkflowConditionValidation</c> did before #373 repaired it:
+    /// <c>workflow.js</c> reads <c>flowable:collection</c> and nothing else, while
+    /// <c>WorkflowBpmnXml.CollectionName</c> also accepts
+    /// <c>&lt;bpmn:loopDataInputRef&gt;</c> — which publish therefore allows. A
+    /// multi-instance whose collection is written the spec's way shows an
+    /// <b>empty</b> Collection field in the studio.
+    /// </para>
+    /// <para>
+    /// This pins the gap rather than allowlisting it. An allowlist entry would
+    /// make the divergence permitted and invisible, which is the failure this
+    /// whole class exists to stop. Asserted as a fact means: the day someone
+    /// teaches the studio the second spelling, this test goes red and tells them
+    /// to delete it. It also pins the <em>extent</em> — one reader, not two — so a
+    /// second divergent SPA reader fails here even before #384 is fixed.
+    /// </para>
+    /// <para>
+    /// Not fixed in the same pass deliberately. <c>loopDataInputRef</c> is a
+    /// moddle <em>reference</em> in bpmn-js, not a plain attribute, so reading it
+    /// correctly is a studio change with no JS test tier to catch a mistake — and
+    /// a wrong guess here writes bad diagrams. #384 carries it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_studio_still_reads_only_one_of_the_two_collection_spellings()
+    {
+        var spa = Path.Combine(
+            AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, "src", "AutoNate.Spa", "src");
+
+        var readers = Directory
+            .EnumerateFiles(spa, "*.js", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(spa, "*.ts", SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(spa, "*.tsx", SearchOption.AllDirectories))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(f => (
+                Path: Path.GetRelativePath(AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, f),
+                Text: File.ReadAllText(f)))
+            .Where(f => f.Text.Contains("loopCharacteristics", StringComparison.Ordinal)
+                        && f.Text.Contains("\"collection\"", StringComparison.Ordinal))
+            .Select(f => f.Path)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            readers.Count == 1,
+            "The SPA should have exactly one reader of the multi-instance collection. "
+            + $"Found {readers.Count}:\n  " + string.Join("\n  ", readers)
+            + "\n\nTwo readers of one fact disagreeing is the defect this class is named "
+            + "for, and the SPA has no test tier to catch it (#384).");
+
+        var studio = File.ReadAllText(Path.Combine(
+            AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, readers[0]));
+
+        Assert.False(
+            studio.Contains("loopDataInputRef", StringComparison.Ordinal),
+            "The studio now reads `loopDataInputRef`, which means #384's user-visible "
+            + "half is fixed: a collection written the spec's way no longer shows an "
+            + "empty Collection field. Good — now DELETE this test, and route the read "
+            + "through one shared helper so the two spellings cannot drift apart again.");
+    }
+
 }

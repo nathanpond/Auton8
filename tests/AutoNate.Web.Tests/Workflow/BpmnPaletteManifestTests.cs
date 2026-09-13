@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AutoNate.Web.Tests.Infrastructure;
 using Xunit;
 
@@ -1013,6 +1014,149 @@ public sealed class BpmnPaletteManifestTests
             "cannot be denied on the replace menu at all -- which is how a coming-soon Pool " +
             $"stayed one click away through two rounds about that filter:{Environment.NewLine}  " +
             string.Join(Environment.NewLine + "  ", missing));
+    }
+
+
+    /// <summary>
+    /// Every deny key a withheld entry carries is a key <c>palette.js</c> still READS (#381).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #374 widened the literal above from one key family to all three. That fixed
+    /// the <b>data</b>. Nothing pinned the <b>reader</b>: deleting
+    /// <c>entry.className</c> from the <c>WITHHELD_ICON_CLASSES</c> flatMap left
+    /// 31/31 green, and <c>create.participant</c> carries no <c>menuEntryIds</c>
+    /// and loses its <c>target</c> on the Create and Append surfaces — so
+    /// <c>className</c> is its only key, and the coming-soon Pool was one click
+    /// away again. That is the same hole this file's own remarks describe from
+    /// #264 and #282.
+    /// </para>
+    /// <para>
+    /// So this asserts the two halves that a literal cannot: every family a
+    /// withheld entry actually carries is referenced inside a deny-set
+    /// construction, and every property a withheld entry carries is accounted for
+    /// as either a deny key or a deliberately inert one. The second half is what
+    /// makes a FOURTH family fail here on the day it is added, rather than in the
+    /// round after it is missed.
+    /// </para>
+    /// <para>
+    /// Text analysis rather than execution because the SPA has no JS test tier.
+    /// Scoped to declarations that mention <c>WITHHELD</c> (plus the helpers they
+    /// call), so the identical <c>entry.className</c> read in the
+    /// <c>SUPPORTED_ICON_CLASSES</c> / <c>OFFERED</c> path cannot satisfy it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_deny_key_family_a_withheld_entry_carries_is_one_palette_js_reads()
+    {
+        var source = File.ReadAllText(ProviderPath);
+
+        // Top-level declarations, each running to the next one's start.
+        var starts = Regex.Matches(source, @"^(?:export\s+)?(const|function)\s+(\w+)",
+                RegexOptions.Multiline)
+            .Select(m => (Index: m.Index, Kind: m.Groups[1].Value, Name: m.Groups[2].Value))
+            .ToList();
+
+        Assert.True(starts.Count > 5,
+            "No top-level declarations were found in palette.js -- this guard is "
+            + "parsing nothing and would pass forever.");
+
+        var blocks = starts
+            .Select((s, i) => (
+                s.Name,
+                s.Kind,
+                Text: source[s.Index..(i + 1 < starts.Count ? starts[i + 1].Index : source.Length)]))
+            .ToList();
+
+        // Deny regions: anything built from WITHHELD, plus the helpers those call.
+        // `WITHHELD_ICON_CLASSES` etc. are excluded from the seed by the negative
+        // lookahead, so the seed really is "reads the withheld entries".
+        var deny = blocks.Where(b => Regex.IsMatch(b.Text, @"\bWITHHELD(?!_)\b")).ToList();
+        var denyNames = deny.Select(b => b.Name).ToHashSet(StringComparer.Ordinal);
+        // Only FUNCTIONS are pulled in transitively -- a helper like `targetKeyOf`
+        // is part of the deny expression that calls it. Not other consts: the
+        // WITHHELD_ICON_CLASSES block names SUPPORTED_ICON_CLASSES in order to
+        // SUBTRACT it, and following that reference dragged the OFFERED-side
+        // `entry.className` read into the deny set -- which made the first draft
+        // of this guard survive the very mutation it was written for.
+        foreach (var block in blocks)
+        {
+            if (denyNames.Contains(block.Name)) continue;
+            if (!string.Equals(block.Kind, "function", StringComparison.Ordinal)) continue;
+            if (deny.Any(d => Regex.IsMatch(d.Text, $@"\b{Regex.Escape(block.Name)}\b")))
+            {
+                deny.Add(block);
+            }
+        }
+
+        Assert.NotEmpty(deny);
+
+        var read = deny
+            .SelectMany(b => Regex.Matches(b.Text, @"\bentry\??\.(\w+)").Select(m => m.Groups[1].Value))
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Properties that identify a withheld element on some popup surface. Each
+        // is the ONLY key on at least one surface: `target` is dropped by Create
+        // and Append, `menuEntryIds` exists on 2 entries, `menuClassNames` on 6.
+        string[] denyKeyFamilies =
+            ["className", "menuClassNames", "menuEntryIds", "type", "eventDefinitionType"];
+
+        // Carried by withheld entries but deliberately not a deny key: display
+        // text, the manifest key `studioStatusOf` uses to decide withheld-ness in
+        // the first place, and the bpmn-js factory hook.
+        string[] inert =
+            ["id", "label", "description", "group", "localName", "eventDefinition", "createFactory"];
+
+        using var palette = PaletteDocument();
+        var withheldNames = Manifest()
+            .Where(e => e.Studio != "supported")
+            .Select(e => Key(e.LocalName, e.EventDefinition))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var withheld = palette.RootElement.GetProperty("entries").EnumerateArray()
+            .Where(entry => withheldNames.Contains(Key(
+                entry.GetProperty("localName").GetString()!,
+                entry.TryGetProperty("eventDefinition", out var ed) ? ed.GetString() : null)))
+            .ToList();
+
+        Assert.NotEmpty(withheld);
+
+        var carried = withheld
+            .SelectMany(e => e.EnumerateObject().Select(p => p.Name))
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Half 1 -- the reader. Every deny family actually present must be read.
+        var unread = denyKeyFamilies
+            .Where(carried.Contains)
+            .Where(f => !read.Contains(f))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            unread.Count == 0,
+            "Withheld entries carry these keys, but no WITHHELD-derived expression in "
+            + "palette.js reads them, so they deny nothing:\n  "
+            + string.Join("\n  ", unread)
+            + "\n\nPinning the keys in bpmn-palette.json is not enough -- #374 did that "
+            + "and dropping `entry.className` from the flatMap still left 31/31 green, "
+            + "putting the coming-soon Pool one click away in the Create popup (#381).");
+
+        // Half 2 -- a new family cannot arrive unnoticed.
+        var unaccounted = carried
+            .Except(denyKeyFamilies, StringComparer.Ordinal)
+            .Except(inert, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            unaccounted.Count == 0,
+            "Withheld entries carry these properties, which are neither declared deny "
+            + "keys nor listed as inert:\n  "
+            + string.Join("\n  ", unaccounted)
+            + "\n\nDecide which they are. A key family that identifies an element on a "
+            + "popup surface must be denied on; anything else belongs in `inert`. Three "
+            + "rounds lost a surface because a family was added and the guard only knew "
+            + "about the families it was written for (#264, #282, #374, #381).");
     }
 
 }
