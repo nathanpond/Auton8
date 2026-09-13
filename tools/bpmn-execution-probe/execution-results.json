@@ -1,0 +1,343 @@
+[
+ {
+  "name": "Start Event (None)",
+  "localName": "startEvent",
+  "eventDefinition": null,
+  "declaredEffect": "instance-ends",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "BehaviorErrorBoundaryExecutionTests",
+   "CallActivityExecutionTests",
+   "CallActivityStudioTests",
+   "CompensationExecutionTests",
+   "ComplexGatewayExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "ConditionalEventExecutionTests",
+   "DataObjectExecutionTests",
+   "ErrorEscalationExecutionTests",
+   "ErrorEscalationStudioTests",
+   "EventBasedGatewayExecutionTests",
+   "EventSubProcessExecutionTests",
+   "EventSubProcessStudioTests",
+   "FlowableDeploymentSweepTests",
+   "MessageCorrelationExecutionTests",
+   "MessageCorrelationStudioTests",
+   "MultiInstanceExecutionTests",
+   "RetryPointExecutionTests",
+   "RetryPointStudioTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "SubProcessExecutionTests",
+   "TaskConversionTests",
+   "TimerBoundaryExecutionTests",
+   "WorkflowBpmnSupportPanelTests",
+   "WorkflowPaletteTests"
+  ],
+  "verdict": "proved",
+  "detail": "endTime=2026-09-13T22:39:15.880Z"
+ },
+ {
+  "name": "Intermediate Catch (Timer)",
+  "localName": "intermediateCatchEvent",
+  "eventDefinition": "timer",
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "EventBasedGatewayExecutionTests",
+   "EventSubProcessExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "TimerBoundaryExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "End Event (None)",
+  "localName": "endEvent",
+  "eventDefinition": null,
+  "declaredEffect": "instance-ends",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "CallActivityExecutionTests",
+   "CompensationExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "ConditionalEventExecutionTests",
+   "ErrorEscalationExecutionTests",
+   "EventSubProcessExecutionTests",
+   "MessageCorrelationExecutionTests",
+   "MessageCorrelationStudioTests",
+   "MultiInstanceExecutionTests",
+   "RetryPointExecutionTests",
+   "RetryPointStudioTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "SubProcessExecutionTests",
+   "TaskConversionTests",
+   "TimerBoundaryExecutionTests",
+   "WorkflowBpmnSupportPanelTests"
+  ],
+  "verdict": "proved",
+  "detail": "endTime=2026-09-13T22:39:16.762Z"
+ },
+ {
+  "name": "End Event (Terminate)",
+  "localName": "endEvent",
+  "eventDefinition": "terminate",
+  "declaredEffect": "instance-ends",
+  "liveEngineTestsMentioningIt": [],
+  "verdict": "proved",
+  "detail": "endTime=2026-09-13T22:39:17.200Z"
+ },
+ {
+  "name": "User Task",
+  "localName": "userTask",
+  "eventDefinition": null,
+  "declaredEffect": "task-appears",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "BehaviorErrorBoundaryExecutionTests",
+   "CallActivityExecutionTests",
+   "CallActivityStudioTests",
+   "CompensationExecutionTests",
+   "ComplexGatewayExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "ConditionalEventExecutionTests",
+   "DataObjectExecutionTests",
+   "ErrorEscalationExecutionTests",
+   "ErrorEscalationStudioTests",
+   "EventBasedGatewayExecutionTests",
+   "EventSubProcessExecutionTests",
+   "EventSubProcessStudioTests",
+   "FlowableDeploymentSweepTests",
+   "MessageCorrelationExecutionTests",
+   "MultiInstanceExecutionTests",
+   "RetryPointExecutionTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "SubProcessExecutionTests",
+   "TaskConversionTests",
+   "TimerBoundaryExecutionTests",
+   "WorkflowBpmnSupportPanelTests"
+  ],
+  "verdict": "proved",
+  "detail": "1 runtime task(s) on this instance"
+ },
+ {
+  "name": "Script Task",
+  "localName": "scriptTask",
+  "eventDefinition": null,
+  "declaredEffect": "variable-written",
+  "liveEngineTestsMentioningIt": [
+   "CompensationExecutionTests",
+   "MultiInstanceExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "proof='ran' in history"
+ },
+ {
+  "name": "Service Task (Behavior)",
+  "localName": "serviceTask",
+  "eventDefinition": null,
+  "declaredEffect": "variable-written",
+  "liveEngineTestsMentioningIt": [
+   "BehaviorErrorBoundaryExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "RetryPointExecutionTests",
+   "RetryPointStudioTests"
+  ],
+  "verdict": "start-refused",
+  "detail": "{\"message\":\"Internal server error\",\"exception\":\"Workflow-behavior callback to 'http://host.docker.internal:5108/api/workflow-behaviors/autonate.noop/execute' returned HTTP 404 (correlationId 5a5d051b-"
+ },
+ {
+  "name": "Exclusive Gateway (XOR)",
+  "localName": "exclusiveGateway",
+  "eventDefinition": null,
+  "declaredEffect": "variable-written",
+  "liveEngineTestsMentioningIt": [
+   "CompensationExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "proof='ran' in history"
+ },
+ {
+  "name": "Inclusive Gateway (OR)",
+  "localName": "inclusiveGateway",
+  "eventDefinition": null,
+  "declaredEffect": "variable-written",
+  "liveEngineTestsMentioningIt": [],
+  "verdict": "proved",
+  "detail": "proof='ran' in history"
+ },
+ {
+  "name": "Parallel Gateway (AND)",
+  "localName": "parallelGateway",
+  "eventDefinition": null,
+  "declaredEffect": "variable-written",
+  "liveEngineTestsMentioningIt": [
+   "EventSubProcessExecutionTests",
+   "MessageCorrelationExecutionTests",
+   "SignalScopeExecutionTests",
+   "TimerBoundaryExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "proof='ran' on the running instance"
+ },
+ {
+  "name": "Sequence Flow",
+  "localName": "sequenceFlow",
+  "eventDefinition": null,
+  "declaredEffect": "instance-ends",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "BehaviorErrorBoundaryExecutionTests",
+   "CallActivityExecutionTests",
+   "CallActivityStudioTests",
+   "CompensationExecutionTests",
+   "ComplexGatewayExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "ConditionalEventExecutionTests",
+   "DataObjectExecutionTests",
+   "ErrorEscalationExecutionTests",
+   "ErrorEscalationStudioTests",
+   "EventBasedGatewayExecutionTests",
+   "EventSubProcessExecutionTests",
+   "EventSubProcessStudioTests",
+   "FlowableDeploymentSweepTests",
+   "MessageCorrelationExecutionTests",
+   "MessageCorrelationStudioTests",
+   "MultiInstanceExecutionTests",
+   "RetryPointExecutionTests",
+   "RetryPointStudioTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "SubProcessExecutionTests",
+   "TaskConversionTests",
+   "TimerBoundaryExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "endTime=2026-09-13T22:39:19.873Z"
+ },
+ {
+  "name": "Intermediate Throw (None)",
+  "localName": "intermediateThrowEvent",
+  "eventDefinition": null,
+  "declaredEffect": "instance-ends",
+  "liveEngineTestsMentioningIt": [
+   "CompensationExecutionTests",
+   "ErrorEscalationExecutionTests",
+   "EventSubProcessExecutionTests",
+   "MessageCorrelationExecutionTests",
+   "MessageCorrelationStudioTests",
+   "SignalScopeExecutionTests",
+   "TaskConversionTests"
+  ],
+  "verdict": "proved",
+  "detail": "endTime=2026-09-13T22:39:20.303Z"
+ },
+ {
+  "name": "Intermediate Catch (Message)",
+  "localName": "intermediateCatchEvent",
+  "eventDefinition": "message",
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "EventBasedGatewayExecutionTests",
+   "EventSubProcessExecutionTests",
+   "MessageCorrelationExecutionTests",
+   "MessageCorrelationStudioTests",
+   "StartEventPlacementDifferentialTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "Intermediate Catch (Signal)",
+  "localName": "intermediateCatchEvent",
+  "eventDefinition": "signal",
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "EventSubProcessExecutionTests",
+   "MessageCorrelationStudioTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "Intermediate Catch (Conditional)",
+  "localName": "intermediateCatchEvent",
+  "eventDefinition": "conditional",
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "ConditionalEventExecutionTests",
+   "EventSubProcessExecutionTests",
+   "StartEventPlacementDifferentialTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "Receive Task",
+  "localName": "receiveTask",
+  "eventDefinition": null,
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "MessageCorrelationExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "Call Activity",
+  "localName": "callActivity",
+  "eventDefinition": null,
+  "declaredEffect": "task-appears",
+  "liveEngineTestsMentioningIt": [
+   "CallActivityExecutionTests",
+   "CallActivityStudioTests"
+  ],
+  "verdict": "proved",
+  "detail": "1 runtime task(s) in the called instance"
+ },
+ {
+  "name": "Sub-Process (Embedded)",
+  "localName": "subProcess",
+  "eventDefinition": null,
+  "declaredEffect": "task-appears",
+  "liveEngineTestsMentioningIt": [
+   "ErrorEscalationExecutionTests",
+   "ErrorEscalationStudioTests",
+   "EventSubProcessExecutionTests",
+   "EventSubProcessStudioTests",
+   "SignalScopeExecutionTests",
+   "StartEventPlacementDifferentialTests",
+   "SubProcessExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "1 runtime task(s) on this instance"
+ },
+ {
+  "name": "Ad-Hoc Sub-Process",
+  "localName": "adHocSubProcess",
+  "eventDefinition": null,
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "AdhocSubProcessExecutionTests",
+   "ComplexGatewayStudioRoundTripTests",
+   "StartEventPlacementDifferentialTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['Ev_1']"
+ },
+ {
+  "name": "Event-Based Gateway",
+  "localName": "eventBasedGateway",
+  "eventDefinition": null,
+  "declaredEffect": "instance-waits",
+  "liveEngineTestsMentioningIt": [
+   "EventBasedGatewayExecutionTests"
+  ],
+  "verdict": "proved",
+  "detail": "parked at ['C_1', 'C_2']"
+ }
+]

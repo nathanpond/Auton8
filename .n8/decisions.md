@@ -6282,3 +6282,53 @@ the literal rather than the shape.
 
 **#325 remains partially done** (AC1, AC2, AC5 outstanding; its AC4 list shipped
 last round as #404).
+
+## M4b round 5 — 2026-09-13 (during /n8-exec M4b)
+
+**#325 AC1 and AC2 — the oracle starts instances now.**
+`tools/bpmn-execution-probe/probe.py` deploys a minimal process per element,
+**starts an instance**, and observes the declared effect: a task appeared, a
+variable was written, the instance parked, the instance completed. **19 of the 20
+elements with a declared effect are proven this way.**
+
+Terminate gets the treatment it deserves: its whole behaviour is cancelling its
+siblings, so the probe parks a parallel branch on a user task and asserts the
+instance ends anyway. A deployment says nothing about that, and neither does a
+token reaching it.
+
+**The probe was wrong four times and the engine said so each time.** Worth
+recording, because every one was a case of writing from assumption and being
+corrected by measurement — which is the habit this milestone exists to install:
+
+1. `scriptFormat="groovy"` — Auton8's sandbox takes **javascript or python** and
+   refuses anything else by name (M3). `execution.setVariable` is the JVM API;
+   the sandbox exposes `variables.set`.
+2. An exclusive gateway with **one** outgoing flow is refused
+   (`flowable-exclusive-gateway-condition-not-allowed-on-single-seq-flow`).
+3. `flowable:autonateServiceKind` is **required** on a service task, and
+   `autonate.set-variable` was a behaviour key I invented; `autonate.noop` exists.
+4. `processInstanceIdWithChildren` is **silently ignored** by the GET task route —
+   it turned two proved elements into two false negatives. A call activity's task
+   belongs to the CALLED instance, so the child is now looked up explicitly. That
+   fourth one is the dangerous shape: a query that returns nothing reads exactly
+   like "the element did nothing", which is the verdict this probe exists to make
+   trustworthy.
+
+**The twentieth is an honest environmental limit, not a defect.** Service Task
+(Behavior) runs its behaviour as an HTTP callback into the Auton8 app, so the
+engine alone cannot prove it. Recorded as that rather than as a failure.
+
+**The in-CI half guards the record, not the engine.** `ExecutionEvidenceTests`
+asserts every `executes` row has an evidence row and vice versa, that a proof
+claim carries what the engine showed, that nothing is proven without a declared
+effect, and pins 19/20/57 as a literal — AC4 says a green first run means the
+oracle is not measuring anything, so the count is a fact about a measurement
+rather than something derived from the file being checked. All three mutations go
+red: a proof with no evidence text, an element promoted to `executes` with no row,
+and a fabricated proof on an undeclared element.
+
+**The honest headline: 57 rows claim `executes`, 19 have been run.** That gap is
+not a defect — it is the measurement AC4 asked for, and pinning it stops it being
+forgotten. AC5's remaining half, moving the unproven to `cannot-execute`, needs
+evidence per element rather than a sweep, and #404 already carries the seven with
+nothing at all.
