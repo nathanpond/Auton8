@@ -179,6 +179,70 @@ public sealed class BpmnPaletteManifestTests
     /// deliberate; #265 owns making the reasons true.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The deny keys are pinned independently of the file they live in (#365).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every other palette guard <b>derives</b> the set of classes to assert
+    /// absent from <c>bpmn-palette.json</c> itself. So deleting a
+    /// <c>menuClassNames</c> entry deletes the product's deny key <em>and</em> the
+    /// assertion that wants it, together — confirmed: removing both keys #358
+    /// added left 52/52 green.
+    /// </para>
+    /// <para>
+    /// That is the self-referential shape
+    /// <c>Every_cannot_execute_reason_still_says_what_it_said</c> documents in its
+    /// own remarks, found by #347 and reproduced one file over by #358. A literal
+    /// list is the only thing that does not move with the mutation.
+    /// </para>
+    /// <para>
+    /// Only the <b>menu</b> class names are pinned, not every entry's
+    /// <c>className</c>: those are the ones that exist solely to deny something
+    /// bpmn-js spells differently, so silently losing one silently re-offers a
+    /// withdrawn element.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_menu_class_name_deny_key_is_still_declared()
+    {
+        using var palette = PaletteDocument();
+        var declared = palette.RootElement.GetProperty("entries").EnumerateArray()
+            .SelectMany(entry => entry.TryGetProperty("menuClassNames", out var names)
+                ? names.EnumerateArray().Select(n => n.GetString()!)
+                : [])
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        string[] expected =
+        [
+            // #264: bpmn-js names this differently in its popups than we do.
+            "bpmn-icon-business-rule",
+            // #358: the non-interrupting siblings of the withdrawn message forms.
+            // Message is the only typed event whose interrupting form is withheld
+            // while its siblings ship, so nothing else needed these.
+            "bpmn-icon-intermediate-event-catch-non-interrupting-message",
+            "bpmn-icon-lane",
+            "bpmn-icon-manual",
+            "bpmn-icon-send",
+            "bpmn-icon-start-event-non-interrupting-message",
+        ];
+
+        var gone = expected.Except(declared, StringComparer.Ordinal).ToList();
+        var added = declared.Except(expected, StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            gone.Count == 0 && added.Count == 0,
+            "The set of menu-class deny keys changed."
+            + (gone.Count == 0 ? "" : $"{Environment.NewLine}  REMOVED — a withheld element may be "
+                + $"reachable again: {string.Join(", ", gone)}")
+            + (added.Count == 0 ? "" : $"{Environment.NewLine}  ADDED: {string.Join(", ", added)}")
+            + $"{Environment.NewLine}{Environment.NewLine}"
+            + "Every other guard here derives its expectation from this same file, so a "
+            + "deleted key deletes its own assertion. This list is deliberately a literal "
+            + "(#365).");
+    }
+
     [Fact]
     public void The_exclusion_list_is_exactly_these_entries()
     {

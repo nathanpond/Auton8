@@ -232,8 +232,23 @@ public sealed class BpmnSupportManifestTests
         var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
 
         // name -> a fragment that cannot survive the reason being replaced.
+        //
+        // #365 widened this past `cannot-execute`. The five message rows are
+        // `engine: executes` / `studio: withdrawn`, so they sat outside the gate
+        // and their restored engine-axis reasons -- restored BY #358, for exactly
+        // this reason -- were re-overwritable with the suite green. A guard for
+        // unguarded fields that left the fields it had just repaired unguarded.
         var required = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            ["Task (Generic)"] = "silent pass-through",
+            ["Manual Task"] = "does not wait",
+            ["Send Task"] = "#316",
+            ["Message Start Event"] = "POST /runtime/process-instances",
+            ["Intermediate Throw (Message)"] = "flowable-throw-event-invalid-eventdefinition",
+            ["Intermediate Catch (Message)"] = "correlating on a declared process variable",
+            ["Message Boundary"] = "interrupting and non-interrupting",
+            ["Message End"] = "SENDS NOTHING",
+
             ["Compensation Start Event"] = "EventSubProcessCompensationStartEventActivityBehavior",
             ["Intermediate Throw (Link)"] = "no link event type",
             ["Intermediate Catch (Link)"] = "no link event type",
@@ -245,8 +260,11 @@ public sealed class BpmnSupportManifestTests
             ["Loop Marker"] = "#159",
         };
 
+        // Any row whose reason records a FINDING -- the engine cannot run it, or
+        // the studio cannot author it. Both are claims someone measured.
         var cannotExecute = elements
-            .Where(e => e!["engine"]!.GetValue<string>() == "cannot-execute")
+            .Where(e => e!["engine"]!.GetValue<string>() == "cannot-execute"
+                        || e!["studio"]!.GetValue<string>() == "withdrawn")
             .ToDictionary(
                 e => e!["name"]!.GetValue<string>(),
                 e => e!["reason"]?.GetValue<string>() ?? "",

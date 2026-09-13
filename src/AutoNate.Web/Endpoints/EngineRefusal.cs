@@ -163,16 +163,73 @@ internal static class EngineRefusal
 
         ("query the process instance", HttpStatusCode.NotFound,
             "that workflow run does not exist, or has already finished"),
+        // 409 is the one an operator actually hits, and it was missing until #362.
+        // Flowable says "running child executions"; this says the same thing in
+        // words an operator can act on, which is what #163's AC7 asks for -- a
+        // refusal "handled in a defined, documented way", not the engine's wording
+        // specifically.
+        ("complete the ad-hoc sub-process", HttpStatusCode.Conflict,
+            "that section still has work in progress — finish or cancel it first"),
         ("complete the ad-hoc sub-process", HttpStatusCode.NotFound,
             "that step of the workflow run no longer exists"),
         ("list the ad-hoc subprocess activities", HttpStatusCode.NotFound,
             "that step of the workflow run no longer exists"),
     ];
 
-    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>
+    /// <summary>The code, only if we know it — otherwise nothing (#349).</summary>    /// <summary>
+    /// A refusal the XML parser produced, rather than the validator (#363).
+    /// </summary>
+    /// <remarks>
+    /// This is the structural fact the whole anti-planting argument rests on.
+    /// <b>A parse failure is the only way an author's own text is echoed back</b> —
+    /// Xerces quotes the offending attribute value verbatim. A validator refusal
+    /// never quotes the author; it emits its own envelope.
+    /// </remarks>
+    private static readonly Regex ParserRefusal = new(
+        @"cvc-|XMLStreamException|SAXParseException|TransformerException|ParseError",
+        RegexOptions.Compiled);
+
+    /// <summary>The code, only if we know it and only if the engine wrote it (#349, #363).</summary>
+    /// <remarks>
+    /// <para>
+    /// Two rounds tried to stop an author planting a code by constraining its
+    /// <em>shape</em> (#349) and then its <em>surroundings</em> (#357). Both took
+    /// the previous counterexample as the specification, and both lost: the author
+    /// controls the entire attribute value, so any marker they can type they can
+    /// plant — 7 of 12 payloads still landed after #357.
+    /// </para>
+    /// <para>
+    /// The property being defended is <b>"a caller cannot influence what Auton8
+    /// asserts about someone else's diagram"</b>. Stated that way the fix is not a
+    /// better pattern, it is a different question: <em>could the author's text be
+    /// in this message at all?</em> It can only be there if the parser echoed it,
+    /// so a parse refusal yields no code — ever, regardless of what it contains.
+    /// </para>
+    /// <para>
+    /// And within a validation refusal, the code is taken from before the
+    /// <c>[Extra info</c> tail, which is where author-controlled element names and
+    /// ids appear. First match, before the tail, non-parse: the author has no
+    /// reachable position left.
+    /// </para>
+    /// <para>
+    /// The cost: a parse failure now always reads generically. That is the right
+    /// side of the trade — the parse-error family is the one whose text is most
+    /// likely to be author-supplied, and its problem codes were mostly invented
+    /// anyway (#349 found <c>flowable-bpmn-parse-failure</c> is never emitted).
+    /// </para>
+    /// </remarks>
     internal static string? KnownCode(string? message)
     {
-        var match = ProblemCode.Match(message ?? string.Empty);
+        var text = message ?? string.Empty;
+
+        // The parser echoed something. Nothing in here is trustworthy as OURS.
+        if (ParserRefusal.IsMatch(text)) return null;
+
+        // Author-controlled element names and ids live in the tail.
+        var tail = text.IndexOf("[Extra info", StringComparison.OrdinalIgnoreCase);
+        var beforeTail = tail > 0 ? text[..tail] : text;
+
+        var match = ProblemCode.Match(beforeTail);
         if (!match.Success) return null;
 
         var code = match.Groups["code"].Value;
