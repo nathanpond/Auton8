@@ -5780,3 +5780,46 @@ throwing behaviour is left alone — Outcome 10 documents it as intentional.
 **Process note.** I ran a filtered `dotnet test` while the full suite was in flight
 again. It did not corrupt the result this time, but it is the third occurrence and
 the rule is simple: nothing touches the project while a full run is going.
+
+## Owner decisions — 2026-09-13 (M4 closure)
+
+Three things stood between M4 and closure after round 15. All three were the
+owner's to call, and all three were asked as one batch rather than one per round.
+
+**#368 — waived, premise checked.** *"Waive it, but it should be covered in local
+tests, right?"* The "right?" is the part worth recording: it is a premise, and in a
+milestone whose subject is claims matching their source, a waiver resting on an
+unchecked premise would be the same defect one level up. So it was measured, not
+assumed — `dotnet test tests/AutoNate.E2E.Tests --filter "RequiresService=Flowable"`
+at `1c17154`: **161 passed, 2 failed, 163 total**, the two failures being exactly
+#369's known cases. Outcomes 5, 6 and 7 — the three with no in-CI test touching the
+behaviour at all — are carried by `CallActivityExecutionTests` (5 cases),
+`ErrorEscalationExecutionTests` (4) + `BehaviorErrorBoundaryExecutionTests` +
+`EventSubProcessExecutionTests`, and `CompensationExecutionTests` (5). Every one is
+`RequiresService=Flowable`. The behaviour is covered against a real engine; the
+**gate** cannot see it.
+
+Recorded alongside the waiver, because "covered locally" is not "covered": nothing
+enforces the local run (it needs the `infra` compose project plus Flowable at
+`:8080` and is invoked by hand); `ci.yml`'s reconciliation at `:79-191` covers
+`tests/AutoNate.Web.Tests` only, so the hand-written E2E filter at `:839` matching
+less than intended would read as a greener build; and #296's two latency flakes
+make 161/163 a good run rather than a guaranteed one. **#368 stays open** against a
+later milestone — the waiver unblocks M4, it does not close the gap.
+
+**#369 — carried, and said out loud.** *"Carry it and close M4."* Two
+`ComplexGatewayStudioRoundTripTests` cases are red at `1c17154` and M4 closes that
+way, against a Definition of Done reading "all tests passing". Written into the
+milestone description rather than left for a later reader to find, which is the
+thing round 15's verification specifically faulted the closing document for.
+
+**The 17 carried mediums/lows — their own milestone.** *"Own milestone after M4."*
+They stay in M4 until verification closes it, so a re-verify still finds them, then
+move. Planning them together is the point: they are largely **one** defect in
+seventeen costumes — a guard written from the last specific case rather than from
+the property it should hold — and fixing them one more time each is what the last
+fifteen rounds already did.
+
+Affected: M4 closes on the next `/n8-verify`. A new milestone for the carried bugs
+needs `/n8-roadmap` or `/n8-plan` after that; M4b (studio axis) is a different
+theme and should not absorb them.
