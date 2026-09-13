@@ -128,8 +128,19 @@ public sealed class AdhocSubProcessExecutionTests : E2ETestBase
         Assert.NotEqual(500, response.Status);
         Assert.Equal(409, response.Status);
 
-        // The engine's own sentence, not ours: it names the actual obstacle.
-        Assert.Contains("running child executions", body, StringComparison.OrdinalIgnoreCase);
+        // #362. This asserted the ENGINE's sentence ("running child executions").
+        // #357 stopped forwarding engine text -- it can carry a JDBC password, a
+        // hostname, a filesystem path -- and this refusal then read "the reason is
+        // in the server log", which is the bare-500 defect #163's AC7 was filed
+        // about, one layer up.
+        //
+        // AC7 asks for a refusal "handled in a defined, documented way". It does
+        // not ask for Flowable's wording. So the assertion is now that the
+        // obstacle is NAMED, in words an operator can act on -- which is a better
+        // answer than "running child executions", and carries nothing from the
+        // engine.
+        Assert.Contains("work in progress", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Flowable could not", body, StringComparison.Ordinal);
 
         // And the refusal changed nothing -- the section is still open and the
         // task still there, so the operator can finish it and try again.

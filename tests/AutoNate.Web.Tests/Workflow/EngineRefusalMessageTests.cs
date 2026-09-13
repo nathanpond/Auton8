@@ -312,31 +312,77 @@ public sealed class EngineRefusalMessageTests
     }
 
     /// <summary>
-    /// An author cannot make a publisher read a sentence about their diagram (#357).
+    /// An author cannot influence what Auton8 asserts about their diagram (#357, #363).
     /// </summary>
     /// <remarks>
-    /// A schema refusal carries no genuine <c>Problem:</c> marker and Xerces echoes
-    /// an invalid attribute value verbatim, so a bare <c>Problem: '…'</c> match let
-    /// an author supply one — and a <b>publisher</b>, a different person, read
-    /// "a mail task has no recipient" about a diagram with no mail task. The marker
-    /// must now sit inside a real <c>[Validation set: … | Problem: …]</c> envelope.
+    /// <para>
+    /// <b>Written from the property, not from a counterexample.</b> Two rounds
+    /// failed here by doing the opposite: #349 constrained the code's shape
+    /// because a free-text leak was the last counterexample; #357 constrained the
+    /// marker's surroundings because a bare marker was the last counterexample.
+    /// Seven of twelve payloads still landed.
+    /// </para>
+    /// <para>
+    /// The property is: <i>a caller cannot influence what Auton8 asserts about
+    /// someone else's diagram.</i> The author's text reaches the message only when
+    /// the PARSER echoes it, so the rule is structural — a parse refusal yields no
+    /// code at all, whatever it contains.
+    /// </para>
+    /// <para>
+    /// Every row below is a payload that defeated #357. They are kept as rows
+    /// rather than deleted, because the design changed specifically to defeat them
+    /// and the next person to touch this needs to see what it is holding back.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("flowable-mailtask-no-recipient", "no recipient")]
-    [InlineData("flowable-signal-duplicate-name", "share a name")]
-    [InlineData("flowable-servicetask-missing-implementation", "no behaviour chosen")]
-    public void An_author_cannot_plant_a_problem_code(string planted, string sentenceItWouldHaveTriggered)
+    // the whole envelope planted, which is what beat #357
+    [InlineData("javax.xml.stream.XMLStreamException: cvc-datatype-valid.1.2.1: '[Validation set: 'x' | Problem: 'flowable-mailtask-no-recipient']' is not a valid value for 'QName'.")]
+    // no-quote cvc-attribute form
+    [InlineData("cvc-attribute.3: The value [Validation set: 'x' | Problem: 'flowable-mailtask-no-recipient'] of attribute 'signalRef' is not valid.")]
+    // newline-separated parts
+    [InlineData("org.xml.sax.SAXParseException: bad value\n[Validation set: 'x' | Problem: 'flowable-signal-duplicate-name']\n")]
+    // tab-separated parts
+    [InlineData("javax.xml.stream.XMLStreamException:\t[Validation set: 'x'\t| Problem: 'flowable-servicetask-missing-implementation']")]
+    // no spaces at all
+    [InlineData("cvc-datatype-valid.1.2.1: '[Validation set:'x'|Problem:'flowable-mailtask-no-recipient']' is not valid.")]
+    // planted via a documentation parse error
+    [InlineData("javax.xml.transform.TransformerException: [Validation set: 'x' | Problem: 'flowable-signal-missing-name'] in documentation")]
+    // planted in an Extra info tail with no genuine envelope
+    [InlineData("Deployment failed - [Extra info : activityName = [Validation set: 'x' | Problem: 'flowable-mailtask-no-recipient'] ]")]
+    public void An_author_cannot_influence_what_auton8_asserts(string planted)
     {
-        // Exactly what Xerces returns for an invalid QName carrying the payload.
-        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
-            $"javax.xml.stream.XMLStreamException: cvc-datatype-valid.1.2.1: "
-            + $"'Problem: '{planted}'' is not a valid value for 'QName'."));
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(planted));
 
-        Assert.DoesNotContain(sentenceItWouldHaveTriggered, described, StringComparison.Ordinal);
-        Assert.DoesNotContain(planted, described, StringComparison.Ordinal);
+        // Not "does not contain the planted code" -- does not contain ANY of our
+        // sentences. The property is that the author selected nothing.
+        Assert.Contains("The reason is in the server log", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("no recipient", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("share a name", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("has no name", described, StringComparison.Ordinal);
     }
 
-    /// <summary>And a genuine envelope still works (#357).</summary>
+    /// <summary>
+    /// A genuine envelope beats a planted one in the same message (#363).
+    /// </summary>
+    /// <remarks>
+    /// The `[Extra info` tail carries author-controlled element names, so a real
+    /// validation refusal can contain both. The code is taken from before the
+    /// tail, so the engine's own answer wins.
+    /// </remarks>
+    [Fact]
+    public void A_planted_code_in_the_tail_does_not_displace_the_real_one()
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            "[Validation set: 'flowable-executable-process' | Problem: "
+            + "'flowable-servicetask-missing-implementation'] : Service task has no implementation "
+            + "- [Extra info : activityName = Problem: 'flowable-mailtask-no-recipient' ]"));
+
+        Assert.Contains("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("no recipient", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>And a genuine envelope still works (#357).</summary>    /// <summary>And a genuine envelope still works (#357).</summary>
     /// <remarks>
     /// Without this, anchoring the marker could have disabled the whole deployment
     /// table and every row above would still pass.

@@ -444,6 +444,30 @@ public static partial class WorkflowBpmnXml
         || loop.Elements(BpmnNamespace + "loopCardinality")
             .Any(c => !string.IsNullOrWhiteSpace(c.Value));
 
+    /// <summary>Where a loop collects each run's result, if it says (#364).</summary>
+    internal static string? AggregationTarget(XElement loop) =>
+        Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
+
+    /// <summary>Which variable a loop collects, if it says (#364).</summary>
+    internal static string? AggregationSource(XElement loop) =>
+        Trimmed(loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+
+    /// <summary>
+    /// Has this loop already been given a hand-written aggregation (#364)?
+    /// </summary>
+    /// <remarks>
+    /// <c>ExpandMultiInstanceAggregation</c> honours a hand-written
+    /// <c>&lt;flowable:variableAggregation&gt;</c> — its comment says "an author who
+    /// hand-wrote the aggregation meant it" — while <c>BuildMultiInstanceErrors</c>
+    /// read only the <c>autonate:aggregate*</c> attributes and had never heard of
+    /// the element. So an author who wrote it was told they "did not say which
+    /// variable to collect", which is #356's sentence in a second rule.
+    /// </remarks>
+    internal static bool DeclaresAggregationElement(XElement loop) =>
+        loop.Element(BpmnNamespace + "extensionElements")
+            ?.Elements(FlowableNamespace + "variableAggregation")
+            .Any() == true;
+
     /// <summary>Does this loop say what to iterate over (#356)?</summary>
     /// <remarks>
     /// <c>flowable:collection</c> is namespaced; an unprefixed <c>collection</c>
@@ -535,10 +559,8 @@ public static partial class WorkflowBpmnXml
             .Descendants(BpmnNamespace + "multiInstanceLoopCharacteristics")
             .ToList())
         {
-            var target = Trimmed(
-                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
-            var source = Trimmed(
-                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+            var target = AggregationTarget(loop);
+            var source = AggregationSource(loop);
 
             loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Remove();
             loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Remove();
@@ -555,8 +577,10 @@ public static partial class WorkflowBpmnXml
                 loop.AddFirst(extensions);
             }
 
-            // An author who hand-wrote the aggregation meant it.
-            if (extensions.Elements(FlowableNamespace + "variableAggregation").Any()) continue;
+            // An author who hand-wrote the aggregation meant it. Through the
+            // shared reader, so the validator and the expansion cannot drift --
+            // they had (#364).
+            if (DeclaresAggregationElement(loop)) continue;
 
             extensions.Add(new XElement(
                 FlowableNamespace + "variableAggregation",
@@ -4057,12 +4081,13 @@ public static partial class WorkflowBpmnXml
                     "would silently do nothing. Clear whichever you did not mean.";
             }
 
-            var target = Trimmed(
-                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateTargetAttribute)?.Value);
-            var source = Trimmed(
-                loop.Attribute(ScriptTaskIdentity.AutoNateNamespace + AggregateSourceAttribute)?.Value);
+            var target = AggregationTarget(loop);
+            var source = AggregationSource(loop);
 
-            if (target is not null && source is null)
+            // #364: an author who hand-wrote <flowable:variableAggregation> HAS
+            // said which variable to collect, in the spelling the expansion
+            // respects. This rule read only the attributes and refused them.
+            if (target is not null && source is null && !DeclaresAggregationElement(loop))
             {
                 yield return
                     $"'{owner}' collects each run's result into '{target}' but does " +
@@ -4070,7 +4095,7 @@ public static partial class WorkflowBpmnXml
                     "sets, or clear the collection target.";
             }
 
-            if (source is not null && target is null)
+            if (source is not null && target is null && !DeclaresAggregationElement(loop))
             {
                 yield return
                     $"'{owner}' collects the variable '{source}' from each run but " +

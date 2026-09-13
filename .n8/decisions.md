@@ -5631,3 +5631,77 @@ Outcomes 9 and 3 gained the qualifications they lacked. Outcome 10's locator now
 names **both** entry points — five rounds of it naming only one, which excluded the
 two routes the next sentence enumerated — and `BroadcastSignalAsync` is recorded as
 a delivery Auton8 makes that cannot nudge, which was in neither list.
+
+## Round 14 — 2026-09-12 (during /n8-exec M4)
+
+**#362 — my #357 broke #163's AC7 (Rule 1).** `RuntimeReasons` had no 409 row for
+the ad-hoc route, so a refusal that used to name the obstacle read "the reason is
+in the server log" — the bare-500 defect AC7 was filed about, one layer up. Found
+by running the excluded suite, for the second consecutive round.
+
+A real collision, not just a missing row: #334→#357 established *never forward
+engine text*; #163 AC7 requires *the operator learns the actual obstacle*. Resolved
+by a sentence of ours that is as specific as the engine's — "that section still has
+work in progress — finish or cancel it first" — and the test now asserts the
+obstacle is **named**, not that Flowable's wording appears. AC7 asks for a refusal
+"handled in a defined, documented way"; it does not ask for the engine's words.
+
+**#363 — stop taking the last counterexample as the specification (Rule 1).** #349
+constrained the code's *shape*; #357 constrained the marker's *surroundings*; 7 of
+12 payloads still landed, because the author controls the entire attribute value
+Xerces echoes and any marker they can type they can plant.
+
+The property is *"a caller cannot influence what Auton8 asserts about someone
+else's diagram"*. Stated that way the question changes from "is this marker real?"
+to **"could the author's text be in this message at all?"** — and it can only be
+there if the PARSER echoed it. So a parse refusal now yields no code, whatever it
+contains, and within a validation refusal the code is taken from before the
+`[Extra info` tail where author-controlled names live.
+
+All 12 payloads are test rows, and the test asserts the author selected **none of
+our sentences**, not merely that the planted code is absent.
+
+**#364 — four more two-readers pairs, one live (Rule 1).** `BuildMultiInstanceErrors`
+read only the `autonate:aggregate*` attributes while the expansion honours
+`<flowable:variableAggregation>`, so an author who wrote the element was told they
+"did not say which variable to collect" — #356's sentence in a second rule.
+Unified behind shared readers, now three facts deep.
+
+**And the scan I added in round 13 to prevent this caught none of them.** It
+grepped only the cardinality spellings despite its name, its method attribution
+walked backwards into its own allowlist, and it read one file. Rewritten from the
+property — every spelling of every fact, every file, brace-scoped attribution.
+
+Writing it surfaced the same bug once more: my first rewrite reset `current` only
+on `}`, so every expression-bodied member left it stuck on an allowlisted name and
+two of three bypasses still walked through. Fixed by resetting on the semicolon
+that ends an expression body. All three bypasses now fail.
+
+**#365 — guards that leave the field they just repaired unguarded (Rule 2).**
+`Every_cannot_execute_reason_still_says_what_it_said` gated on
+`engine == "cannot-execute"`; the five message rows #358 had just restored are
+`engine: executes` / `studio: withdrawn`, so they sat outside it and were
+re-overwritable at 52/52 green. Widened to any row whose reason records a finding.
+
+The deny keys had the self-referential shape #347 named: every palette guard
+derives the classes to assert absent *from the file being mutated*, so deleting a
+key deletes its own assertion. Added a literal list — the only thing that does not
+move with the mutation.
+
+**#366 / #367 — the description.** `49 of 54 have a behaviour` had never been
+re-measured since 2026-09-07 and contradicted the manifest's own 46; corrected and
+re-sourced from the file. The `BroadcastSignalAsync` exemption **I added in round
+13 describes dead code** — zero production callers, and a plan doc says it was
+removed from the dispatch path. Outcomes 4 and 7 gained the qualifications they
+lacked. Outcome 10's 9-vs-11 count now names the helper that reconciles it.
+
+**#368 — filed, not done.** Running the Flowable suite in CI is the highest-leverage
+thing left, and it is Rule 4: Flowable is a custom image build, so this is new CI
+infrastructure whose cost lands on every build. CI already stands up Postgres (with
+a `flowable` database), NATS and Redis, so the proposal is concrete. Two rounds
+running, the worst defect was found only by running that suite by hand.
+
+**#369 — filed with a diagnosis rather than deferred a fourth time.** Two
+`ComplexGatewayStudioRoundTripTests` cases have been red since round 12. I ruled
+out prepare and validation (both shapes return `errors=0 warnings=0`), so it is the
+studio's save handler. Further diagnosis needs the browser, which is #323.
