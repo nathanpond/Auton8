@@ -127,10 +127,15 @@ public sealed class MultiInstanceReaderAgreementTests
             </bpmn:multiInstanceLoopCharacteristics>
             """);
 
+        // #373: this asserted only two fragments, and the source-only branch emits
+        // a THIRD -- "collects the variable 'score' from each run but does not say
+        // where to put the results." -- so that row of the theory asserted nothing.
+        // Reverting both guards failed only the aggregateTarget row.
         Assert.DoesNotContain(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
             e => e.Contains("which variable to collect", StringComparison.Ordinal)
-                 || e.Contains("collects each run", StringComparison.Ordinal));
+                 || e.Contains("collects each run", StringComparison.Ordinal)
+                 || e.Contains("where to put the results", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -186,10 +191,19 @@ public sealed class MultiInstanceReaderAgreementTests
     public void One_fact_one_reader_across_every_file_that_reads_them()
     {
         // Every spelling of every multi-instance fact, not just the one that broke.
+        // Derived from what the shared readers actually touch, not from which
+        // spelling last broke. #373: `"collection"` -- the studio's PRIMARY
+        // spelling of the collection fact and half of DeclaresCollection -- was
+        // missing from the previous two versions of this list, in a guard named
+        // for that very fact. Each rewrite had widened along the axis the last
+        // bypass used.
         string[] spellings =
         [
+            // cardinality
             "loopCardinality", "LoopCardinalityAttribute",
-            "loopDataInputRef",
+            // collection
+            "\"collection\"", "loopDataInputRef",
+            // aggregation
             "variableAggregation",
             "AggregateTargetAttribute", "AggregateSourceAttribute",
         ];
@@ -198,16 +212,25 @@ public sealed class MultiInstanceReaderAgreementTests
         // expansion, whose job is rewriting one spelling into another. Declared
         // by name, so a new method is an offender until someone adds it here on
         // purpose.
-        string[] mayNameASpelling =
-        [
-            "DeclaresCardinality", "DeclaresCollection", "DeclaresAggregationElement",
-            "AggregationTarget", "AggregationSource",
-            "ExpandMultiInstanceCardinality", "ExpandMultiInstanceAggregation",
-        ];
+        // file + method, not the bare name: a method called DeclaresCardinality in
+        // any other class was allowlisted by the previous version (#373).
+        var mayNameASpelling = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "WorkflowBpmnXml.cs:DeclaresCardinality",
+            "WorkflowBpmnXml.cs:DeclaresCollection",
+            "WorkflowBpmnXml.cs:CollectionName",
+            "WorkflowBpmnXml.cs:DeclaresAggregationElement",
+            "WorkflowBpmnXml.cs:AggregationTarget",
+            "WorkflowBpmnXml.cs:AggregationSource",
+            "WorkflowBpmnXml.cs:ExpandMultiInstanceCardinality",
+            "WorkflowBpmnXml.cs:ExpandMultiInstanceAggregation",
+        };
 
         var roots = new[]
         {
-            Path.Combine(AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, "src", "AutoNate.Web"),
+            // All of src/, not one project: a reader in Plugin.Abstractions or
+            // shared/ was invisible to the previous version (#373).
+            Path.Combine(AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, "src"),
         };
 
         var offenders = new List<string>();
@@ -260,9 +283,11 @@ public sealed class MultiInstanceReaderAgreementTests
                            || line.StartsWith("///", StringComparison.Ordinal)
                            || line.Contains("internal const string", StringComparison.Ordinal);
 
+                var key = current is null ? null : $"{Path.GetFileName(file)}:{current}";
+
                 if (!skip
                     && spellings.Any(sp => line.Contains(sp, StringComparison.Ordinal))
-                    && !(current is not null && mayNameASpelling.Contains(current)))
+                    && !(key is not null && mayNameASpelling.Contains(key)))
                 {
                     offenders.Add($"{relative}:{index + 1} (in {current ?? "<file scope>"}): {line}");
                 }

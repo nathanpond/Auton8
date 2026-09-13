@@ -662,7 +662,10 @@ public sealed class FlowableClient(
         };
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
-        await EnsureSuccessAsync(response, $"start the ad-hoc activity '{activityId}'");
+        // #371: the operation is a KEY, so it must not carry caller data -- this
+        // interpolated a URL route segment straight into the refusal message.
+        // The id belongs in the log, which already has the exception.
+        await EnsureSuccessAsync(response, "start the ad-hoc activity");
 
         // #293. Same reason as move-state, and this one matters more: ad-hoc is
         // how case-work ordinarily advances in the sub-process #163 shipped, so a

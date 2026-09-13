@@ -468,15 +468,28 @@ public static partial class WorkflowBpmnXml
             ?.Elements(FlowableNamespace + "variableAggregation")
             .Any() == true;
 
+    /// <summary>
+    /// What a loop iterates over, in either spelling, if it says (#373).
+    /// </summary>
+    /// <remarks>
+    /// <c>WorkflowConditionValidation</c> read only <c>flowable:collection</c>
+    /// while <c>DeclaresCollection</c> also accepts <c>loopDataInputRef</c>, so a
+    /// multi-instance whose collection was written the spec's way produced **no**
+    /// "nothing in this process sets that variable" warning at all. Two readers,
+    /// different answers — the #356 family, across files, which is why #373 widened
+    /// the scan past one project.
+    /// </remarks>
+    internal static string? CollectionName(XElement loop) =>
+        Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value)
+        ?? Trimmed(loop.Element(BpmnNamespace + "loopDataInputRef")?.Value);
+
     /// <summary>Does this loop say what to iterate over (#356)?</summary>
     /// <remarks>
     /// <c>flowable:collection</c> is namespaced; an unprefixed <c>collection</c>
     /// attribute is rejected by the BPMN XSD outright and was a dead branch (#341).
     /// <c>loopDataInputRef</c> is the spec's own element form.
     /// </remarks>
-    internal static bool DeclaresCollection(XElement loop) =>
-        Trimmed(loop.Attribute(FlowableNamespace + "collection")?.Value) is not null
-        || loop.Element(BpmnNamespace + "loopDataInputRef") is not null;
+    internal static bool DeclaresCollection(XElement loop) => CollectionName(loop) is not null;
 
     /// <summary>Where each run's result is collected, and from which variable (#245).</summary>
     internal const string AggregateTargetAttribute = "aggregateTarget";

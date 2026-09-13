@@ -34,8 +34,11 @@ public sealed class EngineRefusalMessageTests
     /// <c>$"Flowable could not {operation}. HTTP {code} {reason}. {rawResponseBody}"</c>.
     /// </summary>
     private static FlowableRequestException AsTheClientBuildsIt(string rawResponseBody) =>
-        new(HttpStatusCode.InternalServerError, "deploy process",
-            $"Flowable could not deploy process. HTTP 500 Internal Server Error. {rawResponseBody}");
+        // The operation is the REAL literal the client passes -- "deploy process"
+        // was close enough while nothing keyed on it, and stopped being so when
+        // #371 made the deploy operation the gate for reading a problem code.
+        new(HttpStatusCode.InternalServerError, EngineRefusal.DeployOperation,
+            $"Flowable could not {EngineRefusal.DeployOperation}. HTTP 500 Internal Server Error. {rawResponseBody}");
 
     /// <summary>Everything that defeated the #339 post-condition (#344).</summary>
     /// <remarks>
@@ -396,6 +399,171 @@ public sealed class EngineRefusalMessageTests
 
         Assert.Contains("no behaviour chosen", described, StringComparison.Ordinal);
         Assert.Contains("flowable-servicetask-missing-implementation", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// No channel by which caller data reaches the message can select a sentence (#371).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Round 14 reasoned that "the author's text can only be in the message if the
+    /// parser echoed it". True of the <b>diagram</b>; false of the <b>request</b>.
+    /// <c>EnsureSuccessAsync</c> interpolates the operation into the message, and
+    /// 13 operations interpolate caller data — a URL route segment, a variable
+    /// name, a message name. A caller could put a validation envelope in a URL
+    /// path and pick one of our sentences, with no XML anywhere.
+    /// </para>
+    /// <para>
+    /// So this theory is the <b>channel inventory</b>, not a payload list: one row
+    /// per way caller-supplied text reaches a <c>FlowableRequestException</c>. That
+    /// is the thing I failed to enumerate, and enumerating it is the test.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    // a URL route segment (the one that worked)
+    [InlineData("start the ad-hoc activity", HttpStatusCode.NotFound,
+        "Flowable could not start the ad-hoc activity '[Validation set: 'x' | Problem: 'flowable-mailtask-no-recipient']'. HTTP 404 Not Found.")]
+    // a caller-named variable, echoed by the engine in a real 409
+    [InlineData("create the process variables", HttpStatusCode.Conflict,
+        "Flowable could not create the process variables. HTTP 409 Conflict. {\"exception\":\"Variable '[Validation set: 'x' | Problem: 'flowable-signal-duplicate-name']' is already present.\"}")]
+    // a caller-supplied message name, echoed in a real 400
+    [InlineData("start the process instance", HttpStatusCode.BadRequest,
+        "Flowable could not start the process instance. HTTP 400 Bad Request. {\"exception\":\"no subscription to message with name '[Validation set: 'x' | Problem: 'flowable-servicetask-missing-implementation']' found.\"}")]
+    // an operation that is not in the table at all, carrying a planted envelope
+    [InlineData("broadcast signal", HttpStatusCode.InternalServerError,
+        "Flowable could not broadcast signal '[Validation set: 'x' | Problem: 'flowable-mailtask-no-recipient']'. HTTP 500.")]
+    public void No_caller_channel_can_select_a_sentence(
+        string operation, HttpStatusCode status, string message)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(
+            new FlowableRequestException(status, operation, message));
+
+        // None of the planted sentences. The row may legitimately return OUR
+        // sentence for that (operation, status) -- what it must never do is return
+        // the one the caller asked for.
+        Assert.DoesNotContain("no recipient", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("share a name", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Validation set", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only a deploy may have its message read for a code (#371).
+    /// </summary>
+    /// <remarks>
+    /// The structural rule that closes every channel at once: a deployment
+    /// validation envelope can only appear on a deploy, so nothing else looks.
+    /// </remarks>
+    [Fact]
+    public void A_runtime_refusal_never_consults_the_deployment_table()
+    {
+        // A genuine, perfectly-formed envelope -- on a runtime operation.
+        var described = WorkflowEndpoints.DescribeEngineRefusal(new FlowableRequestException(
+            HttpStatusCode.InternalServerError, "complete the user task",
+            "Flowable could not complete the user task. HTTP 500. "
+            + "[Validation set: 'flowable-executable-process' | Problem: "
+            + "'flowable-servicetask-missing-implementation'] : Service task has no implementation"));
+
+        Assert.DoesNotContain("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.Contains("server log", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An author's element name cannot suppress a genuine code (#371).
+    /// </summary>
+    /// <remarks>
+    /// `ParserRefusal` scanned the whole message including the `[Extra info` tail,
+    /// where Flowable puts the author's `activityName`. So naming an activity
+    /// "cvc-check step" turned a real, correctly-coded refusal into "the reason is
+    /// in the server log" — the fix suppressing the very thing it exists to show.
+    /// </remarks>
+    [Theory]
+    [InlineData("cvc-check step")]
+    [InlineData("Handle ParseError")]
+    [InlineData("SAXParseException triage")]
+    public void An_element_name_in_the_tail_cannot_suppress_a_genuine_code(string activityName)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(AsTheClientBuildsIt(
+            "[Validation set: 'flowable-executable-process' | Problem: "
+            + "'flowable-servicetask-missing-implementation'] : Service task has no implementation "
+            + $"- [Extra info : activityName = {activityName} ]"));
+
+        Assert.Contains("no behaviour chosen", described, StringComparison.Ordinal);
+        Assert.DoesNotContain("server log", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The ad-hoc rows, asserted where CI can run them (#372).
+    /// </summary>
+    /// <remarks>
+    /// #362 added the 409 row and its only assertion was in
+    /// <c>AdhocSubProcessExecutionTests</c>, which carries
+    /// <c>RequiresService=Flowable</c> — the suite CI excludes. Deleting the row
+    /// left 781/781 green. A fix for a regression CI could not see, guarded only
+    /// by a test CI cannot run.
+    /// <c>EngineRefusal.Describe</c> is a pure function; there was never a reason
+    /// for these to need an engine.
+    /// </remarks>
+    [Theory]
+    [InlineData("complete the ad-hoc sub-process", HttpStatusCode.Conflict, "work in progress")]
+    [InlineData("complete the ad-hoc sub-process", HttpStatusCode.NotFound, "no longer exists")]
+    [InlineData("start the ad-hoc activity", HttpStatusCode.NotFound, "not available in this section")]
+    [InlineData("start the ad-hoc activity", HttpStatusCode.Conflict, "already running in this section")]
+    [InlineData("update the process variables", HttpStatusCode.Conflict, "already set on this step")]
+    [InlineData("update the process variables", HttpStatusCode.BadRequest, "not a type the engine can store")]
+    [InlineData("create the process variables", HttpStatusCode.BadRequest, "not a type the engine can store")]
+    public void Each_reachable_refusal_has_our_words(
+        string operation, HttpStatusCode status, string expected)
+    {
+        var described = WorkflowEndpoints.DescribeEngineRefusal(new FlowableRequestException(
+            status, operation, $"Flowable could not {operation}. HTTP {(int)status}."));
+
+        Assert.Contains(expected, described, StringComparison.Ordinal);
+        Assert.DoesNotContain("server log", described, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every declared operation is one some route actually passes (#372).
+    /// </summary>
+    /// <remarks>
+    /// A row keyed on an operation string nothing emits is decoration that reads
+    /// as coverage — #349 found exactly that in the deployment table
+    /// (<c>flowable-bpmn-parse-failure</c>, which Flowable never emits), and #372
+    /// found it again here (<c>list the ad-hoc subprocess activities</c>, whose
+    /// route has no try/catch at all).
+    /// </remarks>
+    [Fact]
+    public void Every_declared_operation_is_one_the_client_actually_passes()
+    {
+        var client = File.ReadAllText(Path.Combine(
+            AutoNate.Web.Tests.Infrastructure.RepoRoot.Path,
+            "src", "AutoNate.Web", "Services", "Flowable", "FlowableClient.cs"));
+
+        var declared = typeof(WorkflowEndpoints).Assembly
+            .GetType("AutoNate.Web.Endpoints.EngineRefusal")!
+            .GetField("RuntimeReasons", System.Reflection.BindingFlags.NonPublic
+                                        | System.Reflection.BindingFlags.Static)!
+            .GetValue(null)!;
+
+        var operations = ((System.Collections.IEnumerable)declared)
+            .Cast<object>()
+            .Select(row => (string)row.GetType().GetField("Item1")!.GetValue(row)!)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(operations);
+
+        var unreachable = operations
+            .Where(op => !client.Contains($"\"{op}\"", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.True(
+            unreachable.Count == 0,
+            "These operations are keys in RuntimeReasons but FlowableClient never passes "
+            + "them to EnsureSuccessAsync as a literal, so their rows can never fire:\n  "
+            + string.Join("\n  ", unreachable)
+            + "\n\nA row nothing can reach reads as coverage and is not (#372).");
     }
 
     /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>

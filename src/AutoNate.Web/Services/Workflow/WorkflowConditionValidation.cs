@@ -153,7 +153,10 @@ public static class WorkflowConditionValidation
             var owner = multiInstance.Parent;
             var label = owner is null ? LabelOf(multiInstance) : LabelOf(owner);
 
-            var collection = multiInstance.Attribute(Flowable + "collection")?.Value;
+            // #373: through the shared reader. This read only the flowable:
+            // attribute, so a collection written as <bpmn:loopDataInputRef> --
+            // which publish accepts -- produced no warning at all.
+            var collection = WorkflowBpmnXml.CollectionName(multiInstance);
             if (!string.IsNullOrWhiteSpace(collection))
             {
                 yield return new Site(label, "The collection", collection);

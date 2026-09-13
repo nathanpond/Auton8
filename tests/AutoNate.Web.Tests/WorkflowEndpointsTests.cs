@@ -461,8 +461,11 @@ public sealed class WorkflowEndpointsTests
         // Flowable answers validation refusals with 500, which is the case the
         // old IsCallerError split got backwards.
         factory.FlowableStub.DeployThrows = new FlowableRequestException(
-            HttpStatusCode.InternalServerError, "deploy process",
-            "Flowable could not deploy process. HTTP 500 Internal Server Error. "
+            // #371 made the operation load-bearing -- the deployment table is
+            // consulted only for the real deploy operation -- so a fixture using
+            // an approximation silently stopped exercising this path.
+            HttpStatusCode.InternalServerError, EngineRefusal.DeployOperation,
+            $"Flowable could not {EngineRefusal.DeployOperation}. HTTP 500 Internal Server Error. "
             + "[Validation set: 'flowable-executable-process' | Problem: "
             + "'flowable-servicetask-missing-implementation'] : Service task does not have an "
             + "implementation defined - [Extra info : processDefinitionId = secretProc:3:9f2c ] "
@@ -501,8 +504,11 @@ public sealed class WorkflowEndpointsTests
 
         // No problem code: we genuinely do not know the caller was at fault.
         factory.FlowableStub.DeployThrows = new FlowableRequestException(
-            HttpStatusCode.InternalServerError, "deploy process",
-            "Flowable could not deploy process. HTTP 500 Internal Server Error. "
+            // #371 made the operation load-bearing -- the deployment table is
+            // consulted only for the real deploy operation -- so a fixture using
+            // an approximation silently stopped exercising this path.
+            HttpStatusCode.InternalServerError, EngineRefusal.DeployOperation,
+            $"Flowable could not {EngineRefusal.DeployOperation}. HTTP 500 Internal Server Error. "
             + "Could not acquire a connection: jdbc:postgresql://flowable-db.internal:5432/db"
             + "?user=flowable&password=Hunter2!");
 
