@@ -6241,3 +6241,44 @@ a hypothesis for the probe, not a result — and in this story of all stories,
 reasoning is not evidence.
 
 **#328 not started.**
+
+## M4b round 4 — 2026-09-13 (during /n8-exec M4b)
+
+**#328 — Send Task is authorable again, with a test on each side.** The story
+offered two fixes and I took the first: the message editor writes
+`flowable:behaviorKey="autonate.send-message"` when the element is a
+`bpmn:SendTask`. Publish already accepted that key as one of three deployable
+wirings and the expansion already converted such a task to a service task, so
+this closes the loop without touching either.
+
+**Why not the second option** — "the expansion treats *any* send task carrying an
+`autonateMessageName` as one it owns". It widens what Auton8 silently rewrites in
+an **imported** diagram, which may carry that attribute for reasons of its own.
+Option (a) changes only what the studio itself produces, which is the surface the
+story is actually about.
+
+The row returns to `studio: supported` **with a test behind it**, which is the
+story's own closing sentence — not on the strength of someone having read the
+code. Tallies move 47/16/6 → **48/15/6**; the engine axis never moved, because the
+engine always ran a correctly configured send task.
+
+**Five guards fired on one manifest edit, every one correctly**: the withdrawn
+literal, the per-row reason dictionary, the digest baseline (twice — the floor and
+the regenerability check), and the palette deny-key literal, which legitimately
+lost Send Task's three keys. That is the layer built over rounds 15–19 doing
+exactly what it was built for: a deliberate change surfaces in five places and
+each demands an explicit edit. None of them could be satisfied by accident.
+
+**The refusal message was rewritten too.** It told the author Send Task is
+withdrawn from the palette, which stopped being true with this change — and a
+refusal that names a false reason is its own defect. The complement test asserts
+the new message does *not* contain the old sentence, so the two cannot drift apart
+again.
+
+**Mutation-proven both ways**: removing the write returns the studio to its #316
+state and fails; renaming the key on the studio side only — leaving both halves
+internally consistent and jointly broken — also fails, because each side asserts
+the literal rather than the shape.
+
+**#325 remains partially done** (AC1, AC2, AC5 outstanding; its AC4 list shipped
+last round as #404).

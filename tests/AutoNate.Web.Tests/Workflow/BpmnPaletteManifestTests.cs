@@ -260,15 +260,12 @@ public sealed class BpmnPaletteManifestTests
             "bpmn-icon-manual",
             "bpmn-icon-manual-task",
             "bpmn-icon-participant",
-            "bpmn-icon-send",
-            "bpmn-icon-send-task",
             "bpmn-icon-start-event-compensation",
             "bpmn-icon-start-event-message",
             "bpmn-icon-start-event-non-interrupting-message",
             "bpmn-icon-task",
             "bpmn-icon-transaction",
             "none-boundary-event",
-            "send-task",
         ];
 
         var gone = expected.Except(declared, StringComparer.Ordinal).ToList();

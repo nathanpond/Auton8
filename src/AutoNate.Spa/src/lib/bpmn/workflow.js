@@ -810,6 +810,11 @@ function describeServiceTask(businessObject) {
 // The autonate-namespace equivalents of the flowable: helpers above. The
 // namespace URI is on the do-not-rename list: changing it orphans the property
 // on every diagram that already carries it.
+// #328. The behaviour the expansion converts a send task into. Must match
+// WorkflowBpmnXml.SendMessageBehaviorKey exactly -- the two halves of one
+// contract, and a test on each side asserts the literal rather than the shape.
+const SEND_MESSAGE_BEHAVIOR_KEY = "autonate.send-message";
+
 const AUTONATE_ATTR_PREFIX = "autonate:";
 const FLOWABLE_ATTR_PREFIX = "flowable:";
 const FLOWABLE_NAMESPACE = "http://flowable.org/bpmn";
@@ -1454,6 +1459,20 @@ export function updateMessageElementProperties(modelerHandle, payload) {
   if (businessObject.$type === "bpmn:SendTask") {
     writeFlowableAttribute(
       businessObject, "autonateMessageName", normalizeOptionalString(payload.messageName));
+
+    // #328. The behaviour key, without which NO send task the studio can produce
+    // is deployable. Flowable requires `type` or `operation` on a sendTask and
+    // refuses the whole deployment otherwise; Auton8's expansion converts one to
+    // a service task only when it carries this key -- and until now nothing in
+    // the studio could write it. `updateServiceTaskProperties` throws unless the
+    // element is a bpmn:ServiceTask, and selecting a send task routes here, whose
+    // only write was the message name. So the element was withdrawn (#316).
+    //
+    // Written here rather than by widening the expansion to adopt any send task
+    // carrying an autonateMessageName: that would silently rewrite send tasks in
+    // an IMPORTED diagram, which may carry that attribute for reasons of its own.
+    // This changes only what the studio itself produces.
+    writeFlowableAttribute(businessObject, "behaviorKey", SEND_MESSAGE_BEHAVIOR_KEY);
   }
 
   // Through modeling so the command stack records it and the dirty flag flips —

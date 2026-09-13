@@ -103,8 +103,13 @@ public sealed class BpmnSupportManifestTests
             // while no editor for an ioSpecification exists, and the palette's own
             // exclusion line excused the gap by naming an editor that was never
             // built. The engine axis is unchanged: both still `engine: executes`.
-            ["studio:supported"] = 47,
-            ["studio:withdrawn"] = 16,
+            // 47/16 until #328 made Send Task authorable again: the studio's message
+            // editor now writes the behaviour key the expansion needs, so a send task
+            // it produces is deployable. #316 had withdrawn it because nothing in the
+            // studio could write that key. The engine axis never moved -- the engine
+            // always ran a correctly configured send task.
+            ["studio:supported"] = 48,
+            ["studio:withdrawn"] = 15,
             ["studio:coming-soon"] = 6,
             ["engine:executes"] = 57,
             ["engine:cannot-execute"] = 9,
@@ -177,7 +182,7 @@ public sealed class BpmnSupportManifestTests
             "Boundary Event (None)", "Cancel Boundary", "Cancel End", "Compensation Start Event",
             "Intermediate Catch (Link)", "Intermediate Catch (Message)", "Intermediate Throw (Link)",
             "Intermediate Throw (Message)", "Loop Marker", "Manual Task", "Message Boundary",
-            "Message End", "Message Start Event", "Send Task", "Task (Generic)", "Transaction",
+            "Message End", "Message Start Event", "Task (Generic)", "Transaction",
         ];
         string[] expectedComingSoon =
         [
@@ -249,7 +254,10 @@ public sealed class BpmnSupportManifestTests
         {
             ["Task (Generic)"] = "silent pass-through",
             ["Manual Task"] = "does not wait",
-            ["Send Task"] = "#316",
+            // Send Task was here until #328 made it authorable again. This dictionary
+            // is keyed on the WITHDRAWN set, so a row that returns to supported
+            // leaves it -- the test compares the two key sets, which is what makes
+            // a silent withdrawal impossible in either direction.
             ["Message Start Event"] = "POST /runtime/process-instances",
             ["Intermediate Throw (Message)"] = "flowable-throw-event-invalid-eventdefinition",
             ["Intermediate Catch (Message)"] = "correlating on a declared process variable",
