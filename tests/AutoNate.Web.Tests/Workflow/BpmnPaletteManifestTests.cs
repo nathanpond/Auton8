@@ -1165,4 +1165,90 @@ public sealed class BpmnPaletteManifestTests
             + "about the families it was written for (#264, #282, #374, #381).");
     }
 
+
+    /// <summary>
+    /// A palette exclusion cannot excuse a SUPPORTED element (#265).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// `notOnThePalette` exists to be honest about elements that are not shapes —
+    /// a sequence flow is drawn from the context pad, a loop marker is set in a
+    /// panel. Used on an element the manifest calls <c>supported</c>, it does the
+    /// opposite: it makes a gap look like a design choice.
+    /// </para>
+    /// <para>
+    /// That is exactly what happened. <c>dataInput</c> and <c>dataOutput</c> were
+    /// <c>studio: supported</c> — which the manifest's own <c>$fields</c> define as
+    /// "authorable in the studio today" — and excluded with the reason *"made in
+    /// the element data editor (#166)"*. No such editor exists, and none ever did.
+    /// </para>
+    /// <para>
+    /// The previous guard pinned six named elements, so a verifier could delete
+    /// <c>create.group</c> from the catalog, add
+    /// <c>{"localName":"group","reason":"nonsense excuse"}</c> to the exclusion
+    /// list, and watch 19/19 pass. This asks the property instead: **every
+    /// excluded element must be one the manifest does not call supported**, with a
+    /// named allowlist for the genuine non-shapes, each carrying why it is one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void No_supported_element_is_excused_off_the_palette()
+    {
+        using var palette = PaletteDocument();
+
+        var studioByKey = Manifest().ToDictionary(
+            e => Key(e.LocalName, e.EventDefinition), e => e.Studio, StringComparer.Ordinal);
+
+        // The genuine non-shapes: authorable, but not by dragging. Each is here
+        // because a DIFFERENT surface creates it, named so the claim is checkable
+        // rather than asserted.
+        // Keyed the same way the manifest is, so a variant can be allowed without
+        // allowing its siblings: the two event-subprocess start events below are
+        // authorable, and a bare `startEvent` would not be.
+        var authoredElsewhere = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [Key("sequenceFlow", null)] = "drawn from an element's context pad",
+            [Key("association", null)] = "drawn from an element's context pad",
+            [Key("messageFlow", null)] = "drawn between pools from the context pad",
+            [Key("lane", null)] = "added by the pool's own 'add lane' control",
+            // Legal ONLY inside an event sub-process, so the palette cannot place
+            // them -- there is nowhere to drop one. The event sub-process's own
+            // start event replaces into them, which is a real authoring surface
+            // and is why these stay supported. #392's effect guard covers the
+            // other half: a supported element must survive the popup filter.
+            [Key("startEvent", "error")] = "the event sub-process start event's replace menu",
+            [Key("startEvent", "escalation")] = "the event sub-process start event's replace menu",
+        };
+
+        var excused = new List<string>();
+
+        foreach (var entry in palette.RootElement.GetProperty("notOnThePalette").EnumerateArray())
+        {
+            var localName = entry.GetProperty("localName").GetString()!;
+            if (localName == "*") continue;   // a marker rule, not an element row
+
+            var eventDefinition = entry.TryGetProperty("eventDefinition", out var ed)
+                ? ed.GetString()
+                : null;
+
+            if (!studioByKey.TryGetValue(Key(localName, eventDefinition), out var studio)) continue;
+            if (studio != "supported") continue;
+            if (authoredElsewhere.ContainsKey(Key(localName, eventDefinition))) continue;
+
+            excused.Add($"{localName}: studio=supported, excluded with \"{entry.GetProperty("reason").GetString()}\"");
+        }
+
+        Assert.True(
+            excused.Count == 0,
+            "These elements are `studio: supported` -- which this manifest's own $fields "
+            + "define as \"authorable in the studio today\" -- and are excluded from the "
+            + "palette anyway:\n  "
+            + string.Join("\n  ", excused.Order(StringComparer.Ordinal))
+            + "\n\nEither an authoring surface exists, in which case name it in "
+            + "`authoredElsewhere` above; or it does not, in which case the row is not "
+            + "supported and the manifest should say coming-soon. What it must not do is "
+            + "claim both (#265).");
+    }
+
+
 }

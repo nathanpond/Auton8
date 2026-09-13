@@ -98,9 +98,14 @@ public sealed class BpmnSupportManifestTests
             // 54/11 until #340 withdrew the five message rows: the studio cannot
             // create or name a <bpmn:message> root, so they were never authorable.
             // The engine axis is unchanged -- all five still `engine: executes`.
-            ["studio:supported"] = 49,
+            // 49/4 until #265 moved Data Input and Data Output to coming-soon: the
+            // manifest called them SUPPORTED -- "authorable in the studio today" --
+            // while no editor for an ioSpecification exists, and the palette's own
+            // exclusion line excused the gap by naming an editor that was never
+            // built. The engine axis is unchanged: both still `engine: executes`.
+            ["studio:supported"] = 47,
             ["studio:withdrawn"] = 16,
-            ["studio:coming-soon"] = 4,
+            ["studio:coming-soon"] = 6,
             ["engine:executes"] = 57,
             ["engine:cannot-execute"] = 9,
             ["engine:annotation"] = 3,
@@ -176,7 +181,8 @@ public sealed class BpmnSupportManifestTests
         ];
         string[] expectedComingSoon =
         [
-            "Business Rule Task", "Lane", "Message Flow", "Pool / Participant",
+            "Business Rule Task", "Data Input", "Data Output", "Lane",
+            "Message Flow", "Pool / Participant",
         ];
 
         static string Diff(string label, IEnumerable<string> actual, IEnumerable<string> expected)

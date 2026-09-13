@@ -38,12 +38,12 @@
     {
       "localName": "dataInput",
       "eventDefinition": null,
-      "reason": "A process-level data declaration, made in the element data editor (#166); it is not a shape."
+      "reason": "Part of an activity's ioSpecification. There is no editor for one (#166), which is why the manifest row is coming-soon rather than supported -- #265 found this line excusing a gap as a design choice."
     },
     {
       "localName": "dataOutput",
       "eventDefinition": null,
-      "reason": "A process-level data declaration, made in the element data editor (#166); it is not a shape."
+      "reason": "Part of an activity's ioSpecification. There is no editor for one (#166), which is why the manifest row is coming-soon rather than supported -- #265 found this line excusing a gap as a design choice."
     },
     {
       "localName": "startEvent",

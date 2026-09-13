@@ -6110,3 +6110,37 @@ defect.
 chosen while showing the global warning copy. #323 covered `src/lib/bpmn/`, not
 the React pages, and changing render logic blind trades a known wrong display for
 an unknown one — the same reasoning #352 gave for not touching 34 copies at once.
+
+**#265 — the manifest stopped calling two unauthorable elements supported.** The
+story gave the choice: build the editor the exclusion reason claims, or change the
+rows. Built nothing — M4b's scope says it adds no element support — so
+`dataInput` and `dataOutput` are now `coming-soon`, and both the manifest reason
+and the palette exclusion say plainly that no editor for an `ioSpecification`
+exists.
+
+That moves M4's studio tallies: **49/16/4 becomes 47/16/6**. The engine axis is
+untouched (both still `engine: executes`), so 43/3/8 stands. M4 is closed and its
+description records those numbers as of its own close; this is the milestone whose
+stated job is revising the instrument, so the guard was updated with the reason
+written into it rather than the number quietly edited.
+
+The reason baseline was regenerated deliberately and the diff is **two rows** —
+exactly the two changed. That is the golden-file discipline from #380 doing what
+it was built for: the change is visible, reviewable, and could not have happened
+silently.
+
+**The guard the story asked for.** The previous one pinned six named elements, so
+a verifier could delete `create.group` from the catalog, add
+`{"localName":"group","reason":"nonsense excuse"}` to the exclusion list, and
+watch 19/19 pass. The new one asks the property: **no `studio: supported` element
+may be excused off the palette**, with a named allowlist for the genuine
+non-shapes, each carrying the surface that does author it.
+
+On its first run it found two more — `startEvent+error` and
+`startEvent+escalation`, the pair round 20's verification had already noticed had
+no palette row. Those are legitimate: they are legal only inside an event
+sub-process, so the palette has nowhere to drop one, and the event sub-process's
+own start event replaces into them. Allowlisted with that surface named, and keyed
+on `(localName, eventDefinition)` so allowing a variant does not allow its
+siblings. Mutation-tested with the story's own scenario: excusing `userTask` with
+"nonsense excuse" now fails by name.
