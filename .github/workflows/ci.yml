@@ -60,6 +60,14 @@ jobs:
         working-directory: src/AutoNate.Spa
         run: npx tsc -b
 
+      # #323. The gate, not just the runner: M4b exists because `studio: supported`
+      # was a load-bearing claim nothing in the repository could check, and a
+      # runner nothing runs is the same as no runner. Before Build so a broken
+      # authoring layer fails fast rather than after a two-minute bundle.
+      - name: Test
+        working-directory: src/AutoNate.Spa
+        run: npm test
+
       - name: Build
         working-directory: src/AutoNate.Spa
         run: npm run build

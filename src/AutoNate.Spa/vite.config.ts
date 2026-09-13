@@ -1,4 +1,9 @@
-import { createLogger, defineConfig } from "vite";
+import { createLogger } from "vite";
+// vitest's defineConfig, not vite's: it is the same function with the `test`
+// block added to the type. Importing vite's leaves `test` an unknown property
+// and `npm run type-check` fails -- which is the right failure, since the block
+// would then be silently ignored at runtime too.
+import { defineConfig } from "vitest/config";
 
 import react from "@vitejs/plugin-react";
 import path from "node:path";
@@ -82,6 +87,18 @@ export default defineConfig({
       // entry, Vite's SPA fallback returns index.html for /files/* requests.
       "/files": { target: backendTarget, changeOrigin: false }
     }
+  },
+  // #323. vitest reuses this config on purpose: the module graph, the `@/` and
+  // `@shared/` aliases and the JSON imports resolve in tests exactly as they do
+  // in the app. A second resolver is a second thing that can disagree with the
+  // app, and "the test passed but the studio is broken" is the class of defect
+  // this milestone exists to close.
+  test: {
+    include: ["src/**/*.test.{js,ts,tsx}"],
+    environment: "node",
+    // No globals: every test imports `describe`/`it`/`expect` explicitly, so a
+    // file that runs outside vitest fails loudly instead of silently.
+    globals: false
   },
   build: {
     outDir: "dist",

@@ -401,6 +401,13 @@ public sealed class MultiInstanceReaderAgreementTests
         var readers = new[] { "*.js", "*.jsx", "*.ts", "*.tsx" }
             .SelectMany(pattern => Directory.EnumerateFiles(spa, pattern, SearchOption.AllDirectories))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            // Test files name these spellings in order to ASSERT them (#323 stood
+            // up the SPA runner and its round-trip tests mention every one). A
+            // test is not a divergent reader of the fact -- it is the thing that
+            // catches one -- so counting it here would make adding coverage look
+            // like adding a defect.
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}__tests__{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => !Path.GetFileName(f).Contains(".test.", StringComparison.Ordinal))
             .Select(f => (
                 Path: Path.GetRelativePath(AutoNate.Web.Tests.Infrastructure.RepoRoot.Path, f),
                 Text: File.ReadAllText(f)))
