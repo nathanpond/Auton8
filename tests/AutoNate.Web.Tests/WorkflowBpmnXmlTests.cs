@@ -4948,4 +4948,74 @@ public sealed class WorkflowBpmnXmlTests
             """));
     }
 
+
+    /// <summary>
+    /// Publish accepts exactly the send task the studio now writes (#328, #316).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves of one contract: the studio writes
+    /// <c>flowable:behaviorKey="autonate.send-message"</c> and the expansion adopts
+    /// a send task carrying it. #316 withdrew the element because the studio could
+    /// not write that key, so <b>no state of it an author could produce was
+    /// deployable</b> — Flowable requires <c>type</c> or <c>operation</c> and
+    /// refuses the whole deployment otherwise.
+    /// </para>
+    /// <para>
+    /// Asserted as the literal string rather than by shape, because the studio's
+    /// side matches on ordinal equality and a renamed key would leave both halves
+    /// internally consistent and jointly broken.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ValidateProcess_AcceptsTheSendTaskTheStudioWrites()
+    {
+        var xml = SendTaskDiagram("""flowable:behaviorKey="autonate.send-message" flowable:autonateMessageName="invoice.sent" """);
+
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(xml).Errors);
+    }
+
+    /// <summary>The complement: an unwired send task is still refused (#328).</summary>
+    /// <remarks>
+    /// This is the half that protects an IMPORTED diagram. #328 changed only what
+    /// the studio produces; a send task authored elsewhere with none of the three
+    /// wirings still fails the whole deployment, so it is refused here with words
+    /// the author can act on rather than sent to the engine.
+    /// </remarks>
+    [Fact]
+    public void ValidateProcess_StillRefusesASendTaskWithNoWiringAtAll()
+    {
+        var errors = WorkflowBpmnXml.ValidateProcess(SendTaskDiagram("")).Errors;
+
+        Assert.Contains(errors, e => e.Contains("has nothing to send with", StringComparison.Ordinal));
+
+        // And the refusal no longer tells the author the element is withdrawn from
+        // the palette, which stopped being true with #328. A refusal that names a
+        // false reason is its own defect.
+        Assert.DoesNotContain(errors, e => e.Contains("withdrawn from the palette", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("""flowable:type="mail" """)]
+    [InlineData("""flowable:operation="op" """)]
+    public void ValidateProcess_AcceptsFlowablesOwnSendTaskWirings(string attributes)
+    {
+        // The other two of the three. Auton8 does not own these and must not
+        // refuse them: an imported diagram wired Flowable's way deploys fine.
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(SendTaskDiagram(attributes)).Errors);
+    }
+
+    private static string SendTaskDiagram(string sendTaskAttributes) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:flowable="http://flowable.org/bpmn"
+                     targetNamespace="http://autonate.dev/workflows">
+          <process id="P_1" name="p" isExecutable="true">
+            <startEvent id="Start_1" />
+            <sendTask id="Send_1" name="Tell them" {sendTaskAttributes}/>
+            <endEvent id="End_1" />
+          </process>
+        </definitions>
+        """;
+
 }

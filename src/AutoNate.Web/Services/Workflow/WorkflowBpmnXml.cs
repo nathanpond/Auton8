@@ -3187,18 +3187,20 @@ public static partial class WorkflowBpmnXml
     /// exactly as authored.
     /// </para>
     /// <para>
-    /// **The studio cannot write that key onto a send task.** `updateServiceTaskProperties`
+    /// **#316: the studio could not write that key.** `updateServiceTaskProperties`
     /// throws unless the element is a `bpmn:ServiceTask`, and selecting a send task
-    /// routes to the message editor, whose only write is the message name. So every
+    /// routes to the message editor, whose only write was the message name. So every
     /// send task an author could place was undeployable, publish said nothing, and
     /// the element's manifest row said `studio: supported` / `engine: executes`.
+    /// The row was withdrawn.
     /// </para>
     /// <para>
-    /// The row is now <c>studio: withdrawn</c> — the engine really does run a
-    /// correctly configured send task, so the engine axis is unchanged, and it is
-    /// the authorability claim that was false. This rule is the publish half:
-    /// an imported diagram can still carry one, and it is refused rather than
-    /// deployed into a failure.
+    /// **#328 made it authorable again**: the message editor now writes the key
+    /// beside the message name, so a send task the studio produces carries one of
+    /// the three deployable wirings and the row is `studio: supported` with a test
+    /// on each side of the contract. This rule keeps its job — an IMPORTED diagram
+    /// can still carry a send task with none of the three, and it is refused here
+    /// rather than deployed into a whole-deployment failure.
     /// </para>
     /// </remarks>
     private static IReadOnlyList<string> BuildSendTaskErrors(XDocument document)
@@ -3221,10 +3223,11 @@ public static partial class WorkflowBpmnXml
 
             errors.Add(
                 $"Send task '{LabelOf(sendTask)}' has nothing to send with. Flowable needs a " +
-                "send task to name how it sends — and Auton8's studio cannot configure one, " +
-                "which is why Send Task is withdrawn from the palette. Replace it with a " +
-                "service task, or an intermediate throw message event if you want Auton8 to " +
-                "send the message. Left as it is, Flowable refuses the whole deployment.");
+                "send task to name how it sends. Open it in the studio and give it a message " +
+                "name — that writes the wiring Auton8 needs. If this diagram came from " +
+                "elsewhere, give it a flowable:type or flowable:operation of its own, or " +
+                "replace it with a service task or an intermediate throw message event. Left " +
+                "as it is, Flowable refuses the whole deployment.");
         }
 
         return errors;

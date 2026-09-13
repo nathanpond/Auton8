@@ -462,11 +462,11 @@
     {
       "name": "Send Task",
       "category": "Tasks",
-      "studio": "withdrawn",
+      "studio": "supported",
       "engine": "executes",
       "localName": "sendTask",
       "eventDefinition": null,
-      "reason": "#316: the studio cannot configure a deployable send task. Flowable requires 'type' or 'operation' and refuses the whole deployment otherwise (flowable-sendtask-invalid-implementation); Auton8's expansion converts one only when it carries flowable:behaviorKey='autonate.send-message', and the studio cannot write that onto a send task -- updateServiceTaskProperties throws unless the element is a bpmn:ServiceTask, and selecting a send task routes to the message editor, whose only write is the message name. So EVERY send task an author could place was undeployable while this row read studio: supported, and publish said nothing. The ENGINE axis is unchanged: Flowable runs a correctly configured send task, which is why engine stays 'executes'. Use a service task, or an intermediate throw message event.",
+      "reason": "#328: authorable again. The studio's message editor now writes flowable:behaviorKey=\"autonate.send-message\", which publish-time expansion converts to a service task running Auton8's message-sending behaviour. #316 withdrew it because nothing in the studio could write that key, so every send task an author could place was undeployable -- Flowable requires type or operation and refuses the whole deployment otherwise. Verified against Flowable 8.0.0; the engine axis never changed.",
       "evidence": "deployed against a live 8.0.0 engine in its default palette state and refused: flowable-sendtask-invalid-implementation"
     },
     {

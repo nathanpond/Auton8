@@ -99,3 +99,48 @@ describe("message element properties round-trip", () => {
     expect(send.$attrs["flowable:autonateMessageName"]).toBe("invoice.sent");
   });
 });
+
+/**
+ * A send task the studio produces is deployable (#328, #316).
+ *
+ * #316 withdrew Send Task because **no state of it the studio could produce was
+ * deployable**: Flowable requires `type` or `operation` and refuses the whole
+ * deployment otherwise, and Auton8's expansion adopts one only when it carries
+ * `flowable:behaviorKey="autonate.send-message"` — which nothing in the studio
+ * could write. The element was BPMN's most obvious "send a message" shape and it
+ * was unavailable while a perfectly good message-sending behaviour sat behind it.
+ */
+describe("a send task the studio configures can actually deploy", () => {
+  it("writes the behaviour key the expansion needs", () => {
+    const send = businessObject("bpmn:SendTask", "s3");
+    const { handle } = fakeModeler([element(send)]);
+
+    updateMessageElementProperties(handle, { id: "s3", messageName: "invoice.sent" });
+
+    // The literal, not the shape: WorkflowBpmnXml.SendMessageBehaviorKey is the
+    // other half of this contract and matches on ordinal equality.
+    expect(send.$attrs["flowable:behaviorKey"]).toBe("autonate.send-message");
+  });
+
+  it("does not put the behaviour key on anything that is not a send task", () => {
+    // A receive task goes through the same editor. Adopting one would convert an
+    // element the author meant to WAIT into one that sends.
+    const receive = businessObject("bpmn:ReceiveTask", "r1");
+    const { handle } = fakeModeler([element(receive)]);
+
+    updateMessageElementProperties(handle, { id: "r1", messageName: "invoice.sent" });
+
+    expect(receive.$attrs["flowable:behaviorKey"]).toBeUndefined();
+    expect(receive.$attrs["flowable:autonateMessageName"]).toBeUndefined();
+  });
+
+  it("still carries the message name beside the key, so the send has something to send", () => {
+    const send = businessObject("bpmn:SendTask", "s4");
+    const { handle } = fakeModeler([element(send)]);
+
+    updateMessageElementProperties(handle, { id: "s4", messageName: "invoice.sent" });
+
+    expect(describeElementById(handle, "s4").messageName).toBe("invoice.sent");
+    expect(send.$attrs["flowable:behaviorKey"]).toBe("autonate.send-message");
+  });
+});
