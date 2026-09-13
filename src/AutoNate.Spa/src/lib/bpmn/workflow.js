@@ -1161,7 +1161,15 @@ export function updateSignalElementProperties(modelerHandle, payload) {
   }
 
   const name = normalizeOptionalString(payload.signalName);
-  const scope = payload.scope === "global" ? "global" : "instance";
+
+  // #317: interpret FIRST, coerce after. This line used to read
+  //   const scope = payload.scope === "global" ? "global" : "instance";
+  // which made the guard below unreachable -- `scope` was already one of the two
+  // valid values by the time it was tested, so #311's replacement was dead code
+  // and a mistyped scope was silently NARROWED to instance instead of being
+  // refused. Safer than #311's widening, and still a data change nobody asked
+  // for, with the backend's own refusal never seeing the typo.
+  const interpreted = interpretSignalScope(payload.scope);
   const root = name ? ensureSignalRootElement(modeler, moddle, name) : undefined;
 
   modeling.updateModdleProperties(element, definition, { signalRef: root });
@@ -1180,12 +1188,16 @@ export function updateSignalElementProperties(modelerHandle, payload) {
   // "global" for display meant Apply silently corrected an author's typo into the
   // WIDER of the two options -- the one behaviour that cannot be right here.
   // Refusing is what lets publish's own refusal (#278, #291) reach the author.
-  if (interpretSignalScope(scope) === "unrecognised") {
+  if (interpreted === "unrecognised") {
     throw new Error(
-      `This signal's scope is '${scope}', which Auton8 does not understand. ` +
+      `This signal's scope is '${payload.scope}', which Auton8 does not understand. ` +
       "Set it to 'instance' so only this process instance hears it, or 'global' " +
       "so every instance does.");
   }
+
+  // Unspecified stays the narrow default: a signal nobody scoped should reach
+  // its own instance, not every instance. Only an UNRECOGNISED value is refused.
+  const scope = interpreted === "global" ? "global" : "instance";
 
   const scopeElement = moddle.createAny(
     "flowable:autonateSignalScope", FLOWABLE_NAMESPACE, { value: scope });
