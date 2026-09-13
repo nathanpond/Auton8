@@ -5823,3 +5823,113 @@ fifteen rounds already did.
 Affected: M4 closes on the next `/n8-verify`. A new milestone for the carried bugs
 needs `/n8-roadmap` or `/n8-plan` after that; M4b (studio axis) is a different
 theme and should not absorb them.
+
+## Round 17 — 2026-09-13 (during /n8-exec M4)
+
+Four `sev:high` from round 16, all of them guards **beside** the thing they guard
+rather than **over** it, and three of them round 15's own fixes.
+
+**#379 — the gate and its check died in the same commit (Rule 1).** #371 made
+`Describe` consult the 16-row deployment table only when the operation equals
+`EngineRefusal.DeployOperation`, and in the same PR I rewrote every fixture to
+interpolate that constant. So the fixtures agreed with it *by construction* and
+nothing compared it to `FlowableClient.cs:60`. Renaming the producer left 149
+green while every publish refusal in production degraded to "the reason is in the
+server log" — the author-facing banner five rounds of this milestone exist for.
+
+Fixed by **deriving** the operation set instead of listing it: `RuntimeReasons`
+keys **plus every `const string ...Operation` the class declares**, by naming
+convention, so the next gate constant is covered the day it is added. Mutation:
+renaming the literal now fails, naming the operation.
+
+**#380 — a syntactic floor cannot ask a semantic question (Rule 1).** #374's
+"property floor" (≥60 chars + an evidence keyword) admitted
+`"Not supported by the engine. Not supported by the engine. Not supported."` —
+72 characters, matching on `engine`. That is the canonical gutting string the
+floor was written to reject, repeated to length. Four versions of this guard have
+now asked "is this string *shaped* like a measurement" and been answered yes by a
+string that was not one.
+
+So the fourth version asks a different question. Two changes:
+
+1. The floor gained a **variety** term — distinct long words over total. Real
+   reasons run 0.75–1.00; the gutting string is 0.40. And the meta-test now calls
+   the **real predicate** instead of a private copy of it, which is why it passed
+   while the floor it claimed to exercise was broken.
+2. A **digest baseline** (`bpmn-reason-baseline.tsv`) pins all 45 reasons by
+   SHA-256. This is the half no pattern can do: it asks whether a reason is *the
+   string that was measured*, not whether it looks like one. Proven against a
+   mutation that replaces all 45 with distinct, long, evidence-bearing,
+   high-variety, entirely false sentences — every syntactic check passes and the
+   baseline fails.
+
+   A reason *should* change when someone re-measures. Then the baseline changes in
+   the same commit and a reviewer sees both halves. What can no longer happen is 45
+   reasons quietly becoming noise with a green suite — #353, #365 and #374 each
+   failed to stop exactly that.
+
+**#381 — pinning the data is not pinning the reader (Rule 1).** #374 widened the
+deny-key literal to all three families in `bpmn-palette.json`. Dropping
+`entry.className` from `palette.js`'s flatMap still left 31/31 green, and
+`create.participant` has no `menuEntryIds` and loses its `target` on Create and
+Append — so `className` is its only key and the coming-soon Pool was one click
+away again.
+
+Now the guard reads `palette.js` itself: every family a withheld entry carries
+must be referenced inside a **WITHHELD-derived** expression, and every property a
+withheld entry carries must be either a declared deny key or explicitly inert —
+so a *fourth* family fails on the day it is added rather than the round after it
+is missed.
+
+Worth recording: the first draft of that guard survived its own mutation, because
+following name references pulled `SUPPORTED_ICON_CLASSES` (which the withheld
+expression names in order to *subtract* it) into the deny set, dragging the
+OFFERED-side `entry.className` read in with it. Only function helpers are followed
+now. I nearly shipped a guard with the defect it was written to catch, in the
+round whose subject is that exact failure.
+
+**#382 — the harness could not express the failure (Rule 2).** #376's reorder
+shipped with no guard: reverting it left 30/30 green. The two nearby assertions
+pin `write < evaluate`, true in **both** orderings, and
+`StubFlowableClient.EvaluateConditionalEventsAsync` returned `Task.CompletedTask`
+unconditionally — so the scenario the fix exists for was inexpressible. Added a
+throw hook and the actual complement: *the audit record survives the failure of
+the step after it*, on both routes.
+
+**#384 (part) — path keys, and a gap pinned rather than permitted.** The
+allowlist was keyed on bare filename, so a second `WorkflowBpmnXml.cs` anywhere
+under `src/` with an allowlisted method name was exempt — proven, 16/16 green.
+Now keyed on repo-relative path; the same probe fails.
+
+The studio half is **not** fixed, deliberately. `workflow.js` reads
+`flowable:collection` and never `loopDataInputRef`, which `CollectionName` accepts
+and publish allows — so a spec-spelled collection shows an empty field. But
+`loopDataInputRef` is a moddle *reference* in bpmn-js, not an attribute, and the
+SPA has no test tier, so a guess here writes bad diagrams. Instead the gap is
+**asserted as a fact** naming #384: it pins the extent (one SPA reader, not two),
+and the day someone teaches the studio the second spelling the test goes red and
+tells them to delete it. An allowlist entry would have made the divergence
+permitted and invisible, which is the failure this class exists to stop.
+
+**#388 — I filed a wrong diagnosis and corrected it.** I named
+`src/AutoNate.Spa/dist` as the reason five backend tests fail in a worktree. Both
+that and `src/AutoNate.Web/wwwroot/` are gitignored and both are absent there, so
+the correlation held and the causation did not. The real dependency is
+**`wwwroot/`**: `Program.cs:1747` gates lines 1747–1813 on
+`Directory.Exists(WebRootPath)`, and the `/api` 404 guard's `no-store` header is
+written at `:1787`, inside it.
+
+Proven rather than argued: in a fresh worktree the test fails `Expected
+"no-store", Actual null`; `mkdir wwwroot && touch index.html` makes it pass. The
+issue is corrected, and it is now more interesting than filed — **the `/api` 404
+guard is conditional on the SPA bundle existing**, and the reasoning for the guard
+does not depend on `index.html` being there. Left for the carried-bug milestone
+because moving that middleware carries a documented regression of its own.
+
+**#387 — the description's own pointers.** Two line numbers stale by +3, one of
+them landing on the construct the sentence says is absent; the two "Engine facts"
+tables no longer imply cannot-execute (both named rows read `engine: executes`);
+and #168's open state was disclosed nowhere. Corrected in place.
+
+**Not fixed this round**, and carried to the milestone the owner asked for: #383,
+#385, #386, #389, #390, and #384's studio half.

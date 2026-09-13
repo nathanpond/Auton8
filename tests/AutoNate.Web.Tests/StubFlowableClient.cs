@@ -528,12 +528,28 @@ internal sealed class StubFlowableClient : IFlowableClient
     // was called AFTER a variable write, because Flowable does not re-evaluate
     // conditional events on its own and a process parked on an already-true
     // condition is indistinguishable from a broken feature.
+    /// <summary>
+    /// Set to make the nudge fail (#382).
+    /// </summary>
+    /// <remarks>
+    /// Without this there was no way to express the scenario #376 exists for. The
+    /// two <c>/variables</c> routes call the THROWING overload deliberately, so a
+    /// nudge failure surfaces as a 500 -- and the audit record of the write must
+    /// already have been published by then, because the variables are written
+    /// before either. Ordered the other way the write happened, the caller saw a
+    /// 500, and nothing recorded it. A stub that can only succeed cannot tell the
+    /// two orderings apart, which is why reverting #376 left 30/30 green.
+    /// </remarks>
+    public Exception? EvaluateConditionalEventsThrows { get; set; }
+
     public Task EvaluateConditionalEventsAsync(
         string processInstanceId,
         CancellationToken cancellationToken = default)
     {
         Calls.Add($"EvaluateConditionalEvents:{processInstanceId}");
-        return Task.CompletedTask;
+        return EvaluateConditionalEventsThrows is { } boom
+            ? Task.FromException(boom)
+            : Task.CompletedTask;
     }
 
     public Task UpdateProcessVariablesAsync(

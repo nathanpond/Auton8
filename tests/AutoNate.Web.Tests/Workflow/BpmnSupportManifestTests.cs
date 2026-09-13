@@ -375,22 +375,11 @@ public sealed class BpmnSupportManifestTests
     {
         var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
 
-        // An issue, an engine, a version, or a measuring verb. Every one of the
-        // 45 reasons in the file today carries at least one; "Not supported."
-        // carries none.
-        var evidence = new Regex(
-            @"#\d+|Flowable|8\.0\.0|verified|measured|deployed|REST|engine",
-            RegexOptions.IgnoreCase);
-
-        // The shortest real reason is 71 characters. 60 leaves room to tighten
-        // wording without leaving room for a bare pointer.
-        const int Substance = 60;
-
         var gutted = elements
             .Select(e => (Name: e!["name"]!.GetValue<string>(),
                           Reason: (e!["reason"]?.GetValue<string>() ?? "").Trim()))
             .Where(row => row.Reason.Length > 0)
-            .Where(row => row.Reason.Length < Substance || !evidence.IsMatch(row.Reason))
+            .Where(row => !ReasonLooksLikeAMeasurement(row.Reason))
             .Select(row => $"{row.Name}: \"{row.Reason}\"")
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -416,14 +405,19 @@ public sealed class BpmnSupportManifestTests
     [InlineData("#220")]
     [InlineData("")]
     [InlineData("Does not work; see the issue.")]
+    // 72 characters, matches on `engine`, and cleared every earlier version of
+    // this floor. It is the canonical gutting string repeated to length (#380).
+    [InlineData("Not supported by the engine. Not supported by the engine. Not supported.")]
+    [InlineData("#163 #163 #163 #163 #163 #163 #163 #163 #163 #163 #163 #163 #163 #163")]
     public void A_gutted_reason_is_not_a_measurement(string gutted)
     {
-        var evidence = new Regex(
-            @"#\d+|Flowable|8\.0\.0|verified|measured|deployed|REST|engine",
-            RegexOptions.IgnoreCase);
-
-        var survives = gutted.Trim().Length >= 60 && evidence.IsMatch(gutted);
-        Assert.False(survives, $"\"{gutted}\" would pass the floor");
+        // The REAL predicate, not a private copy of it (#380). A meta-test that
+        // reimplements what it is checking cannot notice the original drifting --
+        // and that is exactly what happened: this passed while the floor it
+        // claimed to exercise admitted the string on the last row below.
+        Assert.False(
+            ReasonLooksLikeAMeasurement(gutted),
+            $"\"{gutted}\" would pass the floor");
     }
 
     /// <summary>
@@ -1188,4 +1182,151 @@ public sealed class BpmnSupportManifestTests
         string.Join(
             "\n",
             source.Split('\n').Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+    /// <summary>
+    /// The predicate the floor uses, exposed so the meta-test exercises it (#380).
+    /// </summary>
+    /// <remarks>
+    /// <c>A_gutted_reason_is_not_a_measurement</c> used to build its OWN copy of
+    /// the regex and its own <c>&gt;= 60</c>. That made it a tautology over four
+    /// hand-picked strings: it could not notice the real floor drifting, and it
+    /// did not, which is how the floor shipped admitting the one string it names.
+    /// </remarks>
+    internal static bool ReasonLooksLikeAMeasurement(string reason)
+    {
+        var text = reason.Trim();
+        if (text.Length < ReasonSubstance) return false;
+        if (!ReasonEvidence.IsMatch(text)) return false;
+
+        // #380: the floor's blind spot was repetition. A sentence can clear any
+        // length by saying the same thing three times, and "Not supported by the
+        // engine." repeated is 72 characters that match on `engine` -- literally
+        // the string the floor was written to reject. Real reasons run 0.75 to
+        // 1.00 distinct; that one is 0.40.
+        var words = Regex.Matches(text, "[A-Za-z][A-Za-z0-9]{3,}")
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToList();
+        if (words.Count == 0) return false;
+        var distinct = words.Distinct(StringComparer.Ordinal).Count();
+        return (double)distinct / words.Count >= ReasonVariety;
+    }
+
+    private static readonly Regex ReasonEvidence = new(
+        @"#\d+|Flowable|8\.0\.0|verified|measured|deployed|REST|engine",
+        RegexOptions.IgnoreCase);
+
+    /// <summary>The shortest real reason is 71 characters.</summary>
+    private const int ReasonSubstance = 60;
+
+    /// <summary>The least varied real reason runs 0.75 distinct; the gutting string, 0.40.</summary>
+    private const double ReasonVariety = 0.6;
+
+    private static string ReasonBaselinePath => Path.Combine(
+        RepoRoot.Path, "tests", "AutoNate.Web.Tests", "Workflow", "bpmn-reason-baseline.tsv");
+
+    /// <summary>
+    /// Every reason is the one that was measured, byte for byte (#380).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the half no pattern can do. A floor asks whether a string is
+    /// SHAPED like a measurement; four versions of that question have now been
+    /// answered "yes" by a string that was not one. This asks whether it is the
+    /// string that was actually measured against Flowable 8.0.0 — which is the
+    /// property the manifest's whole existence rests on.
+    /// </para>
+    /// <para>
+    /// A reason SHOULD change when someone re-measures, or tightens wording. Then
+    /// this file changes in the same commit and a reviewer sees both halves. What
+    /// cannot happen any more is 45 reasons quietly becoming noise while the
+    /// suite stays green, which is what #353, #365 and #374 each failed to stop.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_reason_is_still_the_one_that_was_measured()
+    {
+        var baseline = File.ReadAllLines(ReasonBaselinePath)
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .Select(line => line.Split('\t'))
+            .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
+
+        Assert.True(baseline.Count > 40,
+            $"The reason baseline holds {baseline.Count} rows. If it was emptied, this "
+            + "guard checks nothing (#380).");
+
+        var actual = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray()
+            .Select(e => (Name: e!["name"]!.GetValue<string>(),
+                          Reason: (e!["reason"]?.GetValue<string>() ?? "").Trim()))
+            .Where(row => row.Reason.Length > 0)
+            .ToList();
+
+        var drifted = new List<string>();
+
+        foreach (var (name, reason) in actual)
+        {
+            var digest = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(reason)))[..16].ToLowerInvariant();
+
+            if (!baseline.TryGetValue(name, out var expected))
+            {
+                drifted.Add($"{name}: has a reason with no baseline row");
+            }
+            else if (!string.Equals(expected, digest, StringComparison.Ordinal))
+            {
+                drifted.Add($"{name}: reason changed (baseline {expected}, now {digest})");
+            }
+        }
+
+        foreach (var name in baseline.Keys.Except(actual.Select(a => a.Name), StringComparer.Ordinal))
+        {
+            drifted.Add($"{name}: baseline row exists but the element has no reason any more");
+        }
+
+        Assert.True(
+            drifted.Count == 0,
+            "These manifest reasons no longer match the measurement they were taken "
+            + "from:\n  "
+            + string.Join("\n  ", drifted.Order(StringComparer.Ordinal))
+            + "\n\nIf you changed a reason DELIBERATELY -- re-measured, or tightened the "
+            + "wording -- regenerate tests/AutoNate.Web.Tests/Workflow/bpmn-reason-baseline.tsv "
+            + "in the same commit and say why. That is the point: the change becomes "
+            + "visible instead of silent (#380).");
+    }
+
+    /// <summary>The baseline can be regenerated from the manifest (#380).</summary>
+    /// <remarks>
+    /// Not a test of the product — it is the recipe, executable so it cannot go
+    /// stale, and a check that the two file formats still line up. Set
+    /// <c>AUTONATE_REGENERATE_REASON_BASELINE=1</c> to rewrite the file.
+    /// </remarks>
+    [Fact]
+    public void The_reason_baseline_is_regenerable()
+    {
+        var rows = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray()
+            .Select(e => (Name: e!["name"]!.GetValue<string>(),
+                          Reason: (e!["reason"]?.GetValue<string>() ?? "").Trim()))
+            .Where(row => row.Reason.Length > 0)
+            .OrderBy(row => row.Name, StringComparer.Ordinal)
+            .Select(row => row.Name + "\t" + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(row.Reason)))[..16].ToLowerInvariant())
+            .ToList();
+
+        Assert.NotEmpty(rows);
+
+        if (Environment.GetEnvironmentVariable("AUTONATE_REGENERATE_REASON_BASELINE") == "1")
+        {
+            var header = File.ReadAllLines(ReasonBaselinePath).TakeWhile(l => l.StartsWith('#'));
+            File.WriteAllText(ReasonBaselinePath,
+                string.Join("\n", header) + "\n" + string.Join("\n", rows) + "\n");
+        }
+
+        var onDisk = File.ReadAllLines(ReasonBaselinePath)
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .ToList();
+
+        Assert.Equal(rows, onDisk);
+    }
+
 }

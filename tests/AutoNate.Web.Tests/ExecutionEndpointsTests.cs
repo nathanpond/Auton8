@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Workflow;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -483,4 +484,72 @@ public sealed class ExecutionEndpointsTests
     {
         (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
     }
+
+    /// <summary>
+    /// The write is recorded even when the nudge that follows it explodes (#376, #382).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #376 moved <c>auditPublisher.PublishAsync</c> ahead of the throwing
+    /// conditional-event nudge on both <c>/variables</c> routes, because ordered
+    /// the other way a nudge failure meant the variables were written, the caller
+    /// got a 500, and <b>nothing recorded that the write happened</b>.
+    /// </para>
+    /// <para>
+    /// It shipped with no guard at all: reverting the reorder left 30/30 green.
+    /// The two assertions nearby pin <c>write &lt; evaluate</c>, which is true in
+    /// BOTH orderings, and the stub's nudge could not fail, so the scenario the
+    /// fix exists for could not be expressed (#382).
+    /// </para>
+    /// <para>
+    /// This is the complement: not "the audit event was published" (true either
+    /// way on the happy path) but "the audit event survives the failure of the
+    /// step that comes after it". Both routes, because #293 and #360 each found a
+    /// path an enumeration had missed by checking one of a pair.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("PUT", "inst-boom-put", WorkflowAdminEventTypes.ExecutionVariablesSet)]
+    [InlineData("POST", "inst-boom-post", WorkflowAdminEventTypes.ExecutionVariablesAdded)]
+    public async Task A_failing_nudge_does_not_lose_the_record_of_the_write(
+        string method, string instanceId, string expectedEventType)
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        factory.RecordedAuditEvents.Clear();
+        factory.FlowableStub.EvaluateConditionalEventsThrows =
+            new InvalidOperationException("the engine refused to re-evaluate");
+
+        var body = new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+        {
+            new ProcessVariableUpdate { Name = "approved", Value = true, Type = "boolean" }
+        });
+
+        var response = method == "PUT"
+            ? await client.PutAsJsonAsync($"/api/executions/{instanceId}/variables", body)
+            : await client.PostAsJsonAsync($"/api/executions/{instanceId}/variables", body);
+
+        // The nudge is the throwing overload on purpose (Outcome 10), so the
+        // caller is told. What must NOT happen is the write going unrecorded.
+        Assert.NotEqual(HttpStatusCode.NoContent, response.StatusCode);
+
+        var calls = factory.FlowableStub.Calls;
+        Assert.Contains($"EvaluateConditionalEvents:{instanceId}", calls);
+
+        var recorded = factory.RecordedAuditEvents.Events
+            .Where(e => e.EventType == expectedEventType)
+            .ToList();
+
+        Assert.True(
+            recorded.Count == 1,
+            $"The {method} /variables route wrote the variables and then failed on the "
+            + $"nudge, and published {recorded.Count} '{expectedEventType}' audit events. "
+            + "It must publish exactly one BEFORE the nudge: the event is the record "
+            + "that the write happened, and the write has already happened by then. "
+            + "If this is red, the audit publish moved back below "
+            + "EvaluateConditionalEventsAsync (#376, #382).");
+    }
+
 }

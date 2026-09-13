@@ -1,0 +1,58 @@
+# One line per manifest reason: <element name>\t<sha256(reason)[:16]>.
+#
+# Why a digest baseline and not another pattern (#380):
+# three versions of a per-row literal list went stale, and the property floor
+# that replaced them admitted
+#   "Not supported by the engine. Not supported by the engine. Not supported."
+# -- 72 characters, matching on `engine`. A syntactic floor cannot tell a
+# measurement from a sentence shaped like one. A digest can: changing any
+# reason fails here, and the fix is to update this file in the same commit,
+# which makes the change deliberate and reviewable instead of silent.
+#
+# Regenerate with BpmnSupportManifestTests.The_reason_baseline_is_regenerable
+# (see its remarks), and say in the commit message WHY the reason changed.
+Ad-Hoc Sub-Process	a9414a9bfca6888b
+Boundary Event (None)	ae6c4ff903bf9a7a
+Business Rule Task	232838fb224633c6
+Call Activity	5e212da2859f5256
+Cancel Boundary	fa2e604155db8414
+Cancel End	5a985e9a46050ecf
+Compensation Boundary	ca6b4435cd7f694d
+Compensation End	61e8ae937ddd8648
+Compensation Marker	fe2acc01aed51424
+Compensation Start Event	317f3063b9417b74
+Complex Gateway	abc90b736f6d33cf
+Conditional Start Event	8821c3ac279eb21e
+Data Input	ae6e404100bb1dd1
+Data Object Reference	87abd02c36a34c04
+Data Output	d777e947340b252e
+Data Store Reference	f1bfc2cc7d93ee91
+Error Boundary	c4b622fb992b283c
+Error End	91bc95b21e29a8e7
+Error Start Event	7929e937e98bc334
+Escalation Boundary	20dc705fb2c13b28
+Escalation End	4e4f229602ecbab0
+Escalation Start Event	95bab7a78ddd4899
+Event Sub-Process	5c906867b6d409c4
+Event-Based Gateway	7078a25b4729ba8a
+Intermediate Catch (Link)	e14ce60c4c601062
+Intermediate Catch (Message)	38bea94b616dee27
+Intermediate Catch (Signal)	2c0f72446a3711fd
+Intermediate Throw (Compensation)	d78c36351cd80b20
+Intermediate Throw (Escalation)	6cac0f9463a2ef8a
+Intermediate Throw (Link)	e14ce60c4c601062
+Intermediate Throw (Message)	c6e4ded383bca70b
+Intermediate Throw (Signal)	1372a9bca0775a9e
+Loop Marker	8366508c4ebe43ab
+Manual Task	fdff6e3fd0f985f6
+Message Boundary	0ec609ef604a59d1
+Message End	eb0ba4531521d650
+Message Start Event	353e7abf26461d7f
+Multi-Instance (Parallel)	41d70c7d16c45c1b
+Multi-Instance (Sequential)	41d70c7d16c45c1b
+Receive Task	350dce1a3b656564
+Send Task	6da6f83e0fb5fd69
+Signal Boundary	53ee9108c129fc44
+Signal End	cf1c1bafe09df726
+Task (Generic)	cbde9cb14d681cf8
+Transaction	215a79e1ab73d333

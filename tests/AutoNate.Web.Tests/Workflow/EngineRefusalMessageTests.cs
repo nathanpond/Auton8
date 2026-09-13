@@ -539,15 +539,48 @@ public sealed class EngineRefusalMessageTests
             AutoNate.Web.Tests.Infrastructure.RepoRoot.Path,
             "src", "AutoNate.Web", "Services", "Flowable", "FlowableClient.cs"));
 
-        var declared = typeof(WorkflowEndpoints).Assembly
-            .GetType("AutoNate.Web.Endpoints.EngineRefusal")!
+        var refusal = typeof(WorkflowEndpoints).Assembly
+            .GetType("AutoNate.Web.Endpoints.EngineRefusal")!;
+
+        var declared = refusal
             .GetField("RuntimeReasons", System.Reflection.BindingFlags.NonPublic
                                         | System.Reflection.BindingFlags.Static)!
             .GetValue(null)!;
 
-        var operations = ((System.Collections.IEnumerable)declared)
+        var fromTable = ((System.Collections.IEnumerable)declared)
             .Cast<object>()
-            .Select(row => (string)row.GetType().GetField("Item1")!.GetValue(row)!)
+            .Select(row => (string)row.GetType().GetField("Item1")!.GetValue(row)!);
+
+        // #379: and every `const string ...Operation` the class declares, NOT just
+        // the table. #371 promoted `DeployOperation` to a gate -- `Describe` reads
+        // the 16-row deployment table only when the exception's operation equals
+        // it -- and in the same PR every fixture that used to hard-code the string
+        // was changed to interpolate the constant. So the fixtures agreed with the
+        // constant BY CONSTRUCTION and nothing compared it to its producer.
+        // Renaming FlowableClient.cs's literal left 149 tests green while every
+        // publish refusal in production silently fell back to the generic
+        // sentence.
+        //
+        // Derived by naming convention rather than listed, so the next operation
+        // constant is covered the day it is added rather than the round after it
+        // breaks. A constant that is an operation says so in its name.
+        var fromConstants = refusal
+            .GetFields(System.Reflection.BindingFlags.NonPublic
+                       | System.Reflection.BindingFlags.Public
+                       | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
+            .Where(f => f.Name.EndsWith("Operation", StringComparison.Ordinal))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+
+        Assert.True(
+            fromConstants.Count > 0,
+            "EngineRefusal declares no `const string ...Operation`. If the naming "
+            + "convention changed, this guard stopped covering the deploy gate and "
+            + "#379 is open again.");
+
+        var operations = fromTable
+            .Concat(fromConstants)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -560,10 +593,14 @@ public sealed class EngineRefusalMessageTests
 
         Assert.True(
             unreachable.Count == 0,
-            "These operations are keys in RuntimeReasons but FlowableClient never passes "
-            + "them to EnsureSuccessAsync as a literal, so their rows can never fire:\n  "
+            "These operations are declared by EngineRefusal -- as a RuntimeReasons key "
+            + "or as a `const string ...Operation` -- but FlowableClient never passes "
+            + "them to EnsureSuccessAsync as a literal:\n  "
             + string.Join("\n  ", unreachable)
-            + "\n\nA row nothing can reach reads as coverage and is not (#372).");
+            + "\n\nA row nothing can reach reads as coverage and is not (#372). A GATE "
+            + "nothing can reach is worse: `Describe` consults the whole deployment "
+            + "table only on DeployOperation, so a drifted literal silently turns all "
+            + "16 refusal reasons into the generic fallback (#379).");
     }
 
     /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>    /// <summary>There is no length by which a refusal can grow (#344, #349).</summary>
