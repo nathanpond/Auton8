@@ -15,6 +15,7 @@
     },
     "$invariant": "studio=supported implies engine is not cannot-execute. The studio may not claim support for something the engine will not run; BpmnSupportManifestTests enforces it."
   },
+  "$axes": "This manifest keys every row on (localName, eventDefinition) and carries a studio and an engine column. It deliberately has NO container axis and NO configuration-state axis: an Error Start Event is correct inside an event subprocess and refused at process level (#289), and a Message Boundary Event with its name set deploys while the same element as the palette creates it does not (#316). One row, two verdicts, in both cases. PLACEMENT IS NOT THIS FILE'S CONCERN -- it lives in bpmn-placement.json, measured against the engine rather than reasoned (#324). A guard that iterates these rows inherits that blind spot by construction, so a guard about WHERE an element may go must read the placement file instead.",
   "flowableVersion": "8.0.0",
   "generatedFrom": "#103 inventory \u2014 every verdict produced by deploying to a running engine",
   "elements": [
