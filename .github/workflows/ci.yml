@@ -286,6 +286,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # BpmnPaletteFilterEffectTests runs Auton8's real popup-menu filter in node
+      # (#392). It fails rather than skips when node is absent, so the dependency
+      # is declared here instead of relying on whatever the runner image ships.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"

@@ -5933,3 +5933,110 @@ and #168's open state was disclosed nowhere. Corrected in place.
 
 **Not fixed this round**, and carried to the milestone the owner asked for: #383,
 #385, #386, #389, #390, and #384's studio half.
+
+## Round 19 — 2026-09-13 (during /n8-exec M4)
+
+**#392 — stop pinning proxies and run the module (Rule 1).** Three rounds pinned
+progressively better proxies for "a withdrawn element is not one click away": the
+catalog JSON, then the deny keys, then which key families `palette.js` reads.
+#392 is what that cost — deleting the entire popup filter left **32/32 green**
+while Pool, Transaction, Cancel End, Business Rule Task and `toggle-loop` all
+returned to Create, Append and Replace.
+
+The property was never "is the deny set built correctly" but "does the filter
+remove the entries", and no amount of text analysis reaches it. So the new guard
+**imports `palette.js` in node**, calls `createManifestMenuFilter`, and pushes the
+entry shapes bpmn-js actually produces through the filter's own `strip`.
+
+The obstacle was that the SPA has no JS test tier — no vitest, no `test` script,
+zero `*.test.*` — and adding one is a bigger decision than this bug. Running the
+real module from the existing backend suite gets the property asserted today and
+keeps it inside CI's test-count reconciliation, which a new tier would not be.
+Only the two `@shared/*` import specifiers are rewritten (node has no Vite); the
+module under test is otherwise the shipped file byte for byte.
+
+Three mutations now go red where all three previously stayed green: deleting the
+filter, keeping the read but returning `false` from `isWithheldMenuEntry`, and the
+comment bypass below.
+
+Two design points worth recording. The guard **fails rather than skips when node
+is missing** — a guard that opts out when its tool is absent is the failure this
+milestone has found more than any other — so `ci.yml`'s `backend` job now declares
+`setup-node` instead of relying on whatever the runner image ships (**Rule 3**).
+And the harness deliberately does *not* demand denial on a `className` shared with
+a supported element: `palette.js` subtracts those on purpose, because denying them
+would withdraw the supported element too. A harness that ignored the module's
+stated design would have failed honestly-correct code.
+
+Building it caught my own error twice. The first probe reported a survivor that
+turned out to be my synthetic entry, not the filter: I built the Create id as
+`create-${e.id}` when bpmn-js builds it from `menuEntryIds`, which is the whole
+reason that field exists (#282). Guessing at the shape would have filed a false
+defect against working code.
+
+**#393 — a guard a comment can satisfy is asking about the text (Rule 1).** Two
+round-17 guards were defeated by leaving the removed code in a comment, which is
+the normal shape of a rename, not a contrived attack:
+
+```
+// renamed from "deploy the BPMN workflow" for consistency
+await EnsureSuccessAsync(response, "deploy the workflow");
+```
+
+74/74 green, every publish refusal degraded to the generic fallback. Added
+`SourceText.WithoutComments` (string-aware, so `"http://x"` does not truncate),
+used by both guards, with its own theory pinning that it drops comments and keeps
+code — a stripper that removed too much would make those guards pass for a new
+reason, the same defect with the opposite sign.
+
+And #379's guard no longer scans whole-file text at all: it extracts the
+arguments actually passed at `EnsureSuccessAsync(` call sites, with a floor
+asserting it found more than ten, so a changed call shape fails loudly instead of
+matching nothing forever.
+
+**#394 — the gap-pin under-counted the gap, twice (Rule 1).** Round 17's test
+claims to pin the *extent* of the studio divergence ("one reader, not two"). It
+required the literal `"collection"` **with its opening quote**, so the moddle's
+own spelling — `loop.get("flowable:collection")`, how a properties-panel component
+naturally reads it — slipped past.
+
+Widening the collection half was not enough: the file gate also required a
+case-sensitive `loopCharacteristics`, and a reader keying off the moddle type
+writes `"bpmn:MultiInstanceLoopCharacteristics"` with a capital L. My first fix
+repaired one clause and left the identical defect in the clause beside it —
+exactly the failure mode this milestone keeps producing, inside the fix for that
+failure mode. Both halves are now case-insensitive, `.jsx` is enumerated, and the
+probe that walked through twice now fails.
+
+**#395 — the drift that a drift-correction round walked past.** The owner wrote
+"the 17 carried bugs" and it was exactly right at 12:34; seven more were filed 50
+minutes later, and #387 — a pass whose entire job was correcting drift in this
+document — re-derived two line pointers and the Engine-facts rows while stepping
+straight over it.
+
+So the number is no longer written. The description carries the query instead.
+A count that changes every round cannot be maintained by remembering to maintain
+it; the same reasoning that replaced three stale literal lists in the test suite
+applies to prose.
+
+Also corrected: the Send Task `DESCOPED` date (the ledger puts every #316 entry
+under 2026-09-11, not 09-10), and the bucket counts in the provenance paragraph,
+which were measured against an eight-line list and never re-derived when it grew
+to nine.
+
+**The uncorroborated quotation, finally resolved.** The Compensation Start Event
+line presented "Descope it, record the engine finding" as the owner's exact words;
+three rounds grepped and found nothing. The previous note argued against
+rewriting, on the grounds that silently downgrading a line the owner may well have
+said is its own falsification.
+
+That reasoning protects the **attribution** — which is corroborated at
+`.n8/decisions.md:2277` and is kept, unchanged, as the owner's decision. It does
+not protect the **quotation marks**, which assert a specific wording no source
+carries. An uncorroborated quotation is worse than an unattributed line because it
+reads as evidence. The line is now sourced the way the other three are, and
+nothing is presented as speech. Disclaiming it in a footnote for three rounds was
+not the same as fixing it.
+
+**Not fixed this round**, carried to the milestone the owner asked for: #383,
+#385, #386, #389, #390, and #384's studio half.
