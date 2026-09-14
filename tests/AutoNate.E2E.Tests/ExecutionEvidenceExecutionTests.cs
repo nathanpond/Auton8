@@ -193,6 +193,42 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "Auton8 rewrites the element at publish the un-rewritten name is the defect the "
             + "rewrite exists to prevent (#446).");
 
+        // THE REWRITE MUST PRESERVE THE SEMANTICS (#454).
+        //
+        // #446 made the engine-name alias exclusive, which proves the rewrite
+        // HAPPENED. It does not prove the rewritten element still carries the
+        // thing it was rewritten to throw: Flowable reports `throwEvent` for a
+        // signal throw AND for a bare none-throw, so dropping the
+        // <signalEventDefinition> during the rewrite was invisible -- measured,
+        // with the deployed XML read back showing `<intermediateThrowEvent
+        // id="Ev_1"/>` and the signal declared at root, referenced by nothing.
+        // That is #156's headline surviving the fix filed to catch it.
+        //
+        // Measured across every deployed shape this class produces: a rewritten
+        // element carries EITHER its event definition or a flowable:behaviorKey.
+        // Neither is a dropped semantic.
+        if (declaredEventDefinition is not null)
+        {
+            var deployed = await DeployedElementAsync(key, "Ev_1");
+
+            Assert.True(
+                deployed is not null,
+                $"{name}: could not read the deployed form of 'Ev_1' back from the engine, so "
+                + "nothing here can say whether the publish rewrite preserved it (#454).");
+
+            var keeps = deployed!.Elements()
+                .Any(child => child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal));
+            var delegates = deployed.Attributes()
+                .Any(a => a.Name.LocalName == "behaviorKey");
+
+            Assert.True(
+                keeps || delegates,
+                $"{name}: the manifest declares the event definition '{declaredEventDefinition}', and "
+                + $"the element Auton8 deployed is a <{deployed.Name.LocalName}> carrying neither an "
+                + "event definition nor a behaviorKey. The publish rewrite dropped the semantics, "
+                + "which is exactly what #156 and #112 were about (#454).");
+        }
+
         var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
         _output.WriteLine($"{name,-34} {effect,-17} {observed.Detail}");
 
@@ -299,6 +335,107 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return null;
     }
 
+    /// <summary>The element as Auton8 actually DEPLOYED it, read back from the engine (#454).</summary>
+    private static async Task<XElement?> DeployedElementAsync(string key, string id)
+    {
+        using var engine = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var definitions = await engine.GetAsync(
+            $"service/repository/process-definitions?key={Uri.EscapeDataString(key)}&latest=true");
+        if (!definitions.IsSuccessStatusCode) return null;
+
+        using var page = JsonDocument.Parse(await definitions.Content.ReadAsStringAsync());
+        if (!page.RootElement.TryGetProperty("data", out var rows)) return null;
+        if (rows.GetArrayLength() == 0) return null;
+        if (!rows[0].TryGetProperty("id", out var definitionId)) return null;
+
+        var resource = await engine.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId.GetString()!)}/resourcedata");
+        if (!resource.IsSuccessStatusCode) return null;
+
+        return XDocument.Parse(await resource.Content.ReadAsStringAsync())
+            .Descendants()
+            .FirstOrDefault(e => (string?)e.Attribute("id") == id);
+    }
+
+    /// <summary>
+    /// The activity id that wrote a variable, as the ENGINE records it (#452).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Auton8's own execution log carries each variable update's
+    /// <c>activityInstanceId</c>, which is an instance id rather than an
+    /// activity id. Flowable's historic activity instances resolve one to the
+    /// other, and this suite already talks to the engine directly in
+    /// <c>CallActivityExecutionTests</c>, <c>ComplexGatewayExecutionTests</c>
+    /// and <c>BehaviorErrorBoundaryExecutionTests</c> -- reading the engine is
+    /// established here; it is PUBLISHING around Auton8's validation that this
+    /// class refuses to do.
+    /// </para>
+    /// <para>
+    /// Null when nothing wrote it, which includes the case that made #452
+    /// serious: a value supplied by the start request, belonging to no activity
+    /// at all.
+    /// </para>
+    /// </remarks>
+    private static async Task<string?> VariableWriterAsync(
+        IAPIRequestContext api, string instance, string variable)
+    {
+        // SINGLE ATTEMPT. `ObserveAsync` already retries the whole observation
+        // twenty times; retrying again in here multiplied the two loops, and a
+        // failing cell took 100 seconds instead of five -- measured, as an
+        // eight-minute run of a suite that takes sixteen seconds.
+        string? writerInstance = null;
+
+        var response = await api.GetAsync($"/api/executions/{instance}/log");
+        if (response.Ok)
+        {
+            using var body = JsonDocument.Parse(await response.TextAsync());
+            if (body.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in body.RootElement.EnumerateArray())
+                {
+                    if (!entry.TryGetProperty("variableUpdate", out var update)) continue;
+                    if (update.ValueKind != JsonValueKind.Object) continue;
+                    if (!update.TryGetProperty("name", out var name)) continue;
+                    if (name.GetString() != variable) continue;
+                    if (!update.TryGetProperty("activityInstanceId", out var owner)) continue;
+
+                    writerInstance = owner.GetString();
+                    if (writerInstance is not null) break;
+                }
+            }
+        }
+
+        if (writerInstance is null) return null;
+
+        using var engine = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var activities = await engine.GetAsync(
+            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(instance)}&size=500");
+
+        if (!activities.IsSuccessStatusCode) return null;
+
+        using var page = JsonDocument.Parse(await activities.Content.ReadAsStringAsync());
+        if (!page.RootElement.TryGetProperty("data", out var rows)) return null;
+
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (!row.TryGetProperty("id", out var id)) continue;
+            if (id.GetString() != writerInstance) continue;
+
+            return row.TryGetProperty("activityId", out var activity) ? activity.GetString() : null;
+        }
+
+        return null;
+    }
+
     /// <summary>When each activity was first entered, by the engine's own clock.</summary>
     private static async Task<IReadOnlyDictionary<string, DateTimeOffset>> EntryOrderAsync(
         IAPIRequestContext api, string instance)
@@ -390,26 +527,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             .Where(found => found is not null && found != id)
             .Select(found => found!)
             .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// The script tasks in this diagram whose body writes `proof` (#444).
-    /// </summary>
-    /// <remarks>
-    /// The previous version returned the FIRST `<scriptTask` in the document and
-    /// never checked what it wrote. Measured, that let a decoy script task
-    /// downstream of the element take credit for a `proof` written upstream by
-    /// another one -- the exact mutation the fix claimed to catch.
-    /// </remarks>
-    private static IReadOnlyList<string> ProofWritersIn(string xml)
-    {
-        return ElementIn(xml, "Ev_1").Document!.Descendants()
-            .Where(e => e.Name.LocalName == "scriptTask")
-            .Where(e => e.Descendants()
-                .Any(child => child.Name.LocalName == "script"
-                    && child.Value.Contains("proof", StringComparison.Ordinal)))
-            .Select(e => (string?)e.Attribute("id") ?? "")
-            .ToList();
     }
 
     /// <summary>Every call activity in this diagram (#445).</summary>
@@ -595,60 +712,44 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
             case "variable-written":
             {
-                var written = root.TryGetProperty("variables", out var variables)
-                    && variables.ValueKind == JsonValueKind.Array
-                    && variables.EnumerateArray().Any(v =>
-                        v.TryGetProperty("name", out var n) && n.GetString() == "proof");
-
-                if (!written) return new(false, "no `proof` variable on this instance");
-
-                // AND Ev_1 MUST BE UPSTREAM OF THE WRITER (#434).
+                // WHO WROTE IT, ACCORDING TO THE ENGINE (#452).
                 //
-                // Asking only whether a variable exists was #412's original
-                // complaint, and the fix moved the script onto a conditional
-                // branch -- which makes the DIAGRAM discriminating and leaves the
-                // OBSERVER indiscriminate. Measured: moving the script upstream of
-                // the exclusive gateway left the cell green, so any future edit to
-                // these three diagrams silently disarms them.
+                // Two previous attempts asked the DIAGRAM. The first took the
+                // first `<scriptTask` in the document; the second took the one
+                // whose script text contains `proof`. Both are heuristics over
+                // non-evidence, and verification broke the second with two
+                // mutations -- a decoy that merely mentions `proof` while the
+                // real write says `'pro'+'of'`, and a `proof` supplied by the
+                // start request with no element writing it at all. All four
+                // cells were green with nothing writing the variable.
                 //
-                // For a Script Task, Ev_1 IS the writer and this is trivially
-                // true. For a gateway or a sequence flow, it is the whole claim:
-                // the routing decision is what put the writer on the path.
-                // THE WRITER MUST BE IDENTIFIED, AND THERE MUST BE EXACTLY ONE
-                // (#444). This was `the first <scriptTask in the document`, never
-                // checked to write `proof`, and finding none returned TRUE
-                // unconditionally. Measured: a decoy script task downstream took
-                // credit for a `proof` written upstream, and any writer that was
-                // not a literal `<scriptTask>` tag passed without a check at all.
-                var writers = ProofWritersIn(xml);
+                // The engine records the activity instance that performed each
+                // variable update. That is the attribution; nothing in the
+                // diagram is.
+                var wrote = await VariableWriterAsync(api, instance, "proof");
 
-                if (writers.Count != 1)
+                if (wrote is null)
                 {
                     return new(false,
-                        writers.Count == 0
-                            ? "`proof` is set, but no script task in this diagram writes it, so "
-                              + "nothing here can attribute it to Ev_1 (#444)"
-                            : $"`proof` is set and {writers.Count} script tasks write it "
-                              + $"[{string.Join(", ", writers)}], so the writer is ambiguous (#444)");
+                        "no activity in this instance wrote `proof` -- if the variable is set, "
+                        + "something other than an element in this diagram set it (#452)");
                 }
 
-                var writer = writers[0];
                 var order = await EntryOrderAsync(api, instance);
-
                 if (!order.TryGetValue("Ev_1", out var elementAt))
                 {
-                    return new(false, "`proof` is set, but Ev_1 is absent from history");
+                    return new(false, "`proof` was written, but Ev_1 is absent from history");
                 }
 
-                if (!order.TryGetValue(writer, out var writerAt))
+                if (!order.TryGetValue(wrote, out var writerAt))
                 {
-                    return new(false, $"`proof` is set, but the script task '{writer}' never ran");
+                    return new(false, $"`proof` was written by '{wrote}', which is absent from history");
                 }
 
                 return new(writerAt >= elementAt,
                     writerAt >= elementAt
-                        ? $"`proof` written by '{writer}', which ran after Ev_1"
-                        : $"`proof` written by '{writer}', which ran BEFORE Ev_1 -- so the "
+                        ? $"`proof` written by activity '{wrote}', which ran at or after Ev_1"
+                        : $"`proof` written by activity '{wrote}', which ran BEFORE Ev_1 -- so the "
                           + "variable is not this element's doing (#434)");
             }
 

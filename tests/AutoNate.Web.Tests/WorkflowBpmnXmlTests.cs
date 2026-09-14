@@ -5104,4 +5104,73 @@ public sealed class WorkflowBpmnXmlTests
         </definitions>
         """;
 
+    /// <summary>
+    /// A bare `resultVariable` is namespaced even with no snapshot (#430).
+    /// </summary>
+    /// <remarks>
+    /// #416 fixed this inside <c>ApplyScriptTaskSnapshot</c>, which the caller
+    /// only reaches for an element that HAS a snapshot — <c>if (snapshot is
+    /// null) continue;</c> comes first. A legacy document, or any publish with
+    /// an empty snapshot list, carried the bare attribute to the engine and was
+    /// refused at deploy with <c>cvc-complex-type.3.2.2</c>. Run this against
+    /// the pre-fix code and it fails: the attribute survives.
+    /// </remarks>
+    [Fact]
+    public void A_bare_result_variable_is_namespaced_on_the_snapshotless_path()
+    {
+        const string Xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:flowable="http://flowable.org/bpmn"
+                         targetNamespace="http://autonate.dev/workflows">
+              <process id="p" name="p" isExecutable="true">
+                <startEvent id="s"/>
+                <scriptTask id="t" name="t" scriptFormat="javascript" resultVariable="out">
+                  <script>variables.set('x', 1);</script>
+                </scriptTask>
+                <endEvent id="e"/>
+                <sequenceFlow id="f1" sourceRef="s" targetRef="t"/>
+                <sequenceFlow id="f2" sourceRef="t" targetRef="e"/>
+              </process>
+            </definitions>
+            """;
+
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(Xml));
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var task = expanded.Descendants()
+            .Single(e => e.Name.LocalName == "scriptTask");
+
+        Assert.Null(task.Attribute("resultVariable"));
+        Assert.Equal("out", task.Attribute(flowable + "resultVariable")?.Value);
+    }
+
+    /// <summary>An already-namespaced value is not clobbered, and a blank one leaves nothing.</summary>
+    [Theory]
+    [InlineData("""resultVariable="" """, null)]
+    [InlineData("""resultVariable="out" flowable:resultVariable="kept" """, "kept")]
+    public void The_namespacing_neither_clobbers_nor_invents(string attributes, string? expected)
+    {
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:flowable="http://flowable.org/bpmn"
+                         targetNamespace="http://autonate.dev/workflows">
+              <process id="p" name="p" isExecutable="true">
+                <scriptTask id="t" name="t" scriptFormat="javascript" {attributes}>
+                  <script>variables.set('x', 1);</script>
+                </scriptTask>
+              </process>
+            </definitions>
+            """;
+
+        var task = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml))
+            .Descendants()
+            .Single(e => e.Name.LocalName == "scriptTask");
+
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Null(task.Attribute("resultVariable"));
+        Assert.Equal(expected, task.Attribute(flowable + "resultVariable")?.Value);
+    }
 }

@@ -111,9 +111,9 @@ public sealed class BpmnSupportManifestTests
             ["studio:supported"] = 48,
             ["studio:withdrawn"] = 15,
             ["studio:coming-soon"] = 6,
-            ["engine:executes"] = 57,
+            ["engine:executes"] = 51,
             ["engine:cannot-execute"] = 9,
-            ["engine:annotation"] = 3,
+            ["engine:annotation"] = 9,
         };
 
         var drifted = expected
@@ -352,10 +352,21 @@ public sealed class BpmnSupportManifestTests
         int Count(string engine) =>
             inScope.Count(e => e!["engine"]!.GetValue<string>() == engine);
 
-        // "43 of the 54 execute; 3 are BPMN artifacts with no execution semantics
+        // "37 of the 54 execute; 9 are BPMN artifacts with no execution semantics
         // by design; 8 cannot execute."
-        Assert.Equal(43, Count("executes"));
-        Assert.Equal(3, Count("annotation"));
+        //
+        // Was 43 / 3 / 8 until #325 AC5. Six rows moved from `executes` to
+        // `annotation` by owner decision -- Pool / Participant, Lane, Message
+        // Flow, Data Store Reference, Data Input, Data Output. Nothing about the
+        // engine changed: those six always deployed and were never entered by an
+        // instance, and `executes` was recording the first half of that while
+        // implying the second. The total is still 54.
+        //
+        // This is a published coverage claim, so the number moving is the point:
+        // a reader who saw "43 execute" and now sees 37 should be able to find
+        // out why, and this comment is where they look.
+        Assert.Equal(37, Count("executes"));
+        Assert.Equal(9, Count("annotation"));
         Assert.Equal(8, Count("cannot-execute"));
     }
 
@@ -652,6 +663,26 @@ public sealed class BpmnSupportManifestTests
             ["Text Annotation"] = BpmnSupportManifest.EngineAnnotation,
             ["Group"] = BpmnSupportManifest.EngineAnnotation,
             ["Association"] = BpmnSupportManifest.EngineAnnotation,
+
+            // #325 AC5, by owner decision. Six more rows in the same position as
+            // the three above: they deploy, and no instance ever ENTERS them, so
+            // no run can prove them. AC5 offered two outcomes -- gain evidence,
+            // or move to cannot-execute with a reason -- and neither fits: the
+            // first is impossible and the second means refusing a Lane at
+            // publish, which would be a real regression. `annotation` is the
+            // word this manifest already has for it.
+            //
+            // Data OBJECT Reference is deliberately NOT here. It creates a real
+            // runtime process variable and `DataObjectExecutionTests` already
+            // proves it by starting an instance; the obstacle is that the
+            // execution oracle's entry assertion is activity-shaped, which is
+            // work rather than a reclassification.
+            ["Pool / Participant"] = BpmnSupportManifest.EngineAnnotation,
+            ["Lane"] = BpmnSupportManifest.EngineAnnotation,
+            ["Message Flow"] = BpmnSupportManifest.EngineAnnotation,
+            ["Data Store Reference"] = BpmnSupportManifest.EngineAnnotation,
+            ["Data Input"] = BpmnSupportManifest.EngineAnnotation,
+            ["Data Output"] = BpmnSupportManifest.EngineAnnotation,
 
             // "needs configuration" is not a verdict the engine axis has, because
             // it is not a property of the element — it is a property of the

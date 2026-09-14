@@ -175,6 +175,7 @@ public static partial class WorkflowBpmnXml
         ExpandMultiInstanceCardinality(document);
         ExpandCompletionConditions(document);
         ExpandComplexGateways(document);
+        NamespaceScriptTaskResultVariables(document);
         ApplySignalScopes(document);
 
         var declaration = document.Declaration is null
@@ -779,6 +780,45 @@ public static partial class WorkflowBpmnXml
     //
     // Only the PUBLISHED copy is rewritten. The stored model keeps the single
     // gateway the author drew.
+    /// <summary>
+    /// A bare <c>resultVariable</c> on a script task becomes the namespaced one (#430).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable refuses a bare <c>resultVariable</c> on a <c>bpmn:scriptTask</c>
+    /// outright — <c>cvc-complex-type.3.2.2: Attribute 'resultVariable' is not
+    /// allowed to appear in element 'scriptTask'</c>. #416 fixed that inside
+    /// <c>ApplyScriptTaskSnapshot</c>, which only runs for an element that HAS a
+    /// snapshot: the caller does <c>if (snapshot is null) continue;</c> first. A
+    /// diagram published without one — a legacy document, or
+    /// <c>ApplyProcessMetadata(xml, key, name, [])</c> — carried the bare
+    /// attribute through to the engine and was refused at deploy.
+    /// </para>
+    /// <para>
+    /// It belongs here rather than there. Namespacing the attribute is a property
+    /// of what the engine accepts, not of what a snapshot says, so it should not
+    /// have been reachable only through the snapshot path.
+    /// </para>
+    /// </remarks>
+    private static void NamespaceScriptTaskResultVariables(XDocument document)
+    {
+        foreach (var element in document.Descendants()
+                     .Where(e => e.Name.LocalName == "scriptTask")
+                     .ToList())
+        {
+            var bare = element.Attribute("resultVariable");
+            if (bare is null) continue;
+
+            var value = bare.Value;
+            element.SetAttributeValue("resultVariable", null);
+
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            if (element.Attribute(FlowableNamespace + "resultVariable") is not null) continue;
+
+            element.SetAttributeValue(FlowableNamespace + "resultVariable", value);
+        }
+    }
+
     private static void ExpandComplexGateways(XDocument document)
     {
         var flowsBySource = document
