@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Linq;
 using System.Text.Json.Nodes;
 using AutoNate.E2E.Tests.Support;
 using Microsoft.Playwright;
@@ -175,12 +176,22 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "whatever effect follows is some other element's (#412).");
 
         Assert.True(
-            string.Equals(enteredAs, expectedType, StringComparison.Ordinal)
-            || (EngineNames.TryGetValue((expectedType, declaredEventDefinition), out var alias)
-                && string.Equals(enteredAs, alias, StringComparison.Ordinal)),
+            // EXCLUSIVE, not OR-ed (#446). Where an entry exists the engine name
+            // is the ONLY acceptable one, because for five of these rows Auton8
+            // REWRITES the element at publish -- a signal end becomes a throw
+            // event (#156), a message end and a send task become a service task
+            // (#112). Accepting the un-rewritten name as an alternative accepted
+            // exactly the pre-#112/#156 defect, and it was measured: with those
+            // rewrites disabled, Signal End and Message End stayed GREEN while
+            // raising and sending nothing.
+            EngineNames.TryGetValue((expectedType, declaredEventDefinition), out var alias)
+                ? string.Equals(enteredAs, alias, StringComparison.Ordinal)
+                : string.Equals(enteredAs, expectedType, StringComparison.Ordinal),
             $"{name}: activity 'Ev_1' ran, but as a '{enteredAs}' rather than a "
-            + $"'{expectedType}'. A same-id stand-in satisfies every effect this class "
-            + "observes, which is exactly what #412 measured.");
+            + $"'{(EngineNames.TryGetValue((expectedType, declaredEventDefinition), out var wanted) ? wanted : expectedType)}'. "
+            + "A same-id stand-in satisfies every effect this class observes (#412), and where "
+            + "Auton8 rewrites the element at publish the un-rewritten name is the defect the "
+            + "rewrite exists to prevent (#446).");
 
         var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
         _output.WriteLine($"{name,-34} {effect,-17} {observed.Detail}");
@@ -288,50 +299,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return null;
     }
 
-    /// <summary>
-    /// The event definition `Ev_1` carries, in the manifest's vocabulary (#435).
-    /// </summary>
-    /// <remarks>
-    /// `<timerEventDefinition/>` -> "timer", to match `bpmn-support.json`'s
-    /// `eventDefinition` column. Null when the element carries none, which is
-    /// itself the assertion for a None event.
-    /// </remarks>
-    private static string? EventDefinitionIn(string xml)
-    {
-        var element = ElementMarkupIn(xml, "Ev_1");
-
-        var match = System.Text.RegularExpressions.Regex.Match(
-            element, @"<(?<kind>[A-Za-z]+)EventDefinition\b");
-
-        return match.Success ? match.Groups["kind"].Value : null;
-    }
-
-    /// <summary>
-    /// The markup of one element: its open tag through its matching close tag,
-    /// or just the tag when it is self-closing.
-    /// </summary>
-    private static string ElementMarkupIn(string xml, string id)
-    {
-        var open = System.Text.RegularExpressions.Regex.Match(
-            xml, @"<(?<tag>[A-Za-z]+)\b[^>]*\bid=""" + id + @"""[^>]*>");
-
-        Assert.True(open.Success, $"No element in this diagram carries id '{id}'.");
-        if (open.Value.EndsWith("/>", StringComparison.Ordinal)) return open.Value;
-
-        var close = $"</{open.Groups["tag"].Value}>";
-        var end = xml.IndexOf(close, open.Index, StringComparison.Ordinal);
-        return end < 0 ? open.Value : xml[open.Index..(end + close.Length)];
-    }
-
-    /// <summary>The id of the script task that writes `proof`, if this diagram has one.</summary>
-    private static string? ScriptTaskIdIn(string xml)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(
-            xml, @"<scriptTask\b[^>]*\bid=""(?<id>[^""]+)""");
-
-        return match.Success ? match.Groups["id"].Value : null;
-    }
-
     /// <summary>When each activity was first entered, by the engine's own clock.</summary>
     private static async Task<IReadOnlyDictionary<string, DateTimeOffset>> EntryOrderAsync(
         IAPIRequestContext api, string instance)
@@ -347,11 +314,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         foreach (var row in body.RootElement.EnumerateArray())
         {
             if (!row.TryGetProperty("activityId", out var id)) continue;
+
             // `startedAtUtc`, which is what WorkflowExecutionHistoryEvent calls
-            // it -- not Flowable's own `startTime`. The first version read the
-            // engine's name through Auton8's route and found nothing, and the
-            // cell went red rather than green, which is the point of requiring
-            // the field rather than defaulting when it is missing.
+            // it -- not Flowable's own `startTime`. Reading the engine's name
+            // through Auton8's route found nothing, and the cells went red
+            // rather than green, because the field is required not defaulted.
             if (!row.TryGetProperty("startedAtUtc", out var start)) continue;
             if (!start.TryGetDateTimeOffset(out var at)) continue;
 
@@ -363,51 +330,108 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return order;
     }
 
+    // ---- reading the diagram -------------------------------------------
+    //
+    // ALL OF THIS PARSES XML AS XML (#448). Every helper here used to be a
+    // regex over the document text, and every one of them was wrong in the same
+    // way: `<[A-Za-z]+` cannot see a namespace-prefixed tag, and bpmn.io and
+    // Camunda write `<bpmn:signalEventDefinition/>` in every file they produce.
+    // Measured: #435's headline mutation went green again simply by writing the
+    // element with a prefix, and the deployed model read back from the engine
+    // confirmed the element really was a signal throw. The same blindness
+    // disarmed the writer check in #444, and `ElementMarkupIn` additionally
+    // truncated at the first matching close tag, so containment was never
+    // actually computed.
+
+    private static XElement ElementIn(string xml, string id)
+    {
+        var found = XDocument.Parse(xml)
+            .Descendants()
+            .FirstOrDefault(e => (string?)e.Attribute("id") == id);
+
+        Assert.True(found is not null, $"No element in this diagram carries id '{id}'.");
+        return found!;
+    }
+
+    /// <summary>The BPMN element this diagram gives the id `Ev_1`.</summary>
+    private static string ElementTypeIn(string xml) => ElementIn(xml, "Ev_1").Name.LocalName;
+
+    /// <summary>
+    /// The event definition `Ev_1` carries, in the manifest's vocabulary (#435).
+    /// </summary>
+    /// <remarks>
+    /// `<timerEventDefinition/>` -> "timer", to match `bpmn-support.json`'s
+    /// `eventDefinition` column. Null when the element carries none, which is
+    /// itself the assertion for a None event. DIRECT children only: a definition
+    /// belonging to something nested inside a container is not the container's.
+    /// </remarks>
+    private static string? EventDefinitionIn(string xml)
+    {
+        const string Suffix = "EventDefinition";
+
+        var definition = ElementIn(xml, "Ev_1").Elements()
+            .Select(e => e.Name.LocalName)
+            .FirstOrDefault(name => name.EndsWith(Suffix, StringComparison.Ordinal));
+
+        return definition?[..^Suffix.Length];
+    }
+
     /// <summary>The ids of elements nested INSIDE `Ev_1` (#434).</summary>
     /// <remarks>
-    /// A container's declared effect is something inside it. The previous version
-    /// accepted any task anywhere on the instance for any of four container tag
-    /// names, which is the bug #412 named, narrowed rather than fixed -- both
-    /// container cells took that path even unmutated. Reading the nested ids from
-    /// the diagram means moving the task OUT of the container, or emptying the
-    /// container, makes the set not contain it.
+    /// A container's declared effect is something inside it. Descendants of the
+    /// real element, so a nested same-tag child no longer truncates the window
+    /// the way the old close-tag search did.
     /// </remarks>
     private static IReadOnlyCollection<string> NestedIdsIn(string xml, string id)
     {
-        var inner = ElementMarkupIn(xml, id);
+        return ElementIn(xml, id)
+            .Descendants()
+            .Select(e => (string?)e.Attribute("id"))
+            .Where(found => found is not null && found != id)
+            .Select(found => found!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
-        return System.Text.RegularExpressions.Regex
-            .Matches(inner, @"<[A-Za-z]+\b[^>]*\bid=""(?<id>[^""]+)""")
-            .Select(m => m.Groups["id"].Value)
-            .Where(found => !string.Equals(found, id, StringComparison.Ordinal))
+    /// <summary>
+    /// The script tasks in this diagram whose body writes `proof` (#444).
+    /// </summary>
+    /// <remarks>
+    /// The previous version returned the FIRST `<scriptTask` in the document and
+    /// never checked what it wrote. Measured, that let a decoy script task
+    /// downstream of the element take credit for a `proof` written upstream by
+    /// another one -- the exact mutation the fix claimed to catch.
+    /// </remarks>
+    private static IReadOnlyList<string> ProofWritersIn(string xml)
+    {
+        return ElementIn(xml, "Ev_1").Document!.Descendants()
+            .Where(e => e.Name.LocalName == "scriptTask")
+            .Where(e => e.Descendants()
+                .Any(child => child.Name.LocalName == "script"
+                    && child.Value.Contains("proof", StringComparison.Ordinal)))
+            .Select(e => (string?)e.Attribute("id") ?? "")
+            .ToList();
+    }
+
+    /// <summary>Every call activity in this diagram (#445).</summary>
+    private static IReadOnlyCollection<string> CallActivityIdsIn(string xml)
+    {
+        return XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "callActivity")
+            .Select(e => (string?)e.Attribute("id") ?? "")
             .ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>The ids this diagram's sequence flows carry away from an element.</summary>
     private static IReadOnlyCollection<string> FlowTargetsOf(string xml, string source)
     {
-        return System.Text.RegularExpressions.Regex
-            .Matches(xml, @"<sequenceFlow\b[^>]*\bsourceRef=""" + source
-                + @"""[^>]*\btargetRef=""(?<to>[^""]+)""")
-            .Select(m => m.Groups["to"].Value)
+        return XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "sequenceFlow")
+            .Where(e => (string?)e.Attribute("sourceRef") == source)
+            .Select(e => (string?)e.Attribute("targetRef"))
+            .Where(target => target is not null)
+            .Select(target => target!)
             .ToHashSet(StringComparer.Ordinal);
     }
-
-    /// <summary>The BPMN element this diagram gives the id `Ev_1`.</summary>
-    /// <remarks>
-    /// Derived from the diagram rather than declared beside it: a second list is
-    /// a second thing to drift, and every list in this milestone that could drift
-    /// eventually did.
-    /// </remarks>
-    private static string ElementTypeIn(string xml)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(
-            xml, @"<(?<tag>[A-Za-z]+)\b[^>]*\bid=""Ev_1""");
-
-        Assert.True(match.Success, "No element in this diagram carries id 'Ev_1'.");
-        return match.Groups["tag"].Value;
-    }
-
     private readonly record struct Observation(bool Held, string Detail);
 
     private static async Task<Observation> ObserveAsync(
@@ -463,9 +487,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         [("adHocSubProcess", null)] = "adhocSubProcess",
     };
 
-    /// <summary>Elements whose effect is something INSIDE them, not on them.</summary>
-    private static readonly string[] Containers =
-        ["subProcess", "adHocSubProcess", "callActivity", "transaction"];
 
     private static async Task<Observation> LookAsync(
         IAPIRequestContext api, string instance, string effect, string elementType,
@@ -517,9 +538,41 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
                 // A CALL ACTIVITY's task belongs to the CALLED instance, so a query
                 // on this one returns zero -- which reads exactly like "the element
-                // did nothing". The standalone probe hit this too; the difference is
-                // that entry on Ev_1 has already been asserted by the time we get
-                // here, so a genuine zero is a genuine failure.
+                // did nothing". CALL ACTIVITIES ONLY (#445): this ran for every
+                // element type and accepted a task in ANY child instance, because
+                // the children route asks for `superProcessInstanceId = parent`.
+                // Measured, a sub-process with no inner task passed on an unrelated
+                // call activity's task -- with a message asserting a containment
+                // the code never checked, which is the sentence this fallback's
+                // predecessor was replaced for.
+                if (!string.Equals(elementType, "callActivity", StringComparison.Ordinal))
+                {
+                    return new(false,
+                        here.Count > 0
+                            ? $"{here.Count} task(s) exist [{string.Join(", ", here.Select(t => t.Owner))}], "
+                              + $"but none belongs to Ev_1 or anything inside it [{string.Join(", ", nested)}]"
+                            : "no task on this instance");
+                }
+
+                // ATTRIBUTION, given that the route cannot provide it.
+                // `/children` returns `superProcessInstanceId = <parent>` -- every
+                // call activity on the instance -- and the summary carries no
+                // calling-activity id, so a child cannot be traced to Ev_1 from
+                // the payload. Rather than filter on a field that does not exist
+                // (which would accept everything while looking like a check), the
+                // requirement is moved somewhere it can actually be tested: Ev_1
+                // must be the diagram's ONLY call activity, and then any child is
+                // necessarily its. A second call activity makes this cell
+                // unattributable, and it says so instead of guessing.
+                var callActivities = CallActivityIdsIn(xml);
+                if (callActivities.Count != 1 || !callActivities.Contains("Ev_1"))
+                {
+                    return new(false,
+                        $"no task belongs to Ev_1, and this diagram has {callActivities.Count} call "
+                        + $"activities [{string.Join(", ", callActivities)}], so a task in a child "
+                        + "instance cannot be attributed to Ev_1 (#445)");
+                }
+
                 var children = await api.GetAsync($"/api/executions/{instance}/children");
                 if (!children.Ok) return new(false, $"0 here; children: {children.Status}");
 
@@ -530,14 +583,14 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 {
                     if (!child.TryGetProperty("id", out var id)) continue;
                     var inChild = await TasksAsync(api, id.GetString()!);
-                    if (inChild.Count > 0) return new(true, $"{inChild.Count} task(s) in the called instance");
+                    if (inChild.Count > 0) return new(true, $"{inChild.Count} task(s) in Ev_1's called instance");
                 }
 
                 return new(false,
                     here.Count > 0
                         ? $"{here.Count} task(s) exist [{string.Join(", ", here.Select(t => t.Owner))}], "
-                          + $"but none belongs to Ev_1 or anything inside it [{string.Join(", ", nested)}]"
-                        : "no task on this instance or any child");
+                          + "but none belongs to Ev_1, anything inside it, or its called instance"
+                        : "no task on this instance or in Ev_1's called instance");
             }
 
             case "variable-written":
@@ -561,10 +614,27 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // For a Script Task, Ev_1 IS the writer and this is trivially
                 // true. For a gateway or a sequence flow, it is the whole claim:
                 // the routing decision is what put the writer on the path.
-                var writer = ScriptTaskIdIn(xml);
-                if (writer is null) return new(true, "`proof` written; no script task in this diagram");
+                // THE WRITER MUST BE IDENTIFIED, AND THERE MUST BE EXACTLY ONE
+                // (#444). This was `the first <scriptTask in the document`, never
+                // checked to write `proof`, and finding none returned TRUE
+                // unconditionally. Measured: a decoy script task downstream took
+                // credit for a `proof` written upstream, and any writer that was
+                // not a literal `<scriptTask>` tag passed without a check at all.
+                var writers = ProofWritersIn(xml);
 
+                if (writers.Count != 1)
+                {
+                    return new(false,
+                        writers.Count == 0
+                            ? "`proof` is set, but no script task in this diagram writes it, so "
+                              + "nothing here can attribute it to Ev_1 (#444)"
+                            : $"`proof` is set and {writers.Count} script tasks write it "
+                              + $"[{string.Join(", ", writers)}], so the writer is ambiguous (#444)");
+                }
+
+                var writer = writers[0];
                 var order = await EntryOrderAsync(api, instance);
+
                 if (!order.TryGetValue("Ev_1", out var elementAt))
                 {
                     return new(false, "`proof` is set, but Ev_1 is absent from history");
