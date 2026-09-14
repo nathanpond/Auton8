@@ -4,7 +4,8 @@
   "$why-not-in-bpmn-support": "An observable effect is an axis bpmn-support.json does not have, and #324 already rejected bolting a column onto 69 rows to serve a subset.",
   "$fields": {
     "declaredEffect": "task-appears | variable-written | instance-waits | instance-ends, or null where no unambiguous effect has been declared -- which AC3 makes a FINDING, not a pass. ExecutionEvidenceExecutionTests must have a diagram for every non-null one.",
-    "liveEngineTestsMentioningIt": "E2E classes whose source contains this element's construct. A mention is weaker than an assertion; an EMPTY list is the strong signal."
+    "liveEngineTestsMentioningIt": "E2E classes whose source contains this element's construct. A mention is weaker than an assertion; an EMPTY list is the strong signal.",
+    "undeclaredReason": "Why this element has no declaredEffect yet. Permitted ONLY on a row whose declaredEffect is null -- a reason beside a declaration is incoherent. This is the field that carries AC3's finding; it is not a proof. ExecutionEvidenceTests enforces both the key allowlist and the pairing (#429)."
   },
   "elements": [
     {
@@ -173,7 +174,7 @@
         "RetryPointExecutionTests",
         "RetryPointStudioTests"
       ],
-      "evidence": "NOT DECLARED (#325 AC3 makes this a finding, not a pass). Its behaviour runs as an HTTP callback into the Auton8 app; autonate.noop is registered by a test fixture, not by the running app, so the E2E stack answers 404. Proving it needs a behaviour the app actually serves."
+      "undeclaredReason": "NOT DECLARED (#325 AC3 makes this a finding, not a pass). Its behaviour runs as an HTTP callback into the Auton8 app; autonate.noop is registered by a test fixture, not by the running app, so the E2E stack answers 404. Proving it needs a behaviour the app actually serves."
     },
     {
       "name": "Exclusive Gateway (XOR)",
