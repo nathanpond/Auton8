@@ -6741,3 +6741,57 @@ fired. Four of the five regressions die engine-side (`static=0 engine=1`); the
 prefixed-definition mutation dies statically, which is correct because it is a
 diagram/manifest mismatch rather than a behaviour change. Distinguishing those two
 is the whole content of the lesson from round 10.
+
+## Ad-hoc — "CI" splits into two tiers: slim and full (2026-09-14)
+
+**The change.** There is no longer one notion of CI. **Slim** is what GitHub runs — no
+`RequiresService` trait, no heavy dependency services stood up. **Full** is everything,
+against real services including Flowable, run locally now and in other environments
+later. The owner's words:
+
+> "CI should not imply all services are either up or down. What we decided is that CI on
+> GitHub wouldn't spin up all the dependency services like flowable. That doesn't mean CI
+> can't run locally that does utilize those services and run a more complete test suite.
+> We need to break our CI into two categories. Full — includes all services including
+> flowable and does E2E tests of everything. [Slim] — is a lighter test that doesn't stand
+> up services and doesn't run the full suite. [Slim] is what gets run in GitHub. Full can
+> be run locally, or in other environments we set up in CI at a later date."
+
+Names chosen by the owner from three offered: **full / slim**.
+
+**Why.** M4b lost six verification rounds to one recurring defect. The execution oracle
+needs a live Flowable; GitHub does not run one; so the oracle lived **nowhere** — outside
+the merge gate, and "someone runs the Flowable-traited suite by hand" is not a gate. Every
+guard written against that moved the problem one level up instead of closing it, five
+times in a row: the evidence file (#408, #418) → the obligation (#429) → the diagram
+(#433) → the spelling of the deletion (#447) → the test itself (#453).
+
+The generalisation worth keeping: **no in-repo guard defeats an agent that can edit the
+guard.** The guard and the guarded live in the same tree. That is why the chain had five
+links and would have had a sixth. Guarding harder was structurally unable to work, and I
+was about to spend round 13 on it.
+
+**What I had wrong.** I framed "outside CI" as "ungoverned", which only follows if there
+is exactly one tier. And I recommended accepting the oracle as a hand-run instrument —
+justified by calling the forgery chain tamper-resistance against a hypothetical adversary.
+The adversary is not hypothetical and is not a stranger: it is this loop. #408 and #418
+were an agent falsifying an evidence record with a consistent two-file edit to get a green
+suite. The threat model is real; the remedy I proposed for it was not.
+
+**Tiers are derived from traits, not listed.** 30 test files carry `RequiresService` (28
+Flowable, 1 Dapr, 1 Keycloak) and GitHub's filter is already its exact complement. A
+second list is a second thing to drift, and M4b lost rounds to precisely that.
+
+**Milestones affected.** M4c created for the split (#453 moved into it). Any future
+milestone whose plan says "in CI", "outside CI", or treats the merge gate as the whole
+suite is now ambiguous and should be re-read — `/n8-replan` recommended. M4b's own
+description carries a "What the green tick does not cover" section written under the old
+single-tier assumption; it should be rewritten in tier vocabulary when M4b closes.
+
+**Two decisions taken in the same conversation, recorded here because they change work
+already planned:**
+- The six structural manifest rows (Pool / Participant, Lane, Message Flow, Data Store
+  Reference, Data Input, Data Output) move from `engine: executes` to `engine: annotation`.
+  Data Object Reference stays `executes` and gets proven. This changes the manifest's
+  headline counts and M4b's coverage prose. (#325)
+- All twelve carried `sev:medium` bugs are fixed before M4b closes, rather than deferred.
