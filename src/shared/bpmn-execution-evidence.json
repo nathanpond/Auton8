@@ -671,27 +671,6 @@
       ]
     },
     {
-      "name": "Pool / Participant",
-      "localName": "participant",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": []
-    },
-    {
-      "name": "Lane",
-      "localName": "lane",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": []
-    },
-    {
-      "name": "Message Flow",
-      "localName": "messageFlow",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": []
-    },
-    {
       "name": "Data Object Reference",
       "localName": "dataObjectReference",
       "eventDefinition": null,
@@ -699,29 +678,6 @@
       "liveEngineTestsMentioningIt": [
         "ComplexGatewayStudioRoundTripTests"
       ]
-    },
-    {
-      "name": "Data Store Reference",
-      "localName": "dataStoreReference",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": []
-    },
-    {
-      "name": "Data Input",
-      "localName": "dataInput",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": [
-        "ComplexGatewayStudioRoundTripTests"
-      ]
-    },
-    {
-      "name": "Data Output",
-      "localName": "dataOutput",
-      "eventDefinition": null,
-      "declaredEffect": null,
-      "liveEngineTestsMentioningIt": []
     }
   ]
 }

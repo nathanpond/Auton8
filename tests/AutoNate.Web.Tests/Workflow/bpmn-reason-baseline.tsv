@@ -23,10 +23,10 @@ Compensation Marker	fe2acc01aed51424
 Compensation Start Event	317f3063b9417b74
 Complex Gateway	abc90b736f6d33cf
 Conditional Start Event	8821c3ac279eb21e
-Data Input	7752c1f6a984731e
+Data Input	ac5e7ee0be3ce943
 Data Object Reference	87abd02c36a34c04
-Data Output	7752c1f6a984731e
-Data Store Reference	f1bfc2cc7d93ee91
+Data Output	388f081f356eb003
+Data Store Reference	2bf1dc9660b45813
 Error Boundary	c4b622fb992b283c
 Error End	91bc95b21e29a8e7
 Error Start Event	7929e937e98bc334
@@ -43,13 +43,16 @@ Intermediate Throw (Escalation)	6cac0f9463a2ef8a
 Intermediate Throw (Link)	e14ce60c4c601062
 Intermediate Throw (Message)	c6e4ded383bca70b
 Intermediate Throw (Signal)	1372a9bca0775a9e
+Lane	a303634e3a22f262
 Loop Marker	8366508c4ebe43ab
 Manual Task	fdff6e3fd0f985f6
 Message Boundary	0ec609ef604a59d1
 Message End	eb0ba4531521d650
+Message Flow	725cdc56e9d735fb
 Message Start Event	353e7abf26461d7f
 Multi-Instance (Parallel)	41d70c7d16c45c1b
 Multi-Instance (Sequential)	41d70c7d16c45c1b
+Pool / Participant	2c38bcf6756fe173
 Receive Task	350dce1a3b656564
 Send Task	301cf22f50086ca8
 Signal Boundary	53ee9108c129fc44

@@ -249,9 +249,9 @@ public sealed class ExecutionEvidenceTests
     public void The_undeclared_elements_are_a_finding_and_the_count_only_falls()
     {
         // Measured, and LOWERED as elements gain declarations -- 38 when this
-        // ratchet was written, 28 now that #325's AC5 tranche is proven. Never
+        // ratchet was written, 22 now that #325's AC5 tranche is proven. Never
         // raise it.
-        const int Ceiling = 28;
+        const int Ceiling = 22;
 
         var undeclared = Elements()
             .Where(e => e!["declaredEffect"] is null)
