@@ -168,59 +168,68 @@ public sealed class ExecutionEvidenceTests
     [Fact]
     public void Exactly_these_elements_are_obliged_to_declare_an_effect()
     {
-        string[] obliged =
+        // The PAIR, not just the name (#449). Pinning only the names left
+        // "weaken the obligation" unguarded: changing Script Task from
+        // `variable-written` to `instance-ends` kept every guard green and the
+        // cell count intact while that cell stopped asserting the element's own
+        // effect and started asserting something true of almost any linear
+        // process. `instance-ends` is the observer #412 itself called "true of a
+        // great many diagrams".
+        (string Name, string Effect)[] obliged =
         [
-            "Ad-Hoc Sub-Process",
-            "Call Activity",
-            "Compensation End",
-            "End Event (None)",
-            "End Event (Terminate)",
-            "Error End",
-            "Escalation End",
-            "Event-Based Gateway",
-            "Exclusive Gateway (XOR)",
-            "Inclusive Gateway (OR)",
-            "Intermediate Catch (Conditional)",
-            "Intermediate Catch (Message)",
-            "Intermediate Catch (Signal)",
-            "Intermediate Catch (Timer)",
-            "Intermediate Throw (Compensation)",
-            "Intermediate Throw (Escalation)",
-            "Intermediate Throw (Message)",
-            "Intermediate Throw (None)",
-            "Intermediate Throw (Signal)",
-            "Message End",
-            "Parallel Gateway (AND)",
-            "Receive Task",
-            "Script Task",
-            "Send Task",
-            "Sequence Flow",
-            "Signal End",
-            "Start Event (None)",
-            "Sub-Process (Embedded)",
-            "User Task",
+            ("Ad-Hoc Sub-Process", "instance-waits"),
+            ("Call Activity", "task-appears"),
+            ("Compensation End", "instance-ends"),
+            ("End Event (None)", "instance-ends"),
+            ("End Event (Terminate)", "instance-ends"),
+            ("Error End", "instance-ends"),
+            ("Escalation End", "instance-ends"),
+            ("Event-Based Gateway", "instance-waits"),
+            ("Exclusive Gateway (XOR)", "variable-written"),
+            ("Inclusive Gateway (OR)", "variable-written"),
+            ("Intermediate Catch (Conditional)", "instance-waits"),
+            ("Intermediate Catch (Message)", "instance-waits"),
+            ("Intermediate Catch (Signal)", "instance-waits"),
+            ("Intermediate Catch (Timer)", "instance-waits"),
+            ("Intermediate Throw (Compensation)", "instance-ends"),
+            ("Intermediate Throw (Escalation)", "instance-ends"),
+            ("Intermediate Throw (Message)", "instance-ends"),
+            ("Intermediate Throw (None)", "instance-ends"),
+            ("Intermediate Throw (Signal)", "instance-ends"),
+            ("Message End", "instance-ends"),
+            ("Parallel Gateway (AND)", "variable-written"),
+            ("Receive Task", "instance-waits"),
+            ("Script Task", "variable-written"),
+            ("Send Task", "instance-ends"),
+            ("Sequence Flow", "instance-ends"),
+            ("Signal End", "instance-ends"),
+            ("Start Event (None)", "instance-ends"),
+            ("Sub-Process (Embedded)", "task-appears"),
+            ("User Task", "task-appears"),
         ];
 
         var declaring = Elements()
             .Where(e => e!["declaredEffect"] is not null)
-            .Select(e => e!["name"]!.GetValue<string>())
-            .Order(StringComparer.Ordinal)
+            .Select(e => (Name: e!["name"]!.GetValue<string>(),
+                          Effect: e["declaredEffect"]!.GetValue<string>()))
+            .Order()
             .ToList();
 
-        var dropped = obliged.Except(declaring, StringComparer.Ordinal).ToList();
-        var added = declaring.Except(obliged, StringComparer.Ordinal).ToList();
+        var dropped = obliged.Except(declaring).Select(p => $"{p.Name} -> {p.Effect}").ToList();
+        var added = declaring.Except(obliged).Select(p => $"{p.Name} -> {p.Effect}").ToList();
 
         Assert.True(
             dropped.Count == 0,
-            "These elements are obliged to declare an effect and no longer do. Each one "
-            + "silently removes a cell from the live-engine oracle:\n  "
+            "These (element, effect) pairs are obliged and no longer hold. A missing element "
+            + "silently removes a cell from the live-engine oracle; a changed effect silently "
+            + "empties one:\n  "
             + string.Join("\n  ", dropped)
             + "\n\nIf the demotion is genuinely right, delete the name from `obliged` in this "
             + "test in the same commit, and say why in the row's `undeclaredReason` (#429).");
 
         Assert.True(
             added.Count == 0,
-            "These elements declare an effect but are not in `obliged`, so the list has "
+            "These (element, effect) pairs are declared but not in `obliged`, so the list has "
             + "drifted from the file and no longer pins anything:\n  "
             + string.Join("\n  ", added)
             + "\n\nAdd them here (#429).");
