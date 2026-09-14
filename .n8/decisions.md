@@ -6527,3 +6527,58 @@ recording because the pattern is the point:
 description now says plainly that the execution oracle is `RequiresService=Flowable`
 by necessity and therefore outside the merge gate, and names what CI does run for
 that axis instead.
+
+## M4b round 9 — an oracle whose expectation was a function of what it judged (#412, #429)
+
+**The expected activity type must not be derived from the diagram under test.**
+My first fix for #412 read the element's type with a regex over the diagram it was
+about to publish, reasoning that a second list is a second thing to drift — this
+milestone has been punished repeatedly by drifting lists, so the instinct had
+history behind it. It was still wrong, and wrong in a way that produced *zero*
+signal: mutating the diagram mutated the expectation with it, so all nine same-id
+stand-ins walked past a guard that had just been written specifically to catch
+them. The expectation now comes from `bpmn-support.json`'s `localName`, and the
+diagram is separately asserted to match it — one half catches a swapped diagram,
+the other a swapped behaviour, and neither can be satisfied by editing the other.
+
+The general rule, which is worth more than the fix: **a guard must not read its
+expectation from the artifact it is judging.** Every instance of that is a test
+that cannot fail.
+
+**My mutation harness produced nine false verdicts before it produced nine true
+ones.** The first run reported all nine "walked past" — a result I nearly filed as
+a finding. Nine identical outcomes is the shape of a broken harness, not a broken
+oracle, and the harness was in fact fine on the second run; what differed is that
+the second prints `build_errors=` and `Total:` beside every verdict. A verdict that
+does not carry the evidence it ran is the same defect as #412 one level up, and
+that is now the third time in this milestone I have hit it. Verdicts in this repo's
+mutation runs carry their corroboration from here on.
+
+**`instance-waits` legitimately widened, and the distinction matters.** An
+event-based gateway measurably parks at its downstream catches rather than on
+itself. Accepting "parked at a target `Ev_1`'s own sequence flows fan to" looks
+exactly like the loosen-until-green move that caused half the defects in this
+milestone. It is not, because the targets are read from the diagram's own flows and
+entry has already proven the type — a stand-in that does not fan out cannot satisfy
+it. The test of such a widening is whether the mutation still fails, and it does.
+
+**`evidence` renamed to `undeclaredReason` rather than deleted.** #429 cites the
+key as proof that arbitrary keys were accepted, which is true and is now fixed with
+an allowlist. But its content was the relocated "why not provable" reason for
+Service Task (Behavior) — the very thing #429 notes went missing with `measured`.
+Deleting it to satisfy an allowlist would have destroyed the information the issue
+was complaining about losing.
+
+**AC3 moved from prose into the merge gate.** The check that every declared effect
+has a diagram lived inside the `RequiresService=Flowable` class, which CI excludes —
+so the one assertion that a declaration is actually exercised could not fail a
+merge. It now also exists source-level in the backend suite, with a self-check that
+fails if it stops being able to parse the file it reads.
+
+**One transient, recorded so it is not mistaken for a result later.** A full backend
+run reported 323 failures, all sharing one cause: a missing static web assets
+manifest, because I ran an E2E build concurrently and it rewrote shared output
+mid-run. Isolated re-run: 2640/2641, the one failure a 10s NATS connect timeout that
+passes 14/14 alone against a container healthy for nine days. Concurrent `dotnet
+test` invocations against this tree do not produce trustworthy numbers; this is at
+least the fourth time.
