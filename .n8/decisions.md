@@ -6690,3 +6690,54 @@ milestone's coverage claims; (b) leave them and amend AC5 to admit a third outco
 is not a low-cost ambiguity, so it is not mine to guess. #325 is `blocked` +
 `needs-owner-action` for that question alone — the other 21 undeclared elements
 need no decision, only work.
+
+## M4b round 11 — going after the class instead of the instance (#444-#449)
+
+Five verification rounds had each found the same shape: the fix closes the
+instance and leaves the class. Three of this round's five bugs were that shape
+again, so each was fixed at the class.
+
+**Regexing XML was the root of three separate defects.** `<[A-Za-z]+` cannot see
+a namespace-prefixed tag, and bpmn.io and Camunda write
+`<bpmn:signalEventDefinition/>` in every file they produce — so #435's headline
+mutation went green again simply by writing the element the ordinary way,
+confirmed by reading the deployed model back from the engine. The same blindness
+disarmed the writer check, and `ElementMarkupIn` additionally truncated at the
+first matching close tag so containment was never actually computed. Rewriting
+all five helpers on `XDocument` fixed #448, half of #444, and the nesting defect
+in one change. **The file now contains no `Regex` at all**, and that is the
+durable part: a regex over a structured format is a guess about its serialisation.
+
+**A guard that matches a spelling has as many holes as there are spellings.**
+#433 was fixed by reading the E2E source and rejecting an arm whose body was the
+literal `null`; verification found four escapes in one sitting. The replacement
+does not parse better — it stops parsing. `ExecutionOracleSizeTests` calls
+`DeclaredEffects()` and asserts the count, so it runs the switch. It carries no
+trait and needs no engine, which is what puts it in front of the merge gate where
+its Flowable-traited sibling cannot go. **Verified against CI's own filter string
+rather than assumed.**
+
+**The obvious fix for #445 would have been a no-op that reads as a check.** The
+child-instance fallback accepted a task in any child instance, so the natural
+repair is to filter children by their calling activity — and
+`FlowableProcessInstanceSummary` carries no such field. `TryGetProperty` on a
+field that does not exist skips the `continue`, so that filter would have accepted
+*everything* while looking like a guard: fail-open, and the fourth instance of
+"a query returning nothing reads like a verdict" in this milestone. Caught by
+checking the model before shipping it. The requirement moved somewhere actually
+testable: Ev_1 must be the diagram's only call activity, and then any child is
+necessarily its.
+
+**An alias for a rewrite is not an alternative, it is the only answer.** For five
+rows Auton8 REWRITES the element at publish — a signal end becomes a throw event
+(#156), a message end and a send task become a service task (#112). The map was
+OR-ed with the raw tag name, so it accepted the un-rewritten shape: precisely the
+defect the rewrite exists to prevent. Measured before and after by disabling the
+product's own rewrite, which is the only honest test of a claim like this: with
+`ExpandSignalEndEvents` disabled the cell was green before and is red now.
+
+**The evidence standard held this round.** Every mutation reports which assertion
+fired. Four of the five regressions die engine-side (`static=0 engine=1`); the
+prefixed-definition mutation dies statically, which is correct because it is a
+diagram/manifest mismatch rather than a behaviour change. Distinguishing those two
+is the whole content of the lesson from round 10.
