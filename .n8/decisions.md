@@ -6643,3 +6643,50 @@ milestone carried "a previous verifier wiped every deployment on this shared
 engine." That is very likely false: the suite's own `FlowableDeploymentSweep`
 cascade-deletes any `e2e-*` deployment older than two hours on every run. The
 accusation has been retracted on PR #431 and will not be repeated.
+
+## M4b round 10b — AC5's first tranche, and a question AC5 cannot answer (#325)
+
+**Ten elements proven, two recorded as refused, 19 -> 29 cells.** The oracle now
+covers Intermediate Throw in all four definitions, five End variants, and Send
+Task.
+
+**The alias map had #435's defect inside the table meant to help fix it.** Added
+in round 9 keyed on `localName` alone, it was wrong rather than coarse: measured,
+a message throw reports `serviceTask` while a signal throw reports `throwEvent`,
+so one `intermediateThrowEvent` entry licensed either to appear as either. Keyed
+now on `(localName, eventDefinition)` — the pair the manifest has always used, for
+the reason its own `$comment` gives: *"a localName-only key cannot tell the eight
+boundary variants apart."* The manifest said this at the top of the file the whole
+time.
+
+**Not everything unproven is a gap; some of it is the product refusing.** Task
+(Generic) and Manual Task cannot be proven through Auton8's publish API because
+Auton8 rejects both, by design, with a written reason, and both are `studio:
+withdrawn`. The tempting move was to publish around the validation to get the
+cell green. That would have proven something true of Flowable and false of the
+product. Their rows carry the measured 400 instead — which is what AC5's "or
+record the reason" is for.
+
+**Two engine refusals on Error End, both the product working.** The error must be
+declared, and it must be caught; Auton8's second refusal names the cost —
+*"reaching this event destroys the whole process instance, there is no history to
+look at afterwards."* The diagram now puts the element inside a sub-process whose
+boundary catches its code, because that is the only shape in which an error end is
+publishable here. Worth recording that the obstacle was a correct validation, not
+a defect.
+
+**BLOCKER — seven structural rows claim `engine: executes` and can never be
+proven.** Pool / Participant, Lane, Message Flow, Data Object Reference, Data Store
+Reference, Data Input, Data Output have no runtime activity to enter. The
+manifest's own vocabulary has the right word — `annotation`: *"deploys and carries
+no execution semantics BY DESIGN — a BPMN artifact, not a gap."* But **AC5's two
+outcomes do not include it**: "gain evidence" is impossible and `cannot-execute`
+means *"refused at publish"*, which for a Lane would be a real regression.
+
+Options put to the owner on #325: (a) reclassify the seven to `engine: annotation`,
+which costs nothing at publish but changes the manifest's headline counts and this
+milestone's coverage claims; (b) leave them and amend AC5 to admit a third outcome;
+(c) something else. Reclassifying what the product claims about seven BPMN elements
+is not a low-cost ambiguity, so it is not mine to guess. #325 is `blocked` +
+`needs-owner-action` for that question alone — the other 21 undeclared elements
+need no decision, only work.
