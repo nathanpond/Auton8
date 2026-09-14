@@ -119,7 +119,8 @@
       "declaredEffect": null,
       "liveEngineTestsMentioningIt": [
         "TaskConversionTests"
-      ]
+      ],
+      "undeclaredReason": "NOT DECLARED (#325 AC3 makes this a finding, not a pass). Auton8 REFUSES a plain bpmn:task at publish, by design and with a written reason -- it is `studio: withdrawn`. Measured: 400 \"it looks like a step somebody performs, but the engine passes straight through it without waiting for anyone.\" Flowable would run it; the product will not carry it, and this class publishes the way the product does rather than around it. Proving it would mean bypassing the validation that exists to stop it."
     },
     {
       "name": "User Task",
@@ -308,7 +309,7 @@
       "name": "Intermediate Throw (Message)",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "message",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",
@@ -321,7 +322,7 @@
       "name": "Intermediate Throw (Signal)",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "signal",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "EventSubProcessExecutionTests",
         "MessageCorrelationStudioTests",
@@ -333,7 +334,7 @@
       "name": "Intermediate Throw (Escalation)",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "escalation",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "ErrorEscalationExecutionTests",
         "ErrorEscalationStudioTests",
@@ -346,7 +347,7 @@
       "name": "Intermediate Throw (Compensation)",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "compensate",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests",
         "ComplexGatewayStudioRoundTripTests",
@@ -483,7 +484,7 @@
       "name": "Message End",
       "localName": "endEvent",
       "eventDefinition": "message",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",
@@ -496,7 +497,7 @@
       "name": "Signal End",
       "localName": "endEvent",
       "eventDefinition": "signal",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "EventSubProcessExecutionTests",
         "MessageCorrelationStudioTests",
@@ -508,7 +509,7 @@
       "name": "Error End",
       "localName": "endEvent",
       "eventDefinition": "error",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "BehaviorErrorBoundaryExecutionTests",
         "ErrorEscalationExecutionTests",
@@ -522,7 +523,7 @@
       "name": "Escalation End",
       "localName": "endEvent",
       "eventDefinition": "escalation",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "ErrorEscalationExecutionTests",
         "ErrorEscalationStudioTests",
@@ -535,7 +536,7 @@
       "name": "Compensation End",
       "localName": "endEvent",
       "eventDefinition": "compensate",
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests",
         "ComplexGatewayStudioRoundTripTests",
@@ -547,7 +548,7 @@
       "name": "Send Task",
       "localName": "sendTask",
       "eventDefinition": null,
-      "declaredEffect": null,
+      "declaredEffect": "instance-ends",
       "liveEngineTestsMentioningIt": [
         "MessageCorrelationExecutionTests"
       ]
@@ -568,7 +569,8 @@
       "declaredEffect": null,
       "liveEngineTestsMentioningIt": [
         "TaskConversionTests"
-      ]
+      ],
+      "undeclaredReason": "NOT DECLARED (#325 AC3 makes this a finding, not a pass). Auton8 REFUSES a manual task at publish, by design and with a written reason -- it is `studio: withdrawn`. Measured: 400 \"Manual task 'manual' cannot be deployed: it looks like a step somebody performs, but the engine passes straight through it without waiting for anyone.\" This is the element whose silent pass-through a person found by hand; the refusal is that finding, enforced."
     },
     {
       "name": "Call Activity",

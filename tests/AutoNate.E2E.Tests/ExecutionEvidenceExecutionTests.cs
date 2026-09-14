@@ -110,9 +110,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// can see it; this is the assertion at the point of use.
     /// </remarks>
     [Fact]
-    public void The_oracle_runs_nineteen_cells()
+    public void The_oracle_runs_every_declared_cell()
     {
-        Assert.Equal(19, DeclaredEffects().Count);
+        // Pinned alongside the backend suite's `obliged` list, which names the
+        // same set where CI can see it. Both move together or one of them fails,
+        // which is the point (#429, #433).
+        Assert.Equal(29, DeclaredEffects().Count);
     }
 
     [Theory]
@@ -173,7 +176,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
         Assert.True(
             string.Equals(enteredAs, expectedType, StringComparison.Ordinal)
-            || (EngineNames.TryGetValue(expectedType, out var alias)
+            || (EngineNames.TryGetValue((expectedType, declaredEventDefinition), out var alias)
                 && string.Equals(enteredAs, alias, StringComparison.Ordinal)),
             $"{name}: activity 'Ev_1' ran, but as a '{enteredAs}' rather than a "
             + $"'{expectedType}'. A same-id stand-in satisfies every effect this class "
@@ -425,24 +428,39 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// Where Flowable's runtime `activityType` is not the BPMN tag name.
     /// </summary>
     /// <remarks>
-    /// MEASURED, not assumed: every entry below was discovered by this class
-    /// failing against the real engine.
     /// <para>
-    /// The comparison is ORDINAL (#438). It was `OrdinalIgnoreCase`, under a
-    /// claim that "a third divergence appearing later fails loudly rather than
-    /// passing quietly" -- and a third divergence had already appeared and been
-    /// swallowed: Ad-Hoc Sub-Process declares <c>adHocSubProcess</c> and the
-    /// engine reports <c>adhocSubProcess</c>, lowercase h. Confirmed against the
-    /// engine's own history, where <c>adhocSubProcess</c> appears 20 times and
-    /// <c>adHocSubProcess</c> never. A case-insensitive compare made the written
-    /// claim false, so the compare changed rather than the claim.
+    /// MEASURED, not assumed: every entry was discovered by this class failing
+    /// against the real engine.
+    /// </para>
+    /// <para>
+    /// Keyed on <c>(localName, eventDefinition)</c> -- the same pair
+    /// `bpmn-support.json` keys every row on, and for the same reason (#435).
+    /// Keyed on the tag alone this map was WRONG, not merely coarse: a message
+    /// throw reports `serviceTask` while a signal throw reports `throwEvent`, so
+    /// one entry for `intermediateThrowEvent` would have licensed a message
+    /// throw to appear as anything a signal throw may appear as. The bug #435
+    /// named, inside the table that was supposed to help fix it.
+    /// </para>
+    /// <para>
+    /// The comparison is ORDINAL (#438): Ad-Hoc Sub-Process declares
+    /// <c>adHocSubProcess</c> and the engine reports <c>adhocSubProcess</c>, and
+    /// a case-insensitive compare swallowed that divergence while the comment
+    /// beside it claimed a third would fail loudly.
     /// </para>
     /// </remarks>
-    private static readonly Dictionary<string, string> EngineNames = new(StringComparer.Ordinal)
+    private static readonly Dictionary<(string Local, string? Definition), string> EngineNames = new()
     {
-        ["intermediateThrowEvent"] = "throwEvent",
-        ["eventBasedGateway"] = "eventGateway",
-        ["adHocSubProcess"] = "adhocSubProcess",
+        [("intermediateThrowEvent", null)] = "throwEvent",
+        [("intermediateThrowEvent", "signal")] = "throwEvent",
+        [("intermediateThrowEvent", "escalation")] = "throwEvent",
+        [("intermediateThrowEvent", "compensate")] = "throwEvent",
+        [("intermediateThrowEvent", "message")] = "serviceTask",
+        [("endEvent", "signal")] = "throwEvent",
+        [("endEvent", "compensate")] = "throwEvent",
+        [("endEvent", "message")] = "serviceTask",
+        [("sendTask", null)] = "serviceTask",
+        [("eventBasedGateway", null)] = "eventGateway",
+        [("adHocSubProcess", null)] = "adhocSubProcess",
     };
 
     /// <summary>Elements whose effect is something INSIDE them, not on them.</summary>
@@ -747,6 +765,73 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
             "Call Activity" => Wrap("", Linear(
                 $"""<callActivity id="Ev_1" name="call" calledElement="{key}c"/>""")),
+
+            // ---- AC5 tranche: elements that need no trigger and no host (#325).
+            //
+            // Task (Generic) and Manual Task are NOT here, and their absence is
+            // the finding. Auton8 refuses both at publish, by design and with a
+            // written reason -- they are `studio: withdrawn`. They cannot be
+            // proven through the product's own API, and this class deliberately
+            // publishes the way the product does rather than around it. Their
+            // rows carry that as an `undeclaredReason`.
+            // Each is a linear process, so `instance-ends` means the engine
+            // entered THIS element as THIS type and ran the instance to
+            // completion through it. That is the whole claim for a task or a
+            // throw that creates nothing -- and it is exactly what Manual Task
+            // and Task (Generic) were missing when they shipped doing nothing.
+            "Send Task" => Wrap("", Linear(
+                """<sendTask id="Ev_1" name="send" flowable:behaviorKey="autonate.send-message"/>""")),
+
+            "Intermediate Throw (Message)" => Wrap(
+                """<message id="Msg_1" name="m1"/>""",
+                Linear("""<intermediateThrowEvent id="Ev_1"><messageEventDefinition messageRef="Msg_1"/></intermediateThrowEvent>""")),
+
+            "Intermediate Throw (Signal)" => Wrap(
+                """<signal id="Sig_1" name="s1"/>""",
+                Linear("""<intermediateThrowEvent id="Ev_1"><signalEventDefinition signalRef="Sig_1"/></intermediateThrowEvent>""")),
+
+            "Intermediate Throw (Escalation)" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                Linear("""<intermediateThrowEvent id="Ev_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>""")),
+
+            "Intermediate Throw (Compensation)" => Wrap("", Linear(
+                """<intermediateThrowEvent id="Ev_1"><compensateEventDefinition/></intermediateThrowEvent>""")),
+
+            "Message End" => Wrap(
+                """<message id="Msg_1" name="m1"/>""",
+                """<startEvent id="Start_1"/><endEvent id="Ev_1"><messageEventDefinition messageRef="Msg_1"/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""),
+
+            "Signal End" => Wrap(
+                """<signal id="Sig_1" name="s1"/>""",
+                """<startEvent id="Start_1"/><endEvent id="Ev_1"><signalEventDefinition signalRef="Sig_1"/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""),
+
+            // An error end must be CAUGHT. Auton8 refuses it otherwise, naming
+            // the cost: "reaching this event destroys the whole process instance
+            // -- there is no history to look at afterwards." So the element under
+            // test sits inside a sub-process whose boundary catches its code,
+            // which is the only shape in which an error end is publishable here.
+            "Error End" => Wrap(
+                """<error id="Err_1" errorCode="E1" name="e1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Sub_1"><startEvent id="In_1"/>"""
+                + """<endEvent id="Ev_1"><errorEventDefinition errorRef="Err_1"/></endEvent>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Ev_1"/></subProcess>"""
+                + """<boundaryEvent id="Catch_1" attachedToRef="Sub_1"><errorEventDefinition errorRef="Err_1"/></boundaryEvent>"""
+                + """<endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Sub_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Sub_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Catch_1" targetRef="End_2"/>"""),
+
+            "Escalation End" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                """<startEvent id="Start_1"/><endEvent id="Ev_1"><escalationEventDefinition escalationRef="Esc_1"/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""),
+
+            "Compensation End" => Wrap("",
+                """<startEvent id="Start_1"/><endEvent id="Ev_1"><compensateEventDefinition/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""),
 
             _ => null
         };
