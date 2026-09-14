@@ -1,25 +1,35 @@
+import { BpmnModdle } from "bpmn-moddle";
+
 /**
- * A modeler the studio's own update functions can drive (#323).
+ * A modeler the studio's own update functions can drive (#323, #411).
  *
  * `workflow.js` imports only `./palette` at module scope; everything else it
  * needs arrives through `modelerHandle.modeler.get(...)`. So covering the
- * authoring layer needs a stand-in for two services, not bpmn-js.
+ * authoring layer needs a stand-in for a few services, not the whole editor.
  *
- * **The fidelity assumption, stated because everything here rests on it.**
- * bpmn-js routes a property whose key carries a namespace prefix and which no
- * moddle descriptor declares into `businessObject.$attrs`, and sets a bare
- * declared key as a direct field. That is exactly the split
- * `readAutoNateAttribute` (reads `$attrs["autonate:name"]`) and
- * `readFlowableString` (reads the direct field, then `$attrs["flowable:name"]`)
- * expect on the way back out. `TheFakeRoutesKeysTheWayBpmnJsDoes` in
- * `fake-modeler.test.js` pins the rule, because a fake that drifts from bpmn-js
- * would make every round-trip test pass while the studio stayed broken -- which
- * is the failure this milestone exists to end, wearing a new hat.
+ * **It has no routing rule of its own, and that is the fix.** The first version
+ * asserted "a namespaced key goes to `$attrs`, a bare key to a direct field",
+ * and #411 measured that against the shipped library: bpmn-js routes by whether
+ * a **moddle descriptor declares the property**, and the colon is irrelevant. A
+ * bare UNDECLARED key -- `resultVariable` on a `bpmn:ScriptTask`, which the
+ * studio writes -- lands in `$attrs`, where the old fake put it in a direct
+ * field. `null` is STORED, where the old fake deleted it.
+ *
+ * Both halves of that were wrong, and `fake-modeler.test.js` certified them. So
+ * business objects are now created by the **real `bpmn-moddle`** and properties
+ * applied through its own `set`, which is what bpmn-js calls. A fake that asks
+ * the real library how it routes cannot drift from it.
  */
+const moddle = new BpmnModdle();
 
-/** A moddle-ish business object: direct fields plus the `$attrs` bag. */
+/** A real moddle element, so routing is the library's answer rather than ours. */
 export function businessObject(type, id, fields = {}) {
-  return { $type: type, id, $attrs: {}, ...fields };
+  const element = moddle.create(type, { id });
+  for (const [key, value] of Object.entries(fields)) {
+    element.set(key, value);
+  }
+  element.$attrs ??= {};
+  return element;
 }
 
 export function fakeModeler(elements, options = {}) {
@@ -37,15 +47,17 @@ export function fakeModeler(elements, options = {}) {
     }
   };
 
+  // Straight to moddle's own `set`, which is what bpmn-js's updateProperties
+  // ends up calling. Whether a key lands in `$attrs` or in a direct field is the
+  // library's decision, not ours -- #411 is what happens when we make it.
   const applyKey = (target, key, value) => {
-    if (key.includes(":")) {
-      // A namespaced key no descriptor declares -- bpmn-js parks it in $attrs.
+    if (typeof target?.set === "function") {
+      target.set(key, value);
       target.$attrs ??= {};
-      if (value === undefined || value === null) delete target.$attrs[key];
-      else target.$attrs[key] = value;
       return;
     }
-    if (value === undefined) delete target[key];
+    target.$attrs ??= {};
+    if (key.includes(":")) target.$attrs[key] = value;
     else target[key] = value;
   };
 
@@ -54,7 +66,17 @@ export function fakeModeler(elements, options = {}) {
     // `$attrs` bag. That is what bpmn-moddle hands back for a type it knows,
     // and it is all the writers here touch.
     moddle: {
-      create: (type, properties = {}) => ({ $type: type, $attrs: {}, ...properties }),
+      create: (type, properties = {}) => {
+        // Real moddle for types it knows; a plain object for the rest, since the
+        // studio also creates extension elements moddle has no descriptor for.
+        try {
+          const element = moddle.create(type, properties);
+          element.$attrs ??= {};
+          return element;
+        } catch {
+          return { $type: type, $attrs: {}, ...properties };
+        }
+      },
       // `createAny` is how the signal scope rides on the event: an extension
       // ELEMENT, because two attribute routes failed on events parsed without
       // one (see the comment at the write site).

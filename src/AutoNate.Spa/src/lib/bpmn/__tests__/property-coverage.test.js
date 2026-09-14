@@ -25,8 +25,17 @@ const workflowSource = readFileSync(path.join(here, "..", "workflow.js"), "utf8"
 function propertiesWritten() {
   const names = new Set();
 
-  // writeAutoNateAttribute(loop, "aggregateTarget", ...)
-  for (const m of workflowSource.matchAll(/writeAutoNateAttribute\(\s*\w+\s*,\s*"([^"]+)"/g)) {
+  // writeAutoNateAttribute(<any receiver>, "aggregateTarget", ...)
+  //
+  // #409: this required a BARE identifier, so `writeAutoNateAttribute(
+  // element.businessObject, ...)` was invisible -- and four real properties were
+  // uncovered behind that: scriptFormat, routeScript, runAs, autonateConvertedFrom.
+  // The fix for #411 then wrote resultVariable through the same dotted shape, so
+  // this guard would have missed its own round's work.
+  //
+  // `[^,"]+` for the receiver: any expression that is not a comma or a quote,
+  // which is every receiver in this file and cannot swallow the name argument.
+  for (const m of workflowSource.matchAll(/writeAutoNateAttribute\(\s*[^,"]+,\s*"([^"]+)"/g)) {
     names.add(m[1]);
   }
   // [`${AUTONATE_ATTR_PREFIX}completionCondition`]: ...
@@ -37,7 +46,7 @@ function propertiesWritten() {
   // the one the first draft of this scan missed. Two of the seven multi-instance
   // properties travel it, which is precisely why the story says the three
   // mechanisms cannot stand in for each other.
-  for (const m of workflowSource.matchAll(/writeFlowableAttribute\(\s*\w+\s*,\s*"([^"]+)"/g)) {
+  for (const m of workflowSource.matchAll(/writeFlowableAttribute\(\s*[^,"]+,\s*"([^"]+)"/g)) {
     names.add(m[1]);
   }
   // "flowable:collection"-style writes through the modeling API.
@@ -49,9 +58,20 @@ function propertiesWritten() {
 }
 
 function testSources() {
-  return readdirSync(here)
+  const sources = readdirSync(here)
     .filter((f) => f.endsWith(".test.js") && f !== "property-coverage.test.js")
     .map((f) => readFileSync(path.join(here, f), "utf8"))
+    .join("\n");
+
+  // #409: COMMENTS STRIPPED. `tests.includes(name)` is a substring search, so
+  // appending `// zzzProbe` to any test file satisfied it with zero assertions
+  // written -- the same loose-oracle shape as #321's Contains("start event") and
+  // #393's comment bypass, in a third place. A mention is not a test; a mention
+  // in a comment is not even a mention.
+  return sources
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }
 
