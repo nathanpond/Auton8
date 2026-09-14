@@ -6795,3 +6795,61 @@ already planned:**
   Data Object Reference stays `executes` and gets proven. This changes the manifest's
   headline counts and M4b's coverage prose. (#325)
 - All twelve carried `sev:medium` bugs are fixed before M4b closes, rather than deferred.
+
+## M4b round 12 — stop asking the diagram, ask the engine (#452, #454, #430, #325)
+
+**The pattern under three of this round's four fixes: the test was asking the wrong
+witness.** #452's two failed predecessors both interrogated the *diagram* about who
+wrote a variable — first "the first `<scriptTask` in the document", then "the one
+whose script mentions `proof`". A diagram is a statement of intent; only the engine
+knows what happened. Auton8's own execution log already carried the variable
+update's `activityInstanceId` and nobody had looked. The general form: **when a test
+needs to know what happened, a heuristic over the input is not evidence, however
+sophisticated the heuristic.**
+
+**Reading the engine is not the same as bypassing the product.** I hesitated over
+querying Flowable directly, because this class deliberately publishes through
+Auton8's API rather than around its validation. Three sibling E2E classes already
+read the engine, and the distinction holds: publishing around validation would
+prove something true of Flowable and false of Auton8; *reading* the engine to check
+what Auton8's publish produced is the only way to check it at all.
+
+**A no-op that reads as a check, caught before shipping (again).** #445's residual
+suggested filtering child instances by their calling activity. The route's summary
+carries no such field, so `TryGetProperty` would have failed, the `continue` would
+have been skipped, and every child accepted — fail-open wearing a guard's clothes.
+Same shape as #452's own defect and the fourth instance this milestone. The check
+moved to something testable instead. **Verify the field exists before filtering on
+it** is now a habit worth naming.
+
+**#454: proving the rewrite happened is not proving it preserved anything.** The
+exclusive alias pins `activityType`, and Flowable reports `throwEvent` for a signal
+throw and a bare none-throw alike — so dropping the signal definition mid-rewrite
+was invisible. Rather than hand-list what each rewrite should produce (a second
+list, and this milestone has lost rounds to those), I probed every deployed shape
+the class produces and found a property that holds across all of them: a rewritten
+element carries either its event definition or a `flowable:behaviorKey`.
+
+**#430: the fix was in the wrong layer, not merely incomplete.** #416 put the
+`resultVariable` namespacing inside `ApplyScriptTaskSnapshot`, which is only
+reached for an element that has a snapshot. Namespacing an attribute is a property
+of what the *engine* accepts, not of what a snapshot says — it belonged in
+`ExpandForDeployment` all along. "Incomplete fix" and "fix in the wrong place" look
+identical from the bug report and are not the same repair.
+
+**#325, owner decision: six rows to `annotation`.** The published coverage split
+moves **43/3/8 → 37/9/8** over the same in-scope 54. Recorded prominently because
+it is a *claim change*, not a code change: nothing about the engine differs, those
+six always deployed and were never entered, and `executes` was recording the first
+half of that while implying the second. The assertion's comment carries the before
+and after so a reader who saw "43 execute" can find out why it says 37.
+
+Data OBJECT Reference was deliberately excluded from the six after verification
+showed `DataObjectExecutionTests` already proves it by starting an instance. My
+earlier framing — "all seven can never be proven" — was wrong, and reclassifying it
+would have been a factual regression in the manifest.
+
+**Partial round, stated plainly.** Four items done of a scope that also includes
+nine `sev:medium` (#399, #402, #404, #410, #413, #419, #436, #437, #438, #449) and
+AC5's remaining 20 elements. The "fix all twelve" decision is one increment in, not
+discharged.
