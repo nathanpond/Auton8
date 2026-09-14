@@ -4,7 +4,7 @@ import {
   updateMessageElementProperties,
   describeElementById
 } from "../workflow.js";
-import { fakeModeler, businessObject, element } from "./fake-modeler.js";
+import { fakeModeler, businessObject, element, moddleElement } from "./fake-modeler.js";
 
 /**
  * The service-task and message-element properties (#323).
@@ -292,7 +292,7 @@ describe("a converted element records what it was", () => {
  */
 describe("timer boundary event properties round-trip", () => {
   function timerBoundary(id = "tb1") {
-    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    const definition = moddleElement("bpmn:TimerEventDefinition");
     return businessObject("bpmn:BoundaryEvent", id, { eventDefinitions: [definition] });
   }
 
@@ -400,7 +400,7 @@ describe("ad-hoc sub-process ordering round-trips", () => {
 
 describe("intermediate catch timer properties round-trip", () => {
   function timerCatch(id = "tc1") {
-    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    const definition = moddleElement("bpmn:TimerEventDefinition");
     return businessObject("bpmn:IntermediateCatchEvent", id, { eventDefinitions: [definition] });
   }
 
@@ -442,7 +442,7 @@ describe("intermediate catch timer properties round-trip", () => {
 describe("timer start event cron round-trips", () => {
   it("writes the cron cycle and reads it back as timerCycleCron", async () => {
     const { updateTimerStartEventProperties } = await import("../workflow.js");
-    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    const definition = moddleElement("bpmn:TimerEventDefinition");
     const bo = businessObject("bpmn:StartEvent", "ts1", { eventDefinitions: [definition] });
     const { handle } = fakeModeler([element(bo)]);
 

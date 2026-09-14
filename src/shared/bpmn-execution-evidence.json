@@ -1,12 +1,10 @@
 {
   "$comment": "What would prove each element RAN, not merely deployed (#325). The class this answers has three known members -- Loop Marker ran ONCE where it should have run three times; Manual Task and Task (Generic) pass straight through creating nothing -- and all three were found by a person, not a test.",
-  "$status": "MEASURED, partially. `provenByStartingAnInstance` is the result of DEPLOYING a minimal process per element, STARTING an instance, and observing the declared effect -- 19 of the 20 elements with a declared effect are proven this way by tools/bpmn-execution-probe/probe.py. The 20th, Service Task (Behavior), runs its behaviour as an HTTP callback into the Auton8 app and so cannot be proven by the engine alone. The 37 elements with declaredEffect null are NOT proven and AC3 makes that a finding rather than a pass; the seven with an empty liveEngineTestsMentioningIt are #404.",
+  "$status": "DECLARATIONS, not proofs. `declaredEffect` says what would prove this element RAN -- a task appeared, a variable was written, the instance parked, the instance ended. The proof itself lives in ExecutionEvidenceExecutionTests, which reads these declarations, publishes a minimal diagram per element, STARTS an instance, asserts the element's own activity id appears in the run's history, and then asserts the effect.\n\nThis file used to carry `provenByStartingAnInstance` and `measured` too, and that was the defect: a proof recorded in a file is a claim, and verification falsified it twice -- certifying that Manual Task creates a runtime task, first with a one-file edit (#408) and then with a consistent two-file edit (#418). There is nothing left to forge, because nothing here claims a proof.\n\nAn element with `declaredEffect: null` is NOT proven and #325 AC3 makes that a finding rather than a pass. The seven with no live-engine test at all are #404.",
   "$why-not-in-bpmn-support": "An observable effect is an axis bpmn-support.json does not have, and #324 already rejected bolting a column onto 69 rows to serve a subset.",
   "$fields": {
-    "declaredEffect": "task-appears | variable-written | instance-waits | instance-ends, or null where no unambiguous effect has been declared yet -- which AC3 makes a FINDING, not a pass",
-    "liveEngineTestsMentioningIt": "E2E classes whose source contains this element's construct. A mention is weaker than an assertion; an EMPTY list is the strong signal.",
-    "provenByStartingAnInstance": "true when an instance was started and the declared effect was observed. Absent means no effect is declared, so nothing was attempted.",
-    "measured": "what the engine actually showed, verbatim from the probe"
+    "declaredEffect": "task-appears | variable-written | instance-waits | instance-ends, or null where no unambiguous effect has been declared -- which AC3 makes a FINDING, not a pass. ExecutionEvidenceExecutionTests must have a diagram for every non-null one.",
+    "liveEngineTestsMentioningIt": "E2E classes whose source contains this element's construct. A mention is weaker than an assertion; an EMPTY list is the strong signal."
   },
   "elements": [
     {
@@ -42,9 +40,7 @@
         "TimerBoundaryExecutionTests",
         "WorkflowBpmnSupportPanelTests",
         "WorkflowPaletteTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "endTime=2026-09-13T22:39:15.880Z"
+      ]
     },
     {
       "name": "Signal Start Event",
@@ -80,9 +76,7 @@
         "EventSubProcessExecutionTests",
         "StartEventPlacementDifferentialTests",
         "TimerBoundaryExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "End Event (None)",
@@ -108,18 +102,14 @@
         "TaskConversionTests",
         "TimerBoundaryExecutionTests",
         "WorkflowBpmnSupportPanelTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "endTime=2026-09-13T22:39:16.762Z"
+      ]
     },
     {
       "name": "End Event (Terminate)",
       "localName": "endEvent",
       "eventDefinition": "terminate",
       "declaredEffect": "instance-ends",
-      "liveEngineTestsMentioningIt": [],
-      "provenByStartingAnInstance": true,
-      "measured": "endTime=2026-09-13T22:39:17.200Z"
+      "liveEngineTestsMentioningIt": []
     },
     {
       "name": "Task (Generic)",
@@ -160,9 +150,7 @@
         "TaskConversionTests",
         "TimerBoundaryExecutionTests",
         "WorkflowBpmnSupportPanelTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "1 runtime task(s) on this instance"
+      ]
     },
     {
       "name": "Script Task",
@@ -172,23 +160,20 @@
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests",
         "MultiInstanceExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "proof='ran' in history"
+      ]
     },
     {
       "name": "Service Task (Behavior)",
       "localName": "serviceTask",
       "eventDefinition": null,
-      "declaredEffect": "variable-written",
+      "declaredEffect": null,
       "liveEngineTestsMentioningIt": [
         "BehaviorErrorBoundaryExecutionTests",
         "ComplexGatewayStudioRoundTripTests",
         "RetryPointExecutionTests",
         "RetryPointStudioTests"
       ],
-      "provenByStartingAnInstance": false,
-      "measured": "requires the Auton8 web app reachable from the engine -- the behaviour runs as an HTTP callback, so this element cannot be proven by the engine alone. Covered by the E2E suite, which runs the full stack."
+      "evidence": "NOT DECLARED (#325 AC3 makes this a finding, not a pass). Its behaviour runs as an HTTP callback into the Auton8 app; autonate.noop is registered by a test fixture, not by the running app, so the E2E stack answers 404. Proving it needs a behaviour the app actually serves."
     },
     {
       "name": "Exclusive Gateway (XOR)",
@@ -197,18 +182,14 @@
       "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "proof='ran' in history"
+      ]
     },
     {
       "name": "Inclusive Gateway (OR)",
       "localName": "inclusiveGateway",
       "eventDefinition": null,
       "declaredEffect": "variable-written",
-      "liveEngineTestsMentioningIt": [],
-      "provenByStartingAnInstance": true,
-      "measured": "proof='ran' in history"
+      "liveEngineTestsMentioningIt": []
     },
     {
       "name": "Parallel Gateway (AND)",
@@ -220,9 +201,7 @@
         "MessageCorrelationExecutionTests",
         "SignalScopeExecutionTests",
         "TimerBoundaryExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "proof='ran' on the running instance"
+      ]
     },
     {
       "name": "Sequence Flow",
@@ -255,9 +234,7 @@
         "SubProcessExecutionTests",
         "TaskConversionTests",
         "TimerBoundaryExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "endTime=2026-09-13T22:39:19.873Z"
+      ]
     },
     {
       "name": "Message Start Event",
@@ -324,9 +301,7 @@
         "MessageCorrelationStudioTests",
         "SignalScopeExecutionTests",
         "TaskConversionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "endTime=2026-09-13T22:39:20.303Z"
+      ]
     },
     {
       "name": "Intermediate Throw (Message)",
@@ -389,9 +364,7 @@
         "MessageCorrelationExecutionTests",
         "MessageCorrelationStudioTests",
         "StartEventPlacementDifferentialTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "Intermediate Catch (Signal)",
@@ -403,9 +376,7 @@
         "MessageCorrelationStudioTests",
         "SignalScopeExecutionTests",
         "StartEventPlacementDifferentialTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "Intermediate Catch (Conditional)",
@@ -417,9 +388,7 @@
         "ConditionalEventExecutionTests",
         "EventSubProcessExecutionTests",
         "StartEventPlacementDifferentialTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "Message Boundary",
@@ -589,9 +558,7 @@
       "declaredEffect": "instance-waits",
       "liveEngineTestsMentioningIt": [
         "MessageCorrelationExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "Manual Task",
@@ -610,9 +577,7 @@
       "liveEngineTestsMentioningIt": [
         "CallActivityExecutionTests",
         "CallActivityStudioTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "1 runtime task(s) in the called instance"
+      ]
     },
     {
       "name": "Sub-Process (Embedded)",
@@ -627,9 +592,7 @@
         "SignalScopeExecutionTests",
         "StartEventPlacementDifferentialTests",
         "SubProcessExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "1 runtime task(s) on this instance"
+      ]
     },
     {
       "name": "Event Sub-Process",
@@ -652,9 +615,7 @@
         "AdhocSubProcessExecutionTests",
         "ComplexGatewayStudioRoundTripTests",
         "StartEventPlacementDifferentialTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['Ev_1']"
+      ]
     },
     {
       "name": "Event-Based Gateway",
@@ -663,9 +624,7 @@
       "declaredEffect": "instance-waits",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests"
-      ],
-      "provenByStartingAnInstance": true,
-      "measured": "parked at ['C_1', 'C_2']"
+      ]
     },
     {
       "name": "Complex Gateway",

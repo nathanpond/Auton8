@@ -1326,7 +1326,16 @@ public sealed class WorkflowBpmnXmlTests
         var task = document.Descendants(bpmn + "scriptTask").Single();
 
         Assert.Equal("javascript", task.Attribute("scriptFormat")?.Value);
-        Assert.Equal("total", task.Attribute("resultVariable")?.Value);
+
+        // #416: NAMESPACED. This asserted the bare spelling and so pinned the
+        // defect -- Flowable refuses a bare `resultVariable` on a bpmn:scriptTask
+        // ("cvc-complex-type.3.2.2"), which this file's own complex-gateway
+        // expansion already knew. It passed for years because the studio's read
+        // was broken in the matching way, so the value never reached here.
+        XNamespace flowable = "http://flowable.org/bpmn";
+        Assert.Equal("total", task.Attribute(flowable + "resultVariable")?.Value);
+        Assert.Null(task.Attribute("resultVariable"));
+
         Assert.Equal("execution.setVariable(\"total\", 42);", task.Element(bpmn + "script")?.Value);
     }
 
@@ -5014,6 +5023,83 @@ public sealed class WorkflowBpmnXmlTests
             <startEvent id="Start_1" />
             <sendTask id="Send_1" name="Tell them" {sendTaskAttributes}/>
             <endEvent id="End_1" />
+          </process>
+        </definitions>
+        """;
+
+
+    /// <summary>
+    /// A script task's result variable publishes XML the engine accepts (#416, #230).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A BARE <c>resultVariable</c> on a <c>bpmn:scriptTask</c> is refused outright:
+    /// <c>cvc-complex-type.3.2.2: Attribute 'resultVariable' is not allowed to
+    /// appear in element 'scriptTask'</c>. This file's own complex-gateway
+    /// expansion already knew that and writes it namespaced.
+    /// </para>
+    /// <para>
+    /// It was latent until #411. The studio read the property as a direct field,
+    /// real bpmn-js routing puts an undeclared bare key in <c>$attrs</c>, so the
+    /// snapshot's value was always null and the branch never fired. Repairing the
+    /// read completed the chain and turned a dormant defect into a publish
+    /// failure — and the PR that did it shipped SPA tests asserting the feature
+    /// round-trips, so the suite certified a path that failed at deploy.
+    /// </para>
+    /// <para>
+    /// Asserted on the emitted XML rather than on the setter, because the defect
+    /// was never in what the code intended — it was in what came out.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ApplyProcessMetadata_WritesTheResultVariableInTheFlowableNamespace()
+    {
+        var applied = WorkflowBpmnXml.ApplyProcessMetadata(
+            ScriptTaskDiagram(), "probe", "Probe",
+            [new WorkflowElementSnapshot("T_1", "bpmn:ScriptTask", "calc", ResultVariable: "out")]);
+
+        var document = System.Xml.Linq.XDocument.Parse(applied);
+        var scriptTask = document.Descendants()
+            .Single(e => e.Name.LocalName == "scriptTask");
+
+        Assert.Equal("out", scriptTask.Attribute(FlowableNs + "resultVariable")?.Value);
+
+        // The complement, and the whole defect: a bare one fails the deployment.
+        Assert.Null(scriptTask.Attribute("resultVariable"));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_ClearsBothSpellingsWhenTheAuthorEmptiesIt()
+    {
+        // A diagram saved before #416 carries the bare spelling. Publishing after
+        // the author clears the field must not leave it behind, or the engine
+        // refuses a value the studio believes is gone.
+        var withBare = ScriptTaskDiagram(extraAttributes: """resultVariable="stale" """);
+
+        var applied = WorkflowBpmnXml.ApplyProcessMetadata(
+            withBare, "probe", "Probe",
+            [new WorkflowElementSnapshot("T_1", "bpmn:ScriptTask", "calc", ResultVariable: null)]);
+
+        var scriptTask = System.Xml.Linq.XDocument.Parse(applied).Descendants()
+            .Single(e => e.Name.LocalName == "scriptTask");
+
+        Assert.Null(scriptTask.Attribute("resultVariable"));
+        Assert.Null(scriptTask.Attribute(FlowableNs + "resultVariable"));
+    }
+
+    private static readonly System.Xml.Linq.XNamespace FlowableNs = "http://flowable.org/bpmn";
+
+    private static string ScriptTaskDiagram(string extraAttributes = "") => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:flowable="http://flowable.org/bpmn"
+                     targetNamespace="http://autonate.dev/workflows">
+          <process id="P_1" isExecutable="true">
+            <startEvent id="S_1"/>
+            <scriptTask id="T_1" name="calc" scriptFormat="javascript" {extraAttributes}>
+              <script>variables.set('x', 1);</script>
+            </scriptTask>
+            <endEvent id="E_1"/>
           </process>
         </definitions>
         """;

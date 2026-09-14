@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { interpretSignalScope, updateSignalElementProperties } from "../workflow.js";
-import { fakeModeler, businessObject, element } from "./fake-modeler.js";
+import { fakeModeler, businessObject, element, moddleElement } from "./fake-modeler.js";
 
 /**
  * Signal scope: all four states, and the write path (#323, #311, #317).
@@ -37,7 +37,7 @@ describe("interpretSignalScope names all four states", () => {
 
 describe("the panel never writes back a scope it does not understand", () => {
   function signalEvent(id = "sig1") {
-    const definition = { $type: "bpmn:SignalEventDefinition", $attrs: {} };
+    const definition = moddleElement("bpmn:SignalEventDefinition");
     return businessObject("bpmn:IntermediateThrowEvent", id, { eventDefinitions: [definition] });
   }
 

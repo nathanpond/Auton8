@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { updateTimerStartEventProperties, describeElementById } from "../workflow.js";
-import { fakeModeler, businessObject, element } from "./fake-modeler.js";
+import { fakeModeler, businessObject, element, moddleElement } from "./fake-modeler.js";
 
 /**
  * The two properties that live on a nested event definition rather than on the
@@ -11,7 +11,7 @@ import { fakeModeler, businessObject, element } from "./fake-modeler.js";
  * nothing about whether the value landed.
  */
 function timerStartEvent(id = "t1") {
-  const timer = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+  const timer = moddleElement("bpmn:TimerEventDefinition");
   return businessObject("bpmn:StartEvent", id, { eventDefinitions: [timer] });
 }
 
@@ -55,10 +55,7 @@ describe("timer start event properties round-trip", () => {
 
 describe("signal start event record-type filter round-trips", () => {
   it("reads recordTypeShortCodes back from the signal event definition", () => {
-    const signal = {
-      $type: "bpmn:SignalEventDefinition",
-      $attrs: { "flowable:recordTypeShortCodes": "INV,PO" }
-    };
+    const signal = moddleElement("bpmn:SignalEventDefinition", { "flowable:recordTypeShortCodes": "INV,PO" });
     const bo = businessObject("bpmn:StartEvent", "s1", { eventDefinitions: [signal] });
     const { handle } = fakeModeler([element(bo)]);
 
@@ -68,7 +65,7 @@ describe("signal start event record-type filter round-trips", () => {
   });
 
   it("reads an absent record-type filter as empty rather than as a one-entry list", () => {
-    const signal = { $type: "bpmn:SignalEventDefinition", $attrs: {} };
+    const signal = moddleElement("bpmn:SignalEventDefinition");
     const bo = businessObject("bpmn:StartEvent", "s2", { eventDefinitions: [signal] });
     const { handle } = fakeModeler([element(bo)]);
 

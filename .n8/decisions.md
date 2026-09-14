@@ -6452,3 +6452,78 @@ bare key via multi-line `updateModdleProperties`, and a dotted-receiver helper
 call.
 
 **Still open:** #410, #412, #413 (`sev:medium`), #325 AC5, #399, #402, #404.
+
+## M4b round 8 — 2026-09-14 (during /n8-exec M4b)
+
+**#416 — I broke publishing, and this fixes it.** `ApplyScriptTaskSnapshot`
+stamped a **bare** `resultVariable` on a `bpmn:scriptTask`, which Flowable refuses
+outright. That is #230, open since before this milestone, and it was harmless only
+because the studio's read was broken in the matching way — `describeBusinessObject`
+read a direct field that real bpmn-js routing never populates, so the snapshot was
+always null and the branch never fired.
+
+**#411's fix repaired the read and completed the chain**, and PR #414 shipped SPA
+tests asserting the feature round-trips — so the suite certified a path that failed
+at deploy. Fixing one half of a two-half defect was worse than fixing neither:
+before, the feature silently did nothing; after, it broke publish.
+
+Now written as `flowable:resultVariable` (what the gateway expansion in the same
+file already did, with a comment saying why), the bare spelling cleared so a
+pre-#416 diagram does not carry both, and the regression test asserts **the emitted
+XML** rather than the setter — the defect was never in what the code intended.
+Deployed to Flowable 8.0.0: **accepted**. Closes #230 too.
+
+**#417 — the fallback rule was still the one most of the suite ran on.** #411
+routed through real moddle only when the target had a `.set`, and every nested
+element in these tests was an object literal, so **18 of 92 tests took the
+hand-written rule** — the exact rule #411 removed. `fake-modeler.test.js`'s own
+"writes moddle properties onto the nested object" case built one of those literals,
+so it certified the fallback: the same tautology #411 was filed for, one object
+deeper.
+
+Deleted the fallback outright and added `moddleElement(type, fields)`. A
+plain-object target now throws by name. There is no second rule left to drift.
+
+**#418 — the proof moved out of the file and into a run.** #408's fix compared the
+record to the probe's transcript; verification falsified it again by editing both
+files consistently, certifying **Manual Task creates a runtime task**. A transcript
+cannot be the oracle however many files agree with it.
+
+So `ExecutionEvidenceExecutionTests` now publishes a minimal diagram per declared
+element through Auton8's own API, **starts an instance**, and observes the effect —
+#325's AC2, which had been recorded as landed and was not. The evidence file keeps
+`declaredEffect` and **no longer carries any proof field at all**; a guard pins that
+it never gets one back. There is nothing left to forge.
+
+**And it asserts ENTRY, which is #412.** Every case checks the element's own
+activity id appears in the run's history before looking at the effect. The
+substitution that made the standalone probe report PROVED — replacing the timer
+catch with a bare user task — now **fails**. Dropping `<terminateEventDefinition/>`
+while keeping the parked branch also fails. Four of four observers discriminate now.
+
+The gateway diagrams were rebuilt rather than copied from the probe: the probe put
+its script *downstream* of the gateway, so deleting the gateway left the script on
+the path and the proof still appeared — 3 of its 5 `variable-written` proofs were
+unsound for exactly that reason. The script now sits on one conditional branch.
+
+**Four of my own errors, each caught by running rather than reasoning**, and worth
+recording because the pattern is the point:
+
+1. I invented `GET /api/executions/{id}` — a route that does not exist — and read
+   its failure as "the instance ran straight through". Seven healthy elements became
+   seven false negatives. *A query that returns nothing reading like a verdict* is
+   the exact shape of #412, and I reproduced it inside the fix for #412.
+2. Minimal diagrams with no BPMN DI section make `/diagram` answer 500, which the
+   same observer read as "did nothing" — all 14 cells, all false.
+3. `autonate.noop` is registered by a test fixture, not by the running app; the E2E
+   stack answers 404. Service Task (Behavior) is left **undeclared** with that
+   reason written down, which AC3 makes a finding rather than a pass.
+4. A call activity's callee must be a separately published workflow — Auton8's
+   validation refused my single-definition version, correctly, naming the missing
+   key. And its task belongs to the CALLED instance, so the child is looked up
+   explicitly.
+
+**The CI caveat #325's Notes asked for, three rounds late.** The milestone
+description now says plainly that the execution oracle is `RequiresService=Flowable`
+by necessity and therefore outside the merge gate, and names what CI does run for
+that axis instead.
