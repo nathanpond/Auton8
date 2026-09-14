@@ -627,7 +627,15 @@ function describeBusinessObject(businessObject) {
         : typeof businessObject.script === "string"
           ? businessObject.script
           : null,
-    resultVariable: typeof businessObject.resultVariable === "string" ? businessObject.resultVariable : null,
+    // #411: three places, in the order they became possible. `flowable:` is what
+    // the studio writes now; the bare $attrs entry is what it wrote before, on
+    // diagrams already saved; the direct field is what a moddle that DECLARED
+    // the property would use. Reading only the last is why it never round-tripped.
+    resultVariable:
+      readFlowableString(businessObject, "resultVariable")
+      ?? (typeof businessObject.$attrs?.resultVariable === "string"
+            ? businessObject.$attrs.resultVariable
+            : null),
     conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null,
     assignee: readFlowableString(businessObject, "assignee"),
     candidateUsers: readFlowableList(businessObject, "candidateUsers"),
@@ -1797,9 +1805,22 @@ export function updateScriptTaskProperties(modelerHandle, task) {
       // rather than an Auton8-specific one (#154). Defaulted rather than trusted:
       // a task authored before Python support carries no value.
       scriptFormat,
-      script,
-      resultVariable: normalizeOptionalString(task.resultVariable)
+      script
     });
+
+    // #411: `flowable:resultVariable`, NOT a bare one. bpmn-js routes an
+    // undeclared key by descriptor, so a bare `resultVariable` lands in $attrs
+    // and serialises as `resultVariable="..."` on a bpmn:scriptTask -- which
+    // Flowable refuses outright ("Attribute 'resultVariable' is not allowed to
+    // appear in element 'scriptTask'"), as WorkflowBpmnXml's own complex-gateway
+    // expansion already knew and wrote namespaced.
+    //
+    // It was invisible because `describeElement` read it as a direct field, so
+    // it always came back null and nothing round-tripped. The backend's
+    // condition validator accepts either spelling, so existing diagrams keep
+    // working and the read below still accepts the bare form.
+    writeFlowableAttribute(
+      element.businessObject, "resultVariable", normalizeOptionalString(task.resultVariable));
   }
 
   // #153: the identity declaration. Written after updateProperties so it is
@@ -2230,14 +2251,21 @@ export function updateServiceTaskProperties(modelerHandle, payload) {
   writeFlowableAttribute(businessObject, "async", payload.retryPoint === true ? "true" : null);
 
   // Clear any plain (no-namespace) leftovers a prior studio iteration may
-  // have set via modeling.updateProperties; passing null here removes them
-  // from the businessObject so they don't survive the next save.
+  // have set via modeling.updateProperties; passing UNDEFINED removes them from
+  // the businessObject so they don't survive the next save. (#411: this said
+  // "null" and did the opposite -- moddle stores a null, which serialised as
+  // the string "null" on every service task the studio touched.)
+  // #411: `undefined`, not `null`. Moddle STORES a null -- it does not clear the
+  // key -- so this wrote `class="null" expression="null" type="null"
+  // delegateExpression="null"` into every service task it touched. Publish
+  // strips those four, which is the only reason it was never seen; the comment
+  // above claimed the opposite and a fidelity test certified the claim.
   modeling.updateProperties(element, {
     name: normalizeOptionalString(payload.name),
-    class: null,
-    expression: null,
-    type: null,
-    delegateExpression: null
+    class: undefined,
+    expression: undefined,
+    type: undefined,
+    delegateExpression: undefined
   });
 }
 

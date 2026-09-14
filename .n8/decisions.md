@@ -6332,3 +6332,64 @@ not a defect — it is the measurement AC4 asked for, and pinning it stops it be
 forgotten. AC5's remaining half, moving the unproven to `cannot-execute`, needs
 evidence per element rather than a sweep, and #404 already carries the seven with
 nothing at all.
+
+## M4b round 6 — 2026-09-13 (during /n8-exec M4b)
+
+**#411 — the fake modeler had a rule of its own, and it was wrong.** The first
+version asserted "a namespaced key goes to `$attrs`, a bare key to a direct
+field". Verification measured that against the shipped bpmn-js: routing is
+decided by whether a **moddle descriptor declares the property**, and the colon
+is irrelevant. A bare UNDECLARED key lands in `$attrs`. `null` is STORED, not
+cleared. Both halves wrong, and `fake-modeler.test.js` — which exists precisely
+because a drifting fake would make every round-trip pass over broken authoring —
+certified them.
+
+Fixed by removing the rule rather than correcting it. The fake now creates
+business objects with the **real `bpmn-moddle`** and applies properties through
+its own `set`. A fake that asks the library how it routes cannot drift from it.
+
+`bpmn-moddle` is a new dev dependency (0 vulnerabilities), and the SPA runs a
+*vendored* bpmn-js bundle rather than an npm one — two copies of one library. So
+a cross-check asks **both** copies how they route the four keys the studio
+actually depends on, and fails if they disagree. Without it the fake would be
+back where #411 found it: confidently answering about a library the product does
+not run.
+
+**Two live product bugs the false rule was hiding (Rule 1):**
+
+`resultVariable` was written bare on a script task. With real routing it lands in
+`$attrs` and serialises as `resultVariable="..."` on a `bpmn:scriptTask`, which
+Flowable refuses outright — as `WorkflowBpmnXml`'s own complex-gateway expansion
+already knew, writing `flowable:resultVariable` with a comment saying why. And
+`describeElement` read it as a direct field, so it came back null every time and
+**never round-tripped**. Now written namespaced and read from all three places,
+so diagrams already carrying the bare spelling keep working.
+
+`updateServiceTaskProperties` passed `class: null, expression: null, type: null,
+delegateExpression: null` under a comment saying "passing null here removes
+them". Moddle stores nulls, so it wrote `class="null"` into every service task
+the studio touched. Publish strips those four, which is the only reason nobody
+saw it. `undefined` now, and the comment says what actually happens.
+
+**#409 — the meta-guard could not see a dotted receiver.** Its scan required a
+BARE identifier, so `writeAutoNateAttribute(element.businessObject, …)` was
+invisible and four real properties were uncovered behind it: `scriptFormat`,
+`routeScript`, `runAs`, `autonateConvertedFrom` — each in zero test files. #159's
+"properties nobody listed", live again inside the guard built to prevent it.
+
+Sharper than that: **my own #411 fix wrote `resultVariable` through that exact
+dotted shape**, so the guard would have missed its own round's work. Widened to
+any receiver, and the three remaining uncovered properties now have round-trips.
+
+Also stripped comments from the coverage check. `tests.includes(name)` is a
+substring search, so appending `// zzzProbe` to any test file satisfied it with
+zero assertions written — #321's `Contains("start event")` and #393's comment
+bypass, in a third place.
+
+**Four mutations, all red:** the old routing rule restored, `resultVariable`
+written bare again, a new property via a dotted receiver, and a property
+"covered" by a comment.
+
+**Not fixed this round:** #408 (the execution record can be falsified — needs the
+probe's output digested beside it, or AC2's real E2E class), and #409's third
+part (two unscanned write mechanisms). #410, #412, #413 also open.

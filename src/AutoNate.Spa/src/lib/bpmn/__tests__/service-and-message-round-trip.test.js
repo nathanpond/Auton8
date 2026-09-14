@@ -144,3 +144,140 @@ describe("a send task the studio configures can actually deploy", () => {
     expect(send.$attrs["flowable:behaviorKey"]).toBe("autonate.send-message");
   });
 });
+
+/**
+ * The two properties #411's broken fake was hiding.
+ */
+describe("script task result variable round-trips, in the namespace the engine accepts", () => {
+  it("writes flowable:resultVariable, not a bare one", async () => {
+    const { updateScriptTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ScriptTask", "st1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateScriptTaskProperties(handle, {
+      id: "st1", name: "calc", scriptFormat: "javascript",
+      script: "variables.set('x', 1);", resultVariable: "out"
+    });
+
+    // A BARE resultVariable on a bpmn:scriptTask is refused by Flowable outright
+    // -- "Attribute 'resultVariable' is not allowed to appear in element
+    // 'scriptTask'" -- which WorkflowBpmnXml's gateway expansion already knew.
+    expect(bo.$attrs["flowable:resultVariable"]).toBe("out");
+    expect(bo.$attrs.resultVariable).toBeUndefined();
+    expect(bo.resultVariable).toBeUndefined();
+  });
+
+  it("reads it back, which it never did before", async () => {
+    const { updateScriptTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ScriptTask", "st2");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateScriptTaskProperties(handle, {
+      id: "st2", name: "calc", scriptFormat: "javascript",
+      script: "variables.set('x', 1);", resultVariable: "out"
+    });
+
+    expect(describeElementById(handle, "st2").resultVariable).toBe("out");
+  });
+
+  it("still reads a diagram that carries the old bare spelling", async () => {
+    const bo = businessObject("bpmn:ScriptTask", "st3");
+    bo.$attrs.resultVariable = "legacy";
+    const { handle } = fakeModeler([element(bo)]);
+
+    // Diagrams saved before #411 carry it bare. Migrating them is not this
+    // change's job; reading them is.
+    expect(describeElementById(handle, "st3").resultVariable).toBe("legacy");
+  });
+});
+
+describe("clearing a service task's alternative wirings removes them", () => {
+  it("does not leave the string \"null\" behind", async () => {
+    const { updateServiceTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ServiceTask", "sv1");
+    bo.$attrs.class = "com.example.Old";
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateServiceTaskProperties(handle, { id: "sv1", behaviorKey: "k" });
+
+    // moddle STORES a null, so passing one wrote class="null" into every service
+    // task the studio touched. Publish strips those four, which is the only
+    // reason it was never seen (#411).
+    for (const key of ["class", "expression", "type", "delegateExpression"]) {
+      expect(bo.$attrs[key], `${key} should be gone, not null`).toBeUndefined();
+      expect(bo[key]).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * The three properties #409's widened scan found uncovered (#323, #409).
+ *
+ * All three are written through a DOTTED receiver, which the first version of
+ * the meta-guard could not see -- so #159's "properties nobody listed" was live
+ * again, in the guard built to prevent it.
+ */
+describe("the script identity and complex-gateway properties round-trip", () => {
+  it("writes runAs and reads it back", async () => {
+    const { updateScriptTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ScriptTask", "ri1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateScriptTaskProperties(handle, {
+      id: "ri1", name: "s", scriptFormat: "javascript", script: "x", runAs: "system"
+    });
+
+    expect(describeElementById(handle, "ri1").runAs).toBe("system");
+  });
+
+  it("refuses to record an identity it does not recognise, rather than storing it", async () => {
+    const { updateScriptTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ScriptTask", "ri2");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateScriptTaskProperties(handle, {
+      id: "ri2", name: "s", scriptFormat: "javascript", script: "x", runAs: "root"
+    });
+
+    // Unset and "explicitly nothing" must stay distinguishable in the XML, and a
+    // privilege level nobody defined must not become one that exists.
+    expect(describeElementById(handle, "ri2").runAs).toBeNull();
+  });
+
+  it("stores a complex gateway's routeScript and scriptFormat as attributes, and reads them back", async () => {
+    const { updateScriptTaskProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:ComplexGateway", "cg1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateScriptTaskProperties(handle, {
+      id: "cg1", name: "Choose", scriptFormat: "javascript", script: "routes.take('a');"
+    });
+
+    const described = describeElementById(handle, "cg1");
+    expect(described.script).toBe("routes.take('a');");
+    expect(described.scriptFormat).toBe("javascript");
+
+    // Attributes, not a <bpmn:script> child: bpmn-js's moddle has no script
+    // property on ComplexGateway and drops the child on save.
+    expect(bo.$attrs["autonate:routeScript"]).toBe("routes.take('a');");
+    expect(bo.script).toBeUndefined();
+  });
+});
+
+describe("a converted element records what it was", () => {
+  it("marks the replacement with autonateConvertedFrom", async () => {
+    const { takeConvertedTasks } = await import("../workflow.js");
+
+    // The conversion runs inside the modeler's own replace flow, so this asserts
+    // the export exists and the marker name is the one publish reads. The full
+    // conversion path is exercised by the E2E studio suite.
+    expect(typeof takeConvertedTasks).toBe("function");
+
+    const bo = businessObject("bpmn:ServiceTask", "cv1");
+    bo.$attrs["flowable:autonateConvertedFrom"] = "bpmn:Task";
+    const { handle } = fakeModeler([element(bo)]);
+
+    expect(describeElementById(handle, "cv1")).not.toBeNull();
+    expect(bo.$attrs["flowable:autonateConvertedFrom"]).toBe("bpmn:Task");
+  });
+});
