@@ -326,12 +326,32 @@ public sealed class ExecutionEvidenceTests
         var source = File.ReadAllText(Path.Combine(
             RepoRoot.Path, "tests", "AutoNate.E2E.Tests", "ExecutionEvidenceExecutionTests.cs"));
 
-        // The `case "<name>" =>` arms of that class's Diagram switch.
+        // The `case "<name>" =>` arms of that class's Diagram switch, and what
+        // each one returns.
+        //
+        // The RIGHT-HAND SIDE matters (#433). The first version checked only that
+        // an arm bearing the element's name existed, so `"Receive Task" => null,`
+        // satisfied it while the live-engine oracle silently dropped from 19 cells
+        // to 18 -- #429's forgery, relocated from the JSON to the switch. Both
+        // verifiers found it independently.
         var arms = System.Text.RegularExpressions.Regex
-            .Matches(source, """^\s{12}"(?<name>[^"]+)" =>""",
+            .Matches(source, """^\s{12}"(?<name>[^"]+)" =>(?<body>[^\n]*)""",
                 System.Text.RegularExpressions.RegexOptions.Multiline)
-            .Select(m => m.Groups["name"].Value)
-            .ToHashSet(StringComparer.Ordinal);
+            .ToDictionary(m => m.Groups["name"].Value, m => m.Groups["body"].Value.Trim(),
+                StringComparer.Ordinal);
+
+        var empty = arms
+            .Where(arm => arm.Value is "null," or "null")
+            .Select(arm => arm.Key)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            empty.Count == 0,
+            "These diagram arms return `null`, which the oracle's own MemberData used to "
+            + "skip silently:\n  "
+            + string.Join("\n  ", empty)
+            + "\n\nA declared element with no diagram must fail, not shrink the run (#433).");
 
         Assert.True(
             arms.Count > 0,
@@ -342,7 +362,7 @@ public sealed class ExecutionEvidenceTests
         var missing = Elements()
             .Where(e => e!["declaredEffect"] is not null)
             .Select(e => e!["name"]!.GetValue<string>())
-            .Where(name => !arms.Contains(name))
+            .Where(name => !arms.ContainsKey(name))
             .Order(StringComparer.Ordinal)
             .ToList();
 

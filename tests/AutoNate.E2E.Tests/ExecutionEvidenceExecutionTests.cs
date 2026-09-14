@@ -51,7 +51,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         : base(fixture) => _output = output;
 
     /// <summary>The declarations this class is obliged to prove.</summary>
-    public static TheoryData<string, string, string> DeclaredEffects()
+    public static TheoryData<string, string, string, string?> DeclaredEffects()
     {
         var path = Path.Combine(RepoRoot.Path, "src", "shared", "bpmn-execution-evidence.json");
         var elements = JsonNode.Parse(File.ReadAllText(path))!["elements"]!.AsArray();
@@ -67,24 +67,35 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             ["elements"]!.AsArray()
             .ToDictionary(
                 e => e!["name"]!.GetValue<string>(),
-                e => e!["localName"]?.GetValue<string>(),
+                e => (Local: e!["localName"]?.GetValue<string>(),
+                      Definition: e!["eventDefinition"]?.GetValue<string>()),
                 StringComparer.Ordinal);
 
-        var data = new TheoryData<string, string, string>();
+        var data = new TheoryData<string, string, string, string?>();
         foreach (var element in elements)
         {
             var effect = element!["declaredEffect"]?.GetValue<string>();
             if (effect is null) continue;
 
             var name = element["name"]!.GetValue<string>();
-            if (Diagram(name, "x") is null) continue;   // no minimal diagram yet
+
+            // NO SILENT SKIP (#433). This was `if (Diagram(name,"x") is null)
+            // continue;`, and that one word is how the forgery survived #429:
+            // changing an arm to `=> null` dropped the oracle from 19 cells to 18
+            // with every CI gate green. A declaration with no diagram is now a
+            // loud failure of this theory rather than a quieter run of it.
+            Assert.True(
+                Diagram(name, "x") is not null,
+                $"'{name}' declares the effect '{effect}' and this class has no diagram "
+                + "for it, so nothing runs it. An oracle that shrinks when an element "
+                + "stops being exercised is not an oracle (#433).");
 
             Assert.True(
-                declared.TryGetValue(name, out var localName) && !string.IsNullOrEmpty(localName),
+                declared.TryGetValue(name, out var identity) && !string.IsNullOrEmpty(identity.Local),
                 $"'{name}' declares an effect but bpmn-support.json gives it no localName, "
                 + "so nothing independent of the diagram says what it should run as (#412).");
 
-            data.Add(name, effect, localName!);
+            data.Add(name, effect, identity.Local!, identity.Definition);
         }
 
         return data;
@@ -107,7 +118,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     [Theory]
     [MemberData(nameof(DeclaredEffects))]
     public async Task The_element_runs_and_has_its_declared_effect(
-        string name, string effect, string declaredLocalName)
+        string name, string effect, string declaredLocalName, string? declaredEventDefinition)
     {
         await using var session = await NewSignedInAsAdminAsync();
         var api = session.Page.APIRequest;
@@ -142,6 +153,16 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // collapses both (#412).
         Assert.Equal(declaredLocalName, ElementTypeIn(xml));
 
+        // AND ITS EVENT DEFINITION (#435). `localName` alone is not an identity:
+        // four intermediate catches share `intermediateCatchEvent`, six throws
+        // share `intermediateThrowEvent`, seven ends share `endEvent`. Measured,
+        // message-catch and signal-catch could BOTH be replaced by a timer and
+        // both cells stayed green -- and an event definition is exactly where
+        // "draws fine, does nothing" lives. The manifest already keys every row
+        // on (localName, eventDefinition) because that pair, not the tag, names
+        // an element.
+        Assert.Equal(declaredEventDefinition, EventDefinitionIn(xml));
+
         var expectedType = declaredLocalName;
         var enteredAs = await EventuallyEnteredAsync(api, instance, "Ev_1");
 
@@ -151,14 +172,14 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "whatever effect follows is some other element's (#412).");
 
         Assert.True(
-            string.Equals(enteredAs, expectedType, StringComparison.OrdinalIgnoreCase)
+            string.Equals(enteredAs, expectedType, StringComparison.Ordinal)
             || (EngineNames.TryGetValue(expectedType, out var alias)
-                && string.Equals(enteredAs, alias, StringComparison.OrdinalIgnoreCase)),
+                && string.Equals(enteredAs, alias, StringComparison.Ordinal)),
             $"{name}: activity 'Ev_1' ran, but as a '{enteredAs}' rather than a "
             + $"'{expectedType}'. A same-id stand-in satisfies every effect this class "
             + "observes, which is exactly what #412 measured.");
 
-        var observed = await ObserveAsync(api, instance, effect, expectedType, FlowTargetsOf(xml, "Ev_1"));
+        var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
         _output.WriteLine($"{name,-34} {effect,-17} {observed.Detail}");
 
         Assert.True(
@@ -264,6 +285,101 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return null;
     }
 
+    /// <summary>
+    /// The event definition `Ev_1` carries, in the manifest's vocabulary (#435).
+    /// </summary>
+    /// <remarks>
+    /// `<timerEventDefinition/>` -> "timer", to match `bpmn-support.json`'s
+    /// `eventDefinition` column. Null when the element carries none, which is
+    /// itself the assertion for a None event.
+    /// </remarks>
+    private static string? EventDefinitionIn(string xml)
+    {
+        var element = ElementMarkupIn(xml, "Ev_1");
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            element, @"<(?<kind>[A-Za-z]+)EventDefinition\b");
+
+        return match.Success ? match.Groups["kind"].Value : null;
+    }
+
+    /// <summary>
+    /// The markup of one element: its open tag through its matching close tag,
+    /// or just the tag when it is self-closing.
+    /// </summary>
+    private static string ElementMarkupIn(string xml, string id)
+    {
+        var open = System.Text.RegularExpressions.Regex.Match(
+            xml, @"<(?<tag>[A-Za-z]+)\b[^>]*\bid=""" + id + @"""[^>]*>");
+
+        Assert.True(open.Success, $"No element in this diagram carries id '{id}'.");
+        if (open.Value.EndsWith("/>", StringComparison.Ordinal)) return open.Value;
+
+        var close = $"</{open.Groups["tag"].Value}>";
+        var end = xml.IndexOf(close, open.Index, StringComparison.Ordinal);
+        return end < 0 ? open.Value : xml[open.Index..(end + close.Length)];
+    }
+
+    /// <summary>The id of the script task that writes `proof`, if this diagram has one.</summary>
+    private static string? ScriptTaskIdIn(string xml)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            xml, @"<scriptTask\b[^>]*\bid=""(?<id>[^""]+)""");
+
+        return match.Success ? match.Groups["id"].Value : null;
+    }
+
+    /// <summary>When each activity was first entered, by the engine's own clock.</summary>
+    private static async Task<IReadOnlyDictionary<string, DateTimeOffset>> EntryOrderAsync(
+        IAPIRequestContext api, string instance)
+    {
+        var order = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+
+        var response = await api.GetAsync($"/api/executions/{instance}/history");
+        if (!response.Ok) return order;
+
+        using var body = JsonDocument.Parse(await response.TextAsync());
+        if (body.RootElement.ValueKind != JsonValueKind.Array) return order;
+
+        foreach (var row in body.RootElement.EnumerateArray())
+        {
+            if (!row.TryGetProperty("activityId", out var id)) continue;
+            // `startedAtUtc`, which is what WorkflowExecutionHistoryEvent calls
+            // it -- not Flowable's own `startTime`. The first version read the
+            // engine's name through Auton8's route and found nothing, and the
+            // cell went red rather than green, which is the point of requiring
+            // the field rather than defaulting when it is missing.
+            if (!row.TryGetProperty("startedAtUtc", out var start)) continue;
+            if (!start.TryGetDateTimeOffset(out var at)) continue;
+
+            var key = id.GetString();
+            if (key is null) continue;
+            if (!order.TryGetValue(key, out var seen) || at < seen) order[key] = at;
+        }
+
+        return order;
+    }
+
+    /// <summary>The ids of elements nested INSIDE `Ev_1` (#434).</summary>
+    /// <remarks>
+    /// A container's declared effect is something inside it. The previous version
+    /// accepted any task anywhere on the instance for any of four container tag
+    /// names, which is the bug #412 named, narrowed rather than fixed -- both
+    /// container cells took that path even unmutated. Reading the nested ids from
+    /// the diagram means moving the task OUT of the container, or emptying the
+    /// container, makes the set not contain it.
+    /// </remarks>
+    private static IReadOnlyCollection<string> NestedIdsIn(string xml, string id)
+    {
+        var inner = ElementMarkupIn(xml, id);
+
+        return System.Text.RegularExpressions.Regex
+            .Matches(inner, @"<[A-Za-z]+\b[^>]*\bid=""(?<id>[^""]+)""")
+            .Select(m => m.Groups["id"].Value)
+            .Where(found => !string.Equals(found, id, StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
     /// <summary>The ids this diagram's sequence flows carry away from an element.</summary>
     private static IReadOnlyCollection<string> FlowTargetsOf(string xml, string source)
     {
@@ -293,32 +409,40 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
     private static async Task<Observation> ObserveAsync(
         IAPIRequestContext api, string instance, string effect, string elementType,
-        IReadOnlyCollection<string> fansTo)
+        string xml)
     {
         for (var attempt = 0; attempt < 20; attempt++)
         {
-            var seen = await LookAsync(api, instance, effect, elementType, fansTo);
+            var seen = await LookAsync(api, instance, effect, elementType, xml);
             if (seen.Held) return seen;
             await Task.Delay(250);
         }
 
-        return await LookAsync(api, instance, effect, elementType, fansTo);
+        return await LookAsync(api, instance, effect, elementType, xml);
     }
 
     /// <summary>
     /// Where Flowable's runtime `activityType` is not the BPMN tag name.
     /// </summary>
     /// <remarks>
-    /// MEASURED, not assumed: both entries below were discovered by this class
-    /// failing against the real engine, and every element not listed here was
-    /// proven to report its tag name verbatim in the same run. A third divergence
-    /// appearing later fails loudly rather than passing quietly -- the exact
-    /// property the first version of this oracle lacked.
+    /// MEASURED, not assumed: every entry below was discovered by this class
+    /// failing against the real engine.
+    /// <para>
+    /// The comparison is ORDINAL (#438). It was `OrdinalIgnoreCase`, under a
+    /// claim that "a third divergence appearing later fails loudly rather than
+    /// passing quietly" -- and a third divergence had already appeared and been
+    /// swallowed: Ad-Hoc Sub-Process declares <c>adHocSubProcess</c> and the
+    /// engine reports <c>adhocSubProcess</c>, lowercase h. Confirmed against the
+    /// engine's own history, where <c>adhocSubProcess</c> appears 20 times and
+    /// <c>adHocSubProcess</c> never. A case-insensitive compare made the written
+    /// claim false, so the compare changed rather than the claim.
+    /// </para>
     /// </remarks>
     private static readonly Dictionary<string, string> EngineNames = new(StringComparer.Ordinal)
     {
         ["intermediateThrowEvent"] = "throwEvent",
         ["eventBasedGateway"] = "eventGateway",
+        ["adHocSubProcess"] = "adhocSubProcess",
     };
 
     /// <summary>Elements whose effect is something INSIDE them, not on them.</summary>
@@ -327,7 +451,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
     private static async Task<Observation> LookAsync(
         IAPIRequestContext api, string instance, string effect, string elementType,
-        IReadOnlyCollection<string> fansTo)
+        string xml)
     {
         // Everything comes off /diagram, which is the route the rest of this suite
         // already reads. The first version of this class invented
@@ -336,6 +460,8 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // healthy elements into seven false negatives. A query that returns
         // nothing reading like a verdict is the exact failure #412 is about, and
         // it happened here inside the fix for it.
+        var fansTo = FlowTargetsOf(xml, "Ev_1");
+
         var response = await api.GetAsync($"/api/executions/{instance}/diagram");
         if (!response.Ok) return new(false, $"diagram: {response.Status}");
 
@@ -352,21 +478,23 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         {
             case "task-appears":
             {
-                // SCOPED (#412). A plain count let a bare user task named Ev_1
-                // stand in for a sub-process or a call activity. The task must
-                // belong to the element under test -- either Ev_1 itself, or
-                // something inside it, which for a container means a descendant
-                // instance or a task whose own activity is not Ev_1's sibling.
                 var here = await TasksAsync(api, instance);
                 var mine = here.Where(t => t.Owner == "Ev_1").ToList();
                 if (mine.Count > 0) return new(true, $"{mine.Count} task(s) on Ev_1 itself");
 
-                // A container's task belongs to an activity INSIDE it, which the
-                // runtime reports by its own id. The container was already proven
-                // entered as the right type, so an inner task is its effect.
-                if (Containers.Contains(elementType, StringComparer.Ordinal) && here.Count > 0)
+                // A CONTAINER's task belongs to an activity INSIDE it, and the
+                // ids of those activities come from this diagram (#434). The
+                // previous version accepted ANY task on the instance for any of
+                // four container tag names -- both container cells took that path
+                // even unmutated, and its message asserted a containment the code
+                // never checked. Emptying the container, or moving the task out of
+                // it, now fails: the id is no longer in the nested set.
+                var nested = NestedIdsIn(xml, "Ev_1");
+                var inside = here.Where(t => nested.Contains(t.Owner)).ToList();
+                if (inside.Count > 0)
                 {
-                    return new(true, $"{here.Count} task(s) inside the {elementType}");
+                    return new(true,
+                        $"{inside.Count} task(s) inside Ev_1 [{string.Join(", ", inside.Select(t => t.Owner))}]");
                 }
 
                 // A CALL ACTIVITY's task belongs to the CALLED instance, so a query
@@ -389,7 +517,8 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
                 return new(false,
                     here.Count > 0
-                        ? $"{here.Count} task(s) exist, but none belongs to Ev_1"
+                        ? $"{here.Count} task(s) exist [{string.Join(", ", here.Select(t => t.Owner))}], "
+                          + $"but none belongs to Ev_1 or anything inside it [{string.Join(", ", nested)}]"
                         : "no task on this instance or any child");
             }
 
@@ -399,30 +528,80 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     && variables.ValueKind == JsonValueKind.Array
                     && variables.EnumerateArray().Any(v =>
                         v.TryGetProperty("name", out var n) && n.GetString() == "proof");
-                return new(written, written ? "proof variable written" : "no 'proof' variable");
+
+                if (!written) return new(false, "no `proof` variable on this instance");
+
+                // AND Ev_1 MUST BE UPSTREAM OF THE WRITER (#434).
+                //
+                // Asking only whether a variable exists was #412's original
+                // complaint, and the fix moved the script onto a conditional
+                // branch -- which makes the DIAGRAM discriminating and leaves the
+                // OBSERVER indiscriminate. Measured: moving the script upstream of
+                // the exclusive gateway left the cell green, so any future edit to
+                // these three diagrams silently disarms them.
+                //
+                // For a Script Task, Ev_1 IS the writer and this is trivially
+                // true. For a gateway or a sequence flow, it is the whole claim:
+                // the routing decision is what put the writer on the path.
+                var writer = ScriptTaskIdIn(xml);
+                if (writer is null) return new(true, "`proof` written; no script task in this diagram");
+
+                var order = await EntryOrderAsync(api, instance);
+                if (!order.TryGetValue("Ev_1", out var elementAt))
+                {
+                    return new(false, "`proof` is set, but Ev_1 is absent from history");
+                }
+
+                if (!order.TryGetValue(writer, out var writerAt))
+                {
+                    return new(false, $"`proof` is set, but the script task '{writer}' never ran");
+                }
+
+                return new(writerAt >= elementAt,
+                    writerAt >= elementAt
+                        ? $"`proof` written by '{writer}', which ran after Ev_1"
+                        : $"`proof` written by '{writer}', which ran BEFORE Ev_1 -- so the "
+                          + "variable is not this element's doing (#434)");
             }
 
             case "instance-waits":
-                // SCOPED to Ev_1 (#412). This asserted `current.Count > 0` --
-                // parked ANYWHERE -- so a bare user task beside the element under
-                // test satisfied it. Six of the nine non-discriminating cells were
-                // this one observer.
+            {
+                // THE ELEMENT MUST BE WHAT IS HOLDING THE INSTANCE (#434).
                 //
-                // "At Ev_1, or at something Ev_1 itself fans to." The second half
-                // is not a loosening to make a red test green: an event-based
-                // gateway is a routing construct, and MEASURED, the engine parks
-                // at its downstream catches rather than on the gateway. The
-                // targets come from this diagram's own sequence flows out of
-                // Ev_1, so a stand-in that does not fan out cannot satisfy it --
-                // and entry has already proven Ev_1 ran as the right type.
-                var waitingHere = current.Contains("Ev_1")
-                    || current.Intersect(fansTo).Any();
+                // The previous version accepted `Ev_1` OR anything `Ev_1` fans
+                // to, for all seven cells. On a linear diagram that is the whole
+                // rest of the process: an inert, correctly-typed catch event that
+                // fires straight through passed, with a downstream USER TASK
+                // doing the waiting (measured: `parked at [End_1]`).
+                //
+                // Only an event-based gateway genuinely waits somewhere other
+                // than on itself -- the engine parks at the catches it fans to,
+                // measured as `[C_1, C_2]`. So the allowance is granted to that
+                // one element type instead of to all of them, and it requires
+                // EVERY current activity to be one of its own targets, and more
+                // than one of them, which is what an event gateway is for.
+                if (current.Contains("Ev_1"))
+                {
+                    return new(true, $"parked on Ev_1 itself [{string.Join(", ", current)}]");
+                }
 
-                return new(waitingHere,
+                if (string.Equals(elementType, "eventBasedGateway", StringComparison.Ordinal))
+                {
+                    var allMine = current.Count > 1 && current.All(fansTo.Contains);
+                    return new(allMine,
+                        allMine
+                            ? $"parked at the gateway's own targets [{string.Join(", ", current)}]"
+                            : $"parked at [{string.Join(", ", current)}], which is not "
+                              + $"{(current.Count > 1 ? "all" : "more than one")} of the "
+                              + $"gateway's targets [{string.Join(", ", fansTo)}]");
+                }
+
+                return new(false,
                     current.Count == 0
                         ? "nothing is current -- the instance ran straight through"
-                        : $"parked at [{string.Join(", ", current)}], and Ev_1 fans to "
-                          + $"[{string.Join(", ", fansTo)}]");
+                        : $"parked at [{string.Join(", ", current)}], not on Ev_1. Something "
+                          + "else is holding this instance (#434).");
+            }
 
             case "instance-ends":
                 // The PROPERTY MUST BE PRESENT (#412). This returned true whenever
