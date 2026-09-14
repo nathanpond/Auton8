@@ -142,4 +142,214 @@ public sealed class ExecutionEvidenceTests
             + "#408 and #418 are what that costs (#418).");
     }
 
+    /// <summary>
+    /// Exactly these elements are obliged to declare an effect (#429).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #418 removed the forgeable proof fields. The forgery moved rather than
+    /// ending: it became <i>delete the obligation</i>. Setting one row's
+    /// <c>declaredEffect</c> to null shrinks the E2E oracle by a cell, and every
+    /// suite stays green — because nothing said which elements owed a
+    /// declaration.
+    /// </para>
+    /// <para>
+    /// PR #420 performed that exact move on <b>Service Task (Behavior)</b>, and
+    /// deleted the count ratchet in the same commit. The demotion was correct and
+    /// disclosed in prose; the problem is that nothing would have caught it
+    /// otherwise, which is the definition of an unguarded claim.
+    /// </para>
+    /// <para>
+    /// So the set is written down. Removing a declaration now requires deleting a
+    /// name here too — an edit a reviewer sees in the diff, next to a test name
+    /// that says what it means.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Exactly_these_elements_are_obliged_to_declare_an_effect()
+    {
+        string[] obliged =
+        [
+            "Ad-Hoc Sub-Process",
+            "Call Activity",
+            "End Event (None)",
+            "End Event (Terminate)",
+            "Event-Based Gateway",
+            "Exclusive Gateway (XOR)",
+            "Inclusive Gateway (OR)",
+            "Intermediate Catch (Conditional)",
+            "Intermediate Catch (Message)",
+            "Intermediate Catch (Signal)",
+            "Intermediate Catch (Timer)",
+            "Intermediate Throw (None)",
+            "Parallel Gateway (AND)",
+            "Receive Task",
+            "Script Task",
+            "Sequence Flow",
+            "Start Event (None)",
+            "Sub-Process (Embedded)",
+            "User Task",
+        ];
+
+        var declaring = Elements()
+            .Where(e => e!["declaredEffect"] is not null)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var dropped = obliged.Except(declaring, StringComparer.Ordinal).ToList();
+        var added = declaring.Except(obliged, StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            dropped.Count == 0,
+            "These elements are obliged to declare an effect and no longer do. Each one "
+            + "silently removes a cell from the live-engine oracle:\n  "
+            + string.Join("\n  ", dropped)
+            + "\n\nIf the demotion is genuinely right, delete the name from `obliged` in this "
+            + "test in the same commit, and say why in the row's `undeclaredReason` (#429).");
+
+        Assert.True(
+            added.Count == 0,
+            "These elements declare an effect but are not in `obliged`, so the list has "
+            + "drifted from the file and no longer pins anything:\n  "
+            + string.Join("\n  ", added)
+            + "\n\nAdd them here (#429).");
+    }
+
+    /// <summary>
+    /// AC3's finding is visible to the merge gate, and may only shrink (#429).
+    /// </summary>
+    /// <remarks>
+    /// The evidence file's own <c>$fields</c> says a null <c>declaredEffect</c> is
+    /// <i>"a FINDING, not a pass"</i>. Nothing asserted that, so 38 elements sat
+    /// in that state where only prose could see them. This is a ratchet, not a
+    /// target: the number may fall as elements are proven, and a rise means an
+    /// obligation was deleted.
+    /// </remarks>
+    [Fact]
+    public void The_undeclared_elements_are_a_finding_and_the_count_only_falls()
+    {
+        // Measured at the commit that added this test. LOWER it when an element
+        // gains a declaration; never raise it.
+        const int Ceiling = 38;
+
+        var undeclared = Elements()
+            .Where(e => e!["declaredEffect"] is null)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            undeclared.Count <= Ceiling,
+            $"{undeclared.Count} elements have no declared effect, up from {Ceiling}. An "
+            + "element losing its declaration removes a cell from the live-engine oracle "
+            + "with every suite green, which is #429:\n  "
+            + string.Join("\n  ", undeclared));
+    }
+
+    /// <summary>
+    /// Only these keys may appear on an evidence row (#429).
+    /// </summary>
+    /// <remarks>
+    /// <c>No_element_claims_a_proof_in_this_file</c> is a denylist of two names,
+    /// so <c>"provenByRunningAnInstance": true</c> satisfies all three of its
+    /// facts. A denylist cannot hold a rule of the form "this file records no
+    /// proofs", because the space of names a proof can wear is unbounded. This is
+    /// the same rule as an allowlist, where it is finite.
+    /// </remarks>
+    [Fact]
+    public void An_evidence_row_carries_only_permitted_keys()
+    {
+        string[] permitted =
+        [
+            "name",
+            "localName",
+            "eventDefinition",
+            "declaredEffect",
+            "liveEngineTestsMentioningIt",
+            "undeclaredReason",
+        ];
+
+        var offenders = Elements()
+            .SelectMany(e => e!.AsObject()
+                .Select(kv => kv.Key)
+                .Where(k => !permitted.Contains(k, StringComparer.Ordinal))
+                .Select(k => $"{e["name"]!.GetValue<string>()}: '{k}'"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "These rows carry keys this file does not permit:\n  "
+            + string.Join("\n  ", offenders)
+            + "\n\nProofs belong in a run, not a file (#408, #418). If the key is a legitimate "
+            + "new field, add it to `permitted` here and document it in the file's `$fields` "
+            + "— deliberately, in a diff, which is the whole point (#429).");
+    }
+
+    /// <summary>A reason for having no declaration belongs only where there is none.</summary>
+    [Fact]
+    public void An_undeclared_reason_appears_only_on_an_undeclared_row()
+    {
+        var incoherent = Elements()
+            .Where(e => e!["undeclaredReason"] is not null && e["declaredEffect"] is not null)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            incoherent.Count == 0,
+            "These rows declare an effect AND explain why they have not:\n  "
+            + string.Join("\n  ", incoherent));
+    }
+
+    /// <summary>
+    /// Every declared effect has a diagram in the live-engine oracle (#325 AC3, #429).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This assertion lived in <c>ExecutionEvidenceExecutionTests</c>, which is
+    /// <c>RequiresService=Flowable</c> and therefore excluded from CI — so the
+    /// one check that a declaration is actually exercised could not fail a merge.
+    /// A declaration with no diagram is skipped by that class's own
+    /// <c>MemberData</c> filter, silently.
+    /// </para>
+    /// <para>
+    /// It reads the E2E source rather than referencing it: the two test projects
+    /// do not reference each other, and a source-level guard is what the
+    /// placement and property-coverage meta-guards in this suite already do.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_declared_effect_has_a_diagram_in_the_live_engine_oracle()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepoRoot.Path, "tests", "AutoNate.E2E.Tests", "ExecutionEvidenceExecutionTests.cs"));
+
+        // The `case "<name>" =>` arms of that class's Diagram switch.
+        var arms = System.Text.RegularExpressions.Regex
+            .Matches(source, """^\s{12}"(?<name>[^"]+)" =>""",
+                System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(m => m.Groups["name"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(
+            arms.Count > 0,
+            "Found no diagram arms in ExecutionEvidenceExecutionTests.cs. This guard has "
+            + "stopped reading the file it guards, which reads as a clean bill of health "
+            + "against nothing — the exact failure mode #429 is about.");
+
+        var missing = Elements()
+            .Where(e => e!["declaredEffect"] is not null)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Where(name => !arms.Contains(name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            "These elements declare an effect and have no minimal diagram in "
+            + "ExecutionEvidenceExecutionTests, so that class skips them without saying so:\n  "
+            + string.Join("\n  ", missing));
+    }
 }
