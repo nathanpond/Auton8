@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fakeModeler, businessObject, element } from "./fake-modeler.js";
+import { fakeModeler, businessObject, element, moddleElement } from "./fake-modeler.js";
 
 /**
  * The fake's fidelity, asserted against the library rather than against itself (#323, #411).
@@ -74,7 +74,7 @@ describe("the fake routes keys the way bpmn-js does", () => {
   });
 
   it("writes moddle properties onto the nested object, not the business object", () => {
-    const loop = { $type: "bpmn:MultiInstanceLoopCharacteristics", $attrs: {} };
+    const loop = moddleElement("bpmn:MultiInstanceLoopCharacteristics");
     const bo = businessObject("bpmn:Task", "t1", { loopCharacteristics: loop });
     const { handle } = fakeModeler([element(bo)]);
 

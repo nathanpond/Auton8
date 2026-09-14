@@ -22,6 +22,21 @@ import { BpmnModdle } from "bpmn-moddle";
  */
 const moddle = new BpmnModdle();
 
+/**
+ * A real moddle element of any type — for the NESTED ones too (#417).
+ *
+ * Event definitions and loop characteristics used to be written as object
+ * literals here, which had no `set` and so took the fake's hand-written
+ * fallback: the exact rule #411 was filed for, on the path most of these tests
+ * run. Built through moddle, they route the way the studio's will.
+ */
+export function moddleElement(type, fields = {}) {
+  const element = moddle.create(type, {});
+  for (const [key, value] of Object.entries(fields)) element.set(key, value);
+  element.$attrs ??= {};
+  return element;
+}
+
 /** A real moddle element, so routing is the library's answer rather than ours. */
 export function businessObject(type, id, fields = {}) {
   const element = moddle.create(type, { id });
@@ -50,15 +65,22 @@ export function fakeModeler(elements, options = {}) {
   // Straight to moddle's own `set`, which is what bpmn-js's updateProperties
   // ends up calling. Whether a key lands in `$attrs` or in a direct field is the
   // library's decision, not ours -- #411 is what happens when we make it.
+  //
+  // #417: there is no fallback any more. The first version kept a hand-written
+  // one for targets with no `.set`, and since every nested element in these
+  // tests was a plain object literal, **18 of 92 tests took it** -- so the rule
+  // #411 removed was still the one most of the suite ran on. Now a target that
+  // is not a moddle element is a loud failure rather than a second rule.
   const applyKey = (target, key, value) => {
-    if (typeof target?.set === "function") {
-      target.set(key, value);
-      target.$attrs ??= {};
-      return;
+    if (typeof target?.set !== "function") {
+      throw new Error(
+        `fake-modeler: ${key} was written to a plain object, not a moddle element. `
+        + "Build it with moddleElement(type, fields) so bpmn-js's own routing decides "
+        + "where it lands -- a second routing rule here is #411 (#417).");
     }
+
+    target.set(key, value);
     target.$attrs ??= {};
-    if (key.includes(":")) target.$attrs[key] = value;
-    else target[key] = value;
   };
 
   const services = {

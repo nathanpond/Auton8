@@ -2690,14 +2690,26 @@ public static partial class WorkflowBpmnXml
             element.SetAttributeValue("scriptFormat", null);
         }
 
-        if (!string.IsNullOrWhiteSpace(snapshot.ResultVariable))
-        {
-            element.SetAttributeValue("resultVariable", snapshot.ResultVariable);
-        }
-        else
-        {
-            element.SetAttributeValue("resultVariable", null);
-        }
+        // #416/#230: `flowable:resultVariable`, NOT a bare one. Flowable refuses a
+        // bare `resultVariable` on a bpmn:scriptTask outright --
+        // "cvc-complex-type.3.2.2: Attribute 'resultVariable' is not allowed to
+        // appear in element 'scriptTask'" -- which the complex-gateway expansion
+        // in this same file already knew, writing it namespaced with a comment
+        // saying why.
+        //
+        // This was harmless until #411: the studio read the property as a direct
+        // field, real bpmn-js routing puts an undeclared bare key in $attrs, so
+        // the snapshot's ResultVariable was ALWAYS null and this branch never
+        // fired. Fixing that read completed the chain and turned a latent defect
+        // into a publish failure -- fixing one half of a two-half defect was worse
+        // than fixing neither.
+        //
+        // The bare attribute is cleared too, so a diagram saved before this keeps
+        // its value instead of carrying both spellings into the engine.
+        element.SetAttributeValue("resultVariable", null);
+        element.SetAttributeValue(
+            FlowableNamespace + "resultVariable",
+            string.IsNullOrWhiteSpace(snapshot.ResultVariable) ? null : snapshot.ResultVariable);
 
         var scriptElement = element.Element(BpmnNamespace + "script");
         if (snapshot.Script is null)

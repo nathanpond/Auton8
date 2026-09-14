@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { updateElementDataProperties, describeElementById } from "../workflow.js";
-import { fakeModeler, businessObject, element } from "./fake-modeler.js";
+import { fakeModeler, businessObject, element, moddleElement } from "./fake-modeler.js";
 
 /**
  * All seven multi-instance properties, written and read back (#323, #159).
@@ -12,7 +12,7 @@ import { fakeModeler, businessObject, element } from "./fake-modeler.js";
  */
 
 function multiInstanceTask(id = "task1") {
-  const loop = { $type: "bpmn:MultiInstanceLoopCharacteristics", $attrs: {} };
+  const loop = moddleElement("bpmn:MultiInstanceLoopCharacteristics");
   return businessObject("bpmn:UserTask", id, { loopCharacteristics: loop });
 }
 
