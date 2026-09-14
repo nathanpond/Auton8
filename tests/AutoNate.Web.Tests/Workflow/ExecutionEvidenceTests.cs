@@ -172,8 +172,11 @@ public sealed class ExecutionEvidenceTests
         [
             "Ad-Hoc Sub-Process",
             "Call Activity",
+            "Compensation End",
             "End Event (None)",
             "End Event (Terminate)",
+            "Error End",
+            "Escalation End",
             "Event-Based Gateway",
             "Exclusive Gateway (XOR)",
             "Inclusive Gateway (OR)",
@@ -181,11 +184,18 @@ public sealed class ExecutionEvidenceTests
             "Intermediate Catch (Message)",
             "Intermediate Catch (Signal)",
             "Intermediate Catch (Timer)",
+            "Intermediate Throw (Compensation)",
+            "Intermediate Throw (Escalation)",
+            "Intermediate Throw (Message)",
             "Intermediate Throw (None)",
+            "Intermediate Throw (Signal)",
+            "Message End",
             "Parallel Gateway (AND)",
             "Receive Task",
             "Script Task",
+            "Send Task",
             "Sequence Flow",
+            "Signal End",
             "Start Event (None)",
             "Sub-Process (Embedded)",
             "User Task",
@@ -229,9 +239,10 @@ public sealed class ExecutionEvidenceTests
     [Fact]
     public void The_undeclared_elements_are_a_finding_and_the_count_only_falls()
     {
-        // Measured at the commit that added this test. LOWER it when an element
-        // gains a declaration; never raise it.
-        const int Ceiling = 38;
+        // Measured, and LOWERED as elements gain declarations -- 38 when this
+        // ratchet was written, 28 now that #325's AC5 tranche is proven. Never
+        // raise it.
+        const int Ceiling = 28;
 
         var undeclared = Elements()
             .Where(e => e!["declaredEffect"] is null)
