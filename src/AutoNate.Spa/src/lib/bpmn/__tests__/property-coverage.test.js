@@ -54,6 +54,29 @@ function propertiesWritten() {
     names.add(m[1]);
   }
 
+  // #409, third part: BARE keys through modeling.updateProperties and
+  // modeling.updateModdleProperties -- the two mechanisms the first three
+  // versions of this scan could not see. `isSequential`, the seventh of the
+  // seven multi-instance properties, had to be hard-coded into the required
+  // list by hand because of this, and that hand-coding was the signal.
+  // TWO shapes, because the first version only matched the multi-line one and a
+  // single-line `updateProperties(element, { name: x, other: y })` walked past
+  // it -- caught by mutation, which is the only reason this line is here.
+  const modelingCalls = [
+    // multi-line: the literal closes on its own line, so nesting inside it is fine
+    /update(?:Moddle)?Properties\([^,]+,\s*(?:[^,]+,\s*)?\{(.*?)\n\s*\}\)/gs,
+    // single-line: no newline in the literal at all
+    /update(?:Moddle)?Properties\([^,]+,\s*(?:[^,]+,\s*)?\{([^{}\n]*)\}\s*\)/g
+  ];
+
+  for (const pattern of modelingCalls) {
+    for (const call of workflowSource.matchAll(pattern)) {
+      for (const key of call[1].matchAll(/(?:^|[{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/gm)) {
+        names.add(key[1]);
+      }
+    }
+  }
+
   return [...names].sort();
 }
 
@@ -102,12 +125,25 @@ describe("every property the studio writes has a round-trip test", () => {
   it("names no property that no test mentions", () => {
     const tests = testSources();
 
-    // `isSequential` is standard BPMN rather than an autonate attribute, so it
-    // is named here rather than discovered by the scan above -- and it is the
-    // seventh of the seven.
+    // `isSequential` no longer needs naming here -- the scan reaches
+    // updateModdleProperties now (#409). Kept in the set as a floor: if the new
+    // branch ever stops matching, this one property still has to be covered, and
+    // its absence from `propertiesWritten()` would be the tell.
     const required = [...new Set([...propertiesWritten(), "isSequential"])];
 
-    const uncovered = required.filter((name) => !tests.includes(name)).sort();
+    // Structural keys bpmn-js's own modelling sets, not author-facing properties
+    // the studio round-trips. `id` and `attachedTo` are identity and attachment;
+    // `cancelActivity` and the *Ref keys are how a definition points at a root
+    // the studio created for it. Each is exercised by the E2E studio suite
+    // through the modeller rather than through a property panel.
+    const structural = new Set([
+      "id", "attachedTo", "cancelActivity", "signalRef", "errorRef", "escalationRef"
+    ]);
+
+    const uncovered = required
+      .filter((name) => !structural.has(name))
+      .filter((name) => !tests.includes(name))
+      .sort();
 
     expect(
       uncovered,

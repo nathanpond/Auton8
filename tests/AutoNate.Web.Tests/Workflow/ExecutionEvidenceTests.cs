@@ -141,4 +141,126 @@ public sealed class ExecutionEvidenceTests
         // measurement AC4 asked for, and pinning it stops it being forgotten.
         Assert.Equal(57, Elements().Count);
     }
+
+    private static string ProbeResultsPath => Path.Combine(
+        RepoRoot.Path, "tools", "bpmn-execution-probe", "execution-results.json");
+
+    private static IReadOnlyDictionary<string, (string Verdict, string Detail)> ProbeResults()
+    {
+        var rows = JsonNode.Parse(File.ReadAllText(ProbeResultsPath))!.AsArray();
+
+        return rows.ToDictionary(
+            r => r!["name"]!.GetValue<string>(),
+            r => (r!["verdict"]!.GetValue<string>(), r["detail"]?.GetValue<string>() ?? ""),
+            StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The record says what the ENGINE said, not what someone typed (#408).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first version of this class checked the evidence file against itself —
+    /// that rows lined up with the manifest, that a proof carried <em>some</em>
+    /// text, that three counts equalled three literals. Those counts were the only
+    /// thing holding the record to reality, and they are preserved by any edit
+    /// that swaps one row's status for another's.
+    /// </para>
+    /// <para>
+    /// Verification demonstrated the cost: giving <b>Manual Task</b> a proof and
+    /// demoting Receive Task kept the counts at 20/19/57 and the suite green.
+    /// Manual Task is one of the three founding members of the class #325 exists
+    /// to catch — it deploys and passes straight through creating nothing — and
+    /// the suite would have certified that it creates a task.
+    /// </para>
+    /// <para>
+    /// So the record is now compared against <c>execution-results.json</c>, which
+    /// the probe writes from what the engine actually returned. A fabricated proof
+    /// fails because the probe never heard of that element; a dropped one fails
+    /// because the probe did.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_proof_matches_what_the_probe_recorded()
+    {
+        var probe = ProbeResults();
+
+        Assert.True(
+            probe.Count > 15,
+            $"The probe results hold {probe.Count} rows. If that file was emptied or moved, "
+            + "this guard is comparing against nothing (#408).");
+
+        var wrong = new List<string>();
+
+        foreach (var element in Elements())
+        {
+            var name = element!["name"]!.GetValue<string>();
+            var claimsProof = element["provenByStartingAnInstance"]?.GetValue<bool>() == true;
+
+            if (!probe.TryGetValue(name, out var recorded))
+            {
+                if (claimsProof)
+                {
+                    wrong.Add($"{name}: claims a proof, but the probe never attempted it");
+                }
+
+                continue;
+            }
+
+            var proved = string.Equals(recorded.Verdict, "proved", StringComparison.Ordinal);
+
+            if (claimsProof != proved)
+            {
+                wrong.Add(
+                    $"{name}: record says proven={claimsProof}, the probe says verdict="
+                    + $"'{recorded.Verdict}'");
+                continue;
+            }
+
+            if (!proved) continue;
+
+            var measured = element["measured"]?.GetValue<string>() ?? "";
+            if (!string.Equals(measured, recorded.Detail, StringComparison.Ordinal))
+            {
+                wrong.Add(
+                    $"{name}: `measured` is not what the probe observed.\n"
+                    + $"      record: {measured}\n"
+                    + $"      probe : {recorded.Detail}");
+            }
+        }
+
+        Assert.True(
+            wrong.Count == 0,
+            "The execution record disagrees with what the probe actually observed:\n  "
+            + string.Join("\n  ", wrong)
+            + "\n\nRe-run tools/bpmn-execution-probe/probe.py and commit both files together. "
+            + "Editing the record by hand is how Manual Task -- an element that deploys and "
+            + "creates nothing, which is why it is withdrawn -- got certified as creating a "
+            + "task with the suite green (#408).");
+    }
+
+    /// <summary>A proved probe row is not quietly dropped from the record (#408).</summary>
+    [Fact]
+    public void Every_probe_proof_appears_in_the_record()
+    {
+        var recorded = Elements()
+            .Where(e => e!["provenByStartingAnInstance"]?.GetValue<bool>() == true)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = ProbeResults()
+            .Where(r => r.Value.Verdict == "proved")
+            .Select(r => r.Key)
+            .Where(name => !recorded.Contains(name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            "The probe proved these elements and the record does not say so:\n  "
+            + string.Join("\n  ", missing)
+            + "\n\nThe other direction of #408 -- a proof can be dropped as easily as invented, "
+            + "and the counts absorb both.");
+    }
+
 }

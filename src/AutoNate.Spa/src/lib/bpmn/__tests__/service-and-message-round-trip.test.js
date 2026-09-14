@@ -281,3 +281,177 @@ describe("a converted element records what it was", () => {
     expect(bo.$attrs["flowable:autonateConvertedFrom"]).toBe("bpmn:Task");
   });
 });
+
+/**
+ * The properties written through `modeling.updateProperties` and
+ * `updateModdleProperties` (#409, third part).
+ *
+ * Three versions of the meta-guard could not see these two mechanisms, so
+ * `isSequential` had to be named by hand and nine others were uncovered
+ * entirely. The hand-coding was the signal and it was read as a footnote.
+ */
+describe("timer boundary event properties round-trip", () => {
+  function timerBoundary(id = "tb1") {
+    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    return businessObject("bpmn:BoundaryEvent", id, { eventDefinitions: [definition] });
+  }
+
+  it.each([
+    ["boundaryTimerDuration", { boundaryTimerDuration: "PT5M" }, "PT5M"],
+    ["boundaryTimerDate", { boundaryTimerDate: "2026-01-01T00:00:00Z" }, "2026-01-01T00:00:00Z"],
+    ["boundaryTimerCycle", { boundaryTimerCycle: "0 0 2 * * ?" }, "0 0 2 * * ?"]
+  ])("writes %s and reads it back", async (field, payload, expected) => {
+    const { updateTimerBoundaryEventProperties } = await import("../workflow.js");
+    const bo = timerBoundary();
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateTimerBoundaryEventProperties(handle, { id: "tb1", name: "wait", ...payload });
+
+    expect(describeElementById(handle, "tb1")[field]).toBe(expected);
+  });
+
+  it("keeps exactly one timer kind, because a stale one behaves unpredictably", async () => {
+    const { updateTimerBoundaryEventProperties } = await import("../workflow.js");
+    const bo = timerBoundary();
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateTimerBoundaryEventProperties(handle, { id: "tb1", boundaryTimerCycle: "0 0 2 * * ?" });
+    updateTimerBoundaryEventProperties(handle, { id: "tb1", boundaryTimerDuration: "PT5M" });
+
+    // Duration wins and the cycle must be GONE -- Flowable honours whichever it
+    // finds, so two of them is a coin toss.
+    const described = describeElementById(handle, "tb1");
+    expect(described.boundaryTimerDuration).toBe("PT5M");
+    expect(described.boundaryTimerCycle).toBeNull();
+  });
+});
+
+describe("call activity properties round-trip", () => {
+  it("writes calledElement and reads it back", async () => {
+    const { updateCallActivityProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:CallActivity", "ca1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateCallActivityProperties(handle, { id: "ca1", name: "call", calledElement: "other-process" });
+
+    expect(describeElementById(handle, "ca1").calledElement).toBe("other-process");
+  });
+
+  it("refuses an element that is not a call activity", async () => {
+    const { updateCallActivityProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:UserTask", "ca1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    expect(() => updateCallActivityProperties(handle, { id: "ca1", calledElement: "x" }))
+      .toThrow(/no longer available/);
+  });
+});
+
+describe("sequence flow condition round-trips", () => {
+  it("writes conditionExpression and reads its body back", async () => {
+    const { updateSequenceFlowProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:SequenceFlow", "sf1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateSequenceFlowProperties(handle, { id: "sf1", conditionExpression: "${approved}" });
+
+    expect(describeElementById(handle, "sf1").conditionExpression).toBe("${approved}");
+  });
+
+  it("clears the condition when the author empties it, rather than leaving the old one", async () => {
+    const { updateSequenceFlowProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:SequenceFlow", "sf2");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateSequenceFlowProperties(handle, { id: "sf2", conditionExpression: "${approved}" });
+    updateSequenceFlowProperties(handle, { id: "sf2", conditionExpression: "" });
+
+    // A stale condition on a flow the author meant to make unconditional is the
+    // difference between a route taken and a route never taken.
+    expect(describeElementById(handle, "sf2").conditionExpression).toBeNull();
+  });
+});
+
+describe("ad-hoc sub-process ordering round-trips", () => {
+  it("writes ordering and reads it back", async () => {
+    const { updateElementDataProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:AdHocSubProcess", "ah1");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateElementDataProperties(handle, {
+      id: "ah1", kind: "adhoc", name: "case", sequential: true, completionCondition: "${done}"
+    });
+
+    expect(describeElementById(handle, "ah1").adhocOrdering).toBe("Sequential");
+  });
+
+  it("reads Parallel when the author did not choose sequential", async () => {
+    const { updateElementDataProperties } = await import("../workflow.js");
+    const bo = businessObject("bpmn:AdHocSubProcess", "ah2");
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateElementDataProperties(handle, {
+      id: "ah2", kind: "adhoc", name: "case", sequential: false, completionCondition: "${done}"
+    });
+
+    expect(describeElementById(handle, "ah2").adhocOrdering).toBe("Parallel");
+  });
+});
+
+describe("intermediate catch timer properties round-trip", () => {
+  function timerCatch(id = "tc1") {
+    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    return businessObject("bpmn:IntermediateCatchEvent", id, { eventDefinitions: [definition] });
+  }
+
+  it.each([
+    ["timerDuration", { timerDuration: "PT5M" }, "PT5M"],
+    ["timerDate", { timerDate: "2026-01-01T00:00:00Z" }, "2026-01-01T00:00:00Z"]
+  ])("writes %s onto the event definition and reads it back", async (field, payload, expected) => {
+    const { updateTimerIntermediateCatchEventProperties } = await import("../workflow.js");
+    const bo = timerCatch();
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateTimerIntermediateCatchEventProperties(handle, { id: "tc1", name: "wait", ...payload });
+
+    expect(describeElementById(handle, "tc1")[field]).toBe(expected);
+
+    // The MODDLE key, not just the read name: `timeDuration` / `timeDate` are
+    // the BPMN element names the engine reads, and the panel's `timerDuration` /
+    // `timerDate` are ours. Asserting only ours would leave the translation
+    // between them untested, which is where #159's six properties lived.
+    const definition = bo.eventDefinitions[0];
+    const moddleKey = field === "timerDuration" ? "timeDuration" : "timeDate";
+    expect(definition[moddleKey]?.body).toBe(expected);
+  });
+
+  it("replaces a duration with a date rather than carrying both", async () => {
+    const { updateTimerIntermediateCatchEventProperties } = await import("../workflow.js");
+    const bo = timerCatch();
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateTimerIntermediateCatchEventProperties(handle, { id: "tc1", timerDuration: "PT5M" });
+    updateTimerIntermediateCatchEventProperties(handle, { id: "tc1", timerDate: "2026-01-01T00:00:00Z" });
+
+    const described = describeElementById(handle, "tc1");
+    expect(described.timerDate).toBe("2026-01-01T00:00:00Z");
+    expect(described.timerDuration).toBeNull();
+  });
+});
+
+describe("timer start event cron round-trips", () => {
+  it("writes the cron cycle and reads it back as timerCycleCron", async () => {
+    const { updateTimerStartEventProperties } = await import("../workflow.js");
+    const definition = { $type: "bpmn:TimerEventDefinition", $attrs: {} };
+    const bo = businessObject("bpmn:StartEvent", "ts1", { eventDefinitions: [definition] });
+    const { handle } = fakeModeler([element(bo)]);
+
+    updateTimerStartEventProperties(handle, { id: "ts1", name: "nightly", timeCycle: "0 0 2 * * ?" });
+
+    expect(describeElementById(handle, "ts1").timerCycleCron).toBe("0 0 2 * * ?");
+
+    // flowable:type="cron" beside it, or Flowable parses the body as ISO 8601
+    // and the schedule silently means something else.
+    expect(definition.timeCycle?.$attrs?.["flowable:type"]).toBe("cron");
+  });
+});

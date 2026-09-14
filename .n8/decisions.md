@@ -6393,3 +6393,62 @@ written bare again, a new property via a dotted receiver, and a property
 **Not fixed this round:** #408 (the execution record can be falsified — needs the
 probe's output digested beside it, or AC2's real E2E class), and #409's third
 part (two unscanned write mechanisms). #410, #412, #413 also open.
+
+## M4b round 7 — 2026-09-13 (during /n8-exec M4b)
+
+**#408 — the record now says what the engine said.** `ExecutionEvidenceTests`
+checked the evidence file against **itself**: rows lined up with the manifest, a
+proof carried *some* text, three counts equalled three literals. Those counts
+were the only thing holding it to reality, and any edit that swaps one row's
+status for another's preserves them — which is how verification certified
+**Manual Task**, an element that deploys and creates nothing, as creating a task,
+with the suite green.
+
+Fixed by comparing against `execution-results.json`, which the probe writes from
+what the engine returned. Both directions: a fabricated proof fails because the
+probe never heard of that element, a dropped one fails because it did, and
+`measured` must equal the probe's `detail` **verbatim** rather than merely being
+non-empty.
+
+I had named a digest of the probe output as the option in the issue. Comparing
+the two committed files directly is strictly stronger and needs no second
+artefact: a digest proves the record was not edited; this proves the record says
+what the engine said. The filed mutation now fails naming both halves.
+
+This does **not** put the probe in CI — that is #325 AC2 and stays open. It stops
+the transcript being able to lie, which is what #408 is.
+
+**#409, third part — the two mechanisms the scan could not see.** Extended to
+bare keys through `modeling.updateProperties` and `updateModdleProperties`, which
+is why `isSequential` had been hard-coded into the required list by hand. That
+hand-coding was the signal and three versions read it as a footnote.
+
+The extension immediately named **nine** uncovered author-facing properties:
+boundary timer duration/date/cycle, `calledElement`, sequence-flow `condition`
+and `conditionExpression`, ad-hoc `ordering`, and the intermediate catch timer's
+`timeDate`/`timeDuration`. All nine now have round-trips, several asserting the
+**moddle key** as well as the read name — the translation between the panel's
+`timerDuration` and BPMN's `timeDuration` is exactly where #159's six properties
+lived.
+
+Six structural keys are excluded by name — `id`, `attachedTo`, `cancelActivity`
+and the three `*Ref` keys — because bpmn-js's own modelling sets them rather than
+the studio round-tripping them. Named rather than pattern-matched, so adding a
+seventh is an edit a reviewer sees.
+
+**Mutation found a hole in my own fix.** The first version matched only
+*multi-line* object literals, so a single-line
+`updateProperties(element, { name: x, other: y })` walked straight past — the
+same class of miss as #409's dotted receiver, in the fix for #409's dotted
+receiver. Both shapes are scanned now, and the mutation that exposed it
+(`zzzBareViaProps`) fails.
+
+That mutation also surfaced `timerCycleCron`, which had no round-trip; its test
+asserts `flowable:type="cron"` rides beside the body, because without it Flowable
+parses the cron as ISO 8601 and the schedule silently means something else.
+
+**Three mutations, all red:** a bare key via single-line `updateProperties`, a
+bare key via multi-line `updateModdleProperties`, and a dotted-receiver helper
+call.
+
+**Still open:** #410, #412, #413 (`sev:medium`), #325 AC5, #399, #402, #404.
