@@ -6582,3 +6582,64 @@ mid-run. Isolated re-run: 2640/2641, the one failure a 10s NATS connect timeout 
 passes 14/14 alone against a container healthy for nine days. Concurrent `dotnet
 test` invocations against this tree do not produce trustworthy numbers; this is at
 least the fourth time.
+
+## M4b round 10 — the oracle had an expectation but no attribution (#433, #434, #435)
+
+**The method failure is the finding; the three bugs are its consequences.** Round
+9 reported "9/9 same-id mutations caught". All nine died at
+`Assert.Equal(declaredLocalName, ElementTypeIn(xml))`, a static string comparison
+that runs before the instance starts — `Assert.Equal() Failure` appears nine times
+in that run and the engine-side messages zero times. The runtime observers the bug
+was about were never under test in the matrix that certified them. The report was
+true and the evidence was hollow, and that is the second time on the same issue.
+
+**The rule this establishes, which is worth more than the fix:** when a test has a
+static precondition and a runtime assertion, a mutation can die at the precondition
+and never reach the assertion being certified. Mutation evidence must name *which*
+assertion fired — grep the run for the target assertion's own failure text, not
+merely for a red cell. Every mutation in this round's PR reports `static=` and
+`engine=` counts for exactly that reason.
+
+**A widening that looked identical to the loosening that caused the last defect.**
+Round 9 let `instance-waits` accept "`Ev_1` or anything `Ev_1` fans to", justified
+by the event-based gateway measurably parking at its downstream catches. The
+justification was true and the generalisation was wrong: applied to all seven
+cells, on a linear diagram it accepts the entire rest of the process, and a
+downstream user task satisfied a catch event that fired straight through. The
+allowance now belongs to the one element type that needs it, and requires *all*
+current activities and more than one. **A measured special case is evidence for a
+special case, not for a general rule.**
+
+**`localName` is not an identity, and the manifest already knew.** Four catches
+share `intermediateCatchEvent`, six throws share `intermediateThrowEvent`, seven
+ends share `endEvent`. `bpmn-support.json` keys every row on
+`(localName, eventDefinition)` precisely because the tag alone does not name an
+element — and round 9 read only the first half of that key. Message-catch and
+signal-catch could both be replaced by a timer with both cells green.
+
+**Deleting the skip beat guarding the skip.** #433's forgery was
+`"Receive Task" => null`, which shrank the oracle by a cell with CI green because
+`DeclaredEffects()` did `if (Diagram(name,"x") is null) continue;`. The instinct
+was to add a guard that detects a null arm. The better fix was to delete the
+`continue` — a declaration with no diagram now fails the theory loudly. A guard
+against a silent skip is weaker than not skipping. The CI-side arm check was added
+too, because the two catch it at different times.
+
+**A comment that was false, corrected by changing the code rather than the
+comment.** `EngineNames` claimed "a third divergence appearing later fails loudly
+rather than passing quietly" while comparing with `OrdinalIgnoreCase` — and a third
+divergence had already appeared and been swallowed (`adHocSubProcess` declared,
+`adhocSubProcess` reported). Changing the sentence would have been easier and would
+have left the hole.
+
+**One error caught by running, not reasoning.** The history timestamp is
+`startedAtUtc`, not Flowable's own `startTime`. Reading the engine's field name
+through Auton8's route found nothing — and four cells went **red**, because the
+field is required rather than defaulted. The same shape as every "query returning
+nothing reads like a verdict" bug in this milestone, failing the safe way for once.
+
+**A correction I owe to the verification record.** Every verifier prompt this
+milestone carried "a previous verifier wiped every deployment on this shared
+engine." That is very likely false: the suite's own `FlowableDeploymentSweep`
+cascade-deletes any `e2e-*` deployment older than two hours on every run. The
+accusation has been retracted on PR #431 and will not be repeated.
