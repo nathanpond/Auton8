@@ -6914,3 +6914,74 @@ line they anchored on had moved, and both printed a green suite. The harness's
 anchor assertion caught both. A mutation that did not apply is not evidence of
 anything — the verdict has to carry proof that it ran, which is the same lesson
 as round 10's static-versus-engine counts, one level down.
+
+## M4b round 14 — pinning discrimination, not data (#452, #454, #463, #464)
+
+**The framing that should have arrived ten rounds ago.** Seven fixes in this
+milestone pinned *data*: which elements owe a declaration, which diagrams exist,
+how many cells run, which rows sit in which bucket. **None pinned
+discrimination** — that the observers still tell a held effect from an unheld
+one. So the forgery kept relocating, and the seventh location was the observers
+themselves: weakening `instance-ends` to something that *reads tighter* left 32
+of 32 live cells and 41 of 41 record guards green with a cell demonstrably false.
+
+The manifest suite had carried the right shape all along —
+`Flipping_one_row_changes_a_tally`, `A_gutted_reason_is_not_a_measurement` —
+assertions that *a mutation is noticed*. The oracle, whose entire purpose is
+mutation-resistance, had none. Four negative controls now exist, one per effect,
+each a diagram inert by construction and asserted to be observed as NOT holding.
+Gutting an observer kills exactly its own control. **A test suite that only ever
+asserts success cannot detect a guard that has stopped guarding.**
+
+**A control must be built the way the thing it guards is built.** `Wrap` and
+`Linear` were local functions inside `Diagram`; the controls needed them, and the
+lazy option was a second copy. Hoisted instead — a control assembled differently
+from the cells it protects is a second construction to get wrong, and this
+milestone has lost rounds to exactly that.
+
+**Reachability was the wrong shape twice, and the second time was mine.**
+Transitive reachability in the *authored* graph is not execution order: a single
+back edge from a node that never fires put an upstream writer in the accepted
+set. One hop is the honest relation. And the gateway rows finally get the
+assertion they always needed — where the diagram puts CONDITIONS on the outgoing
+flows, the untaken branch must not have run, which is the only thing a gateway
+does.
+
+**Scoping that complement by the gateway's TYPE was wrong, and the run said so.**
+Applying it to every multi-target gateway turned the parallel cell red for
+forking to both branches — correct BPMN. Scoping it to `exclusiveGateway` left
+the inclusive row defeated by the same listener attack. The question is not what
+the element *is* but what this diagram *asked it to do*, and the conditions on
+its flows answer that. Reading the tag does not.
+
+**A check removed rather than propped up.** The value assertion took attribution
+from the earliest update and the value from a second query returning the latest,
+so neither half of the sentence it printed need be jointly true. The fix was to
+take both from one record — and measured, that record carries no value: Flowable
+leaves it null, and four cells went red saying `its value is ''`. The tempting
+move was a second source to keep the check alive. **A check that needs two
+sources to agree is the defect it was written to fix**, so it is gone, and the
+routing complement covers where it mattered.
+
+**#454: half of an issue's own prescription is not a fix.** The issue said the
+behaviourKey must be *a registered key, and only where the manifest says
+message*. I implemented "not blank". A registered-but-WRONG key — the send
+rewrite pointed at `autonate.unlock-account` — left three cells green while the
+element deployed, ran, and did something unrelated. That is worse than "deploys
+and does nothing", and the issue had already said what would hold.
+
+**#464: I read this in #458 and skipped it.** The `declared` departures map put
+every justification in a C# comment, and one uncommented line reconciled an
+inverted inventory with 807 tests green. It was filed as a "smaller finding" and
+I treated the label as a priority rather than a description. Departures now carry
+a reason the test asserts, and an orphan departure fails.
+
+Identity got a digest for the same reason the reasons did (#380): nothing tied a
+name to its `(localName, eventDefinition)`, so swapping two rows' keys passed 247
+backend tests and 32 live cells while the oracle reported "Signal throw runs"
+having run an escalation throw.
+
+**Method note, third round running.** Two mutations this round failed to compile
+and one applied to the wrong dictionary; the anchor assertions and the
+`error CS` count caught all three before any verdict was read. The habit is
+holding.
