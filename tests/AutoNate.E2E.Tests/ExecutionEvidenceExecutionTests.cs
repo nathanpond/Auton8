@@ -119,6 +119,142 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         Assert.Equal(29, DeclaredEffects().Count);
     }
 
+    /// <summary>
+    /// One diagram per effect that must be observed as NOT holding (#463).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything else in this milestone pins <b>data</b> — which elements owe a
+    /// declaration, which diagrams exist, how many cells run, which rows are in
+    /// which bucket. Nothing pinned <b>discrimination</b>: that the observers
+    /// still tell a held effect from an unheld one.
+    /// </para>
+    /// <para>
+    /// Measured, which is why this exists: weakening <c>instance-ends</c> from
+    /// <c>current.Count == 0</c> to <c>!current.Contains("Ev_1")</c> — which
+    /// reads <em>tighter</em> and is strictly weaker — left 32 of 32 live cells
+    /// and 41 of 41 record guards green while a cell was demonstrably false.
+    /// Sixteen of the twenty-nine cells ride on that one observer.
+    /// </para>
+    /// <para>
+    /// The manifest suite has carried this shape for a while — <c>Flipping_one_row_changes_a_tally</c>,
+    /// <c>A_gutted_reason_is_not_a_measurement</c> — and the oracle, whose whole
+    /// purpose is mutation-resistance, had no case asserting that any diagram
+    /// must FAIL. These are those cases. An observer gutted to a tautology kills
+    /// the control for its effect on the next run.
+    /// </para>
+    /// </remarks>
+    public static TheoryData<string, string> InertDiagrams() => new()
+    {
+        { "instance-ends", "a parallel branch parks on a user task, so the instance never ends" },
+        { "instance-waits", "nothing waits, so the instance runs straight through" },
+        { "task-appears", "the only task is outside the sub-process, so the container creates none" },
+        { "variable-written", "no script writes `proof`" },
+    };
+
+    [Theory]
+    [MemberData(nameof(InertDiagrams))]
+    public async Task An_inert_diagram_is_observed_as_not_holding(string effect, string why)
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"nc{Guid.NewGuid():N}"[..18];
+        var xml = InertDiagram(effect, key);
+
+        await PublishAsync(api, key, xml);
+        var instance = await StartAsync(api, key);
+
+        var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
+        Assert.True(
+            entered is not null,
+            $"negative control for '{effect}': the engine never entered 'Ev_1', so this control "
+            + "is not testing the observer -- it would fail for the wrong reason (#463).");
+
+        var observed = await ObserveAsync(api, instance, effect, ElementTypeIn(xml), xml);
+
+        Assert.False(
+            observed.Held,
+            $"NEGATIVE CONTROL FAILED for '{effect}'. This diagram is inert by construction -- "
+            + $"{why} -- and the observer reported the effect as HELD, saying: {observed.Detail}. "
+            + "The observer has stopped discriminating, so every cell that declares this effect "
+            + "is now passing on nothing (#463).");
+    }
+
+    // The DI section is not decoration: /api/executions/{id}/diagram renders the
+    // authored diagram and answers 500 without it -- which the first version of
+    // this class read as "the element did nothing" on all 14 cells.
+    //
+    // Hoisted out of `Diagram` so the negative controls build their diagrams the
+    // same way the real cells do (#463). A control assembled differently from
+    // the thing it guards is a second construction to get wrong.
+    private static string WrapIn(string key, string roots, string body) => $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                             xmlns:flowable="http://flowable.org/bpmn"
+                             xmlns:autonate="http://autonate.dev/workflows"
+                             targetNamespace="http://autonate.dev/workflows">
+                  {roots}
+                  <process id="{key}" name="probe" isExecutable="true">
+                    {body}
+                  </process>
+                  <bpmndi:BPMNDiagram id="Diagram_1"
+                                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+                    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{key}">
+                      <bpmndi:BPMNShape id="Shape_Ev_1" bpmnElement="Ev_1">
+                        <dc:Bounds x="240" y="100" width="100" height="80" />
+                      </bpmndi:BPMNShape>
+                    </bpmndi:BPMNPlane>
+                  </bpmndi:BPMNDiagram>
+                </definitions>
+                """;
+
+    private static string LinearIn(string element) =>
+        $"""<startEvent id="Start_1"/>{element}<endEvent id="End_1"/>"""
+        + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""
+        + """<sequenceFlow id="f2" sourceRef="Ev_1" targetRef="End_1"/>""";
+
+    /// <summary>A diagram built so that one effect deliberately does not hold (#463).</summary>
+    private static string InertDiagram(string effect, string key) => effect switch
+    {
+        // Ev_1 is entered and its own branch completes, but a parallel branch
+        // parks forever -- so the INSTANCE does not end.
+        "instance-ends" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><parallelGateway id="Fork_1"/>"""
+            + """<scriptTask id="Ev_1" name="inert" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>var x = 1;</script></scriptTask>"""
+            + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Fork_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Fork_1" targetRef="Ev_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Fork_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="Ev_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f5" sourceRef="Parked_1" targetRef="End_2"/>"""),
+
+        // Ev_1 is entered and passes straight through, so nothing WAITS.
+        "instance-waits" => WrapIn(key, "", LinearIn(
+            """<scriptTask id="Ev_1" name="inert" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>var x = 1;</script></scriptTask>""")),
+
+        // Ev_1 is a sub-process containing nothing that creates a task; the only
+        // user task is OUTSIDE it, on a parallel branch.
+        "task-appears" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><parallelGateway id="Fork_1"/>"""
+            + """<subProcess id="Ev_1"><startEvent id="In_1"/><endEvent id="In_2"/><sequenceFlow id="i1" sourceRef="In_1" targetRef="In_2"/></subProcess>"""
+            + """<userTask id="Outside_1" name="outside"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Fork_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Fork_1" targetRef="Ev_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Fork_1" targetRef="Outside_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="Ev_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f5" sourceRef="Outside_1" targetRef="End_2"/>"""),
+
+        // Ev_1 runs and writes something that is not `proof`.
+        "variable-written" => WrapIn(key, "", LinearIn(
+            """<scriptTask id="Ev_1" name="inert" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('echo', 'x');</script></scriptTask>""")),
+
+        _ => throw new InvalidOperationException(
+            $"No inert diagram for effect '{effect}'. Every observable effect needs one, or the "
+            + "observer it belongs to has no negative control (#463)."),
+    };
+
     [Theory]
     [MemberData(nameof(DeclaredEffects))]
     public async Task The_element_runs_and_has_its_declared_effect(
@@ -230,13 +366,29 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             {
                 // The message rewrite (#112) replaces the event definition with a
                 // behaviour delegate, so there is nothing else left to check.
+                // THE KEY, NOT JUST A KEY (#454). This asserted only that the
+                // attribute was non-blank, which is half of what this issue's own
+                // text asked for. Measured: rewriting the send behaviour to
+                // `autonate.unlock-account` -- a real, registered behaviour --
+                // left three cells green while the element deployed, ran, ended
+                // the instance and did something entirely unrelated. That is not
+                // "deploys and does nothing", it is "deploys and does something
+                // else", which is worse and is exactly what #112 exists to stop.
+                //
+                // And the blank-key assertion was unreachable anyway: the rewrite
+                // stamps flowable:async="true", so an unresolvable key fails the
+                // job and the activity is never entered -- #412's entry check
+                // fires first, every time.
+                const string SendMessage = "autonate.send-message";
+
                 var behaviorKey = deployed.Attributes()
                     .FirstOrDefault(a => a.Name.LocalName == "behaviorKey")?.Value;
 
                 Assert.True(
-                    !string.IsNullOrWhiteSpace(behaviorKey),
-                    $"{name}: Auton8 deployed a <serviceTask> with no flowable:behaviorKey, so the "
-                    + "rewrite produced a service task that delegates to nothing (#454).");
+                    string.Equals(behaviorKey, SendMessage, StringComparison.Ordinal),
+                    $"{name}: Auton8 rewrote this element into a <serviceTask> delegating to "
+                    + $"'{behaviorKey ?? "(nothing)"}', not '{SendMessage}'. The rewrite is the "
+                    + "send behaviour or it is a different feature wearing its shape (#454).");
             }
             else
             {
@@ -254,11 +406,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     .Where(local => local.EndsWith("EventDefinition", StringComparison.Ordinal))
                     .ToList();
 
+                // EXACTLY ONE, AND THE DECLARED ONE (#454). `Contains` asked only
+                // whether it was in the list, and Flowable acts on the FIRST
+                // definition an element carries -- measured on the live engine:
+                // with an escalation definition placed before the signal one, the
+                // signal never fires and no catcher instance is created, while
+                // every cell stayed green.
                 Assert.True(
-                    carried.Contains(declaredEventDefinition + "EventDefinition", StringComparer.Ordinal),
+                    carried.Count == 1
+                    && string.Equals(carried[0], declaredEventDefinition + "EventDefinition",
+                        StringComparison.Ordinal),
                     $"{name}: the manifest declares the event definition '{declaredEventDefinition}', "
                     + $"and the <{deployed.Name.LocalName}> Auton8 deployed carries "
                     + (carried.Count == 0 ? "none at all" : $"[{string.Join(", ", carried)}]")
+                    + (carried.Count > 1 ? " -- and the engine acts on the first of them" : "")
                     + ". The publish rewrite dropped or replaced the semantics, which is what #156 "
                     + "and #112 were about (#454).");
             }
@@ -416,7 +577,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// at all.
     /// </para>
     /// </remarks>
-    private static async Task<string?> VariableWriterAsync(
+    private readonly record struct VariableWrite(string Activity, string? Value);
+
+    private static async Task<VariableWrite?> VariableWriterAsync(
         IAPIRequestContext api, string instance, string variable)
     {
         // SINGLE ATTEMPT. `ObserveAsync` already retries the whole observation
@@ -424,6 +587,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // failing cell took 100 seconds instead of five -- measured, as an
         // eight-minute run of a suite that takes sixteen seconds.
         string? writerInstance = null;
+        string? writtenValue = null;
 
         var response = await api.GetAsync($"/api/executions/{instance}/log");
         if (response.Ok)
@@ -465,7 +629,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             if (!row.TryGetProperty("id", out var id)) continue;
             if (id.GetString() != writerInstance) continue;
 
-            return row.TryGetProperty("activityId", out var activity) ? activity.GetString() : null;
+            var activityId = row.TryGetProperty("activityId", out var activity)
+                ? activity.GetString()
+                : null;
+
+            return activityId is null ? null : new VariableWrite(activityId, writtenValue);
         }
 
         return null;
@@ -601,27 +769,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return seen;
     }
 
-    /// <summary>A variable's current value on this instance.</summary>
-    private static async Task<string?> VariableValueAsync(
-        IAPIRequestContext api, string instance, string variable)
-    {
-        var response = await api.GetAsync($"/api/executions/{instance}/diagram");
-        if (!response.Ok) return null;
-
-        using var body = JsonDocument.Parse(await response.TextAsync());
-        if (!body.RootElement.TryGetProperty("variables", out var variables)) return null;
-        if (variables.ValueKind != JsonValueKind.Array) return null;
-
-        foreach (var entry in variables.EnumerateArray())
-        {
-            if (!entry.TryGetProperty("name", out var name)) continue;
-            if (name.GetString() != variable) continue;
-
-            return entry.TryGetProperty("value", out var value) ? value.GetString() : null;
-        }
-
-        return null;
-    }
+    /// <summary>Do this element's outgoing flows carry conditions? (#452)</summary>
+    private static bool ConditionalFlowsFrom(string xml, string source) =>
+        XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "sequenceFlow")
+            .Where(e => (string?)e.Attribute("sourceRef") == source)
+            .Any(e => e.Elements().Any(c => c.Name.LocalName == "conditionExpression"));
 
     /// <summary>The ids this diagram's sequence flows carry away from an element.</summary>
     private static IReadOnlyCollection<string> FlowTargetsOf(string xml, string source)
@@ -811,61 +964,106 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // The engine records the activity instance that performed each
                 // variable update. That is the attribution; nothing in the
                 // diagram is.
-                var wrote = await VariableWriterAsync(api, instance, "proof");
+                var write = await VariableWriterAsync(api, instance, "proof");
 
-                if (wrote is null)
+                if (write is null)
                 {
                     return new(false,
                         "no activity in this instance wrote `proof` -- if the variable is set, "
                         + "something other than an element in this diagram set it (#452)");
                 }
 
-                // DOWNSTREAM OF Ev_1, STRUCTURALLY -- not "later by the clock" (#452).
+                // ONE HOP FROM Ev_1, NOT TRANSITIVE REACHABILITY (#452).
                 //
-                // The previous version compared `startedAtUtc` with `>=`, and
-                // every activity in one synchronous Flowable transaction shares
-                // a millisecond. Measured: an execution listener on an upstream
-                // throw event wrote `proof` and all three gateway cells went
-                // green, printing "'T_0' ran at or after Ev_1" -- which was
-                // false. It was flaky even when it fired, catching a different
-                // gateway on each run: a one-millisecond race, not a decision.
+                // The previous version accepted any activity reachable from Ev_1
+                // by sequence flow. Reachability in the AUTHORED graph is not
+                // execution order: measured, a single back edge from a node that
+                // never fires into an upstream node put that upstream node in the
+                // accepted set, and an upstream listener's write passed while the
+                // cell printed "'T_0' ... is Ev_1 or downstream of it".
                 //
-                // Reachability is a property of the diagram, so it has no clock
-                // in it. An upstream writer is not in the set however fast it
-                // ran, and a downstream one is however slow.
-                var downstream = ReachableFrom(xml, "Ev_1");
+                // A direct target cannot be reached that way: `Ev_1` flows to it,
+                // full stop. Every shipped diagram writes `proof` either on Ev_1
+                // itself (Script Task) or on a task Ev_1 flows straight to.
+                var wrote = write.Value.Activity;
 
-                if (!downstream.Contains(wrote))
+                var writers = new HashSet<string>(FlowTargetsOf(xml, "Ev_1"), StringComparer.Ordinal)
+                {
+                    "Ev_1",
+                };
+
+                if (!writers.Contains(wrote))
                 {
                     return new(false,
-                        $"`proof` was written by activity '{wrote}', which is not Ev_1 and is not "
-                        + $"reachable from it [{string.Join(", ", downstream.Where(d => d != "Ev_1"))}] "
+                        $"`proof` was written by activity '{wrote}', which is neither Ev_1 nor a "
+                        + $"target Ev_1 flows directly to [{string.Join(", ", writers.Where(w => w != "Ev_1"))}] "
                         + "-- so the variable is not this element's doing (#452)");
                 }
 
-                // AND THE SCRIPT'S OWN VALUE (#452). Attribution says the write
-                // happened on the right activity; it cannot tell the element's
-                // script from an execution listener bolted to the same element.
-                // The value narrows that: a listener writing anything else now
-                // fails.
+                // AND, WHERE Ev_1 ROUTES, THE OTHER BRANCH MUST NOT HAVE RUN.
                 //
-                // WHAT THIS STILL DOES NOT CATCH, measured rather than assumed:
-                // an execution listener on Ev_1 writing the exact value the
-                // script writes passes -- the attribution names Ev_1, correctly,
-                // and the value matches. There is no way to separate the two
-                // from outside, because both ARE this element's behaviour; a
-                // listener on a script task is part of how that element is
-                // configured. So the Script Task cell's claim is precisely
-                // "something on Ev_1 wrote `proof` with this script's value",
-                // not "this script's body ran". That is weaker than the name
-                // suggests and is written down here rather than left implied.
-                var value = await VariableValueAsync(api, instance, "proof");
+                // This is the gateway rows' actual claim, and it was the half
+                // that kept being defeated. A listener on Ev_1 satisfied "the
+                // write is on Ev_1" while the engine routed AWAY from the script,
+                // so those cells carried no information about routing at all --
+                // which is the only thing a gateway does.
+                //
+                // Asserting the complement fixes that without needing to know who
+                // wrote the variable: if the untaken branch ran, the gateway did
+                // not route the way this cell claims.
+                // WHERE THE DIAGRAM PUTS CONDITIONS ON THE BRANCHES.
+                //
+                // Not "where the gateway is exclusive": that is the element's
+                // type, and the question is what this diagram asked it to do. A
+                // parallel gateway forks to every target by definition and its
+                // flows carry no conditions -- measured, applying the complement
+                // by count alone turned that cell red, correctly reporting that
+                // both branches ran. An INCLUSIVE gateway may fork too, but here
+                // its flows carry mutually exclusive conditions, so exactly one
+                // should be taken and the complement is a real claim about it.
+                //
+                // Reading the conditions says which case this is; reading the tag
+                // does not, and scoping by tag left the inclusive row defeated by
+                // the same listener attack the exclusive row now catches.
+                var targets = FlowTargetsOf(xml, "Ev_1");
+                if (targets.Count > 1 && ConditionalFlowsFrom(xml, "Ev_1"))
+                {
+                    var entered = await EntryOrderAsync(api, instance);
+                    var alsoRan = targets.Where(t => t != wrote && entered.ContainsKey(t)).ToList();
 
-                return new(string.Equals(value, "ran", StringComparison.Ordinal),
-                    string.Equals(value, "ran", StringComparison.Ordinal)
-                        ? $"`proof` written as '{value}' by '{wrote}', which is Ev_1 or downstream of it"
-                        : $"`proof` was written by '{wrote}' but its value is '{value}', not the "
-                          + "'ran' this diagram's script writes (#452)");
+                    if (alsoRan.Count > 0)
+                    {
+                        return new(false,
+                            $"`proof` was written by '{wrote}', but Ev_1's other branch(es) "
+                            + $"[{string.Join(", ", alsoRan)}] also ran, so this cell says nothing "
+                            + "about how the gateway routed (#452)");
+                    }
+                }
+
+                // NO VALUE CHECK, AND THAT IS A CORRECTION (#452).
+                //
+                // The previous version read the value from a second query --
+                // `/diagram`, which returns the LATEST value per name -- while
+                // the attribution came from the EARLIEST update, so neither half
+                // of the sentence it printed need be jointly true. The fix was
+                // to take both from one record. Measured, that record does not
+                // carry one: Flowable's historic-detail leaves the value null on
+                // these updates, so the check compared against nothing and four
+                // cells went red saying `its value is ''`.
+                //
+                // Rather than reinstate a second source to keep a check alive,
+                // the check is gone. What replaced it is stronger where it
+                // mattered: the routing complement above is the gateway rows'
+                // actual claim, and it was those rows the listener attack
+                // defeated.
+                //
+                // WHAT REMAINS UNCAUGHT, stated rather than implied: on the
+                // Script Task row, an execution listener on Ev_1 writing `proof`
+                // passes. Both are this element's behaviour and nothing outside
+                // can separate them. The gateway rows no longer share that
+                // weakness, which is where the previous disclosure was wrong to
+                // imply the defence transferred.
+                return new(true, $"`proof` written by '{wrote}'");
             }
 
             case "instance-waits":
@@ -946,32 +1144,10 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // The DI section is not decoration: /api/executions/{id}/diagram renders
         // the authored diagram and answers 500 without it -- which the first
         // version of this class read as "the element did nothing" on all 14 cells.
-        string Wrap(string roots, string body) => $"""
-            <?xml version="1.0" encoding="UTF-8"?>
-            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                         xmlns:flowable="http://flowable.org/bpmn"
-                         xmlns:autonate="http://autonate.dev/workflows"
-                         targetNamespace="http://autonate.dev/workflows">
-              {roots}
-              <process id="{key}" name="probe" isExecutable="true">
-                {body}
-              </process>
-              <bpmndi:BPMNDiagram id="Diagram_1"
-                                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-                                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
-                <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{key}">
-                  <bpmndi:BPMNShape id="Shape_Ev_1" bpmnElement="Ev_1">
-                    <dc:Bounds x="240" y="100" width="100" height="80" />
-                  </bpmndi:BPMNShape>
-                </bpmndi:BPMNPlane>
-              </bpmndi:BPMNDiagram>
-            </definitions>
-            """;
+        string Wrap(string roots, string body) => WrapIn(key, roots, body);
 
-        string Linear(string element) =>
-            $"""<startEvent id="Start_1"/>{element}<endEvent id="End_1"/>"""
-            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""
-            + """<sequenceFlow id="f2" sourceRef="Ev_1" targetRef="End_1"/>""";
+
+        string Linear(string element) => LinearIn(element);
 
         return name switch
         {
