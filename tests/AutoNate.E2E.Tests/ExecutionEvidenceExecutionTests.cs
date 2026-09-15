@@ -196,37 +196,72 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // THE REWRITE MUST PRESERVE THE SEMANTICS (#454).
         //
         // #446 made the engine-name alias exclusive, which proves the rewrite
-        // HAPPENED. It does not prove the rewritten element still carries the
-        // thing it was rewritten to throw: Flowable reports `throwEvent` for a
-        // signal throw AND for a bare none-throw, so dropping the
-        // <signalEventDefinition> during the rewrite was invisible -- measured,
-        // with the deployed XML read back showing `<intermediateThrowEvent
-        // id="Ev_1"/>` and the signal declared at root, referenced by nothing.
-        // That is #156's headline surviving the fix filed to catch it.
+        // HAPPENED. This checks it preserved something.
         //
-        // Measured across every deployed shape this class produces: a rewritten
-        // element carries EITHER its event definition or a flowable:behaviorKey.
-        // Neither is a dropped semantic.
-        if (declaredEventDefinition is not null)
+        // The first version of this block was two bypasses wide, both measured.
+        // `keeps` was `EndsWith("EventDefinition")` -- a string-suffix test that
+        // never consulted `declaredEventDefinition`, a parameter of this very
+        // method -- so rewriting a signal end into a COMPENSATION throw passed.
+        // And the behaviourKey disjunct accepted the attribute anywhere on any
+        // element, so adding a meaningless `flowable:behaviorKey` to a throw
+        // event re-greened the exact defect this check was written for.
+        //
+        // Now: the definition must be the DECLARED one, and the behaviourKey
+        // path belongs only to the service task the message rewrite produces.
+        // "Auton8 rewrote it" is read from the deployed form, not from a list.
+        // `EngineNames` is the wrong predicate: it holds rows where the ENGINE
+        // reports a different activityType (an ad-hoc sub-process, an event
+        // gateway), which is not the same thing as Auton8 replacing the element
+        // at publish. Comparing the deployed tag to the declared one says
+        // exactly which happened, and cannot drift from a hand-maintained set.
+        var deployed = await DeployedElementAsync(key, "Ev_1");
+
+        Assert.True(
+            deployed is not null,
+            $"{name}: could not read the deployed form of 'Ev_1' back from the engine, so "
+            + "nothing here can say whether the publish rewrite preserved it (#454).");
+
+        var wasRewritten = !string.Equals(
+            deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal);
+
+        if (declaredEventDefinition is not null || wasRewritten)
         {
-            var deployed = await DeployedElementAsync(key, "Ev_1");
+            if (deployed.Name.LocalName == "serviceTask")
+            {
+                // The message rewrite (#112) replaces the event definition with a
+                // behaviour delegate, so there is nothing else left to check.
+                var behaviorKey = deployed.Attributes()
+                    .FirstOrDefault(a => a.Name.LocalName == "behaviorKey")?.Value;
 
-            Assert.True(
-                deployed is not null,
-                $"{name}: could not read the deployed form of 'Ev_1' back from the engine, so "
-                + "nothing here can say whether the publish rewrite preserved it (#454).");
+                Assert.True(
+                    !string.IsNullOrWhiteSpace(behaviorKey),
+                    $"{name}: Auton8 deployed a <serviceTask> with no flowable:behaviorKey, so the "
+                    + "rewrite produced a service task that delegates to nothing (#454).");
+            }
+            else
+            {
+                if (declaredEventDefinition is null)
+                {
+                    // Rewritten to another plain element with nothing to carry.
+                    // No shipped row is in this position; if one appears, the
+                    // rewrite is unguarded and that is worth knowing, not
+                    // worth failing on a shape nobody has produced.
+                    return;
+                }
 
-            var keeps = deployed!.Elements()
-                .Any(child => child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal));
-            var delegates = deployed.Attributes()
-                .Any(a => a.Name.LocalName == "behaviorKey");
+                var carried = deployed.Elements()
+                    .Select(child => child.Name.LocalName)
+                    .Where(local => local.EndsWith("EventDefinition", StringComparison.Ordinal))
+                    .ToList();
 
-            Assert.True(
-                keeps || delegates,
-                $"{name}: the manifest declares the event definition '{declaredEventDefinition}', and "
-                + $"the element Auton8 deployed is a <{deployed.Name.LocalName}> carrying neither an "
-                + "event definition nor a behaviorKey. The publish rewrite dropped the semantics, "
-                + "which is exactly what #156 and #112 were about (#454).");
+                Assert.True(
+                    carried.Contains(declaredEventDefinition + "EventDefinition", StringComparer.Ordinal),
+                    $"{name}: the manifest declares the event definition '{declaredEventDefinition}', "
+                    + $"and the <{deployed.Name.LocalName}> Auton8 deployed carries "
+                    + (carried.Count == 0 ? "none at all" : $"[{string.Join(", ", carried)}]")
+                    + ". The publish rewrite dropped or replaced the semantics, which is what #156 "
+                    + "and #112 were about (#454).");
+            }
         }
 
         var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
@@ -538,6 +573,56 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             .ToHashSet(StringComparer.Ordinal);
     }
 
+    /// <summary>Every activity reachable from an element by sequence flow, including it (#452).</summary>
+    /// <remarks>
+    /// Structural, so no clock is involved. `variable-written`'s previous
+    /// ordering check compared millisecond timestamps that a single Flowable
+    /// transaction makes identical.
+    /// </remarks>
+    private static IReadOnlyCollection<string> ReachableFrom(string xml, string start)
+    {
+        var flows = XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "sequenceFlow")
+            .Select(e => ((string?)e.Attribute("sourceRef"), (string?)e.Attribute("targetRef")))
+            .Where(f => f.Item1 is not null && f.Item2 is not null)
+            .ToLookup(f => f.Item1!, f => f.Item2!);
+
+        var seen = new HashSet<string>(StringComparer.Ordinal) { start };
+        var queue = new Queue<string>([start]);
+
+        while (queue.Count > 0)
+        {
+            foreach (var next in flows[queue.Dequeue()])
+            {
+                if (seen.Add(next)) queue.Enqueue(next);
+            }
+        }
+
+        return seen;
+    }
+
+    /// <summary>A variable's current value on this instance.</summary>
+    private static async Task<string?> VariableValueAsync(
+        IAPIRequestContext api, string instance, string variable)
+    {
+        var response = await api.GetAsync($"/api/executions/{instance}/diagram");
+        if (!response.Ok) return null;
+
+        using var body = JsonDocument.Parse(await response.TextAsync());
+        if (!body.RootElement.TryGetProperty("variables", out var variables)) return null;
+        if (variables.ValueKind != JsonValueKind.Array) return null;
+
+        foreach (var entry in variables.EnumerateArray())
+        {
+            if (!entry.TryGetProperty("name", out var name)) continue;
+            if (name.GetString() != variable) continue;
+
+            return entry.TryGetProperty("value", out var value) ? value.GetString() : null;
+        }
+
+        return null;
+    }
+
     /// <summary>The ids this diagram's sequence flows carry away from an element.</summary>
     private static IReadOnlyCollection<string> FlowTargetsOf(string xml, string source)
     {
@@ -735,22 +820,52 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                         + "something other than an element in this diagram set it (#452)");
                 }
 
-                var order = await EntryOrderAsync(api, instance);
-                if (!order.TryGetValue("Ev_1", out var elementAt))
+                // DOWNSTREAM OF Ev_1, STRUCTURALLY -- not "later by the clock" (#452).
+                //
+                // The previous version compared `startedAtUtc` with `>=`, and
+                // every activity in one synchronous Flowable transaction shares
+                // a millisecond. Measured: an execution listener on an upstream
+                // throw event wrote `proof` and all three gateway cells went
+                // green, printing "'T_0' ran at or after Ev_1" -- which was
+                // false. It was flaky even when it fired, catching a different
+                // gateway on each run: a one-millisecond race, not a decision.
+                //
+                // Reachability is a property of the diagram, so it has no clock
+                // in it. An upstream writer is not in the set however fast it
+                // ran, and a downstream one is however slow.
+                var downstream = ReachableFrom(xml, "Ev_1");
+
+                if (!downstream.Contains(wrote))
                 {
-                    return new(false, "`proof` was written, but Ev_1 is absent from history");
+                    return new(false,
+                        $"`proof` was written by activity '{wrote}', which is not Ev_1 and is not "
+                        + $"reachable from it [{string.Join(", ", downstream.Where(d => d != "Ev_1"))}] "
+                        + "-- so the variable is not this element's doing (#452)");
                 }
 
-                if (!order.TryGetValue(wrote, out var writerAt))
-                {
-                    return new(false, $"`proof` was written by '{wrote}', which is absent from history");
-                }
+                // AND THE SCRIPT'S OWN VALUE (#452). Attribution says the write
+                // happened on the right activity; it cannot tell the element's
+                // script from an execution listener bolted to the same element.
+                // The value narrows that: a listener writing anything else now
+                // fails.
+                //
+                // WHAT THIS STILL DOES NOT CATCH, measured rather than assumed:
+                // an execution listener on Ev_1 writing the exact value the
+                // script writes passes -- the attribution names Ev_1, correctly,
+                // and the value matches. There is no way to separate the two
+                // from outside, because both ARE this element's behaviour; a
+                // listener on a script task is part of how that element is
+                // configured. So the Script Task cell's claim is precisely
+                // "something on Ev_1 wrote `proof` with this script's value",
+                // not "this script's body ran". That is weaker than the name
+                // suggests and is written down here rather than left implied.
+                var value = await VariableValueAsync(api, instance, "proof");
 
-                return new(writerAt >= elementAt,
-                    writerAt >= elementAt
-                        ? $"`proof` written by activity '{wrote}', which ran at or after Ev_1"
-                        : $"`proof` written by activity '{wrote}', which ran BEFORE Ev_1 -- so the "
-                          + "variable is not this element's doing (#434)");
+                return new(string.Equals(value, "ran", StringComparison.Ordinal),
+                    string.Equals(value, "ran", StringComparison.Ordinal)
+                        ? $"`proof` written as '{value}' by '{wrote}', which is Ev_1 or downstream of it"
+                        : $"`proof` was written by '{wrote}' but its value is '{value}', not the "
+                          + "'ran' this diagram's script writes (#452)");
             }
 
             case "instance-waits":
