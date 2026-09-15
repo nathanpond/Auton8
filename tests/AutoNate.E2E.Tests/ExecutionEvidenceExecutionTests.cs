@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Xml.Linq;
 using System.Text.Json.Nodes;
 using AutoNate.E2E.Tests.Support;
+using static AutoNate.E2E.Tests.Support.BpmnDiagram;
 using Microsoft.Playwright;
 using Xunit;
 using Xunit.Abstractions;
@@ -767,110 +768,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     // truncated at the first matching close tag, so containment was never
     // actually computed.
 
-    private static XElement ElementIn(string xml, string id)
-    {
-        var found = XDocument.Parse(xml)
-            .Descendants()
-            .FirstOrDefault(e => (string?)e.Attribute("id") == id);
+    // The pure diagram reads moved to Support/BpmnDiagram.cs (#474). They need no
+    // engine, and while they lived here -- on a Flowable-traited class -- every
+    // XML-misreading fix they encode was unguarded on GitHub. ReachableFrom went
+    // with them only in the sense that it was deleted: it had no call site.
 
-        Assert.True(found is not null, $"No element in this diagram carries id '{id}'.");
-        return found!;
-    }
-
-    /// <summary>The BPMN element this diagram gives the id `Ev_1`.</summary>
-    private static string ElementTypeIn(string xml) => ElementIn(xml, "Ev_1").Name.LocalName;
-
-    /// <summary>
-    /// The event definition `Ev_1` carries, in the manifest's vocabulary (#435).
-    /// </summary>
-    /// <remarks>
-    /// `<timerEventDefinition/>` -> "timer", to match `bpmn-support.json`'s
-    /// `eventDefinition` column. Null when the element carries none, which is
-    /// itself the assertion for a None event. DIRECT children only: a definition
-    /// belonging to something nested inside a container is not the container's.
-    /// </remarks>
-    private static string? EventDefinitionIn(string xml)
-    {
-        const string Suffix = "EventDefinition";
-
-        var definition = ElementIn(xml, "Ev_1").Elements()
-            .Select(e => e.Name.LocalName)
-            .FirstOrDefault(name => name.EndsWith(Suffix, StringComparison.Ordinal));
-
-        return definition?[..^Suffix.Length];
-    }
-
-    /// <summary>The ids of elements nested INSIDE `Ev_1` (#434).</summary>
-    /// <remarks>
-    /// A container's declared effect is something inside it. Descendants of the
-    /// real element, so a nested same-tag child no longer truncates the window
-    /// the way the old close-tag search did.
-    /// </remarks>
-    private static IReadOnlyCollection<string> NestedIdsIn(string xml, string id)
-    {
-        return ElementIn(xml, id)
-            .Descendants()
-            .Select(e => (string?)e.Attribute("id"))
-            .Where(found => found is not null && found != id)
-            .Select(found => found!)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>Every call activity in this diagram (#445).</summary>
-    private static IReadOnlyCollection<string> CallActivityIdsIn(string xml)
-    {
-        return XDocument.Parse(xml).Descendants()
-            .Where(e => e.Name.LocalName == "callActivity")
-            .Select(e => (string?)e.Attribute("id") ?? "")
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>Every activity reachable from an element by sequence flow, including it (#452).</summary>
-    /// <remarks>
-    /// Structural, so no clock is involved. `variable-written`'s previous
-    /// ordering check compared millisecond timestamps that a single Flowable
-    /// transaction makes identical.
-    /// </remarks>
-    private static IReadOnlyCollection<string> ReachableFrom(string xml, string start)
-    {
-        var flows = XDocument.Parse(xml).Descendants()
-            .Where(e => e.Name.LocalName == "sequenceFlow")
-            .Select(e => ((string?)e.Attribute("sourceRef"), (string?)e.Attribute("targetRef")))
-            .Where(f => f.Item1 is not null && f.Item2 is not null)
-            .ToLookup(f => f.Item1!, f => f.Item2!);
-
-        var seen = new HashSet<string>(StringComparer.Ordinal) { start };
-        var queue = new Queue<string>([start]);
-
-        while (queue.Count > 0)
-        {
-            foreach (var next in flows[queue.Dequeue()])
-            {
-                if (seen.Add(next)) queue.Enqueue(next);
-            }
-        }
-
-        return seen;
-    }
-
-    /// <summary>Do this element's outgoing flows carry conditions? (#452)</summary>
-    private static bool ConditionalFlowsFrom(string xml, string source) =>
-        XDocument.Parse(xml).Descendants()
-            .Where(e => e.Name.LocalName == "sequenceFlow")
-            .Where(e => (string?)e.Attribute("sourceRef") == source)
-            .Any(e => e.Elements().Any(c => c.Name.LocalName == "conditionExpression"));
-
-    /// <summary>The ids this diagram's sequence flows carry away from an element.</summary>
-    private static IReadOnlyCollection<string> FlowTargetsOf(string xml, string source)
-    {
-        return XDocument.Parse(xml).Descendants()
-            .Where(e => e.Name.LocalName == "sequenceFlow")
-            .Where(e => (string?)e.Attribute("sourceRef") == source)
-            .Select(e => (string?)e.Attribute("targetRef"))
-            .Where(target => target is not null)
-            .Select(target => target!)
-            .ToHashSet(StringComparer.Ordinal);
-    }
     private readonly record struct Observation(bool Held, string Detail);
 
     private static async Task<Observation> ObserveAsync(

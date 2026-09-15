@@ -7098,3 +7098,55 @@ knowing before the next milestone is planned.
 **M4d created** for the 19 unproven elements, on the owner's "split — tiers in
 M4c, elements in M4d". The three markers stay in M4c as #471, because the oracle
 cannot express a marker at all — an instrument defect, not missing coverage.
+
+## M4c execution — #473, #453
+
+**#473 — preflight runs before the compose-up, not after.** `infra-ensure`'s
+`ensure-up.sh` already waits 120 s and then says "did not become ready", which
+cannot distinguish "Docker is not running" from "Flowable crashed on boot". The
+tier preflight probes first and fails in a second naming the service *and the
+endpoint it tried*. Verified both directions (Rule 2 — the story asked for a
+failure mode, and a failure mode that is only asserted in one direction is half
+a test).
+
+**#473 — a third stale recipe, and it was the process being replaced.**
+`CONTRIBUTING.md` said "if your change touches those areas, say so in the PR so
+it gets run somewhere that has them" — stale twice over, since it also predates
+Keycloak joining the trait set. `docs/DEVELOPMENT.md` and the E2E README carried
+the other two. The guard that forbids the retired sentence then fired on my own
+first draft, which *quoted* it to explain the change. The quote went, not the
+check: a guard defeatable by quoting is not a guard.
+
+**#453 — Rule 1: the tier could not fail at all.** Reading `test-full-local`
+found a head the issue had not named. Every `dotnet test` was piped into `tee`;
+a pipeline's exit status is its last command's; the Makefile sets no `SHELL`, so
+there is no `pipefail`. Measured pre-fix: `Failed: 2, Passed: 340, Skipped: 1`
+and `make test-full-local` exiting **0**. Fixed in the same change, because
+adding a skips check to a target that cannot go red is theatre. Guarded by
+`A_tier_never_pipes_a_test_run_straight_into_tee`, which also covers `test-slim`.
+
+**#453 — size pins are per service AND per tier.** Not redundancy, and the
+measurement is the argument: removing the `RequiresService` trait from the
+live-engine oracle left the full-local total at exactly **371, reported `ok`**,
+while `Flowable` went 198 → 163. The test never left the tier, it just stopped
+needing the engine — which is exactly how an oracle gets quietly defanged. The
+mirror case (an untraited test deleted) moves the total 371 → 370 with every
+service pin `ok`. Neither check alone is sufficient.
+
+**#453 — exact pins, not floors.** House style (`ExecutionOracleSizeTests`' 29,
+the coverage ratchet). Growth has to be as visible as loss or the number drifts
+upward and stops meaning anything. The cost is a pin to move whenever tests are
+added; that is the intended friction, not an oversight.
+
+**#453 — `--skips-only` exists to put the guard in the slim tier.** The skip half
+needs no services and no `dotnet`, so `TierIntegrityScriptTests` runs on GitHub
+on every push. A guard that only runs where the thing it guards runs is a guard
+nobody executes — which was #453's own complaint about `ExecutionOracleSizeTests`.
+
+**Discovered work, filed not fixed.** #480 — `ComplexGatewayStudioRoundTripTests`
+fails 2 of 3 cells deterministically; Flowable-traited, so GitHub never ran it
+and the retired `make e2e` was the only local path. It surfaced on the **first
+`make test-full-local` ever executed**, which is the tier split earning its
+keep on day one. #481 — a backend Postgres connect timeout, one occurrence in
+four full runs, green 2/2 in isolation. Neither is in a milestone: they are not
+M4c's subject, and `/n8-plan` triages `needs-triage`.
