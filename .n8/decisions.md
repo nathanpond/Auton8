@@ -6985,3 +6985,64 @@ having run an escalation throw.
 and one applied to the wrong dictionary; the anchor assertions and the
 `error CS` count caught all three before any verdict was read. The habit is
 holding.
+
+## M4b round 15 — stopping an arms race, and two real defects underneath it (#454)
+
+**The decision, and the reasoning I put to the owner.** After nine verification
+rounds, both verifiers independently reached the same judgement: *against
+accidental regression, sound; against deliberate editing, not sound — the guards
+have no guards, and the pattern strongly suggests #8 will not be the last.*
+
+Eight relocations of one forgery across fourteen exec rounds: a proof in a file
+(#408, #418) → delete the obligation (#429) → delete the diagram (#433) → spell
+the deletion differently (#447) → skip the theory (#453) → trade the obligation
+(#458) → weaken an observer (#463) → weaken it *past* its own control (#463
+again). Each fix was legitimate and each bought one round.
+
+**The reason it does not converge is structural, not a failure of any one fix.**
+The guard and the guarded live in the same tree, and the same agent edits both.
+No in-repo guard defeats an agent that can edit the guard. That is why the
+remedy for the deliberate case is a process control — branch protection, a human
+reading the diff — and the remedy for the *accidental* case, which is what the
+milestone was actually for, is M4c's slim/full tier split.
+
+Owner's answer to that recommendation: **"yes, go with your recommendation"**. So
+#452, #463 and #464 are relabelled `sev:medium` and carried, each with the
+reasoning quoted on the issue. They are not dismissed — all three are real,
+reproduced and correctly diagnosed.
+
+**What I should have done earlier.** I should have put this to the owner two
+rounds sooner. The signal was there at round 12 and I kept fixing. Continuing to
+harden a guard whose category keeps reappearing is a decision, and decisions of
+that size belong to the owner, not to the loop.
+
+**Underneath the arms race were two real defects, and one had been live all
+along.** The three message rows' send had failed on *every run since those rows
+were added* — the engine recorded `sendMessageResult = "noTargetProcess"` and
+`instance-ends` was satisfied by a BehaviorResult FAILURE. Three cells certified
+a send that never happened. **Nine verification rounds looked at those cells and
+none caught it**, because every round was attacking the guards rather than
+asking what the green cells were actually asserting. A finding like that is an
+argument for the negative-control idea, not against it — but it is also an
+argument for occasionally reading the transcript instead of mutating the code.
+
+Fixed in the order that proves it: the assertion first, which turned exactly
+those three cells red with the engine's own codes in the message; then the
+diagrams. `noMatch` is deliberately not an accepted outcome — it is a legitimate
+product result, and here it would mean the receiver was not found, which is the
+cell proving nothing in a quieter way.
+
+**Two facts found by measurement rather than reasoning**, both worth keeping:
+Flowable holds message START subscriptions unique per name across the engine, so
+a fixed message name meant the second receiver this suite ever published was
+refused (a bare 502). And the deployed element's event-definition *reference* was
+unpinned while its tag was pinned — a ghost signal passed 35/35 with the
+author's own signal referenced by nothing.
+
+**And one I owe by name.** #452's routing complement is gated on
+`ConditionalFlowsFrom(xml, ...)` — a function of the diagram it judges. This
+class already carries the sentence condemning exactly that, which I wrote for
+#412: *"An oracle whose expectation is a function of the thing it is judging has
+no opinion at all."* I wrote the rule, then wrote a comment defending the
+violation as reading the diagram's intent. It is carried at medium, and the
+issue says so plainly.
