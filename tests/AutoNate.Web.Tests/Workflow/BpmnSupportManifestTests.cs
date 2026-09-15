@@ -1374,4 +1374,74 @@ public sealed class BpmnSupportManifestTests
         Assert.Equal(rows, onDisk);
     }
 
+    /// <summary>
+    /// Exactly these elements are in each non-executing engine bucket (#458).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every other guard on this axis <b>counts</b> rows — the engine tally, the
+    /// in-scope-54 split, the undeclared ratchet, the evidence file's coverage.
+    /// None of them checks <em>which</em> rows, so a 1-for-1 swap between two
+    /// buckets walks through all of them.
+    /// </para>
+    /// <para>
+    /// Measured, not hypothesised: inverting the exact fact #325's
+    /// reclassification turns on — making the manifest say Data Object Reference
+    /// does not execute and Data Input does, with the consistent three-file edit
+    /// a real commit would make — left <b>806 backend tests green</b> while the
+    /// manifest asserted the opposite of what a live engine had said twenty
+    /// minutes earlier.
+    /// </para>
+    /// <para>
+    /// This is the sixth relocation of one forgery: a proof in a file (#408,
+    /// #418) → delete the obligation (#429) → delete the diagram (#433) →
+    /// spell the deletion differently (#447) → skip the theory (#453) → trade
+    /// the obligation. Naming the members is what a count cannot do.
+    /// </para>
+    /// <para>
+    /// `executes` is deliberately the complement rather than a third literal:
+    /// it is 51 rows and would be noise, and any move out of it changes one of
+    /// the two sets below.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Exactly_these_elements_are_annotation_or_cannot_execute()
+    {
+        string[] annotation =
+        [
+            "Association",
+            "Data Input",
+            "Data Output",
+            "Data Store Reference",
+            "Group",
+            "Lane",
+            "Message Flow",
+            "Pool / Participant",
+            "Text Annotation",
+        ];
+
+        string[] cannotExecute =
+        [
+            "Boundary Event (None)",
+            "Business Rule Task",
+            "Cancel Boundary",
+            "Cancel End",
+            "Compensation Start Event",
+            "Intermediate Catch (Link)",
+            "Intermediate Throw (Link)",
+            "Loop Marker",
+            "Transaction",
+        ];
+
+        var elements = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray();
+
+        IReadOnlyList<string> Bucket(string engine) => elements
+            .Where(e => e!["engine"]!.GetValue<string>() == engine)
+            .Select(e => e!["name"]!.GetValue<string>())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(annotation, Bucket("annotation"));
+        Assert.Equal(cannotExecute, Bucket("cannot-execute"));
+    }
 }
