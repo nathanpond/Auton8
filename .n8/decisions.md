@@ -6853,3 +6853,64 @@ would have been a factual regression in the manifest.
 nine `sev:medium` (#399, #402, #404, #410, #413, #419, #436, #437, #438, #449) and
 AC5's remaining 20 elements. The "fix all twelve" decision is one increment in, not
 discharged.
+
+## M4b round 13 — a clock is not a fact about a diagram (#452, #454, #458)
+
+**The deepest of the three: `>=` on wall-clock timestamps was never going to
+work.** `variable-written` asked whether the writer ran "at or after" Ev_1 by
+comparing `startedAtUtc`, and every activity in one synchronous Flowable
+transaction shares a millisecond. So the check was a coin flip — it caught a
+different gateway on each run, and an upstream execution listener walked
+through it entirely while the failure message asserted the opposite of the
+truth. Replaced with **reachability by sequence flow**, which is a property of
+the diagram and has no clock in it: an upstream writer is out of the set however
+fast it ran, and a downstream one is in however slow. The general form worth
+keeping: **when a test needs a causal fact, derive it from structure, not from
+timing.** Timing is an artefact of the run; structure is the claim.
+
+**A bound stated rather than papered over.** The value assertion narrows the
+second half of #452 but does not close it: an execution listener on Ev_1 writing
+the exact value the script writes still passes, because attribution names Ev_1
+correctly and the value matches. There is no way to separate them from outside —
+both *are* the element's behaviour, and a listener on a script task is part of
+how that element is configured. The Script Task cell's claim is therefore
+"something on Ev_1 wrote `proof` with this script's value", not "this script's
+body ran". Written into the code, because a test whose name overstates it is how
+this milestone got here.
+
+**#454: the parameter was sitting right there.** `keeps` was
+`EndsWith("EventDefinition")` while `declaredEventDefinition` was an unused
+parameter of the same method — so a signal end rewritten into a *compensation*
+throw passed, and one meaningless `flowable:behaviorKey` re-greened the defect
+the check was written for. A guard that has the right answer in scope and
+compares against a shape instead is worse than no guard, because it reads as
+coverage.
+
+**And a wrong predicate found by running.** I first gated the rewrite check on
+`EngineNames.ContainsKey`, reasoning that the alias map names the rewritten
+rows. It does not: it names rows where the **engine reports** a different
+activityType (ad-hoc sub-process, event gateway), which is a different fact.
+Two cells went red and said so. "Auton8 rewrote it" is now read from the
+deployed form — the deployed tag differs from the declared one — which is exact
+and cannot drift from a hand-kept list.
+
+**#458: six relocations of one forgery, and the shape of the last one.** Every
+guard on the engine axis counted rows; none named them. A 1-for-1 swap between
+`executes` and `annotation` therefore passed 806 backend tests while inverting
+the exact fact the previous round's reclassification turns on. `annotation` and
+`cannot-execute` are now literal sets. `executes` stays the complement
+deliberately: 51 names would be noise, and any move out of it changes one of the
+two sets that are named — the cheapest form that closes the class.
+
+The chain in full, because it is the most instructive thing in this milestone: a
+proof in a file (#408, #418) → delete the obligation (#429) → delete the diagram
+(#433) → spell the deletion differently (#447) → skip the theory (#453) → trade
+the obligation (#458). Each fix closed a hole and left the category. **A count
+cannot name a member; that is not a bug in any one guard, it is what counting
+is.**
+
+**Method, again.** Two mutations this round silently failed to apply because the
+line they anchored on had moved, and both printed a green suite. The harness's
+anchor assertion caught both. A mutation that did not apply is not evidence of
+anything — the verdict has to carry proof that it ran, which is the same lesson
+as round 10's static-versus-engine counts, one level down.
