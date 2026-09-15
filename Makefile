@@ -209,11 +209,23 @@ test-slim: e2e-install
 # full-local is everything except Keycloak, with real services. #473 gives this
 # target its service stand-up and its preflight; until then it runs the tier
 # against whatever is already up.
+# Dapr is IN this tier -- the owner's split is "everything except keycloak" --
+# so the app runs with a sidecar and the RequiresService=Dapr specs are actually
+# exercised rather than quietly excluded.
 test-full-local: infra-ensure e2e-install
-	@echo "== full-local: backend =="
-	dotnet test tests/AutoNate.Web.Tests --nologo
-	@echo "== full-local: E2E (all but Keycloak) =="
-	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)"
+	@# Before anything else: a dead endpoint fails in a second, named, rather
+	@# than after ensure-up's 120s generic timeout.
+	./infra/tier-preflight.sh
+	@# The summary goes through a trap because make aborts on the first non-zero,
+	@# and a red run that swallows its counts is how a shrink hides.
+	@trap 'echo ""; echo "== full-local summary =="; \
+	       echo "  backend : $$(grep -hoE "Passed: +[0-9]+" /tmp/n8-full-backend.log 2>/dev/null | tail -1)"; \
+	       echo "  E2E     : $$(grep -hoE "Passed: +[0-9]+" /tmp/n8-full-e2e.log 2>/dev/null | tail -1)"; \
+	       echo "  skipped : $$(grep -hoE "Skipped: +[0-9]+" /tmp/n8-full-backend.log /tmp/n8-full-e2e.log 2>/dev/null | tr -s " " | paste -sd" " -)"' EXIT; \
+	  echo "== full-local: backend =="; \
+	  dotnet test tests/AutoNate.Web.Tests --nologo 2>&1 | tee /tmp/n8-full-backend.log; \
+	  echo "== full-local: E2E (all but Keycloak) =="; \
+	  dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1 | tee /tmp/n8-full-e2e.log
 
 # RETIRED (#472). `make e2e` ran the E2E project UNFILTERED against a stack that
 # already has Flowable and Dapr, so it was a fourth, unnamed tier -- and it went

@@ -118,9 +118,9 @@ make infra-reset
 
 ```bash
 dotnet build AutoNate.sln                      # analyzers run on every build (see Directory.Build.props / .editorconfig)
-cd src/AutoNate.Spa && npm ci && npm run lint && npm run build
-cd infra && docker compose -p infra up -d postgres nats nats-init redis   # test suite needs these three
-dotnet test AutoNate.sln                       # ~8 min; integration tests hit the compose services
+
+make test-slim                                 # what GitHub runs: SPA lint/typecheck/vitest/build + backend + untraited E2E
+make test-full-local                           # everything but Keycloak, against real services; stands them up itself
 ```
 
 ### Pinned build inputs

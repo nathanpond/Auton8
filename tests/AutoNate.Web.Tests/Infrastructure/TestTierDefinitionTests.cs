@@ -103,4 +103,48 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("$(AUTONATE_TIER_SLIM_FILTER)", makefile, StringComparison.Ordinal);
         Assert.Contains("$(AUTONATE_TIER_FULL_LOCAL_FILTER)", makefile, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// full-local stands its services up and fails closed when it cannot (#473).
+    /// </summary>
+    [Fact]
+    public void Full_local_preflights_before_it_runs()
+    {
+        var makefile = File.ReadAllText(Path.Combine(RepoRoot.Path, "Makefile"));
+        var preflight = Path.Combine(RepoRoot.Path, "infra", "tier-preflight.sh");
+
+        Assert.True(File.Exists(preflight), "infra/tier-preflight.sh is missing, so full-local "
+            + "has nothing that names a missing service (#473).");
+
+        Assert.Contains("./infra/tier-preflight.sh", makefile, StringComparison.Ordinal);
+
+        var script = File.ReadAllText(preflight);
+
+        // It must fail, not warn. A tier that skips what it cannot reach reports
+        // success for the wrong reason, which is the whole subject of M4c.
+        Assert.Contains("exit 1", script, StringComparison.Ordinal);
+
+        // And it must name what it tried, or "did not become ready" is all a
+        // developer gets -- which is what `ensure-up.sh` already says.
+        Assert.Contains("tried", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Nothing still tells a developer to run the old recipe (#473).
+    /// </summary>
+    /// <remarks>
+    /// Three documents carried one: <c>CONTRIBUTING.md</c> — whose "say so in the
+    /// PR so it gets run somewhere that has them" <em>was</em> the process the
+    /// tiers replace — <c>docs/DEVELOPMENT.md</c>, and the E2E README.
+    /// </remarks>
+    [Theory]
+    [InlineData("CONTRIBUTING.md")]
+    [InlineData("docs/DEVELOPMENT.md")]
+    public void The_contributor_docs_point_at_the_named_tiers(string relative)
+    {
+        var text = File.ReadAllText(Path.Combine(RepoRoot.Path, relative.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("make test-slim", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("say so in the PR so it gets run", text, StringComparison.Ordinal);
+    }
 }

@@ -45,21 +45,31 @@ deployment lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The
 architecture, structure, conventions and testing — which is the fastest way to
 find where something belongs.
 
-Before opening a PR, run what CI runs:
+Before opening a PR, run what GitHub runs:
 
 ```bash
-# SPA — lint carries a warning ratchet and a jsx-a11y error gate
-cd src/AutoNate.Spa && npm ci && npm run lint && npx tsc -b && npm run build
-
-# Backend — needs Postgres, NATS and Redis up
-cd infra && docker compose -p infra up -d postgres nats nats-init redis
-cd .. && dotnet test tests/AutoNate.Web.Tests
+make test-slim
 ```
 
-The end-to-end suite (`tests/AutoNate.E2E.Tests`) needs the full compose stack
-including Flowable and the Hocuspocus sidecar. CI runs it with the specs that
-need Flowable and Dapr filtered out; if your change touches those areas, say
-so in the PR so it gets run somewhere that has them.
+That is the **slim** tier, and it is everything GitHub runs — SPA lint (which
+carries a warning ratchet and a jsx-a11y error gate), typecheck, vitest, build,
+the backend suite, and the E2E specs that need no heavy service. Green here
+means green on your PR.
+
+If your change touches workflow execution, BPMN elements, or anything the engine
+runs, also run:
+
+```bash
+make test-full-local
+```
+
+That is the **full-local** tier: everything except the Keycloak interop specs,
+against real services including Flowable and Dapr. **Slim cannot tell you
+whether a BPMN element actually executes** — that needs a live engine, and
+GitHub does not run one.
+
+This replaces the old instruction to flag such changes in the PR for someone
+else to run — you can run it yourself now. See CLAUDE.md > Test tiers.
 
 ### What a good change looks like here
 

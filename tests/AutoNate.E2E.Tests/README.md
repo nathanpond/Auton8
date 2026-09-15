@@ -16,7 +16,7 @@ slate.
    ```bash
    make infra-up   # docker-compose up -d
    ```
-2. **Playwright browsers installed.** First time only; the `make e2e` target
+2. **Playwright browsers installed.** First time only; the `make test-full-local` target
    below handles this for you, or run by hand once after building the test
    project:
    ```bash
@@ -31,15 +31,15 @@ slate.
 
 ```bash
 # Recommended: one command that ensures infra + browsers + tests
-make e2e
+make test-full-local
 
 # Or, step-by-step (equivalent):
 make infra-ensure
 dotnet build tests/AutoNate.E2E.Tests
-dotnet test tests/AutoNate.E2E.Tests
+dotnet test tests/AutoNate.E2E.Tests --filter "RequiresService!=Keycloak"   # the full-local tier
 
 # Headed — opens a real browser window
-PWDEBUG=1 dotnet test tests/AutoNate.E2E.Tests
+PWDEBUG=1 dotnet test tests/AutoNate.E2E.Tests --filter "RequiresService!=Keycloak"   # the full-local tier
 ```
 
 First run rebuilds the SPA into `wwwroot/` and warms `dotnet build`, so it can
