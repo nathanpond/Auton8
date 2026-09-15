@@ -1,4 +1,4 @@
-name: CI
+name: CI (slim tier)
 
 # Every other test finding in the register is unenforced without this: nothing
 # stopped a PR that deleted assertions, skipped a suite, or broke the auth
@@ -847,10 +847,17 @@ jobs:
       # absent, so a local run without the profile says so instead of passing
       # for the wrong reason. Reaching that assertion in CI would mean this
       # filter had stopped matching.
+      # The tier filter comes from tests/tiers.env, which the Makefile also
+      # reads. Two copies of a filter drift, and this one already had: the
+      # guard that pinned it asserted two services where this job filtered
+      # three, and passed only because Assert.Contains is a substring check.
+      - name: Load tier definitions
+        run: grep -E '^AUTONATE_TIER_' tests/tiers.env >> "$GITHUB_ENV"
+
       - name: Test
         run: |
           dotnet test tests/AutoNate.E2E.Tests --no-build \
-            --filter "RequiresService!=Flowable&RequiresService!=Dapr&RequiresService!=Keycloak" \
+            --filter "$AUTONATE_TIER_SLIM_FILTER" \
             --logger "console;verbosity=minimal"
 
       # A failed selector is close to unreadable without the page. Playwright

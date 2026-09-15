@@ -15,7 +15,9 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+include tests/tiers.env
+
+.PHONY: test-slim test-full-local app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
 
 # Verify the documented prerequisites and port availability before anything
 # tries to start. Reports every problem in one pass so a machine is fixed once,
@@ -182,5 +184,44 @@ e2e-install:
 		--depsfile tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.deps.json \
 		tests/AutoNate.E2E.Tests/bin/Debug/net10.0/Microsoft.Playwright.dll install chromium
 
-e2e: infra-ensure e2e-install
-	dotnet test tests/AutoNate.E2E.Tests --no-build
+# ---- test tiers ------------------------------------------------------------
+#
+# slim is what GitHub runs, and `make test-slim` runs ALL of it -- not the xUnit
+# subset. A developer who runs a partial slim green and then eats a red build
+# from lint or the a11y ratchet has been handed a false gate.
+test-slim: e2e-install
+	@echo "== slim: SPA =="
+	cd src/AutoNate.Spa && npm run lint && npx tsc -b && npm test && npm run build
+	@echo "== slim: backend =="
+	dotnet test tests/AutoNate.Web.Tests --nologo
+	@echo "== slim: E2E (untraited only) =="
+	@# A filter that matches nothing runs no tests and exits 0 -- this repo's own
+	@# named failure mode. Assert a non-zero count before trusting the run.
+	@count=$$(dotnet test tests/AutoNate.E2E.Tests --nologo --list-tests \
+	    --filter "$(AUTONATE_TIER_SLIM_FILTER)" 2>/dev/null | grep -cE '^    [A-Za-z]'); \
+	  if [ "$$count" -eq 0 ]; then \
+	    echo "slim discovered ZERO E2E tests -- the filter matched nothing, which reads as a faster, greener build"; \
+	    exit 1; \
+	  fi; \
+	  echo "slim E2E: $$count tests discovered"
+	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_SLIM_FILTER)"
+
+# full-local is everything except Keycloak, with real services. #473 gives this
+# target its service stand-up and its preflight; until then it runs the tier
+# against whatever is already up.
+test-full-local: infra-ensure e2e-install
+	@echo "== full-local: backend =="
+	dotnet test tests/AutoNate.Web.Tests --nologo
+	@echo "== full-local: E2E (all but Keycloak) =="
+	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)"
+
+# RETIRED (#472). `make e2e` ran the E2E project UNFILTERED against a stack that
+# already has Flowable and Dapr, so it was a fourth, unnamed tier -- and it went
+# red rather than skipping on the Keycloak specs. It now points at the named
+# tiers rather than surviving as a thing nobody can place.
+e2e:
+	@echo "make e2e is retired. The tiers are named now:"
+	@echo "  make test-slim        what GitHub runs"
+	@echo "  make test-full-local  everything except Keycloak, with real services"
+	@echo "See CLAUDE.md > Test tiers."
+	@exit 1

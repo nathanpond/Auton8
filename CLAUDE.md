@@ -79,6 +79,37 @@ defaults fight Mantine's.
 
 The app shell at `src/AutoNate.Spa/src/shell/AppShell.tsx` uses Mantine `<AppShell>` with `<AppShell.Header>` wrapping `NavMenu` and `<AppShell.Main>` wrapping page content. The right-side AI chatbot (`AgentSidebar`) stays `position: fixed` because its overlay/fill × over-header/under-header modes don't map cleanly onto `<AppShell.Aside>`.
 
+## Test tiers
+
+"CI" means three different things here, so they have names. Every boundary is
+the `RequiresService` xUnit trait — there is no second list — and the filters
+have one definition in `tests/tiers.env`, read by the Makefile and by `ci.yml`.
+
+| tier | runs | where | command |
+|---|---|---|---|
+| **slim** | no `RequiresService` trait | GitHub | `make test-slim` |
+| **full-local** | everything except `RequiresService=Keycloak` | your machine | `make test-full-local` |
+| **full-keycloak** | everything | not built yet | — |
+
+**Slim is not service-free.** The untraited backend suite needs Postgres, NATS
+and Redis; GitHub runs Redis as a service container and Postgres as a
+`docker run`, deliberately, because a service container cannot take
+`-c max_connections=300`. Slim is *what GitHub already stands up*.
+
+**`make test-slim` runs everything GitHub runs** — SPA lint, typecheck, vitest,
+build, the backend suite, the untraited E2E specs. Not the xUnit subset: a
+developer who runs a partial slim green and then eats a red build from lint or
+the a11y ratchet has been handed a false gate.
+
+**What slim cannot tell you.** No BPMN element is proven to *execute* in slim —
+that needs a live Flowable, and GitHub does not run one. This is why
+`make test-full-local` exists and why the release runbook requires it before a
+tag.
+
+`make e2e` is retired. It ran the E2E project unfiltered against a
+Flowable-bearing stack, which made it a fourth, unnamed tier that went red
+rather than skipping on the Keycloak specs.
+
 ## n8SDLC project
 
 This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-stat` shows where things stand). If a change made in this session deviates from what planned issues assume — different library, provider, architecture, dropped/added scope, or amending a declared invariant below — do two things before finishing:
