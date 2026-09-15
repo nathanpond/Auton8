@@ -71,6 +71,13 @@ GitHub does not run one.
 This replaces the old instruction to flag such changes in the PR for someone
 else to run — you can run it yourself now. See CLAUDE.md > Test tiers.
 
+It finishes with a size check, and **a tier that got smaller fails**: nothing
+may be skipped, and each filter must discover the exact number pinned in
+`tests/tiers.env`. If you add tests, move the pin in the same commit — the pins
+are exact rather than floors so that growth shows up in the diff instead of
+being absorbed. If you see one drop, something left the tier: deleted, renamed,
+re-traited, or silenced with `[Theory(Skip = "...")]`.
+
 ### What a good change looks like here
 
 - **Match the surrounding code.** Naming, comment density, and idiom vary by

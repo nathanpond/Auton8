@@ -110,6 +110,32 @@ tag.
 Flowable-bearing stack, which made it a fourth, unnamed tier that went red
 rather than skipping on the Keycloak specs.
 
+**A tier that got smaller is a failure, not a faster run.** `test-full-local`
+ends in `infra/tier-integrity.sh`, which asks two questions and fails on either:
+did anything *skip*, and does each filter still discover the exact number pinned
+in `tests/tiers.env`?
+
+The pins are **exact, not floors** — house style, alongside
+`ExecutionOracleSizeTests`' 29 and the coverage ratchet. Growth has to be as
+visible as loss, or the number drifts upward and stops meaning anything. Add
+tests, move the pin in the same commit; that visibility is the point, not
+friction to route around.
+
+They are pinned **per service as well as per tier**, which is not redundancy.
+Measured: deleting the `RequiresService` trait from the live-engine oracle left
+the full-local total at exactly **371 — `ok`** — while `Flowable` went 198 → 163.
+The test never left the tier; it just stopped needing the engine, which is
+precisely how an oracle gets quietly defanged. Only the per-service pin sees it.
+The tier total catches the mirror case, an untraited test deleted (371 → 370),
+which the service pins are blind to.
+
+Both checks run **after** the suites and **whether or not they passed**, the way
+`backend-reconcile` does: a lost test otherwise hides behind a failure. Which is
+also why no recipe may pipe `dotnet test` into `tee` — a pipeline's status is
+its last command's, there is no `pipefail` here, and for a while
+`make test-full-local` exited **0** on `Failed: 2, Passed: 340, Skipped: 1`.
+`TestTierDefinitionTests` fails the build if that form comes back.
+
 ## n8SDLC project
 
 This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-stat` shows where things stand). If a change made in this session deviates from what planned issues assume — different library, provider, architecture, dropped/added scope, or amending a declared invariant below — do two things before finishing:

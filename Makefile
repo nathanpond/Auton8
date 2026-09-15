@@ -216,16 +216,33 @@ test-full-local: infra-ensure e2e-install
 	@# Before anything else: a dead endpoint fails in a second, named, rather
 	@# than after ensure-up's 120s generic timeout.
 	./infra/tier-preflight.sh
-	@# The summary goes through a trap because make aborts on the first non-zero,
-	@# and a red run that swallows its counts is how a shrink hides.
-	@trap 'echo ""; echo "== full-local summary =="; \
-	       echo "  backend : $$(grep -hoE "Passed: +[0-9]+" /tmp/n8-full-backend.log 2>/dev/null | tail -1)"; \
-	       echo "  E2E     : $$(grep -hoE "Passed: +[0-9]+" /tmp/n8-full-e2e.log 2>/dev/null | tail -1)"; \
-	       echo "  skipped : $$(grep -hoE "Skipped: +[0-9]+" /tmp/n8-full-backend.log /tmp/n8-full-e2e.log 2>/dev/null | tr -s " " | paste -sd" " -)"' EXIT; \
+	@# Every step's status is captured and OR-ed into rc rather than allowed to
+	@# abort the recipe, so the integrity check and the summary run even when the
+	@# suite is red -- a lost test otherwise hides behind a failure, which is how
+	@# backend-reconcile already works and for the same reason.
+	@#
+	@# `{ cmd; echo $$? > f; } | tee log` rather than a bare pipe: a pipeline's
+	@# status is its LAST command's, so `dotnet test | tee` is always tee's 0.
+	@# The measured pre-fix behaviour was `Failed: 2, Passed: 340, Skipped: 1`
+	@# and `make test-full-local` exiting 0. There is no `set -o pipefail` to
+	@# lean on -- make runs recipes under /bin/sh with no SHELL override here.
+	@rc=0; \
 	  echo "== full-local: backend =="; \
-	  dotnet test tests/AutoNate.Web.Tests --nologo 2>&1 | tee /tmp/n8-full-backend.log; \
+	  { dotnet test tests/AutoNate.Web.Tests --nologo 2>&1; echo $$? > /tmp/n8-full-backend.rc; } \
+	    | tee /tmp/n8-full-backend.log; \
+	  [ "$$(cat /tmp/n8-full-backend.rc)" -eq 0 ] || rc=1; \
 	  echo "== full-local: E2E (all but Keycloak) =="; \
-	  dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1 | tee /tmp/n8-full-e2e.log
+	  { dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1; \
+	    echo $$? > /tmp/n8-full-e2e.rc; } | tee /tmp/n8-full-e2e.log; \
+	  [ "$$(cat /tmp/n8-full-e2e.rc)" -eq 0 ] || rc=1; \
+	  echo ""; \
+	  ./infra/tier-integrity.sh /tmp/n8-full-backend.log /tmp/n8-full-e2e.log || rc=1; \
+	  echo ""; echo "== full-local summary =="; \
+	  echo "  backend : $$(grep -hoE 'Passed: +[0-9]+' /tmp/n8-full-backend.log 2>/dev/null | tail -1)"; \
+	  echo "  E2E     : $$(grep -hoE 'Passed: +[0-9]+' /tmp/n8-full-e2e.log 2>/dev/null | tail -1)"; \
+	  echo "  skipped : $$(grep -hoE 'Skipped: +[0-9]+' /tmp/n8-full-backend.log /tmp/n8-full-e2e.log 2>/dev/null | tr -s " " | paste -sd" " -)"; \
+	  [ $$rc -eq 0 ] && echo "  result  : PASS" || echo "  result  : FAIL"; \
+	  exit $$rc
 
 # RETIRED (#472). `make e2e` ran the E2E project UNFILTERED against a stack that
 # already has Flowable and Dapr, so it was a fourth, unnamed tier -- and it went

@@ -120,7 +120,8 @@ make infra-reset
 dotnet build AutoNate.sln                      # analyzers run on every build (see Directory.Build.props / .editorconfig)
 
 make test-slim                                 # what GitHub runs: SPA lint/typecheck/vitest/build + backend + untraited E2E
-make test-full-local                           # everything but Keycloak, against real services; stands them up itself
+make test-full-local                           # everything but Keycloak, against real services; stands them up itself,
+                                              # and fails if anything skipped or the tier shrank (tests/tiers.env pins)
 ```
 
 ### Pinned build inputs
