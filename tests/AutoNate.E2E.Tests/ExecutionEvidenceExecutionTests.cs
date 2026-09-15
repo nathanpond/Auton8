@@ -275,6 +275,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             await PublishAsync(api, $"{key}c", callee);
         }
 
+        // A send needs somebody to send TO (#454).
+        if (ReceiverDiagram(name, key) is { } receiver)
+        {
+            await PublishAsync(api, $"{key}r", receiver);
+        }
+
         await PublishAsync(api, key, xml);
         var instance = await StartAsync(api, key);
 
@@ -412,6 +418,38 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // with an escalation definition placed before the signal one, the
                 // signal never fires and no catcher instance is created, while
                 // every cell stayed green.
+                // AND ITS REFERENCE MUST BE THE AUTHOR'S (#454).
+                //
+                // Pinning the definition's TAG says nothing about what it points
+                // at. Measured: a rewrite that invented `<signal id="Ev_1_ghost"/>`
+                // and repointed `signalRef` at it left 35/35 green, with the
+                // author's own signal declared at root and referenced by nothing.
+                // Every signal end raised something no catcher listens for --
+                // #156's headline, surviving four consecutive fixes.
+                //
+                // The diagram declares exactly one root-level signal/message/
+                // escalation/error, so "the reference resolves to a declaration
+                // this diagram's author wrote" is checkable without a second list.
+                var declaredRoots = XDocument.Parse(xml).Root!.Elements()
+                    .Select(e => (string?)e.Attribute("id"))
+                    .Where(id => id is not null)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                var references = deployed.Elements()
+                    .Where(child => child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal))
+                    .SelectMany(child => child.Attributes())
+                    .Where(a => a.Name.LocalName.EndsWith("Ref", StringComparison.Ordinal))
+                    .Select(a => a.Value)
+                    .ToList();
+
+                var ghosts = references.Where(r => !declaredRoots.Contains(r)).ToList();
+
+                Assert.True(
+                    ghosts.Count == 0,
+                    $"{name}: the deployed event definition points at [{string.Join(", ", ghosts)}], "
+                    + $"which this diagram never declared -- it declares [{string.Join(", ", declaredRoots)}]. "
+                    + "The rewrite repointed the element at something nothing listens for (#454).");
+
                 Assert.True(
                     carried.Count == 1
                     && string.Equals(carried[0], declaredEventDefinition + "EventDefinition",
@@ -423,6 +461,30 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     + ". The publish rewrite dropped or replaced the semantics, which is what #156 "
                     + "and #112 were about (#454).");
             }
+        }
+
+        // A SEND THAT FAILED IS NOT A SEND (#454).
+        //
+        // Not a mutation -- this was the state of the suite. `ExpandMessageSendEvents`
+        // removes the event definition and `SendMessageBehavior` resolves the
+        // message from the STORED diagram, which these minimal diagrams did not
+        // carry. Queried from the live engine after a clean run, all three
+        // message rows recorded `sendMessageResult = "noTargetProcess"` or
+        // `"noMessageName"`. `instance-ends` was satisfied by a BehaviorResult
+        // FAILURE, so three cells certified a send that had never once happened.
+        if (deployed.Name.LocalName == "serviceTask")
+        {
+            var sent = await VariableValueAsync(api, instance, "sendMessageResult");
+
+            Assert.True(
+                // NOT `noMatch`. That is a legitimate product outcome -- a send
+                // to a process nobody is waiting in -- but here it would mean the
+                // receiver this test publishes was not found, which is the cell
+                // proving nothing again in a quieter way.
+                sent is "delivered" or "started",
+                $"{name}: Auton8 rewrote this into a send, and the engine recorded "
+                + $"`sendMessageResult = '{sent ?? "(nothing)"}'`. The delegate ran and the send "
+                + "did not happen, so nothing here is evidence that this element sends (#454).");
         }
 
         var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
@@ -526,6 +588,28 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             }
 
             await Task.Delay(250);
+        }
+
+        return null;
+    }
+
+    /// <summary>A variable's current value on this instance.</summary>
+    private static async Task<string?> VariableValueAsync(
+        IAPIRequestContext api, string instance, string variable)
+    {
+        var response = await api.GetAsync($"/api/executions/{instance}/diagram");
+        if (!response.Ok) return null;
+
+        using var body = JsonDocument.Parse(await response.TextAsync());
+        if (!body.RootElement.TryGetProperty("variables", out var variables)) return null;
+        if (variables.ValueKind != JsonValueKind.Array) return null;
+
+        foreach (var entry in variables.EnumerateArray())
+        {
+            if (!entry.TryGetProperty("name", out var n)) continue;
+            if (n.GetString() != variable) continue;
+
+            return entry.TryGetProperty("value", out var v) ? v.GetString() : null;
         }
 
         return null;
@@ -1241,12 +1325,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // completion through it. That is the whole claim for a task or a
             // throw that creates nothing -- and it is exactly what Manual Task
             // and Task (Generic) were missing when they shipped doing nothing.
-            "Send Task" => Wrap("", Linear(
-                """<sendTask id="Ev_1" name="send" flowable:behaviorKey="autonate.send-message"/>""")),
+            "Send Task" => Wrap(
+                $"""<message id="Msg_1" name="m1{key}"/>""",
+                LinearIn($"""<sendTask id="Ev_1" name="send" flowable:behaviorKey="autonate.send-message" flowable:autonateMessageName="m1{key}" flowable:autonateTargetProcessKey="{key}r"/>""")),
 
             "Intermediate Throw (Message)" => Wrap(
-                """<message id="Msg_1" name="m1"/>""",
-                Linear("""<intermediateThrowEvent id="Ev_1"><messageEventDefinition messageRef="Msg_1"/></intermediateThrowEvent>""")),
+                $"""<message id="Msg_1" name="m1{key}"/>""",
+                LinearIn($"""<intermediateThrowEvent id="Ev_1" flowable:autonateTargetProcessKey="{key}r"><messageEventDefinition messageRef="Msg_1"/></intermediateThrowEvent>""")),
 
             "Intermediate Throw (Signal)" => Wrap(
                 """<signal id="Sig_1" name="s1"/>""",
@@ -1259,9 +1344,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             "Intermediate Throw (Compensation)" => Wrap("", Linear(
                 """<intermediateThrowEvent id="Ev_1"><compensateEventDefinition/></intermediateThrowEvent>""")),
 
+            // The three send rows name a TARGET (#454). Without
+            // `flowable:autonateTargetProcessKey`, SendMessageBehavior fails with
+            // `noTargetProcess` and `instance-ends` was satisfied by that failure.
+            // `{key}r` is published alongside, waiting on the same message.
             "Message End" => Wrap(
-                """<message id="Msg_1" name="m1"/>""",
-                """<startEvent id="Start_1"/><endEvent id="Ev_1"><messageEventDefinition messageRef="Msg_1"/></endEvent>"""
+                $"""<message id="Msg_1" name="m1{key}"/>""",
+                $"""<startEvent id="Start_1"/><endEvent id="Ev_1" flowable:autonateTargetProcessKey="{key}r"><messageEventDefinition messageRef="Msg_1"/></endEvent>"""
                 + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Ev_1"/>"""),
 
             "Signal End" => Wrap(
@@ -1313,6 +1402,39 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             : $"""<conditionExpression xsi:type="tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">{body}</conditionExpression>""";
     }
 
+
+    /// <summary>The separately-published receiver the three send rows need (#454).</summary>
+    /// <remarks>
+    /// The message name carries the run's key. Flowable keeps message START
+    /// subscriptions unique per name across the engine, so a fixed name meant the
+    /// second receiver this suite ever published was refused -- measured, as a
+    /// bare 502 "the engine refused this workflow".
+    /// </remarks>
+    private static string? ReceiverDiagram(string name, string key) =>
+        name is not ("Message End" or "Send Task" or "Intermediate Throw (Message)") ? null : $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:flowable="http://flowable.org/bpmn"
+                     targetNamespace="http://autonate.dev/workflows">
+          <message id="RMsg_1" name="m1{key}"/>
+          <process id="{key}r" name="receiver" isExecutable="true">
+            <startEvent id="RS_1"><messageEventDefinition messageRef="RMsg_1"/></startEvent>
+            <userTask id="RT_1" name="received"/>
+            <endEvent id="RE_1"/>
+            <sequenceFlow id="rf1" sourceRef="RS_1" targetRef="RT_1"/>
+            <sequenceFlow id="rf2" sourceRef="RT_1" targetRef="RE_1"/>
+          </process>
+          <bpmndi:BPMNDiagram id="RDiagram_1"
+                              xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                              xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+            <bpmndi:BPMNPlane id="RPlane_1" bpmnElement="{key}r">
+              <bpmndi:BPMNShape id="RShape_1" bpmnElement="RS_1">
+                <dc:Bounds x="240" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
+        </definitions>
+        """;
 
     /// <summary>The separately-published callee a call activity needs.</summary>
     private static string? CalleeDiagram(string name, string key) => name != "Call Activity" ? null : $"""
