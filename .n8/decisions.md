@@ -7046,3 +7046,55 @@ class already carries the sentence condemning exactly that, which I wrote for
 no opinion at all."* I wrote the rule, then wrote a comment defending the
 violation as reading the diagram's intent. It is carried at medium, and the
 issue says so plainly.
+
+## M4c planned — three tiers, and two findings the per-story checks could not see
+
+**Three tiers, not two, and the owner's reasoning is the useful part.** The plan
+went in with slim/full. The executor simulation found that "full = everything"
+hits two walls: Keycloak needs a non-default compose profile plus admin
+credentials that **invariant 1 forbids shipping**, and Dapr needs the app under a
+sidecar the E2E fixture does not launch. Put to the owner, the answer was a third
+tier rather than an asterisk: **slim** (no trait, GitHub), **full-local**
+(everything but Keycloak, local auth), **full-keycloak** (future). Every boundary
+stays derived from the `RequiresService` trait, so there is still no second list.
+
+**"Slim stands up no services" was false and I wrote it anyway.** The untraited
+backend suite needs Postgres, NATS and Redis; GitHub already runs two of them.
+The simulation caught it. Slim is *what GitHub already stands up* — and
+`make test-slim` runs everything GitHub runs, not the xUnit subset, because a
+developer who runs it green and still eats a red build from lint or the a11y
+ratchet has been handed a false gate.
+
+**The coverage check earned its place twice.** Per-story checks cannot see a
+missing story, and this one found two:
+
+1. **Slim had no integrity check** while full had two — and the tier story's own
+   wording advertised the escape as a feature: *"adding a traited test moves it
+   out of slim with no other edit."* That is #453's move 5c re-opened on the other
+   side of the split, in a plan written by someone who had just spent nine rounds
+   on that exact defect. #476 exists only because a fresh reader looked at the set.
+2. **The surface undercounted.** `ci.release` is a `trigger → environment` row —
+   a `v*` tag publishing to GHCR — which I had dismissed because *deployment* is
+   out of v1.0 scope. #475 looked like an orphan and was actually the owner of a
+   real item.
+
+**The second simulation pass caught a guard that would have guarded almost
+nothing.** #477's sweep names three phrases; they match **8 of 19** locations. The
+rest say "excluded from CI", "inherits CI's exclusion", "CI skips them by filter",
+"CI never reaches this". A guard built to the story as first drafted would have
+left eleven of its own sweep free to return. Corrected before filing.
+
+**Triage, with reasons.** #224 closed — CI has built the app container since
+`ci.yml:608`, verified. #228 closed — the Flowable 8.0.0 transaction finding is
+recorded on all three affected manifest rows with measured reasons, and the bucket
+membership is now pinned. #222, #229, #234 → M5, whose subject they are.
+
+**Two structural corrections.** #463 was stranded on the closed M4b, invisible to
+every re-run; moved to M4d. And epic #40 is at GitHub's hard cap of **100
+sub-issues**, so all six new stories are linked by body line instead — the native
+attachment returns 422. That cap has now bitten twice in this project and is worth
+knowing before the next milestone is planned.
+
+**M4d created** for the 19 unproven elements, on the owner's "split — tiers in
+M4c, elements in M4d". The three markers stay in M4c as #471, because the oracle
+cannot express a marker at all — an instrument defect, not missing coverage.
