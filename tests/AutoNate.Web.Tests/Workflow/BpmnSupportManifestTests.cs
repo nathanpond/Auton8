@@ -656,13 +656,24 @@ public sealed class BpmnSupportManifestTests
 
         // Declared departures. Keep this list short and argued; a growing list is
         // the signal that the manifest has stopped deriving from the evidence.
-        var declared = new Dictionary<string, string>(StringComparer.Ordinal)
+        // EVERY DEPARTURE CARRIES A REASON (#464).
+        //
+        // This was `Dictionary<string, string>` — name to engine value — and
+        // every justification was a C# comment, which nothing checks. Measured:
+        // setting rows.json's User Task verdict to "DEPLOYS BUT DOES NOTHING"
+        // and reconciling it with ONE uncommented line left 807 backend tests
+        // green. That is strictly stronger than the forgery #458 closed, because
+        // the manifest is never touched: no tally moves, no bucket pin fires, no
+        // reason baseline changes.
+        //
+        // #458 filed this as a smaller finding and #461 did not address it.
+        var declared = new Dictionary<string, (string Engine, string Why)>(StringComparer.Ordinal)
         {
             // BPMN artifacts deploy and do nothing BY DESIGN, so "executes" is
             // technically right and useless. The third value exists to say so.
-            ["Text Annotation"] = BpmnSupportManifest.EngineAnnotation,
-            ["Group"] = BpmnSupportManifest.EngineAnnotation,
-            ["Association"] = BpmnSupportManifest.EngineAnnotation,
+            ["Text Annotation"] = (BpmnSupportManifest.EngineAnnotation, "A BPMN artifact: deploys and carries no execution semantics by design."),
+            ["Group"] = (BpmnSupportManifest.EngineAnnotation, "A BPMN artifact: deploys and carries no execution semantics by design."),
+            ["Association"] = (BpmnSupportManifest.EngineAnnotation, "A BPMN artifact: deploys and carries no execution semantics by design."),
 
             // #325 AC5, by owner decision. Six more rows in the same position as
             // the three above: they deploy, and no instance ever ENTERS them, so
@@ -677,12 +688,12 @@ public sealed class BpmnSupportManifestTests
             // proves it by starting an instance; the obstacle is that the
             // execution oracle's entry assertion is activity-shaped, which is
             // work rather than a reclassification.
-            ["Pool / Participant"] = BpmnSupportManifest.EngineAnnotation,
-            ["Lane"] = BpmnSupportManifest.EngineAnnotation,
-            ["Message Flow"] = BpmnSupportManifest.EngineAnnotation,
-            ["Data Store Reference"] = BpmnSupportManifest.EngineAnnotation,
-            ["Data Input"] = BpmnSupportManifest.EngineAnnotation,
-            ["Data Output"] = BpmnSupportManifest.EngineAnnotation,
+            ["Pool / Participant"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
+            ["Lane"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
+            ["Message Flow"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
+            ["Data Store Reference"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
+            ["Data Input"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
+            ["Data Output"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
 
             // "needs configuration" is not a verdict the engine axis has, because
             // it is not a property of the element — it is a property of the
@@ -693,8 +704,8 @@ public sealed class BpmnSupportManifestTests
             //   Business Rule  — the DMN engine is absent from the image
             //                    (NoClassDefFoundError org/kie/api). No diagram
             //                    can fix that, so: cannot-execute, until #105.
-            ["Send Task"] = BpmnSupportManifest.EngineExecutes,
-            ["Business Rule Task"] = BpmnSupportManifest.EngineCannotExecute,
+            ["Send Task"] = (BpmnSupportManifest.EngineExecutes, "An author supplies type/operationRef and it runs, so the gap is configuration, not the engine."),
+            ["Business Rule Task"] = (BpmnSupportManifest.EngineCannotExecute, "The DMN engine is absent from the image (NoClassDefFoundError org/kie/api); no diagram can fix that, until #105."),
 
             // #218. rows.json records "DEPLOYS BUT DOES NOTHING", and that
             // verdict is wrong in a way worth stating rather than quietly
@@ -714,7 +725,7 @@ public sealed class BpmnSupportManifestTests
             // conditioned on the result. Spike #155 is not contradicted — it
             // proved no extension point reaches the element, which is why this is
             // done by expansion rather than by a behaviour.
-            ["Complex Gateway"] = BpmnSupportManifest.EngineExecutes,
+            ["Complex Gateway"] = (BpmnSupportManifest.EngineExecutes, "#218: re-probed against 8.0.0 -- it evaluates conditions, honours default, and picks a branch. Not inert; the routing is done by expansion."),
 
             // #159. rows.json says "executes". It does not.
             //
@@ -729,7 +740,7 @@ public sealed class BpmnSupportManifestTests
             // plainly: the inventory credited the engine with a capability it
             // does not have, and an author marking a task as a loop got one that
             // runs once. Publish now refuses it.
-            ["Loop Marker"] = BpmnSupportManifest.EngineCannotExecute,
+            ["Loop Marker"] = (BpmnSupportManifest.EngineCannotExecute, "A downward departure: the inventory credited a capability the engine lacks -- a task marked as a loop ran once. Publish refuses it."),
 
             // #103 probed this at process level, where Flowable rejects it
             // (flowable-start-event-invalid-event-definition). Inside an event
@@ -740,7 +751,7 @@ public sealed class BpmnSupportManifestTests
             // Recorded on #158, which owns conditional events, and #162, which
             // owns event subprocesses. Marking it cannot-execute here would be
             // wrong in the other direction and would block #162.
-            ["Conditional Start Event"] = BpmnSupportManifest.EngineExecutes,
+            ["Conditional Start Event"] = (BpmnSupportManifest.EngineExecutes, "#158/#162: correct inside an event subprocess, refused at process level. cannot-execute here would be wrong in the other direction and would block #162."),
 
             // #112. The inventory is right about the raw element: Flowable 8.0.0
             // rejects an intermediate throw carrying a message definition at
@@ -760,7 +771,7 @@ public sealed class BpmnSupportManifestTests
             // changing what we deploy rather than by the engine changing. If a
             // second one appears, the honest move is a field on the manifest
             // saying "executes after expansion", not a longer list here.
-            ["Intermediate Throw (Message)"] = BpmnSupportManifest.EngineExecutes,
+            ["Intermediate Throw (Message)"] = (BpmnSupportManifest.EngineExecutes, "#112: the verdict was overturned by changing what we deploy, not by the engine changing -- the rewrite makes it a service task that sends."),
 
             // #156. The same shape as the message end event, and found the same
             // way — by testing the element instead of trusting the inventory. A
@@ -772,7 +783,7 @@ public sealed class BpmnSupportManifestTests
             // Declared rather than silently edited, because the inventory's
             // verdict is defensible for what it measured — the element runs — and
             // the departure is that it does not do the one thing it exists for.
-            ["Signal End"] = BpmnSupportManifest.EngineExecutes,
+            ["Signal End"] = (BpmnSupportManifest.EngineExecutes, "#156: the inventory's verdict is defensible for what it measured -- the element runs -- and the departure is that it did not do the one thing it exists for."),
 
             // #220 / #228. The inventory's "executes" is right about what it
             // measured — all three deploy and a transaction subprocess runs — and
@@ -786,9 +797,9 @@ public sealed class BpmnSupportManifestTests
             // NOT included here: probed separately, it works, so #115 stands on
             // its own — the two are usually described together and it would be
             // easy to withdraw both by association.
-            ["Cancel Boundary"] = BpmnSupportManifest.EngineCannotExecute,
-            ["Cancel End"] = BpmnSupportManifest.EngineCannotExecute,
-            ["Transaction"] = BpmnSupportManifest.EngineCannotExecute,
+            ["Cancel Boundary"] = (BpmnSupportManifest.EngineCannotExecute, "Requires a transaction subprocess, which Flowable 8.0.0 does not run; measured at deployment."),
+            ["Cancel End"] = (BpmnSupportManifest.EngineCannotExecute, "Requires a transaction subprocess, which Flowable 8.0.0 does not run; measured at deployment."),
+            ["Transaction"] = (BpmnSupportManifest.EngineCannotExecute, "Flowable 8.0.0 does not run transaction subprocesses; measured at deployment."),
         };
 
         var rows = JsonNode.Parse(File.ReadAllText(InventoryRowsPath))!.AsArray();
@@ -803,8 +814,8 @@ public sealed class BpmnSupportManifestTests
             var verdict = (string)row["verdict"]!;
             var element = Assert.Contains(name, manifest);
 
-            var want = declared.TryGetValue(name, out var override_)
-                ? override_
+            var want = declared.TryGetValue(name, out var departure)
+                ? departure.Engine
                 : expected.GetValueOrDefault(verdict);
 
             if (want is null)
@@ -818,6 +829,31 @@ public sealed class BpmnSupportManifestTests
         }
 
         Assert.Empty(undeclared);
+
+        // A departure naming no row is silently ignored by the loop above, so it
+        // reads as justification for nothing (#464).
+        var orphans = declared.Keys
+            .Where(name => !rows.Any(r => (string)r!["name"]! == name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            orphans.Count == 0,
+            "These declared departures name no row in the inventory, so they justify nothing:\n  "
+            + string.Join("\n  ", orphans));
+
+        var unexplained = declared
+            .Where(d => string.IsNullOrWhiteSpace(d.Value.Why))
+            .Select(d => d.Key)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            unexplained.Count == 0,
+            "These departures from the measured inventory carry no reason:\n  "
+            + string.Join("\n  ", unexplained)
+            + "\n\nA departure is a claim that the probe's verdict is wrong. Saying so in a C# "
+            + "comment is not saying so to a test (#464).");
     }
 
     // ── One source: publish validation follows the manifest, not a list ─────
@@ -1443,5 +1479,59 @@ public sealed class BpmnSupportManifestTests
 
         Assert.Equal(annotation, Bucket("annotation"));
         Assert.Equal(cannotExecute, Bucket("cannot-execute"));
+    }
+
+    /// <summary>
+    /// No row's identity key may move without a deliberate edit here (#464).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every guard on this file pins a row's <em>verdict</em> — which bucket it
+    /// is in, what effect it declares, what its reason says. Nothing pinned its
+    /// <b>identity</b>: <c>rows.json</c> carries only <c>name</c>, <c>verdict</c>
+    /// and <c>note</c>, so nothing tied a name to its
+    /// <c>(localName, eventDefinition)</c>.
+    /// </para>
+    /// <para>
+    /// Measured: swapping the <c>eventDefinition</c> of Intermediate Throw
+    /// (Signal) and Intermediate Throw (Escalation) — and their diagram arms in
+    /// the live-engine oracle — left 247 backend tests and 32 live cells green,
+    /// with the oracle reporting "Signal throw runs" having run an escalation
+    /// throw.
+    /// </para>
+    /// <para>
+    /// A digest rather than 69 literal triples, for the same reason the reason
+    /// baseline is a digest (#380): the list is noise to read and the failure
+    /// message says which row moved anyway, because the test recomputes and
+    /// diffs. Regenerate it deliberately, and say in the commit WHY an identity
+    /// changed — a row's BPMN key changing is a different kind of event from its
+    /// verdict changing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void No_row_has_changed_its_bpmn_identity()
+    {
+        // Regenerate with the line this test prints on failure.
+        const string Baseline = "a74c316685c57e80";
+
+        var identities = JsonNode.Parse(File.ReadAllText(SharedManifestPath))!["elements"]!.AsArray()
+            .Select(e => string.Join('\t',
+                e!["name"]!.GetValue<string>(),
+                e["localName"]?.GetValue<string>() ?? "None",
+                e["eventDefinition"]?.GetValue<string>() ?? "None"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var digest = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(string.Join('\n', identities))))[..16]
+            .ToLowerInvariant();
+
+        Assert.True(
+            string.Equals(digest, Baseline, StringComparison.Ordinal),
+            $"A row's (name, localName, eventDefinition) changed: baseline {Baseline}, now {digest}. "
+            + "If that is deliberate, update the constant in this test in the same commit and say "
+            + "why the identity moved — swapping two rows' keys is invisible to every other guard "
+            + "here, and was measured leaving 247 backend tests and 32 live cells green (#464).");
     }
 }
