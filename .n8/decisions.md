@@ -7277,3 +7277,68 @@ test into slim. Owner chose exact everywhere, so `AUTONATE_TIER_COUNT_SLIM_BACKE
 must move in the same commit as any PR that changes the backend test count. No
 code change: this is what shipped. Recorded so the friction is a known cost
 rather than a surprise on the next PR.
+
+## M4c fix pass — #485, #486, #487, #488, #489, #490 (2026-09-16)
+
+**#485 — the fixtures are real runner output, on purpose.** The skip gate read
+`Counters/@notExecuted`, which VSTest never populates; a real `[Fact(Skip)]`
+gives `total="3" executed="2" notExecuted="0"` while the console prints
+`Skipped: 1`. Fixed to `max(notExecuted, total - executed)` — the gap is also
+the better question, since it counts everything that did not run.
+
+The reason it shipped matters more than the fix: #476's evidence was a
+hand-written trx in a shape the toolchain does not emit, so the mutation never
+reached the oracle. `Infrastructure/TrxFixtures/` now holds trx files captured
+from actual runs, and a test asserts they still carry `notExecuted="0"` — so
+regenerating them by hand fails first and says why. `The_gate_scripts_read_the_skip_count`
+was DELETED rather than tightened: it was satisfied by a comment, and a test that
+runs the script beats any grep of its source.
+
+**#487 — the AC was not achievable and I said so rather than faking it.** It
+asked for the preflight to run *before* the compose-up. `ensure-up.sh` is what
+starts the services, so probing ahead of it fails on every cold machine. The
+intent — a fast, named failure — is served instead by a failure hand-off
+(ensure-up fails → preflight names the service) plus the post-up probe, which is
+the genuinely fast case. `infra-ensure` is no longer a prerequisite, because that
+was what silently ordered it first. Logged as an amendment to the AC, not a
+silent reinterpretation.
+
+**#487 — the Dapr half is blocked, not bodged.** The trait promises an exercise
+no tier performs, and chaining `app-dapr` would not fix it: the fixture spawns
+its own app with `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true`, so a separately
+sidecar'd app is not the app under test. Three options with their costs are on
+the issue; the cheap one (drop the trait) drives `AUTONATE_TIER_COUNT_DAPR` to
+zero, which `tier-integrity.sh` rejects, so it is a real narrowing of the tier
+vocabulary rather than a tidy-up. `blocked` + `needs-owner-action`.
+
+**#488 — the floor got a live negative control, not a source assertion.** The
+control mechanism keyed on EFFECT, one diagram each, so "the right marker asking
+for one instance" could not be expressed. It is keyed on a CONTROL id now, and
+`tasks-appear-together` has two. Removing the floor makes the new control fail
+with the observer's own words: "1 live task(s) on Ev_1 at once, as authored".
+
+**#489 — the fix is in the product, and `toggleVisible` got it too.**
+`handleEditItem` swallowed the error and returned normally, so `applyEdit` could
+not tell success from failure. It rethrows; `applyEdit` closes only on success
+and rolls the optimistic update back from `previous` — locally, because the
+optimistic change was local and a refetch would race the banner. `toggleVisible`
+had the identical defect and the "hidden" badge renders from that state, so an
+E2E assertion on it was reading the lie.
+
+**#490 — my own new guard had the defect it was written to fix.** The
+backend-side trait guard matched the literal `[Trait("RequiresService"` and
+missed `[Xunit.Trait(...)]`. Found by mutating it, which is the only reason I
+know. Three spellings now fail it. Recording this because it is the third time
+in this milestone that a guard was narrower than its own claim, and the pattern
+— build the pattern from what the thing IS, not from the spellings you have seen
+— is the transferable lesson.
+
+**Two corrections rather than guards.** CLAUDE.md claimed `make test-slim` runs
+everything GitHub runs; it does not reproduce the coverage ratchet or the
+app-image build, now named. `tests/tiers.env` described itself as sourced; it is
+grepped, and sourcing it actually fails on the unquoted `&`.
+
+**#480 was a duplicate of #369** and is closed. My duplicate check during
+execution missed an issue open since M4 and reported in #360 and #362, and I
+described the finding as fresh. The evidence and the owner's M4d scheduling moved
+to #369.
