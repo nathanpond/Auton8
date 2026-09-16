@@ -6,7 +6,7 @@ namespace AutoNate.Web.Tests.Infrastructure;
 /// Structural assertions on the `app` compose profile.
 /// </summary>
 /// <remarks>
-/// CI hosts neither Flowable nor Dapr, so the end-to-end behaviour of this
+/// Slim stands up neither Flowable nor Dapr, so the end-to-end behaviour of this
 /// profile is verified by hand (see #57's closing evidence) and cannot be
 /// asserted here. What <i>can</i> be pinned is the wiring that took several
 /// attempts to get right and would be easy to undo without noticing.

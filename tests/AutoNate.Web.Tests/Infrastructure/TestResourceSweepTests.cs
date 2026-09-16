@@ -465,7 +465,7 @@ public sealed class TestResourceSweepTests
     /// </summary>
     /// <remarks>
     /// These two tests used the developer's own `AutoNate` database, which is what
-    /// an installed plugin's schema really lives in — but it does not exist in CI,
+    /// an installed plugin's schema really lives in — but no tier's runner has it,
     /// so they passed on a laptop and failed on the first run that had no dev data
     /// (`3D000: database "AutoNate" does not exist`). Nothing about what they
     /// assert needs a *particular* database, only one the sweep will leave alone:

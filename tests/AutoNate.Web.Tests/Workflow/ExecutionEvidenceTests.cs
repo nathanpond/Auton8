@@ -82,7 +82,7 @@ public sealed class ExecutionEvidenceTests
     /// <remarks>
     /// The file declares what would prove each element ran; the proof happens in
     /// <c>ExecutionEvidenceExecutionTests</c>, which starts an instance. This is
-    /// the in-CI half: it cannot run an engine, so it checks that the
+    /// the slim-tier half: it cannot run an engine, so it checks that the
     /// declarations are answerable — an effect name the oracle has no observer
     /// for is a declaration nothing can ever discharge.
     /// </remarks>

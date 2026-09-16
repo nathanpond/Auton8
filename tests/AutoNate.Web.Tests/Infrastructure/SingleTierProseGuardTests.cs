@@ -37,12 +37,24 @@ public sealed class SingleTierProseGuardTests
     /// all the same claim in a different grammatical mood.
     /// </remarks>
     private static readonly Regex SingleTierProse = new(
+        // Built from what "CI" is DOING, not from a list of sentences. The first
+        // version was six alternatives drawn from the locations it had already
+        // found, and 15 more survived it -- one of them escaping on a two-word
+        // insertion (`exclude IT from CI`). The story's own thesis, one level up.
         @"outside (?:of )?CI\b"
         + @"|outside the gate\b"
+        + @"|\bin-CI\b"
         + @"|CI(?:'s)? exclu(?:des|sion)"
-        + @"|exclude[sd] from CI\b"
-        + @"|CI (?:skips|never reaches|cannot run|does not run|doesn't run|won't run)"
-        + @"|not run (?:in|by) CI\b",
+        + @"|exclude[sd]?\s+(?:\w+\s+){0,2}from CI\b"
+        + @"|CI (?:skips|never reaches|cannot run|can(?:no|')t run|does not run|doesn't run|won't run"
+        + @"|never runs|hosts|is exactly where|can exclude|can see)"
+        + @"|(?:not |never )run (?:in|by) CI\b"
+        + @"|where CI can see it"
+        + @"|(?:runs? )?everywhere CI runs"
+        + @"|(?:These |Those )?tests run in CI\b"
+        + @"|CI E2E job"
+        + @"|CI test-count"
+        + @"|(?:does not|doesn't) exist in CI\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Append-only records of what was true when they were written. Rewriting
@@ -55,17 +67,42 @@ public sealed class SingleTierProseGuardTests
 
     private static IEnumerable<string> Scannable()
     {
-        string[] roots = ["src", "tests", "docs", ".claude", ".github", "infra"];
-        string[] extensions = [".cs", ".md", ".ts", ".tsx", ".js", ".yml", ".yaml", ".py", ".sh"];
+        foreach (var file in ScannableFiles()) yield return file;
+    }
 
-        foreach (var root in roots)
+    // Every root that can carry prose about the tiers. `.n8` and the repo root
+    // were both missing (#486) -- and the repo root holds CLAUDE.md, which is
+    // the canonical Test-tiers document and therefore the likeliest place for
+    // someone to write this prose next.
+    internal static readonly string[] Roots =
+        ["src", "tests", "docs", ".claude", ".github", "infra", ".n8", "plugins", "services", "tools", "scripts"];
+
+    private static readonly string[] Extensions =
+        [".cs", ".md", ".ts", ".tsx", ".js", ".yml", ".yaml", ".py", ".sh"];
+
+    private static IEnumerable<string> ScannableFiles()
+    {
+        // The repo root itself, NON-recursively -- CLAUDE.md, README.md,
+        // CONTRIBUTING.md, Makefile. `Makefile` has no extension, so the
+        // extension filter would drop it.
+        foreach (var file in Directory.EnumerateFiles(RepoRoot.Path, "*", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(file);
+            if (Extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)
+                || string.Equals(name, "Makefile", StringComparison.Ordinal))
+            {
+                yield return file;
+            }
+        }
+
+        foreach (var root in Roots)
         {
             var path = Path.Combine(RepoRoot.Path, root);
             if (!Directory.Exists(path)) continue;
 
             foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
-                if (!extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)) continue;
+                if (!Extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)) continue;
 
                 var relative = Path.GetRelativePath(RepoRoot.Path, file);
 
@@ -82,23 +119,51 @@ public sealed class SingleTierProseGuardTests
         }
     }
 
+    /// <summary>
+    /// The offender scan, over any tree — so the walk itself can be tested (#486).
+    /// </summary>
+    /// <remarks>
+    /// A seam, not decoration. Nothing proved this path could report a hit: the
+    /// positive cases exercised the <em>regex</em>, and a regex mutant says
+    /// nothing about the file walk that feeds it. That is the same shape as
+    /// #485, where a gate read an attribute nobody sets and every test agreed
+    /// with it.
+    /// </remarks>
+    internal static List<string> OffendersIn(IEnumerable<(string Name, string[] Lines)> files)
+    {
+        var offenders = new List<string>();
+
+        foreach (var (name, lines) in files)
+        {
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!SingleTierProse.IsMatch(lines[i])) continue;
+
+                offenders.Add($"{name}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        return offenders;
+    }
+
     [Fact]
     public void No_file_still_teaches_the_single_tier_model()
     {
         var scanned = 0;
+        var perRoot = new Dictionary<string, int>(StringComparer.Ordinal);
         var offenders = new List<string>();
 
         foreach (var file in Scannable())
         {
             scanned++;
 
-            var lines = File.ReadAllLines(file);
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (!SingleTierProse.IsMatch(lines[i])) continue;
+            var relative = Path.GetRelativePath(RepoRoot.Path, file);
+            var root = relative.Contains(Path.DirectorySeparatorChar)
+                ? relative[..relative.IndexOf(Path.DirectorySeparatorChar)]
+                : "(repo root)";
+            perRoot[root] = perRoot.GetValueOrDefault(root) + 1;
 
-                offenders.Add($"{Path.GetRelativePath(RepoRoot.Path, file)}:{i + 1}: {lines[i].Trim()}");
-            }
+            offenders.AddRange(OffendersIn([(relative, File.ReadAllLines(file))]));
         }
 
         // A scan that looked at nothing reports a clean tree forever. Same
@@ -106,6 +171,23 @@ public sealed class SingleTierProseGuardTests
         Assert.True(scanned > 500,
             $"This guard scanned only {scanned} files. It is reporting a clean bill of health "
             + "against almost nothing — check the roots and extensions before believing it.");
+
+        // PER ROOT, not one total (#486). `src` alone is over a thousand files,
+        // so a single threshold survives deleting every root that holds the
+        // prose this guard exists for — 18 of the original 19 locations were
+        // under tests/, docs/ and .claude/. Same reasoning as the per-service
+        // tier pins in tests/tiers.env.
+        var empty = new[] { "(repo root)", "tests", "docs", ".claude", ".github", "src" }
+            .Where(root => perRoot.GetValueOrDefault(root) == 0)
+            .ToList();
+
+        Assert.True(empty.Count == 0,
+            "These roots contributed no files to the scan, so anything they contain is "
+            + "unguarded — most likely a root was dropped from the list or an extension "
+            + "stopped matching:\n  " + string.Join("\n  ", empty)
+            + "\n\nScanned per root: "
+            + string.Join(", ", perRoot.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => $"{kv.Key}={kv.Value}")));
 
         Assert.True(offenders.Count == 0,
             "These say \"CI\" where they mean a tier. \"CI\" names three different things here — "
@@ -155,5 +237,52 @@ public sealed class SingleTierProseGuardTests
     public void The_guard_does_not_fire_on_tier_vocabulary(string allowed)
     {
         Assert.DoesNotMatch(SingleTierProse, allowed);
+    }
+
+    /// <summary>
+    /// The scan reports a hit when there is one — the half nothing proved (#486).
+    /// </summary>
+    /// <remarks>
+    /// The positive <c>InlineData</c> cases below exercise the regex. This
+    /// exercises the walk: a synthetic two-file tree where one line offends, so
+    /// a scan that silently returned nothing could not pass.
+    /// </remarks>
+    [Fact]
+    public void The_scan_reports_an_offender_and_names_where_it_is()
+    {
+        var offenders = OffendersIn(
+        [
+            ("clean.cs", ["// GitHub runs the slim tier.", "// full-local runs the engine."]),
+            ("bad.cs", ["// fine", "// this spec is outside CI", "// also fine"]),
+        ]);
+
+        var only = Assert.Single(offenders);
+        Assert.Equal("bad.cs:2: // this spec is outside CI", only);
+    }
+
+    /// <summary>
+    /// Every phrasing that escaped the first sweep is now seen (#486).
+    /// </summary>
+    /// <remarks>
+    /// Quoted from the 15 locations the first guard missed. The first entry is
+    /// the one that matters most: it escaped <c>exclude[sd] from CI</c> on a
+    /// two-word insertion, which is how every one of these escapes — a small
+    /// rephrasing, never a new idea.
+    /// </remarks>
+    [Theory]
+    [InlineData("traiting the conversion test would exclude it from CI for no reason")]
+    [InlineData("CI hosts neither Flowable nor Dapr")]
+    [InlineData("This is the in-CI half: it cannot run an engine")]
+    [InlineData("asserted where CI can see it (#447)")]
+    [InlineData("which the CI E2E job does not host")]
+    [InlineData("Traited so CI can exclude it by capability")]
+    [InlineData("These tests run in CI: no engine, no browser.")]
+    [InlineData("so it runs everywhere CI runs")]
+    [InlineData("keeps it inside the CI test-count reconciliation")]
+    [InlineData("but it does not exist in CI")]
+    [InlineData("CI is exactly where you want to catch it")]
+    public void The_guard_sees_the_phrasings_that_escaped_the_first_sweep(string shipped)
+    {
+        Assert.Matches(SingleTierProse, shipped);
     }
 }

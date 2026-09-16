@@ -123,7 +123,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     public void The_oracle_runs_every_declared_cell()
     {
         // Pinned alongside the backend suite's `obliged` list, which names the
-        // same set where CI can see it. Both move together or one of them fails,
+        // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
         Assert.Equal(32, DeclaredEffects().Count);
     }
