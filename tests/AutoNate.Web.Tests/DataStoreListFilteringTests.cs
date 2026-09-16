@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -66,14 +68,23 @@ public sealed class DataStoreListFilteringTests
         // residual auth bleeds in from the test runner; the form-login
         // sets a manual identity that the auto-login middleware leaves
         // alone on subsequent GETs.
-        var aliceClient = factory.CreateClient();
+        // AllowAutoRedirect = false on purpose (#388). Following the post-login
+        // redirect lands on the SPA index, which only exists once the Vite
+        // build has run -- so in any checkout without src/AutoNate.Spa/dist
+        // (which is every git worktree) this test failed with a 404 raised by
+        // the REDIRECT TARGET, naming neither login nor the SPA.
+        //
+        // The auth cookie rides on the 302 itself, so not following it loses
+        // nothing: the list-fetch below is still the real verification that
+        // alice is authenticated as herself rather than auto-logged-in as admin.
+        var aliceClient = factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         aliceClient.DefaultRequestHeaders.Clear();
-        // HttpClient follows the post-login redirect by default and lands on
-        // the landing page with 200 OK; the auth cookie is set as a side
-        // effect. The list-fetch below is the real verification that alice
-        // is authenticated as herself rather than auto-logged-in as admin.
         var loginResp = await PostLoginWithAntiforgeryAsync(aliceClient, alice.Username, "p@ssword123");
-        loginResp.EnsureSuccessStatusCode();
+        Assert.True(
+            loginResp.StatusCode is HttpStatusCode.Found or HttpStatusCode.Redirect,
+            $"login did not redirect: {(int)loginResp.StatusCode} "
+            + await loginResp.Content.ReadAsStringAsync());
 
         // Alice sees ONLY storeA.
         var aliceList = await aliceClient.GetAsync("/api/datastores");

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -74,7 +75,14 @@ public sealed class ScriptIdentityPublishGateTests
             grant.EnsureSuccessStatusCode();
         }
 
-        var client = factory.CreateClient();
+        // AllowAutoRedirect = false on purpose (#388). The post-login redirect
+        // target is the SPA index, which exists only once the Vite build has
+        // run; in any checkout without src/AutoNate.Spa/dist -- every git
+        // worktree, and /n8-verify runs in worktrees -- following it produced a
+        // 404 from the redirect target that named neither login nor the SPA.
+        // The auth cookie is set on the 302, so nothing is lost by stopping there.
+        var client = factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Clear();
         var tokenResp = await client.GetAsync("/api/auth/antiforgery");
         tokenResp.EnsureSuccessStatusCode();
@@ -87,7 +95,10 @@ public sealed class ScriptIdentityPublishGateTests
                 ["username"] = username,
                 ["password"] = "p@ssword123",
             }));
-        login.EnsureSuccessStatusCode();
+        Assert.True(
+            login.StatusCode is HttpStatusCode.Found or HttpStatusCode.Redirect,
+            $"login did not redirect: {(int)login.StatusCode} "
+            + await login.Content.ReadAsStringAsync());
         return client;
     }
 
