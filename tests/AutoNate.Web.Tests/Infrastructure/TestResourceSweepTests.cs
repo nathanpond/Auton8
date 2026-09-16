@@ -199,6 +199,27 @@ public sealed class TestResourceSweepTests
 
         try
         {
+            // PRECONDITIONS FIRST (#493). When this failed in CI it said "The
+            // schema pass reported nothing", which blames the sweep for a
+            // planting step that had not worked. Each pass can only count what
+            // was actually planted and actually looks old, so those are checked
+            // here -- a recurrence then names the broken precondition instead of
+            // sending the next reader to the wrong file.
+            Assert.True(await RoleExistsAsync(role),
+                $"Precondition: the planted role '{role}' does not exist, so the role pass has "
+                + "nothing to find and its count says nothing about the sweep.");
+
+            var plantedAt = Directory.GetCreationTimeUtc(directory);
+            Assert.True(plantedAt < DateTime.UtcNow.AddHours(-2),
+                $"Precondition: the planted directory reads as created at {plantedAt:O}, which is "
+                + "not older than the two-hour cutoff, so the directory pass will skip it. "
+                + "`Directory.SetCreationTimeUtc` is not honoured on every filesystem -- where "
+                + "birthtime is unavailable .NET falls back to ctime, and writing metadata "
+                + "updates ctime. This is a planting failure, not a sweep failure.");
+
+            Assert.True(await SchemaExistsAsync(database, schema),
+                $"Precondition: the planted schema '{schema}' is missing from '{database}'.");
+
             var counts = await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
 
             // The numbers, not the labels.
@@ -416,6 +437,21 @@ public sealed class TestResourceSweepTests
         await ExecuteOnPostgresAsync(
             $"comment on database \"{database}\" is '{createdAt:O}';");
         await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+        // Defence in depth, NOT a proven fix (#493). `SuiteDatabasesOlderThanAsync`
+        // skips any database with a live row in pg_stat_activity, and
+        // `DropDatabaseAsync` below already clears pools for exactly that reason
+        // ("including one this test left in the pool"), so a session surviving the
+        // plant would explain the `schemas=0` seen in CI.
+        //
+        // It was measured and it does NOT explain it here: a probe counting
+        // pg_stat_activity rows for the planted database immediately after the
+        // plant reported **0 before the clear and 0 after**. So the pool is not
+        // holding a session on this machine, and the CI cause is still unknown.
+        // The clear stays because it costs nothing and closes the mechanism on a
+        // machine where the pool behaves differently -- but the assertions above
+        // are what will actually name the cause next time.
+        NpgsqlConnection.ClearAllPools();
 
         return (database, schema);
     }
