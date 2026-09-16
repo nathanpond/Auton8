@@ -27,10 +27,20 @@ ci:
     (planned in M0, #56/#58). Still no *deployment* pipeline in v1.0 scope —
     nothing is deployed anywhere; a release is an artifact others run.
   notes: >-
-    E2E runs 155 of 163 specs; the 8 excluded need Flowable and Dapr, which the
-    runner does not host. The owner did NOT select closing that gap as part of
-    "CI up to snuff" — the chosen bar is quality gates, faster feedback, and
-    making use of what a public repo unlocks (CodeQL, Semgrep, FsCheck).
+    GitHub runs the SLIM tier: every test with no `RequiresService` trait. The
+    excluded ones need Flowable, Dapr or Keycloak, which the runner does not
+    host — deliberately (#472). `make test-full-local` runs everything but
+    Keycloak against real services on a developer machine, and the release
+    runbook requires a passing full-local run before a `v*` tag. The tier
+    filters have one definition, in `tests/tiers.env`.
+
+    Stated as the rule rather than a count: the previous note said "155 of 163
+    specs; the 8 excluded need Flowable and Dapr", which was stale on both
+    numbers and omitted Keycloak. A count goes stale again; a rule does not.
+
+    The owner did NOT select closing that gap as part of "CI up to snuff" — the
+    chosen bar is quality gates, faster feedback, and making use of what a
+    public repo unlocks (CodeQL, Semgrep, FsCheck).
 
 areas: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
 # area:api      → src/AutoNate.Web (ASP.NET Core host: endpoints, persistence, authorization, hooks)

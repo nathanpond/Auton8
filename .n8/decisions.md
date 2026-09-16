@@ -7098,3 +7098,155 @@ knowing before the next milestone is planned.
 **M4d created** for the 19 unproven elements, on the owner's "split — tiers in
 M4c, elements in M4d". The three markers stay in M4c as #471, because the oracle
 cannot express a marker at all — an instrument defect, not missing coverage.
+
+## M4c execution — #473, #453
+
+**#473 — preflight runs before the compose-up, not after.** `infra-ensure`'s
+`ensure-up.sh` already waits 120 s and then says "did not become ready", which
+cannot distinguish "Docker is not running" from "Flowable crashed on boot". The
+tier preflight probes first and fails in a second naming the service *and the
+endpoint it tried*. Verified both directions (Rule 2 — the story asked for a
+failure mode, and a failure mode that is only asserted in one direction is half
+a test).
+
+**#473 — a third stale recipe, and it was the process being replaced.**
+`CONTRIBUTING.md` said "if your change touches those areas, say so in the PR so
+it gets run somewhere that has them" — stale twice over, since it also predates
+Keycloak joining the trait set. `docs/DEVELOPMENT.md` and the E2E README carried
+the other two. The guard that forbids the retired sentence then fired on my own
+first draft, which *quoted* it to explain the change. The quote went, not the
+check: a guard defeatable by quoting is not a guard.
+
+**#453 — Rule 1: the tier could not fail at all.** Reading `test-full-local`
+found a head the issue had not named. Every `dotnet test` was piped into `tee`;
+a pipeline's exit status is its last command's; the Makefile sets no `SHELL`, so
+there is no `pipefail`. Measured pre-fix: `Failed: 2, Passed: 340, Skipped: 1`
+and `make test-full-local` exiting **0**. Fixed in the same change, because
+adding a skips check to a target that cannot go red is theatre. Guarded by
+`A_tier_never_pipes_a_test_run_straight_into_tee`, which also covers `test-slim`.
+
+**#453 — size pins are per service AND per tier.** Not redundancy, and the
+measurement is the argument: removing the `RequiresService` trait from the
+live-engine oracle left the full-local total at exactly **371, reported `ok`**,
+while `Flowable` went 198 → 163. The test never left the tier, it just stopped
+needing the engine — which is exactly how an oracle gets quietly defanged. The
+mirror case (an untraited test deleted) moves the total 371 → 370 with every
+service pin `ok`. Neither check alone is sufficient.
+
+**#453 — exact pins, not floors.** House style (`ExecutionOracleSizeTests`' 29,
+the coverage ratchet). Growth has to be as visible as loss or the number drifts
+upward and stops meaning anything. The cost is a pin to move whenever tests are
+added; that is the intended friction, not an oversight.
+
+**#453 — `--skips-only` exists to put the guard in the slim tier.** The skip half
+needs no services and no `dotnet`, so `TierIntegrityScriptTests` runs on GitHub
+on every push. A guard that only runs where the thing it guards runs is a guard
+nobody executes — which was #453's own complaint about `ExecutionOracleSizeTests`.
+
+**Discovered work, filed not fixed.** #480 — `ComplexGatewayStudioRoundTripTests`
+fails 2 of 3 cells deterministically; Flowable-traited, so GitHub never ran it
+and the retired `make e2e` was the only local path. It surfaced on the **first
+`make test-full-local` ever executed**, which is the tier split earning its
+keep on day one. #481 — a backend Postgres connect timeout, one occurrence in
+four full runs, green 2/2 in isolation. Neither is in a milestone: they are not
+M4c's subject, and `/n8-plan` triages `needs-triage`.
+
+## M4c execution — #474, #471, #475, #476, #477, #227
+
+**#474 — the extraction is the story, not the test.** The AC says the helpers
+move to a shared class "rather than having `private` loosened", and the reason is
+worth restating: reaching them through a loosened `private` would move the test
+and leave the coverage in the Flowable-traited class where GitHub never runs it.
+`BpmnDiagramHelperTests` deliberately does not inherit `E2ETestBase`, because
+that base carries `[Collection(AutoNateE2ECollection.Name)]` and the collection
+fixture is what spawns AutoNate.Web and Playwright. Staying outside the
+collection is what makes the class service-free, therefore untraited, therefore
+slim.
+
+**#474 — one AC contradicted another, flagged rather than silently resolved.**
+AC 3 asked for a case proving "a back edge does not make an upstream node
+reachable"; that is `ReachableFrom`'s property and AC 2 deletes `ReachableFrom`.
+Covered the other three named cases and substituted the complement `NestedIdsIn`
+was actually fixed for (#434). Said so on the issue, with what to change if the
+back-edge case was the point.
+
+**#474 — the mutation sweep found a hole in my own tests.** `ElementTypeIn`
+survived `=> "userTask"` because both its cases asserted userTask: one constant
+satisfied the positive case and the namespace-prefix case together. Fixed by
+making them disagree. This is AC 4 earning its place on its first run, and it is
+the argument for mutating every helper rather than the interesting ones.
+
+**#471 — the instrument gap was the effect vocabulary, not the identity check.**
+The obvious reading is that marker rows went undeclared because
+`localName: "*"` has no tag to compare. True, and not sufficient: the four-name
+vocabulary could not say "more than one" or "one at a time" either. Both halves
+had to move. Each new effect name owes a negative control, and the two are each
+other's -- every inert diagram here is a real, working multi-instance activity
+carrying the other marker, so neither observer can be satisfied by a diagram that
+does nothing.
+
+**#471 — `tasks-appear-in-turn` completes a task deliberately.** "Exactly one
+live task" is also true of a plain user task with no marker at all. An oracle
+accepting it would be green on the absence of the thing it exists to prove.
+
+**#471 — I wrote head 5b by hand and caught it.** The first draft of the marker
+branch returned before `ObserveAsync`, which is exactly #453's "gut the cell body
+with one early return". Removing it surfaced a second early return that predated
+this change and skipped the effect check for any row rewritten to a plain
+element. The theory now has zero `return;` between entry and observation.
+
+**#471 — two findings from pointing the instrument somewhere new.**
+`<association>` is a BPMN *artifact* and the schema puts artifacts after every
+flow element, so it must come last or Flowable refuses with
+cvc-complex-type.2.4.a. And #482: `ExpandMultiInstanceCardinality` writes
+`xsi:type="bpmn:tFormalExpression"`, a QName with a hard-coded prefix, so a legal
+default-namespace diagram cannot publish a fixed-count multi-instance. Both were
+only findable because the oracle's minimal diagrams are unlike anything the
+studio emits.
+
+**#475 — the guard requires context, not a mention.** `make test-full-local` in a
+"see also" line would satisfy a substring match while telling a releaser nothing.
+It asserts a HEADING naming both the full tier and "before tagging", positioned
+earlier in the file than "Tag and push": a pre-tag requirement printed after the
+tag is not one.
+
+**#476 — `make test-slim` got the pins too, and that was not scope creep.**
+CLAUDE.md promises the target runs everything GitHub runs. Once the workflow had
+pins and the target did not, the promise was false in the direction that matters:
+green locally, red on the PR.
+
+**#476 — one AC assumption corrected.** Adding a `RequiresService` trait to a
+BACKEND test does not move it out of slim: `ci.yml` applies the slim filter to
+the E2E project only, and no backend test carries the trait. The trait escape is
+E2E-only; the backend pin catches deletion instead. Both projects got both checks
+anyway, because that asymmetry could change.
+
+**#477 — the phrase set, measured rather than repeated.** Against the pre-sweep
+tree: 19 hits for the wide set, 12 for the three literals. The story predicted
+8/19, which holds case-sensitively; mine is case-insensitive. Reported what I
+measured. Either way a third of the sweep escapes the obvious spellings.
+
+**#477 — M4c's own description needed no edit.** Its AC says it describes two
+tiers and `make test-full`; that was corrected during planning. Verified rather
+than assumed before ticking the box.
+
+**#227 — a flake that was a product defect.** `MenuTreeEditor.applyEdit`
+dismissed the modal and updated the list optimistically BEFORE sending the PATCH,
+so "the dialog closed" meant "the request is in flight". Navigating immediately
+aborted it and the rename was lost silently -- the failure handler sets in-page
+error state, and an aborted request has no page left to show it on. Fixed in the
+product rather than waited on in the test, because the story explicitly rules out
+"added a wait" and because a test fix would have left users losing renames.
+Measured 19/20 pre-fix and 20/20 post-fix in isolation, plus a deterministic
+repro that fails 100% before and passes 100% after.
+
+**#227 — my own repro was wrong first, and that is the interesting part.** It
+intercepted the wrong route and method and read the wrong path, so nothing was
+delayed and the test failed on an unrelated assertion with an EMPTY message. Had
+it failed on the right line it would have "proved" the bug while testing nothing.
+Reading the failure text rather than the exit code is what caught it.
+
+**Discovered work, filed not fixed:** #480 (studio never POSTs the save, 2 of 3
+cells, deterministic), #481 (Postgres transport flakes, three occurrences, three
+error codes, raised to sev:medium), #482 (default-namespace multi-instance cannot
+publish). None is in a milestone: none is M4c's subject.

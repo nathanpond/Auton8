@@ -644,7 +644,7 @@
       "name": "Multi-Instance (Parallel)",
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
-      "declaredEffect": null,
+      "declaredEffect": "tasks-appear-together",
       "liveEngineTestsMentioningIt": [
         "ComplexGatewayStudioRoundTripTests",
         "MultiInstanceExecutionTests"
@@ -654,7 +654,7 @@
       "name": "Multi-Instance (Sequential)",
       "localName": "*",
       "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
-      "declaredEffect": null,
+      "declaredEffect": "tasks-appear-in-turn",
       "liveEngineTestsMentioningIt": [
         "ComplexGatewayStudioRoundTripTests",
         "MultiInstanceExecutionTests"
@@ -664,7 +664,7 @@
       "name": "Compensation Marker",
       "localName": "*",
       "eventDefinition": "isForCompensation",
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests",
         "ComplexGatewayStudioRoundTripTests"

@@ -47,9 +47,17 @@ internal sealed class KeycloakRealm : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// Null rather than an exception so a developer without the profile running
-    /// gets a skipped spec with an explanation, not a stack trace. CI never
-    /// reaches this — the specs carry <c>RequiresService=Keycloak</c> and are
-    /// filtered out — so this path exists purely for the local case.
+    /// gets an explanation rather than a stack trace. Neither tier that runs
+    /// today reaches this: the specs carry <c>RequiresService=Keycloak</c>, which
+    /// slim and full-local both filter out, so this path exists purely for
+    /// someone selecting them by hand.
+    /// </para>
+    /// <para>
+    /// It becomes a failure path, not a convenience, once <b>full-keycloak</b>
+    /// exists (#479). In that tier the service is one the tier is responsible for
+    /// standing up, so "Keycloak is not reachable" means the tier did not get
+    /// what it needs — and a tier that skips what it cannot reach reports success
+    /// for the wrong reason.
     /// </remarks>
     internal static async Task<KeycloakRealm?> ConnectAsync()
     {

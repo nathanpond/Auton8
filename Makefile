@@ -15,7 +15,9 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+include tests/tiers.env
+
+.PHONY: test-slim test-full-local app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
 
 # Verify the documented prerequisites and port availability before anything
 # tries to start. Reports every problem in one pass so a machine is fixed once,
@@ -182,5 +184,90 @@ e2e-install:
 		--depsfile tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.deps.json \
 		tests/AutoNate.E2E.Tests/bin/Debug/net10.0/Microsoft.Playwright.dll install chromium
 
-e2e: infra-ensure e2e-install
-	dotnet test tests/AutoNate.E2E.Tests --no-build
+# ---- test tiers ------------------------------------------------------------
+#
+# slim is what GitHub runs, and `make test-slim` runs ALL of it -- not the xUnit
+# subset. A developer who runs a partial slim green and then eats a red build
+# from lint or the a11y ratchet has been handed a false gate.
+test-slim: e2e-install
+	@echo "== slim: SPA =="
+	cd src/AutoNate.Spa && npm run lint && npx tsc -b && npm test && npm run build
+	@echo "== slim: backend =="
+	@# The EXACT pin GitHub checks, not just a non-zero count (#476). CLAUDE.md
+	@# promises this target runs everything GitHub runs; once the workflow gained
+	@# pins, a target without them would make that promise false in the direction
+	@# that matters -- green here, red on the PR.
+	@discovered=$$(dotnet test tests/AutoNate.Web.Tests --nologo --list-tests 2>/dev/null \
+	    | grep -cE '^    [A-Za-z]'); \
+	  if [ "$$discovered" != "$(AUTONATE_TIER_COUNT_SLIM_BACKEND)" ]; then \
+	    echo "backend discovered $$discovered tests, pinned at $(AUTONATE_TIER_COUNT_SLIM_BACKEND) in tests/tiers.env."; \
+	    echo "If that was deliberate, move the pin in the same commit so the change is in the diff."; \
+	    exit 1; \
+	  fi; \
+	  echo "slim backend: $$discovered tests, at its pin"
+	dotnet test tests/AutoNate.Web.Tests --nologo
+	@echo "== slim: E2E (untraited only) =="
+	@# A filter that matches nothing runs no tests and exits 0 -- this repo's own
+	@# named failure mode. The pin subsumes it, and says which direction moved.
+	@count=$$(dotnet test tests/AutoNate.E2E.Tests --nologo --list-tests \
+	    --filter "$(AUTONATE_TIER_SLIM_FILTER)" 2>/dev/null | grep -cE '^    [A-Za-z]'); \
+	  if [ "$$count" -eq 0 ]; then \
+	    echo "slim discovered ZERO E2E tests -- the filter matched nothing, which reads as a faster, greener build"; \
+	    exit 1; \
+	  fi; \
+	  if [ "$$count" != "$(AUTONATE_TIER_COUNT_SLIM_E2E)" ]; then \
+	    echo "slim E2E discovered $$count tests, pinned at $(AUTONATE_TIER_COUNT_SLIM_E2E) in tests/tiers.env."; \
+	    echo "A RequiresService trait on a slim class moves a test out of this tier -- that is the shrink the pin exists to show."; \
+	    exit 1; \
+	  fi; \
+	  echo "slim E2E: $$count tests discovered, at its pin"
+	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_SLIM_FILTER)"
+
+# full-local is everything except Keycloak, with real services. #473 gives this
+# target its service stand-up and its preflight; until then it runs the tier
+# against whatever is already up.
+# Dapr is IN this tier -- the owner's split is "everything except keycloak" --
+# so the app runs with a sidecar and the RequiresService=Dapr specs are actually
+# exercised rather than quietly excluded.
+test-full-local: infra-ensure e2e-install
+	@# Before anything else: a dead endpoint fails in a second, named, rather
+	@# than after ensure-up's 120s generic timeout.
+	./infra/tier-preflight.sh
+	@# Every step's status is captured and OR-ed into rc rather than allowed to
+	@# abort the recipe, so the integrity check and the summary run even when the
+	@# suite is red -- a lost test otherwise hides behind a failure, which is how
+	@# backend-reconcile already works and for the same reason.
+	@#
+	@# `{ cmd; echo $$? > f; } | tee log` rather than a bare pipe: a pipeline's
+	@# status is its LAST command's, so `dotnet test | tee` is always tee's 0.
+	@# The measured pre-fix behaviour was `Failed: 2, Passed: 340, Skipped: 1`
+	@# and `make test-full-local` exiting 0. There is no `set -o pipefail` to
+	@# lean on -- make runs recipes under /bin/sh with no SHELL override here.
+	@rc=0; \
+	  echo "== full-local: backend =="; \
+	  { dotnet test tests/AutoNate.Web.Tests --nologo 2>&1; echo $$? > /tmp/n8-full-backend.rc; } \
+	    | tee /tmp/n8-full-backend.log; \
+	  [ "$$(cat /tmp/n8-full-backend.rc)" -eq 0 ] || rc=1; \
+	  echo "== full-local: E2E (all but Keycloak) =="; \
+	  { dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1; \
+	    echo $$? > /tmp/n8-full-e2e.rc; } | tee /tmp/n8-full-e2e.log; \
+	  [ "$$(cat /tmp/n8-full-e2e.rc)" -eq 0 ] || rc=1; \
+	  echo ""; \
+	  ./infra/tier-integrity.sh /tmp/n8-full-backend.log /tmp/n8-full-e2e.log || rc=1; \
+	  echo ""; echo "== full-local summary =="; \
+	  echo "  backend : $$(grep -hoE 'Passed: +[0-9]+' /tmp/n8-full-backend.log 2>/dev/null | tail -1)"; \
+	  echo "  E2E     : $$(grep -hoE 'Passed: +[0-9]+' /tmp/n8-full-e2e.log 2>/dev/null | tail -1)"; \
+	  echo "  skipped : $$(grep -hoE 'Skipped: +[0-9]+' /tmp/n8-full-backend.log /tmp/n8-full-e2e.log 2>/dev/null | tr -s " " | paste -sd" " -)"; \
+	  [ $$rc -eq 0 ] && echo "  result  : PASS" || echo "  result  : FAIL"; \
+	  exit $$rc
+
+# RETIRED (#472). `make e2e` ran the E2E project UNFILTERED against a stack that
+# already has Flowable and Dapr, so it was a fourth, unnamed tier -- and it went
+# red rather than skipping on the Keycloak specs. It now points at the named
+# tiers rather than surviving as a thing nobody can place.
+e2e:
+	@echo "make e2e is retired. The tiers are named now:"
+	@echo "  make test-slim        what GitHub runs"
+	@echo "  make test-full-local  everything except Keycloak, with real services"
+	@echo "See CLAUDE.md > Test tiers."
+	@exit 1

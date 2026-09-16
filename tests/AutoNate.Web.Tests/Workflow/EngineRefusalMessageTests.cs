@@ -493,14 +493,14 @@ public sealed class EngineRefusalMessageTests
     }
 
     /// <summary>
-    /// The ad-hoc rows, asserted where CI can run them (#372).
+    /// The ad-hoc rows, asserted in the slim tier (#372).
     /// </summary>
     /// <remarks>
     /// #362 added the 409 row and its only assertion was in
     /// <c>AdhocSubProcessExecutionTests</c>, which carries
-    /// <c>RequiresService=Flowable</c> — the suite CI excludes. Deleting the row
-    /// left 781/781 green. A fix for a regression CI could not see, guarded only
-    /// by a test CI cannot run.
+    /// <c>RequiresService=Flowable</c> and is therefore full-local only. Deleting
+    /// the row left 781/781 green: a fix for a regression the merge gate could
+    /// not see, guarded only by a test no merge gate runs.
     /// <c>EngineRefusal.Describe</c> is a pure function; there was never a reason
     /// for these to need an engine.
     /// </remarks>

@@ -79,6 +79,63 @@ defaults fight Mantine's.
 
 The app shell at `src/AutoNate.Spa/src/shell/AppShell.tsx` uses Mantine `<AppShell>` with `<AppShell.Header>` wrapping `NavMenu` and `<AppShell.Main>` wrapping page content. The right-side AI chatbot (`AgentSidebar`) stays `position: fixed` because its overlay/fill × over-header/under-header modes don't map cleanly onto `<AppShell.Aside>`.
 
+## Test tiers
+
+"CI" means three different things here, so they have names. Every boundary is
+the `RequiresService` xUnit trait — there is no second list — and the filters
+have one definition in `tests/tiers.env`, read by the Makefile and by `ci.yml`.
+
+| tier | runs | where | command |
+|---|---|---|---|
+| **slim** | no `RequiresService` trait | GitHub | `make test-slim` |
+| **full-local** | everything except `RequiresService=Keycloak` | your machine | `make test-full-local` |
+| **full-keycloak** | everything | not built yet | — |
+
+**Slim is not service-free.** The untraited backend suite needs Postgres, NATS
+and Redis; GitHub runs Redis as a service container and Postgres as a
+`docker run`, deliberately, because a service container cannot take
+`-c max_connections=300`. Slim is *what GitHub already stands up*.
+
+**`make test-slim` runs everything GitHub runs** — SPA lint, typecheck, vitest,
+build, the backend suite, the untraited E2E specs. Not the xUnit subset: a
+developer who runs a partial slim green and then eats a red build from lint or
+the a11y ratchet has been handed a false gate.
+
+**What slim cannot tell you.** No BPMN element is proven to *execute* in slim —
+that needs a live Flowable, and GitHub does not run one. This is why
+`make test-full-local` exists and why the release runbook requires it before a
+tag.
+
+`make e2e` is retired. It ran the E2E project unfiltered against a
+Flowable-bearing stack, which made it a fourth, unnamed tier that went red
+rather than skipping on the Keycloak specs.
+
+**A tier that got smaller is a failure, not a faster run.** `test-full-local`
+ends in `infra/tier-integrity.sh`, which asks two questions and fails on either:
+did anything *skip*, and does each filter still discover the exact number pinned
+in `tests/tiers.env`?
+
+The pins are **exact, not floors** — house style, alongside
+`ExecutionOracleSizeTests`' 29 and the coverage ratchet. Growth has to be as
+visible as loss, or the number drifts upward and stops meaning anything. Add
+tests, move the pin in the same commit; that visibility is the point, not
+friction to route around.
+
+They are pinned **per service as well as per tier**, which is not redundancy.
+Measured: deleting the `RequiresService` trait from the live-engine oracle left
+the full-local total at exactly **371 — `ok`** — while `Flowable` went 198 → 163.
+The test never left the tier; it just stopped needing the engine, which is
+precisely how an oracle gets quietly defanged. Only the per-service pin sees it.
+The tier total catches the mirror case, an untraited test deleted (371 → 370),
+which the service pins are blind to.
+
+Both checks run **after** the suites and **whether or not they passed**, the way
+`backend-reconcile` does: a lost test otherwise hides behind a failure. Which is
+also why no recipe may pipe `dotnet test` into `tee` — a pipeline's status is
+its last command's, there is no `pipefail` here, and for a while
+`make test-full-local` exited **0** on `Failed: 2, Passed: 340, Skipped: 1`.
+`TestTierDefinitionTests` fails the build if that form comes back.
+
 ## n8SDLC project
 
 This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-stat` shows where things stand). If a change made in this session deviates from what planned issues assume — different library, provider, architecture, dropped/added scope, or amending a declared invariant below — do two things before finishing:

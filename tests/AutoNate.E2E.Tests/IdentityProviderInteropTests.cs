@@ -22,7 +22,10 @@ namespace AutoNate.E2E.Tests;
 /// software somebody else wrote.
 ///
 /// Traited <c>RequiresService=Keycloak</c> at class level, so a spec added here
-/// inherits CI's exclusion rather than relying on someone remembering it.
+/// inherits the tier rather than relying on someone remembering it. Keycloak is
+/// the one service neither <b>slim</b> nor <b>full-local</b> stands up, so these
+/// belong to <b>full-keycloak</b> — a tier that does not exist yet (#479). Until
+/// it does, nothing runs them but a developer with <c>make keycloak-up</c>.
 /// </remarks>
 [Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Keycloak")]
@@ -178,11 +181,13 @@ public sealed class IdentityProviderInteropTests : E2ETestBase
 
         // Fail rather than silently pass when Keycloak is absent. A spec that
         // green-ticks itself because the thing it tests was unreachable is worse
-        // than no spec — CI excludes these by trait, so reaching this line at
-        // all means someone ran them locally without the profile up.
+        // than no spec. Both tiers that run today filter these out by trait, so
+        // reaching this line means someone selected them deliberately without the
+        // profile up -- and once full-keycloak exists (#479) it will mean the
+        // tier's own service did not come up, which is a failure, not a skip.
         Assert.True(realm is not null,
             "Keycloak is not reachable. Run `make keycloak-up`. These specs carry "
-            + "RequiresService=Keycloak, so CI skips them by filter and never reaches this.");
+            + "RequiresService=Keycloak, so neither slim nor full-local selects them.");
         return realm!;
     }
 

@@ -61,12 +61,17 @@ all true of a process that has not started yet. Wait for a **positive** signal f
 then assert the negative alongside it — and prefer waiting on the thing that proves
 the process got where you think it did.
 
-## Traits and the CI contract
+## Traits and the tier contract
 
-Anything touching a real engine carries `RequiresService=Flowable`. CI excludes those
-by trait (159/169 E2E run by design), and `ci.yml` reconciles the discovered test
-count against what the shards actually ran — a filter that matches nothing would
-otherwise read as a faster, greener build.
+Anything touching a real engine carries `RequiresService=Flowable`, which puts it in
+the **full-local** tier: GitHub does not run it, `make test-full-local` does. The
+trait is the only boundary — see CLAUDE.md > Test tiers.
+
+Both tiers now refuse to run smaller than they are: each pins an exact discovered
+count in `tests/tiers.env` and fails on any skipped test. So adding a traited spec
+turns the **full-local** pin red until you move it in the same commit, and
+forgetting the trait turns the **slim** pin red instead. Either way the change is a
+diff a reviewer sees rather than a number that quietly absorbed it.
 
 Unit-level tests (`WorkflowBpmnXmlTests`, validation, serialisation round-trip) need
 no engine and no trait. Prefer them: they are faster and they cover the validation

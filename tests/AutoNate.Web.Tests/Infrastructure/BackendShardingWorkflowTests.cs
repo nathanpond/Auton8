@@ -222,13 +222,19 @@ public sealed class BackendShardingWorkflowTests
     [Fact]
     public void The_e2e_and_spa_jobs_were_not_touched_by_sharding()
     {
-        // #67 is explicitly scoped to the backend suite, and the E2E job's
-        // Flowable/Dapr trait exclusions are a recorded decision, not an
-        // oversight.
+        // #67 is explicitly scoped to the backend suite, and the E2E job runs
+        // the SLIM tier -- a recorded decision, not an oversight (#472).
         var e2e = Job("e2e");
 
         Assert.DoesNotContain("matrix", e2e);
         Assert.DoesNotContain("shard", e2e);
-        Assert.Contains("RequiresService!=Flowable&RequiresService!=Dapr", Workflow(), StringComparison.Ordinal);
+
+        // Was: Assert.Contains("RequiresService!=Flowable&RequiresService!=Dapr", ...).
+        // That pinned the filter as a literal and was ALREADY STALE -- it named
+        // two services while the job filtered three, and passed only because
+        // Assert.Contains is a substring check. The filter now has one
+        // definition in tests/tiers.env; TestTierDefinitionTests pins that both
+        // readers use it, and derives the slim filter from the service list.
+        Assert.Contains("$AUTONATE_TIER_SLIM_FILTER", Workflow(), StringComparison.Ordinal);
     }
 }

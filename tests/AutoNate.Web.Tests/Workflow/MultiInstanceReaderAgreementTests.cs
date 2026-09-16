@@ -19,7 +19,8 @@ namespace AutoNate.Web.Tests.Workflow;
 /// multi-instance was refused with "has nothing to repeat over. Set the collection
 /// … or a fixed number of times" — telling the author to set what they had set.
 /// The only test that caught it, <c>MultiInstanceExecutionTests</c>, carries
-/// <c>RequiresService=Flowable</c>, which CI excludes.
+/// <c>RequiresService=Flowable</c>, which puts it in the full-local tier — so no
+/// merge gate ran it.
 /// </para>
 /// <para>
 /// So these rows deliberately need <b>no engine</b>. The rule they guard is a pure

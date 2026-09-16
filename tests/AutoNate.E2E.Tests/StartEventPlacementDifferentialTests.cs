@@ -32,9 +32,10 @@ namespace AutoNate.E2E.Tests;
 /// of is still in the product, so it is still in the test.
 /// </para>
 /// <para>
-/// Deliberately <c>RequiresService=Flowable</c> and therefore outside CI: the
-/// engine IS the oracle here. There is no version of this test that runs without
-/// one, and a mocked oracle would be the enumerated rule again wearing a costume.
+/// Deliberately <c>RequiresService=Flowable</c>, so this is a full-local test
+/// and not a slim one: the engine IS the oracle here. There is no version of it
+/// that runs without one, and a mocked oracle would be the enumerated rule again
+/// wearing a costume.
 /// </para>
 /// </remarks>
 [Trait("RequiresService", "Flowable")]

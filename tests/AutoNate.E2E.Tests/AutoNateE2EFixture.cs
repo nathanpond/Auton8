@@ -37,10 +37,11 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     // CREATEs raced ("23505: duplicate key ... pg_database_datname_index").
     // Three verification agents hit this; one lost four runs to it.
     //
-    // That is not merely inconvenient. CI excludes `RequiresService=Flowable`,
-    // so every execution-level guarantee in M4 is checked only on a developer
-    // machine — and anything making those runs fragile makes the milestone's
-    // central evidence fragile.
+    // That is not merely inconvenient. `RequiresService=Flowable` puts those
+    // specs in the full-local tier, which GitHub does not run, so every
+    // execution-level guarantee in M4 is checked only by `make test-full-local`
+    // — and anything making those runs fragile makes the milestone's central
+    // evidence fragile.
     //
     // Per-run, like `PostgresTestDatabase` already does for the backend suite.
     // Lowercase because an unquoted identifier folds to lowercase in Postgres and
