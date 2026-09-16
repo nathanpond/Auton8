@@ -68,6 +68,94 @@ internal static class BpmnDiagram
         return definition?[..^Suffix.Length];
     }
 
+    /// <summary>
+    /// The activity marker `Ev_1` carries, in the manifest's vocabulary (#471).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A marker is not an element. <c>bpmn-support.json</c> gives these rows
+    /// <c>localName: "*"</c> — they are something a host activity carries, not a
+    /// tag of their own — so the oracle's identity assertion had nothing to
+    /// compare and three rows went undeclared. One of them is the Loop Marker
+    /// archetype the whole milestone opens on: a multi-instance marker Flowable
+    /// accepted at deployment and then ran once where the author asked for three.
+    /// </para>
+    /// <para>
+    /// Returns the manifest's own spelling so the comparison is
+    /// manifest-against-diagram, exactly as it is for a tag row — the diagram
+    /// never gets to state its own expectation (#412).
+    /// </para>
+    /// <para>
+    /// <c>isSequential</c> defaults to parallel when absent, which is what BPMN
+    /// says and what Flowable does. Treating "absent" as its own answer would
+    /// make a diagram that omits the attribute match neither row.
+    /// </para>
+    /// </remarks>
+    internal static string? MarkerIn(string xml) => MarkerOf(ElementIn(xml, "Ev_1"));
+
+    /// <summary>
+    /// <see cref="MarkerIn"/> against an element already in hand — the deployed
+    /// form read back from the engine, which is not a whole document.
+    /// </summary>
+    internal static string? MarkerOf(XElement element)
+    {
+        var loop = element.Elements()
+            .FirstOrDefault(e => e.Name.LocalName == "multiInstanceLoopCharacteristics");
+
+        if (loop is not null)
+        {
+            var sequential = string.Equals(
+                (string?)loop.Attribute("isSequential"), "true", StringComparison.OrdinalIgnoreCase);
+
+            return sequential
+                ? "multiInstanceLoopCharacteristics:sequential"
+                : "multiInstanceLoopCharacteristics:parallel";
+        }
+
+        if (element.Elements().Any(e => e.Name.LocalName == "standardLoopCharacteristics"))
+        {
+            return "standardLoopCharacteristics";
+        }
+
+        return string.Equals(
+            (string?)element.Attribute("isForCompensation"), "true", StringComparison.OrdinalIgnoreCase)
+            ? "isForCompensation"
+            : null;
+    }
+
+    /// <summary>
+    /// How many instances the author asked `Ev_1`'s multi-instance marker for (#471).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reads both spellings, because Auton8 rewrites between them: the stored
+    /// form carries <c>autonate:loopCardinality</c> as an <b>attribute</b>, and
+    /// publish turns it into a <c>&lt;bpmn:loopCardinality&gt;</c> child for the
+    /// engine. A reader that knew only one would report "no cardinality" for
+    /// half the lifecycle of the same diagram.
+    /// </para>
+    /// <para>
+    /// This is the author's INTENT, and it is the half of #325 that was never
+    /// checkable: "ran exactly once where the author asked for three" is a
+    /// comparison between this number and what the engine did.
+    /// </para>
+    /// </remarks>
+    internal static int? LoopCardinalityIn(string xml)
+    {
+        var loop = ElementIn(xml, "Ev_1").Elements()
+            .FirstOrDefault(e => e.Name.LocalName == "multiInstanceLoopCharacteristics");
+
+        if (loop is null) return null;
+
+        var attribute = loop.Attributes()
+            .FirstOrDefault(a => a.Name.LocalName == "loopCardinality")?.Value;
+
+        var child = loop.Elements()
+            .FirstOrDefault(e => e.Name.LocalName == "loopCardinality")?.Value;
+
+        return int.TryParse(attribute ?? child, out var count) ? count : null;
+    }
+
     /// <summary>The ids of elements nested INSIDE <paramref name="id"/> (#434).</summary>
     /// <remarks>
     /// A container's declared effect is something inside it. Descendants of the

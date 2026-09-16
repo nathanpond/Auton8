@@ -117,7 +117,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set where CI can see it. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(29, DeclaredEffects().Count);
+        Assert.Equal(32, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -151,6 +151,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         { "instance-waits", "nothing waits, so the instance runs straight through" },
         { "task-appears", "the only task is outside the sub-process, so the container creates none" },
         { "variable-written", "no script writes `proof`" },
+
+        // These two are each other's control (#471). Each diagram is a real,
+        // deployable, WORKING multi-instance activity carrying the other kind of
+        // marker -- so neither observer can be satisfied by a diagram that simply
+        // does nothing, which is the usual way a negative control goes soft.
+        { "tasks-appear-together", "the marker is sequential, so only one instance is live at a time" },
+        { "tasks-appear-in-turn", "the marker is parallel, so all three appear at once" },
     };
 
     [Theory]
@@ -189,9 +196,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     // Hoisted out of `Diagram` so the negative controls build their diagrams the
     // same way the real cells do (#463). A control assembled differently from
     // the thing it guards is a second construction to get wrong.
+    //
+    // `xmlns:bpmn` is bound to the SAME uri as the default namespace, which looks
+    // redundant and is not (#471). `ExpandMultiInstanceCardinality` writes
+    // `xsi:type="bpmn:tFormalExpression"` on the loopCardinality child it
+    // synthesises, and that value is a QName: without the prefix bound, Flowable
+    // refuses the deployment. Measured -- removing this one line fails exactly
+    // the two Multi-Instance cells and nothing else. (`xmlns:xsi` is NOT needed;
+    // XDocument declares it when it serialises the attribute. Measured the same
+    // way: removing it leaves 32/32.)
     private static string WrapIn(string key, string roots, string body) => $"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                             xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                              xmlns:flowable="http://flowable.org/bpmn"
                              xmlns:autonate="http://autonate.dev/workflows"
                              targetNamespace="http://autonate.dev/workflows">
@@ -251,6 +268,26 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         "variable-written" => WrapIn(key, "", LinearIn(
             """<scriptTask id="Ev_1" name="inert" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('echo', 'x');</script></scriptTask>""")),
 
+        // THE TWO MARKER CONTROLS ARE EACH OTHER (#471).
+        //
+        // Each inert diagram here is a real, deployable, WORKING multi-instance
+        // activity -- it simply carries the other kind of marker. That is the
+        // strongest form this complement can take: neither control can be
+        // satisfied by a diagram that does nothing, so an observer that has
+        // stopped discriminating cannot hide behind "well, nothing happened".
+        //
+        // Sequential runs one at a time, so "more than one at once" must not hold.
+        "tasks-appear-together" => WrapIn(key, "", LinearIn(
+            """<userTask id="Ev_1" name="approve">"""
+            + """<multiInstanceLoopCharacteristics isSequential="true" autonate:loopCardinality="3"/>"""
+            + """</userTask>""")),
+
+        // Parallel creates all three at once, so "one at a time" must not hold.
+        "tasks-appear-in-turn" => WrapIn(key, "", LinearIn(
+            """<userTask id="Ev_1" name="approve">"""
+            + """<multiInstanceLoopCharacteristics isSequential="false" autonate:loopCardinality="3"/>"""
+            + """</userTask>""")),
+
         _ => throw new InvalidOperationException(
             $"No inert diagram for effect '{effect}'. Every observable effect needs one, or the "
             + "observer it belongs to has no negative control (#463)."),
@@ -298,7 +335,31 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // the half that catches a swapped diagram; the engine assertion below is
         // the half that catches a swapped behaviour. Deriving one from the other
         // collapses both (#412).
-        Assert.Equal(declaredLocalName, ElementTypeIn(xml));
+        // A MARKER ROW IS KEYED ON THE MARKER, NOT A TAG (#471).
+        //
+        // `localName: "*"` means "carried by any host activity". There is no tag
+        // to compare, and `eventDefinition` holds
+        // `multiInstanceLoopCharacteristics:parallel` rather than an
+        // `*EventDefinition` child -- so BOTH assertions below fail on shape, and
+        // that is why the three marker rows sat undeclared through all of M4b.
+        // One of them is #325's founding example.
+        //
+        // The contract is unchanged: the MANIFEST says what the diagram must
+        // contain and the diagram never votes on its own expectation (#412).
+        // Only the vocabulary differs.
+        var isMarkerRow = string.Equals(declaredLocalName, "*", StringComparison.Ordinal);
+
+        if (isMarkerRow)
+        {
+            Assert.Equal(declaredEventDefinition, MarkerIn(xml));
+        }
+        else
+        {
+            Assert.Equal(declaredLocalName, ElementTypeIn(xml));
+        }
+
+        if (!isMarkerRow)
+        {
 
         // AND ITS EVENT DEFINITION (#435). `localName` alone is not an identity:
         // four intermediate catches share `intermediateCatchEvent`, six throws
@@ -309,8 +370,16 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // on (localName, eventDefinition) because that pair, not the tag, names
         // an element.
         Assert.Equal(declaredEventDefinition, EventDefinitionIn(xml));
+        }
 
-        var expectedType = declaredLocalName;
+        // For a marker row the host is whatever the diagram builds, so the
+        // engine-name comparison below has no manifest-side expectation to use.
+        // The host is pinned a different way instead -- see the deployed-form
+        // check further down, which requires the deployed host to be the SAME
+        // tag as the authored one and to still carry the marker. What actually
+        // stops a stand-in here is the effect: `tasks-appear-together` is not
+        // satisfiable by a scriptTask, an unmarked userTask, or a sequential one.
+        var expectedType = isMarkerRow ? ElementTypeIn(xml) : declaredLocalName;
         var enteredAs = await EventuallyEnteredAsync(api, instance, "Ev_1");
 
         Assert.True(
@@ -364,10 +433,33 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             $"{name}: could not read the deployed form of 'Ev_1' back from the engine, so "
             + "nothing here can say whether the publish rewrite preserved it (#454).");
 
-        var wasRewritten = !string.Equals(
+        // A MARKER MUST SURVIVE PUBLISH (#471).
+        //
+        // This is the founding bug's own shape: a marker that draws fine, stores
+        // fine, and is gone by the time the engine sees it. Auton8 genuinely does
+        // rewrite inside this marker -- `autonate:loopCardinality` is an
+        // attribute in the stored form and a <bpmn:loopCardinality> CHILD in the
+        // deployed one -- so "we rewrite it" is not an excuse for losing it.
+        //
+        // The host is pinned here too. `localName: "*"` gives the manifest no
+        // opinion on the host tag, so the constraint is that publish did not
+        // CHANGE it: authored tag == deployed tag.
+        if (isMarkerRow)
+        {
+            Assert.Equal(ElementTypeIn(xml), deployed!.Name.LocalName);
+
+            Assert.Equal(declaredEventDefinition, MarkerOf(deployed));
+        }
+
+        var wasRewritten = !isMarkerRow && !string.Equals(
             deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal);
 
-        if (declaredEventDefinition is not null || wasRewritten)
+        // NOT `return` (#463). Everything from here to the effect observation is
+        // a check on the PUBLISH REWRITE; the effect observation is the point of
+        // the cell. An early return in this stretch skips it, which is head 5b of
+        // #453 -- a cell that runs, stays green, and observes nothing -- and the
+        // first draft of the marker branch above did exactly that.
+        if (!isMarkerRow && (declaredEventDefinition is not null || wasRewritten))
         {
             if (deployed.Name.LocalName == "serviceTask")
             {
@@ -399,68 +491,71 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             }
             else
             {
-                if (declaredEventDefinition is null)
+                // Rewritten to another plain element with nothing to carry. No
+                // shipped row is in this position; if one appears, the rewrite is
+                // unguarded -- worth knowing, not worth failing on a shape nobody
+                // has produced.
+                //
+                // This was an early `return`, which also skipped the effect
+                // observation further down -- so a row arriving here would have
+                // proved nothing at all rather than merely skipping this check.
+                // That is head 5b of #453 living inside the oracle already.
+                if (declaredEventDefinition is not null)
                 {
-                    // Rewritten to another plain element with nothing to carry.
-                    // No shipped row is in this position; if one appears, the
-                    // rewrite is unguarded and that is worth knowing, not
-                    // worth failing on a shape nobody has produced.
-                    return;
+                    var carried = deployed.Elements()
+                        .Select(child => child.Name.LocalName)
+                        .Where(local => local.EndsWith("EventDefinition", StringComparison.Ordinal))
+                        .ToList();
+
+                    // EXACTLY ONE, AND THE DECLARED ONE (#454). `Contains` asked only
+                    // whether it was in the list, and Flowable acts on the FIRST
+                    // definition an element carries -- measured on the live engine:
+                    // with an escalation definition placed before the signal one, the
+                    // signal never fires and no catcher instance is created, while
+                    // every cell stayed green.
+                    // AND ITS REFERENCE MUST BE THE AUTHOR'S (#454).
+                    //
+                    // Pinning the definition's TAG says nothing about what it points
+                    // at. Measured: a rewrite that invented `<signal id="Ev_1_ghost"/>`
+                    // and repointed `signalRef` at it left 35/35 green, with the
+                    // author's own signal declared at root and referenced by nothing.
+                    // Every signal end raised something no catcher listens for --
+                    // #156's headline, surviving four consecutive fixes.
+                    //
+                    // The diagram declares exactly one root-level signal/message/
+                    // escalation/error, so "the reference resolves to a declaration
+                    // this diagram's author wrote" is checkable without a second list.
+                    var declaredRoots = XDocument.Parse(xml).Root!.Elements()
+                        .Select(e => (string?)e.Attribute("id"))
+                        .Where(id => id is not null)
+                        .ToHashSet(StringComparer.Ordinal);
+
+                    var references = deployed.Elements()
+                        .Where(child => child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal))
+                        .SelectMany(child => child.Attributes())
+                        .Where(a => a.Name.LocalName.EndsWith("Ref", StringComparison.Ordinal))
+                        .Select(a => a.Value)
+                        .ToList();
+
+                    var ghosts = references.Where(r => !declaredRoots.Contains(r)).ToList();
+
+                    Assert.True(
+                        ghosts.Count == 0,
+                        $"{name}: the deployed event definition points at [{string.Join(", ", ghosts)}], "
+                        + $"which this diagram never declared -- it declares [{string.Join(", ", declaredRoots)}]. "
+                        + "The rewrite repointed the element at something nothing listens for (#454).");
+
+                    Assert.True(
+                        carried.Count == 1
+                        && string.Equals(carried[0], declaredEventDefinition + "EventDefinition",
+                            StringComparison.Ordinal),
+                        $"{name}: the manifest declares the event definition '{declaredEventDefinition}', "
+                        + $"and the <{deployed.Name.LocalName}> Auton8 deployed carries "
+                        + (carried.Count == 0 ? "none at all" : $"[{string.Join(", ", carried)}]")
+                        + (carried.Count > 1 ? " -- and the engine acts on the first of them" : "")
+                        + ". The publish rewrite dropped or replaced the semantics, which is what #156 "
+                        + "and #112 were about (#454).");
                 }
-
-                var carried = deployed.Elements()
-                    .Select(child => child.Name.LocalName)
-                    .Where(local => local.EndsWith("EventDefinition", StringComparison.Ordinal))
-                    .ToList();
-
-                // EXACTLY ONE, AND THE DECLARED ONE (#454). `Contains` asked only
-                // whether it was in the list, and Flowable acts on the FIRST
-                // definition an element carries -- measured on the live engine:
-                // with an escalation definition placed before the signal one, the
-                // signal never fires and no catcher instance is created, while
-                // every cell stayed green.
-                // AND ITS REFERENCE MUST BE THE AUTHOR'S (#454).
-                //
-                // Pinning the definition's TAG says nothing about what it points
-                // at. Measured: a rewrite that invented `<signal id="Ev_1_ghost"/>`
-                // and repointed `signalRef` at it left 35/35 green, with the
-                // author's own signal declared at root and referenced by nothing.
-                // Every signal end raised something no catcher listens for --
-                // #156's headline, surviving four consecutive fixes.
-                //
-                // The diagram declares exactly one root-level signal/message/
-                // escalation/error, so "the reference resolves to a declaration
-                // this diagram's author wrote" is checkable without a second list.
-                var declaredRoots = XDocument.Parse(xml).Root!.Elements()
-                    .Select(e => (string?)e.Attribute("id"))
-                    .Where(id => id is not null)
-                    .ToHashSet(StringComparer.Ordinal);
-
-                var references = deployed.Elements()
-                    .Where(child => child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal))
-                    .SelectMany(child => child.Attributes())
-                    .Where(a => a.Name.LocalName.EndsWith("Ref", StringComparison.Ordinal))
-                    .Select(a => a.Value)
-                    .ToList();
-
-                var ghosts = references.Where(r => !declaredRoots.Contains(r)).ToList();
-
-                Assert.True(
-                    ghosts.Count == 0,
-                    $"{name}: the deployed event definition points at [{string.Join(", ", ghosts)}], "
-                    + $"which this diagram never declared -- it declares [{string.Join(", ", declaredRoots)}]. "
-                    + "The rewrite repointed the element at something nothing listens for (#454).");
-
-                Assert.True(
-                    carried.Count == 1
-                    && string.Equals(carried[0], declaredEventDefinition + "EventDefinition",
-                        StringComparison.Ordinal),
-                    $"{name}: the manifest declares the event definition '{declaredEventDefinition}', "
-                    + $"and the <{deployed.Name.LocalName}> Auton8 deployed carries "
-                    + (carried.Count == 0 ? "none at all" : $"[{string.Join(", ", carried)}]")
-                    + (carried.Count > 1 ? " -- and the engine acts on the first of them" : "")
-                    + ". The publish rewrite dropped or replaced the semantics, which is what #156 "
-                    + "and #112 were about (#454).");
             }
         }
 
@@ -856,6 +951,84 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
         switch (effect)
         {
+            // THE ARCHETYPE (#471, #325). "It ran exactly once where the author
+            // asked for three" is a comparison between the cardinality the AUTHOR
+            // wrote and what the ENGINE did. Reading the number from the diagram
+            // is not deriving the expectation from the thing under test: the
+            // diagram supplies the author's intent, the engine supplies the
+            // behaviour, and the whole bug is that they disagreed.
+            case "tasks-appear-together":
+            {
+                var wanted = LoopCardinalityIn(xml);
+                if (wanted is null) return new(false, "this diagram declares no loopCardinality");
+
+                var mine = (await TasksAsync(api, instance)).Where(t => t.Owner == "Ev_1").ToList();
+
+                // EXACTLY the number asked for. `> 1` would accept two where
+                // three were requested, which is the same class of defect as one
+                // where three were requested -- just harder to notice.
+                return mine.Count == wanted
+                    ? new(true, $"{mine.Count} live task(s) on Ev_1 at once, as authored")
+                    : new(false,
+                        $"the author asked for {wanted} instances and the engine has "
+                        + $"{mine.Count} live task(s) on Ev_1. This is #325 exactly: a marker "
+                        + "that deploys and then does not multiply.");
+            }
+
+            // Sequential is NOT "one task exists" -- that is true of a plain user
+            // task with no marker at all, so an oracle that accepted it would be
+            // green on the absence of the very thing it is meant to prove. What
+            // distinguishes iteration is that completing the one task produces
+            // ANOTHER on the same activity.
+            case "tasks-appear-in-turn":
+            {
+                var wanted = LoopCardinalityIn(xml);
+                if (wanted is null) return new(false, "this diagram declares no loopCardinality");
+                if (wanted < 2) return new(false, $"loopCardinality is {wanted}; nothing to take turns");
+
+                var first = (await TasksAsync(api, instance)).Where(t => t.Owner == "Ev_1").ToList();
+                if (first.Count == 0) return new(false, "no task on Ev_1 yet");
+
+                if (first.Count != 1)
+                {
+                    return new(false,
+                        $"{first.Count} live tasks on Ev_1 at once. A sequential marker runs its "
+                        + "instances one at a time; this is what a PARALLEL one looks like.");
+                }
+
+                var completed = await api.PostAsync($"/api/tasks/{first[0].Id}/complete",
+                    new() { DataObject = new Dictionary<string, object>() });
+
+                if (!completed.Ok)
+                {
+                    return new(false, $"could not complete the first task: {completed.Status}");
+                }
+
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    var next = (await TasksAsync(api, instance)).Where(t => t.Owner == "Ev_1").ToList();
+
+                    // A DIFFERENT task, not the same one read again -- otherwise a
+                    // stale read passes for a second iteration.
+                    if (next.Count == 1 && next[0].Id != first[0].Id)
+                    {
+                        return new(true,
+                            $"one task at a time: {first[0].Id} completed, then {next[0].Id} appeared");
+                    }
+
+                    if (next.Count > 1)
+                    {
+                        return new(false, $"{next.Count} tasks on Ev_1 after completing one");
+                    }
+
+                    await Task.Delay(250);
+                }
+
+                return new(false,
+                    $"completing the only task on Ev_1 produced no second one, so the marker ran "
+                    + $"once where the author asked for {wanted}. That is #325.");
+            }
+
             case "task-appears":
             {
                 var here = await TasksAsync(api, instance);
@@ -1138,6 +1311,43 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return name switch
         {
             "User Task" => Wrap("", Linear("""<userTask id="Ev_1" name="approve"/>""")),
+
+            // THE ARCHETYPE (#471, #325). A marker on a host activity, not an
+            // element with a tag -- which is why these three rows went undeclared
+            // for the whole of M4b. `autonate:loopCardinality` is an ATTRIBUTE
+            // here and Auton8 rewrites it into a <bpmn:loopCardinality> child at
+            // publish; that rewrite is itself part of what these cells prove,
+            // because a marker that survives the studio and dies at publish is
+            // the founding bug wearing a later timestamp.
+            "Multi-Instance (Parallel)" => Wrap("", Linear(
+                """<userTask id="Ev_1" name="approve">"""
+                + """<multiInstanceLoopCharacteristics isSequential="false" autonate:loopCardinality="3"/>"""
+                + """</userTask>""")),
+            "Multi-Instance (Sequential)" => Wrap("", Linear(
+                """<userTask id="Ev_1" name="approve">"""
+                + """<multiInstanceLoopCharacteristics isSequential="true" autonate:loopCardinality="3"/>"""
+                + """</userTask>""")),
+
+            // A compensation handler is only reachable through a throw, so this
+            // diagram has to carry the whole apparatus: a completed activity, a
+            // boundary compensate event, an association, and a thrower. Ev_1 is
+            // the HANDLER -- the element the manifest row is about.
+            "Compensation Marker" => Wrap("",
+                """<startEvent id="Start_1"/>"""
+                + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""
+                + """<boundaryEvent id="Bnd_1" attachedToRef="Doer_1"><compensateEventDefinition/></boundaryEvent>"""
+                + """<scriptTask id="Ev_1" name="undo" isForCompensation="true" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="End_1"><compensateEventDefinition/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Doer_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
+                // LAST, and that is not style. <association> is an ARTIFACT, and
+                // the BPMN schema puts artifacts after every flow element -- put
+                // it earlier and Flowable refuses the deployment with
+                // cvc-complex-type.2.4.a naming whichever element follows it.
+                // Measured against the engine directly, because Auton8 answers
+                // "the reason is in the server log" for a code it has no sentence
+                // for, and the E2E fixture buffers that log in memory.
+                + """<association id="Assoc_1" associationDirection="One" sourceRef="Bnd_1" targetRef="Ev_1"/>"""),
             "Script Task" => Wrap("", Linear(Script)),
             "Receive Task" => Wrap("", Linear("""<receiveTask id="Ev_1" name="wait"/>""")),
 

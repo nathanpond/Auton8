@@ -89,7 +89,17 @@ public sealed class ExecutionEvidenceTests
     [Fact]
     public void Every_declared_effect_is_one_the_oracle_can_observe()
     {
-        string[] observable = ["task-appears", "variable-written", "instance-waits", "instance-ends"];
+        // The two marker effects (#471). The four-name vocabulary could not say
+        // "more than one" or "one at a time", which is why the Loop Marker
+        // archetype -- the bug #325 opens on, and the reason the oracle exists --
+        // went unproven through the whole of M4b. Every name here owes a negative
+        // control in `InertDiagrams`; the `default` arm of `InertDiagram` throws
+        // rather than letting one arrive without.
+        string[] observable =
+        [
+            "task-appears", "variable-written", "instance-waits", "instance-ends",
+            "tasks-appear-together", "tasks-appear-in-turn",
+        ];
 
         var unobservable = Elements()
             .Select(e => (Name: e!["name"]!.GetValue<string>(),
@@ -179,6 +189,7 @@ public sealed class ExecutionEvidenceTests
         [
             ("Ad-Hoc Sub-Process", "instance-waits"),
             ("Call Activity", "task-appears"),
+            ("Compensation Marker", "variable-written"),
             ("Compensation End", "instance-ends"),
             ("End Event (None)", "instance-ends"),
             ("End Event (Terminate)", "instance-ends"),
@@ -197,6 +208,8 @@ public sealed class ExecutionEvidenceTests
             ("Intermediate Throw (None)", "instance-ends"),
             ("Intermediate Throw (Signal)", "instance-ends"),
             ("Message End", "instance-ends"),
+            ("Multi-Instance (Parallel)", "tasks-appear-together"),
+            ("Multi-Instance (Sequential)", "tasks-appear-in-turn"),
             ("Parallel Gateway (AND)", "variable-written"),
             ("Receive Task", "instance-waits"),
             ("Script Task", "variable-written"),

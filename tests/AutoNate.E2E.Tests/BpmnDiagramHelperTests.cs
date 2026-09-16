@@ -295,4 +295,115 @@ public sealed class BpmnDiagramHelperTests
 
         Assert.Empty(BpmnDiagram.FlowTargetsOf(xml, "Ev_1"));
     }
+
+    // ---- MarkerIn ------------------------------------------------------------
+
+    [Theory]
+    [InlineData("""<multiInstanceLoopCharacteristics isSequential="false" />""", "multiInstanceLoopCharacteristics:parallel")]
+    [InlineData("""<multiInstanceLoopCharacteristics isSequential="true" />""", "multiInstanceLoopCharacteristics:sequential")]
+    [InlineData("""<standardLoopCharacteristics />""", "standardLoopCharacteristics")]
+    public void MarkerIn_reads_the_marker_in_the_manifests_vocabulary(string marker, string expected)
+    {
+        var xml = Diagram($"""    <userTask id="Ev_1">{marker}</userTask>""");
+
+        Assert.Equal(expected, BpmnDiagram.MarkerIn(xml));
+    }
+
+    /// <summary>
+    /// An absent <c>isSequential</c> is parallel, not a third answer.
+    /// </summary>
+    /// <remarks>
+    /// BPMN's default, and Flowable's behaviour. Treating "absent" as unknown
+    /// would leave a diagram that omits the attribute matching neither manifest
+    /// row, and the cell would fail for a reason that is not a defect.
+    /// </remarks>
+    [Fact]
+    public void MarkerIn_defaults_an_absent_isSequential_to_parallel()
+    {
+        var xml = Diagram("""    <userTask id="Ev_1"><multiInstanceLoopCharacteristics /></userTask>""");
+
+        Assert.Equal("multiInstanceLoopCharacteristics:parallel", BpmnDiagram.MarkerIn(xml));
+    }
+
+    [Fact]
+    public void MarkerIn_reads_the_compensation_marker_from_the_attribute()
+    {
+        var xml = Diagram("""    <userTask id="Ev_1" isForCompensation="true" />""");
+
+        Assert.Equal("isForCompensation", BpmnDiagram.MarkerIn(xml));
+    }
+
+    /// <summary>
+    /// An unmarked activity carries no marker — the archetype's complement.
+    /// </summary>
+    /// <remarks>
+    /// This is the Loop Marker bug in miniature: the whole point of a marker row
+    /// is that removing the marker must be visible. A helper that reported one
+    /// anyway would green the exact regression #325 opens on.
+    /// </remarks>
+    [Fact]
+    public void MarkerIn_is_null_for_an_unmarked_activity()
+    {
+        Assert.Null(BpmnDiagram.MarkerIn(Diagram("""    <userTask id="Ev_1" />""")));
+
+        // And explicitly false is not "carries it".
+        Assert.Null(BpmnDiagram.MarkerIn(
+            Diagram("""    <userTask id="Ev_1" isForCompensation="false" />""")));
+    }
+
+    /// <summary>
+    /// A marker on something else in the diagram is not this element's.
+    /// </summary>
+    [Fact]
+    public void MarkerIn_does_not_borrow_a_marker_from_another_element()
+    {
+        var xml = Diagram("""
+            <userTask id="Ev_1" />
+            <userTask id="Other"><multiInstanceLoopCharacteristics isSequential="true" /></userTask>
+        """);
+
+        Assert.Null(BpmnDiagram.MarkerIn(xml));
+    }
+
+    /// <summary>
+    /// A marker on a nested child is not the container's (#435, same shape).
+    /// </summary>
+    [Fact]
+    public void MarkerIn_does_not_claim_a_nested_childs_marker()
+    {
+        var xml = Diagram("""
+            <subProcess id="Ev_1">
+              <userTask id="Inner"><multiInstanceLoopCharacteristics isSequential="true" /></userTask>
+            </subProcess>
+        """);
+
+        Assert.Null(BpmnDiagram.MarkerIn(xml));
+    }
+
+    // ---- LoopCardinalityIn ---------------------------------------------------
+
+    /// <summary>
+    /// Both spellings, because Auton8 rewrites between them at publish.
+    /// </summary>
+    [Theory]
+    [InlineData("""<multiInstanceLoopCharacteristics xmlns:autonate="http://autonate.dev/workflows" isSequential="false" autonate:loopCardinality="3" />""")]
+    [InlineData("""<multiInstanceLoopCharacteristics isSequential="false"><loopCardinality>3</loopCardinality></multiInstanceLoopCharacteristics>""")]
+    public void LoopCardinalityIn_reads_the_stored_and_the_deployed_spelling(string marker)
+    {
+        var xml = Diagram($"""    <userTask id="Ev_1">{marker}</userTask>""");
+
+        Assert.Equal(3, BpmnDiagram.LoopCardinalityIn(xml));
+    }
+
+    [Fact]
+    public void LoopCardinalityIn_is_null_when_there_is_no_marker_or_no_cardinality()
+    {
+        // No marker at all.
+        Assert.Null(BpmnDiagram.LoopCardinalityIn(Diagram("""    <userTask id="Ev_1" />""")));
+
+        // A marker driven by a collection rather than a fixed count -- a real
+        // shape, and "no fixed cardinality" is the honest answer for it.
+        Assert.Null(BpmnDiagram.LoopCardinalityIn(Diagram(
+            """    <userTask id="Ev_1"><multiInstanceLoopCharacteristics isSequential="false" /></userTask>""")));
+    }
 }
