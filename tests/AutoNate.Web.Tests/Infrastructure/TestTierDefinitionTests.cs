@@ -289,6 +289,42 @@ public sealed class TestTierDefinitionTests
     }
 
     /// <summary>
+    /// The pins are arithmetically related, so they must actually agree (#507).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// full-local's E2E run is the slim E2E set plus the Flowable-traited tests
+    /// plus the Dapr one — every E2E test except Keycloak's. So
+    /// <c>SLIM_E2E + FLOWABLE + DAPR</c> is not merely a bound on
+    /// <c>FULL_LOCAL</c>, it is the same number by construction.
+    /// </para>
+    /// <para>
+    /// The inequality above accepts any total larger than 205, so
+    /// <c>FLOWABLE=150</c> passes it while quietly excusing 54 missing engine
+    /// tests. Only a full-local run would notice, and full-local is not a merge
+    /// gate — whereas this identity is pure arithmetic over a checked-in file
+    /// and is therefore decidable in slim, on every push.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_tier_pins_add_up()
+    {
+        var tiers = Tiers();
+
+        var slimE2E = int.Parse(tiers["AUTONATE_TIER_COUNT_SLIM_E2E"]);
+        var flowable = int.Parse(tiers["AUTONATE_TIER_COUNT_FLOWABLE"]);
+        var dapr = int.Parse(tiers["AUTONATE_TIER_COUNT_DAPR"]);
+        var fullLocal = int.Parse(tiers["AUTONATE_TIER_COUNT_FULL_LOCAL"]);
+
+        Assert.True(
+            slimE2E + flowable + dapr == fullLocal,
+            $"the E2E pins disagree: slim {slimE2E} + Flowable {flowable} + Dapr {dapr} "
+            + $"= {slimE2E + flowable + dapr}, but full-local is pinned at {fullLocal}. "
+            + "full-local is every E2E test except Keycloak's, so these are the same "
+            + "number. Whichever pin moved, move the others in the same commit.");
+    }
+
+    /// <summary>
     /// The integrity check is wired into full-local, and runs even when red (#453).
     /// </summary>
     [Fact]

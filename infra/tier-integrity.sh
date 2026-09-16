@@ -106,18 +106,28 @@ discovered() {
   # --list-tests prints one indented line per test after a header. Counting the
   # indented lines is stable across the header's wording; counting every line is
   # not.
-  dotnet test "$E2E" --nologo --list-tests --filter "$1" 2>/dev/null \
-    | sed -n 's/^    [A-Za-z].*/x/p' | grep -c x
+  #
+  # The project is an argument (#507). It used to be hard-wired to $E2E, so the
+  # size half of this script only ever measured one of the two projects the tier
+  # runs -- the skip half checked both logs, and the counts silently did not.
+  project="$1"; filter="$2"
+  if [ -n "$filter" ]; then
+    dotnet test "$project" --nologo --list-tests --filter "$filter" 2>/dev/null \
+      | sed -n 's/^    [A-Za-z].*/x/p' | grep -c x
+  else
+    dotnet test "$project" --nologo --list-tests 2>/dev/null \
+      | sed -n 's/^    [A-Za-z].*/x/p' | grep -c x
+  fi
 }
 
 check_count() {
-  label="$1"; filter="$2"; pinned="$3"
+  label="$1"; filter="$2"; pinned="$3"; project="${4:-$E2E}"
   if [ -z "$pinned" ]; then
     echo "FAIL $label has no pin in tests/tiers.env. An unpinned tier cannot shrink visibly."
     fail=1
     return
   fi
-  actual="$(discovered "$filter")"
+  actual="$(discovered "$project" "$filter")"
   if [ "$actual" -eq 0 ]; then
     echo "FAIL $label discovered 0 tests. A filter that matches nothing is not a passing tier."
     fail=1
@@ -150,6 +160,21 @@ check_counts() {
   # And the tier total, so that deleting an untraited test is caught too.
   check_count "full-local (E2E)" "$(tier_value AUTONATE_TIER_FULL_LOCAL_FILTER)" \
     "$(tier_value AUTONATE_TIER_COUNT_FULL_LOCAL)"
+
+  # The backend project, which this script measured not at all until #507.
+  # CLAUDE.md promises the pins are exact "per service as well as per tier", and
+  # for full-local that was true of one project out of two: a deleted backend
+  # test left `Tier integrity ok: nothing skipped, every count at its pin`
+  # printed over a strictly smaller suite.
+  #
+  # It reads the SLIM_BACKEND pin on purpose rather than introducing a second
+  # number. The backend project carries no RequiresService trait at all --
+  # TestTierDefinitionTests.The_backend_project_carries_no_service_trait fails
+  # the build if one appears -- so slim and full-local run the identical set,
+  # and two pins for one number is just a second thing to drift.
+  check_count "full-local (backend)" "" \
+    "$(tier_value AUTONATE_TIER_COUNT_SLIM_BACKEND)" \
+    "$ROOT/tests/AutoNate.Web.Tests"
 }
 
 case "$mode" in
