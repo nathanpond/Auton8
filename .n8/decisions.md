@@ -7444,3 +7444,67 @@ answers there, so the endpoint override was necessary -- but on a machine withou
 that stray process the first version would have failed loudly rather than quietly
 using the wrong sidecar. The spec now asserts `AUTONATE_E2E_DAPR=1` as a
 precondition, so a green cannot arrive from a sidecar the tier did not start.
+
+## M4c fix pass, round 4 — #505, #388, #506, #507, #509, #510 (2026-09-16)
+
+Scope chosen by the owner: the blocker plus every open medium, and #388 pulled
+in from M4 because it is the other half of what makes a worktree run red.
+
+**#505 — shared stack, not a refusal.** Four options were on the table; the
+owner picked resolving the bind-mount root to the git *common* directory so
+every worktree reuses the main checkout's cluster. This keeps `/n8-verify`
+able to run the full tier, which "refuse to run from a worktree" would have
+ended. `--path-format=absolute` is load-bearing: the bare `--git-common-dir`
+is relative to the CWD, and the tier invokes scripts from both the root and
+`infra/`.
+
+Consequence worth naming: `make infra-reset` from a worktree now resets the
+SHARED stack. That is the correct semantic under one-stack-per-machine, and it
+is a bigger gun than it was. The existing `test -n "$(MOUNT_ROOT)"` guard still
+stands in front of the `rm -rf`.
+
+The deeper Flowable health probe (option 4 in the question) was deliberately
+NOT done. The schema-less engine was a *consequence* of the blank mount; with
+the mount fixed the cause is gone, and adding it would have been scope the
+owner did not pick. It remains available if a cold-start race ever produces
+the same symptom.
+
+**#388 — fix, not skip.** The issue offered "skip with a message naming
+dist/" as an alternative. Not available here: the tier gates count a skip as a
+failure, which is the whole point of M4c. So the /api 404 guard was hoisted
+out of the wwwroot conditional (it is a statement about API routing, not about
+static files) and the four login tests stopped following a redirect into the
+SPA index. Measured side by side in one worktree: pre-fix 5 failed / 2 passed,
+post-fix 7/7.
+
+**#506 — revoke on every startup, not only on creation.** The databases that
+need it most already exist. Paired with an explicit GRANT to the datastores
+writer role, which reached CONNECT only through PUBLIC and would otherwise
+have been locked out of the database it exists to write to. A non-owner
+deployment warns by name rather than failing startup — refusing to boot would
+be a worse failure than the one being closed. The init script's dead entry was
+left in place, with a comment, because it is correct for an operator-created
+database and removing it would make that case silently worse.
+
+**#507 — reuse the slim pin rather than add a second number.** The backend
+project carries no RequiresService trait and a guard fails the build if one
+appears, so slim and full-local run the identical set by construction. Two
+pins for one number is just a second thing to drift. The new check earned
+itself immediately by catching this branch's own eight added tests.
+
+**#509 — `int?` on the input record rather than a sentinel.** Null means
+"append". Existing positional callers pass ints and still compile, so no test
+churn. Corrects the prose in #495/#499: a stale save corrupts ORDER, it does
+not omit a live item — ReplaceTreeAsync never deletes unlisted rows.
+
+**#510 — remove the numbers rather than update them.** Updating would have
+reset the clock. The summary's Passed lines are elided too, because a run's
+pass count is a result rather than a pinned constant; writing 405 there would
+have been the same bug with a fresher number.
+
+**Outcome 7 corrected in the milestone description**, per the owner: the claim
+"a release cannot be tagged without a full run having passed" became "the
+release runbook requires a full-tier run before tagging, and says so in
+writing", which is what #475 actually delivered. release.yml is unchanged and
+still has no gate. The stale "30 files carry RequiresService" was corrected to
+33 in the same PATCH.
