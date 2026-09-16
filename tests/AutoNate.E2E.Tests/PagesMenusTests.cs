@@ -281,9 +281,19 @@ public sealed class PagesMenusTests : E2ETestBase
         await Assertions.Expect(row.GetByText("hidden", new() { Exact = true }))
             .ToHaveCountAsync(0, new() { Timeout = 10_000 });
 
+        // THE ROW UNDER TEST, not the payload (#499). This was
+        // `Assert.Contains("\"isVisible\":true", <whole payload>)`, and six tests
+        // in this class create standalone items that nobody deletes -- so it
+        // passed on somebody else's row whatever happened to this one.
         var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
         Assert.True(stored.Ok, await stored.TextAsync());
-        Assert.Contains("\"isVisible\":true", await stored.TextAsync(), StringComparison.Ordinal);
+
+        using var menu = JsonDocument.Parse(await stored.TextAsync());
+        var mine = menu.RootElement.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("displayName").GetString() == name);
+
+        Assert.True(mine.GetProperty("isVisible").GetBoolean(),
+            $"The server stored isVisible=false for '{name}' even though the PATCH was refused.");
     }
 
     /// <summary>
@@ -311,6 +321,15 @@ public sealed class PagesMenusTests : E2ETestBase
             content = "<h2>d</h2>"
         });
 
+        // The id, so the PUT body can be checked for it by identity rather than
+        // by display name -- the tree request carries ids only.
+        var listed = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
+        Assert.True(listed.Ok, await listed.TextAsync());
+        using var listedDoc = JsonDocument.Parse(await listed.TextAsync());
+        var itemId = listedDoc.RootElement.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("displayName").GetString() == name)
+            .GetProperty("id").GetString();
+
         var refused = 0;
         await page.RouteAsync("**/api/admin/menus/items/**", async route =>
         {
@@ -337,6 +356,38 @@ public sealed class PagesMenusTests : E2ETestBase
         // The row is back in the tree, not silently gone.
         await Assertions.Expect(MenuRow(page, name))
             .ToHaveCountAsync(1, new() { Timeout = 10_000 });
+
+        // THE OTHER HALF OF THE ROLLBACK (#499). `setItems` puts the row back in
+        // the tree; `onChange` puts it back in `pendingItems`. Without the
+        // second, every assertion above still holds -- row back, banner up,
+        // server intact -- while `pendingItems` still holds the post-delete list.
+        // The harm is specific: pressing "Save order" then PUTs a node list that
+        // omits a live item.
+        //
+        // So assert the harm, not the dirty flag. `isStructurallyDirty` compares
+        // the editor's reindexed sortOrder against the server's stored values,
+        // which are all 0 for items this suite creates -- so the tree reads
+        // dirty here for reasons that have nothing to do with the delete, and an
+        // assertion on the button would fail for the wrong reason (#503).
+        //
+        // Measured before this existed: deleting only the `onChange` line left
+        // this test green.
+        string? savedTree = null;
+        await page.RouteAsync("**/api/admin/menus/**/tree", async route =>
+        {
+            savedTree = route.Request.PostData;
+            await route.FulfillAsync(new() { Status = 200, Body = "{}" });
+        });
+
+        var saveOrder = page.GetByRole(AriaRole.Button, new() { Name = "Save order" });
+        if (await saveOrder.CountAsync() > 0)
+        {
+            await saveOrder.ClickAsync();
+            await Assertions.Expect(saveOrder).ToHaveCountAsync(0, new() { Timeout = 10_000 });
+
+            Assert.True(savedTree is not null, "Save order sent no tree request.");
+            Assert.Contains(itemId!, savedTree!, StringComparison.Ordinal);
+        }
 
         var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
         Assert.True(stored.Ok, await stored.TextAsync());
