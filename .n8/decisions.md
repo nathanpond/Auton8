@@ -7250,3 +7250,30 @@ Reading the failure text rather than the exit code is what caught it.
 cells, deterministic), #481 (Postgres transport flakes, three occurrences, three
 error codes, raised to sev:medium), #482 (default-namespace multi-instance cannot
 publish). None is in a milestone: none is M4c's subject.
+
+## Ad-hoc — M4c closeout decisions (2026-09-16)
+
+All four asked of the owner directly rather than assumed, at the end of M4c's
+execution.
+
+**#453 relabelled `sev:high` → `sev:medium`.** Owner's call. It is a carried bug:
+heads 5a and 5c are closed with measured evidence, head 5b is #463 in M4d. It
+stays in M4c so a re-verify finds it, and the gate stops blocking on it. Recorded
+on the issue with the question and answer verbatim, because a severity lowered
+without that trail is indistinguishable from the weakening this milestone spent
+eight rounds chasing. `/n8-verify M4c` can now close the milestone.
+
+**#480, #481 and #482 all scheduled into M4d**, `needs-triage` removed. #481
+matters most to M4c's own outcome: #475 just made `make test-full-local` a
+required pre-tag step, and a gate that goes red on healthy code one run in three
+teaches people to re-run rather than read — the same "green for the wrong reason"
+failure pointed the other way. #480 is `sev:high` and `confirmed`, so it will
+block M4d's closure until the product-vs-test question is settled.
+
+**The exact backend pin stays.** I offered a ratcheting floor for the backend
+count specifically — the argument being that growth in an unfiltered project can
+only mean somebody added tests, unlike the E2E tiers where a lost trait moves a
+test into slim. Owner chose exact everywhere, so `AUTONATE_TIER_COUNT_SLIM_BACKEND`
+must move in the same commit as any PR that changes the backend test count. No
+code change: this is what shipped. Recorded so the friction is a known cost
+rather than a surprise on the next PR.
