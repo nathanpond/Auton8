@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 
-def read_counts(root: Path) -> list[tuple[str, int]]:
+def read_counts(root: Path) -> list[tuple[str, int, int]]:
     counts = []
     for path in sorted(root.glob("**/shard-count.txt")):
         fields = {}
@@ -32,7 +32,15 @@ def read_counts(root: Path) -> list[tuple[str, int]]:
             executed = int(fields.get("executed", "0"))
         except ValueError:
             executed = 0
-        counts.append((shard, executed))
+        # Absent in count files written before #476. Zero is the right default
+        # for those: an old artifact cannot report a skip it never looked for,
+        # and treating the absence as a failure would fail the gate for a reason
+        # that is not about the tests.
+        try:
+            skipped = int(fields.get("skipped", "0"))
+        except ValueError:
+            skipped = 0
+        counts.append((shard, executed, skipped))
     return counts
 
 
@@ -46,19 +54,32 @@ def main() -> int:
     args = ap.parse_args()
 
     counts = read_counts(Path(args.counts_dir))
-    total = sum(executed for _, executed in counts)
+    total = sum(executed for _, executed, _ in counts)
+    skipped = sum(skip for _, _, skip in counts)
 
     lines = [
         "### Reconciliation",
         "",
-        "| shard | executed |",
-        "|---|---|",
+        "| shard | executed | skipped |",
+        "|---|---|---|",
     ]
-    lines += [f"| {shard} | {executed} |" for shard, executed in counts]
+    lines += [f"| {shard} | {executed} | {skip} |" for shard, executed, skip in counts]
     lines += [
-        f"| **sum** | **{total}** |",
-        f"| **discovered** | **{args.expected}** |",
+        f"| **sum** | **{total}** | **{skipped}** |",
+        f"| **discovered** | **{args.expected}** | |",
     ]
+
+    # A SKIP IS A LOST TEST (#476). A trx counts a skipped test in `total`, so
+    # the sum above stays whole and reconciliation used to pass: one attribute
+    # argument took a test out of the merge gate with every number matching.
+    # Checked here rather than per shard because this job is `always()`, so a
+    # skip cannot hide behind a failing shard -- the case where it matters most.
+    if skipped:
+        lines += [
+            "",
+            f"> **{skipped} test(s) skipped.** The slim tier runs everything it "
+            "discovers or it fails.",
+        ]
 
     lost = total != args.expected
     if lost:
@@ -74,6 +95,16 @@ def main() -> int:
 
     if args.summary_file:
         Path(args.summary_file).open("a").write("\n".join(lines) + "\n")
+
+    if skipped:
+        print(
+            f"::error::{skipped} test(s) were skipped in the backend shards. A trx "
+            "counts a skipped test in `total`, so this reconciles perfectly while the "
+            "test does not run -- which is why it is checked separately (#476). Remove "
+            "the Skip, or move the test out of the tier deliberately and update the pin.",
+            file=sys.stderr,
+        )
+        return 1
 
     if lost or not counts:
         print(

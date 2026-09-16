@@ -309,4 +309,93 @@ public sealed class TestTierDefinitionTests
             "\t  { dotnet test tests/AutoNate.Web.Tests --nologo 2>&1; echo $$? > /tmp/a.rc; } \\\n"
             + "\t    | tee /tmp/n8-full-backend.log; \\"));
     }
+
+    /// <summary>
+    /// Slim polices itself inside GitHub's own gate (#476).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// full got a zero-skips check and an exact pin in #453; the tier that
+    /// actually blocks merges got neither, and the tier story's own wording
+    /// advertised the escape as a feature — "adding a traited test moves it out
+    /// of slim with no other edit". That is #453's move 5c re-opened on the
+    /// other side of the split.
+    /// </para>
+    /// <para>
+    /// These assert the <em>workflow</em>, not a local target, because a
+    /// developer's machine is not the thing that blocks a merge.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Slim_carries_a_size_pin_for_each_project()
+    {
+        var tiers = Tiers();
+
+        foreach (var key in new[] { "AUTONATE_TIER_COUNT_SLIM_BACKEND", "AUTONATE_TIER_COUNT_SLIM_E2E" })
+        {
+            Assert.True(tiers.ContainsKey(key), $"{key} is missing from tests/tiers.env, so the "
+                + "tier that blocks merges can shrink without anything noticing (#476).");
+
+            Assert.True(int.TryParse(tiers[key], out var count) && count > 0,
+                $"{key} is '{tiers[key]}'. A pin of zero passes against an empty tier.");
+        }
+    }
+
+    [Fact]
+    public void The_workflow_pins_the_backend_discovery_count()
+    {
+        var workflow = File.ReadAllText(
+            Path.Combine(RepoRoot.Path, ".github", "workflows", "ci.yml"));
+
+        // Reconciliation compares the shards against the SAME discovery run, so
+        // a deleted test moves both numbers and reconciles perfectly against a
+        // smaller suite. Only a pin can see that.
+        Assert.Contains("AUTONATE_TIER_COUNT_SLIM_BACKEND", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_workflow_gates_the_slim_e2e_run_on_a_trx()
+    {
+        var workflow = File.ReadAllText(
+            Path.Combine(RepoRoot.Path, ".github", "workflows", "ci.yml"));
+
+        // The console logger leaves nothing to count. Without a trx the e2e job
+        // has no floor at all, which is how a trait on a slim class removed a
+        // test from the merge gate in silence.
+        Assert.Contains("e2e.trx", workflow, StringComparison.Ordinal);
+        Assert.Contains("tier_gate.py", workflow, StringComparison.Ordinal);
+        Assert.Contains("AUTONATE_TIER_COUNT_SLIM_E2E", workflow, StringComparison.Ordinal);
+
+        Assert.True(File.Exists(Path.Combine(RepoRoot.Path, ".github", "scripts", "tier_gate.py")),
+            ".github/scripts/tier_gate.py is missing but ci.yml calls it.");
+    }
+
+    /// <summary>
+    /// The gate scripts read the skip count, which is the field they lacked.
+    /// </summary>
+    /// <remarks>
+    /// A trx counts a skipped test in <c>total</c>, and
+    /// <c>shard_report.py</c> set <c>executed = total</c> — so a
+    /// <c>[Fact(Skip)]</c> reconciled perfectly while not running. The field is
+    /// <c>notExecuted</c>; asserting on the field name is the only way to pin
+    /// that it is still consulted.
+    /// </remarks>
+    [Theory]
+    [InlineData("shard_report.py")]
+    [InlineData("reconcile_shards.py")]
+    [InlineData("tier_gate.py")]
+    public void The_gate_scripts_read_the_skip_count(string script)
+    {
+        var path = Path.Combine(RepoRoot.Path, ".github", "scripts", script);
+
+        Assert.True(File.Exists(path), $"{script} is missing.");
+
+        var text = File.ReadAllText(path);
+
+        Assert.True(
+            text.Contains("notExecuted", StringComparison.Ordinal)
+            || text.Contains("skipped", StringComparison.Ordinal),
+            $"{script} no longer reads the skip count. A trx counts a skipped test in `total`, "
+            + "so dropping this makes a [Fact(Skip)] invisible to the merge gate again (#476).");
+    }
 }

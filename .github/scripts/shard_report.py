@@ -38,10 +38,17 @@ def read_trx(path: Path) -> dict:
         first = message.splitlines()[0] if message else ""
         failures.append((result.get("testName") or "?", first))
 
+    # `notExecuted` is the skip count, and it was missing here (#476). It
+    # matters twice over: a trx's `total` INCLUDES skipped tests, so
+    # `executed = total` below counted a `[Fact(Skip)]` as having run, and
+    # reconciliation -- which compares that sum against discovery -- saw a whole
+    # suite. One attribute argument removed a test from the merge gate with
+    # every number still matching.
     return {
         "total": int(counters.get("total") or 0),
         "passed": int(counters.get("passed") or 0),
         "failed": int(counters.get("failed") or 0),
+        "skipped": int(counters.get("notExecuted") or 0),
         "failures": failures,
     }
 
@@ -58,9 +65,9 @@ def markdown(shard: str, elapsed: int, data: dict | None) -> str:
         return "\n".join(lines) + "\n"
 
     lines += [
-        "| executed | passed | failed | elapsed |",
+        "| executed | passed | failed | skipped | elapsed |",
         "|---|---|---|---|",
-        f"| {data['total']} | {data['passed']} | {data['failed']} | {minutes}m {seconds}s |",
+        f"| {data['total']} | {data['passed']} | {data['failed']} | {data['skipped']} | {minutes}m {seconds}s |",
     ]
 
     if data["failures"]:
@@ -87,10 +94,12 @@ def main() -> int:
     data = read_trx(trx) if trx.is_file() else None
     executed = data["total"] if data else 0
 
-    Path(args.count_file).write_text(f"shard={args.shard}\nexecuted={executed}\n")
+    skipped = data["skipped"] if data else 0
+    Path(args.count_file).write_text(
+        f"shard={args.shard}\nexecuted={executed}\nskipped={skipped}\n")
     Path(args.summary_file).write_text(markdown(args.shard, args.elapsed, data))
 
-    print(f"shard {args.shard}: executed {executed}")
+    print(f"shard {args.shard}: executed {executed}, skipped {skipped}")
     return 0
 
 

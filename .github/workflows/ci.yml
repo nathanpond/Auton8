@@ -191,6 +191,22 @@ jobs:
           dotnet test tests/AutoNate.Web.Tests --no-build --list-tests > listing.txt
           script=.github/scripts/partition_tests.py
 
+          # THE DELETION CHECK (#476). Reconciliation compares what the shards
+          # ran against what THIS step discovered, so both numbers move together
+          # when a test is deleted and it reconciles perfectly against a smaller
+          # suite. An exact pin is the only thing that can see that, and it
+          # belongs here because this is the number every later job trusts.
+          #
+          # Exact, not a floor: adding tests moves the pin in the same commit,
+          # so growth is as visible as loss.
+          pinned=$(sed -n 's/^AUTONATE_TIER_COUNT_SLIM_BACKEND=//p' tests/tiers.env | tail -1)
+          discovered=$(python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt --emit total)
+          if [ "$discovered" != "$pinned" ]; then
+            echo "::error::Backend discovery found ${discovered} tests, pinned at ${pinned} in tests/tiers.env. If tests were added or removed on purpose, move the pin in the same commit so the change is a diff a reviewer sees (#476)."
+            exit 1
+          fi
+          echo "Backend discovery: ${discovered} tests, at its pin."
+
           {
             echo "matrix=$(python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt --emit matrix)"
             echo "total=$(python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt --emit total)"
@@ -855,10 +871,42 @@ jobs:
         run: grep -E '^AUTONATE_TIER_' tests/tiers.env >> "$GITHUB_ENV"
 
       - name: Test
+        id: e2e
         run: |
+          # `trx` as well as the console logger (#476). The console logger alone
+          # left nothing to count, so this job had no floor: a trait added to a
+          # slim class silently removed it from the merge gate, and a
+          # `[Fact(Skip)]` was invisible everywhere. The console output stays
+          # because it is what a human reads in the log.
+          set +e
           dotnet test tests/AutoNate.E2E.Tests --no-build \
             --filter "$AUTONATE_TIER_SLIM_FILTER" \
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=e2e.trx" \
+            --results-directory "$PWD/trx"
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      # `always()`, for backend-reconcile's reason: a lost or skipped test
+      # otherwise hides behind a failing run, which is the case where the count
+      # matters most.
+      - name: The slim E2E tier ran everything it is pinned at
+        if: always()
+        run: |
+          python3 .github/scripts/tier_gate.py \
+            --trx trx/e2e.trx \
+            --expected "$AUTONATE_TIER_COUNT_SLIM_E2E" \
+            --label "slim E2E" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if the E2E run itself failed
+        if: always()
+        run: |
+          status="${{ steps.e2e.outputs.status }}"
+          if [ "${status:-1}" != "0" ]; then
+            echo "::error::The slim E2E run exited ${status:-<missing>}."
+            exit 1
+          fi
 
       # A failed selector is close to unreadable without the page. Playwright
       # writes traces/screenshots under the test output when a spec fails.

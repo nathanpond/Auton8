@@ -193,17 +193,34 @@ test-slim: e2e-install
 	@echo "== slim: SPA =="
 	cd src/AutoNate.Spa && npm run lint && npx tsc -b && npm test && npm run build
 	@echo "== slim: backend =="
+	@# The EXACT pin GitHub checks, not just a non-zero count (#476). CLAUDE.md
+	@# promises this target runs everything GitHub runs; once the workflow gained
+	@# pins, a target without them would make that promise false in the direction
+	@# that matters -- green here, red on the PR.
+	@discovered=$$(dotnet test tests/AutoNate.Web.Tests --nologo --list-tests 2>/dev/null \
+	    | grep -cE '^    [A-Za-z]'); \
+	  if [ "$$discovered" != "$(AUTONATE_TIER_COUNT_SLIM_BACKEND)" ]; then \
+	    echo "backend discovered $$discovered tests, pinned at $(AUTONATE_TIER_COUNT_SLIM_BACKEND) in tests/tiers.env."; \
+	    echo "If that was deliberate, move the pin in the same commit so the change is in the diff."; \
+	    exit 1; \
+	  fi; \
+	  echo "slim backend: $$discovered tests, at its pin"
 	dotnet test tests/AutoNate.Web.Tests --nologo
 	@echo "== slim: E2E (untraited only) =="
 	@# A filter that matches nothing runs no tests and exits 0 -- this repo's own
-	@# named failure mode. Assert a non-zero count before trusting the run.
+	@# named failure mode. The pin subsumes it, and says which direction moved.
 	@count=$$(dotnet test tests/AutoNate.E2E.Tests --nologo --list-tests \
 	    --filter "$(AUTONATE_TIER_SLIM_FILTER)" 2>/dev/null | grep -cE '^    [A-Za-z]'); \
 	  if [ "$$count" -eq 0 ]; then \
 	    echo "slim discovered ZERO E2E tests -- the filter matched nothing, which reads as a faster, greener build"; \
 	    exit 1; \
 	  fi; \
-	  echo "slim E2E: $$count tests discovered"
+	  if [ "$$count" != "$(AUTONATE_TIER_COUNT_SLIM_E2E)" ]; then \
+	    echo "slim E2E discovered $$count tests, pinned at $(AUTONATE_TIER_COUNT_SLIM_E2E) in tests/tiers.env."; \
+	    echo "A RequiresService trait on a slim class moves a test out of this tier -- that is the shrink the pin exists to show."; \
+	    exit 1; \
+	  fi; \
+	  echo "slim E2E: $$count tests discovered, at its pin"
 	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_SLIM_FILTER)"
 
 # full-local is everything except Keycloak, with real services. #473 gives this
