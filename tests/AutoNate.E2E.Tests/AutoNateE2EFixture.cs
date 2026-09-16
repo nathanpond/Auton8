@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Npgsql;
@@ -281,6 +282,33 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     /// alternative is asking Kestrel for port 0 and never learning the number in
     /// time to tell Flowable where to call, which is the problem this fixes.
     /// </remarks>
+    /// <summary>The app-id this run gave its sidecar, when it has one (#487).</summary>
+    private string? _daprAppId;
+
+    /// <summary>This run's private sidecar ports, so the app talks to ITS sidecar.</summary>
+    private int _daprHttpPort;
+    private int _daprGrpcPort;
+
+    /// <summary>The first match for <paramref name="tool"/> on PATH, or null.</summary>
+    /// <remarks>
+    /// Used to fail loudly when the tier asks for a sidecar and the CLI is
+    /// absent. `dapr run` would otherwise surface as a process that exits
+    /// immediately, and the fixture would report "AutoNate.Web exited before
+    /// reaching the listening state" -- true, and about the wrong thing.
+    /// </remarks>
+    private static string? ResolveOnPath(string tool)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory, tool);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
     private static int FindFreePort()
     {
         using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -295,6 +323,25 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // BuildSpa=true forces the .csproj target that runs `npm run build` and
         // mirrors dist/ into wwwroot/, so the host can serve the SPA directly
         // without SpaProxy.
+        // Chosen before the sidecar block, which needs it for --app-port.
+        var callbackPort = FindFreePort();
+
+        // UNDER A SIDECAR WHEN THE TIER ASKS FOR ONE (#487).
+        //
+        // `RequiresService=Dapr` promised an exercise no tier performed: the app
+        // was started bare, with AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true, so the
+        // one Dapr-traited spec passed on the no-sidecar path and the trait was
+        // decoration. Chaining `make app-dapr` would not have helped -- that runs
+        // a DIFFERENT app; this fixture spawns its own.
+        //
+        // Driven by the tier, not by this file: `make test-full-local` sets
+        // AUTONATE_E2E_DAPR=1 and GitHub does not, because the slim tier runs the
+        // same 202 untraited specs through this same fixture on a runner with no
+        // Dapr at all. A fixture that unconditionally required a sidecar would
+        // take the merge gate down.
+        var underDapr = string.Equals(
+            Environment.GetEnvironmentVariable("AUTONATE_E2E_DAPR"), "1", StringComparison.Ordinal);
+
         var info = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -304,6 +351,67 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        if (underDapr)
+        {
+            // FAIL, do not degrade. A tier that quietly runs without the service
+            // it named reports success for the wrong reason -- the whole subject
+            // of M4c.
+            if (ResolveOnPath("dapr") is null)
+            {
+                throw new InvalidOperationException(
+                    "AUTONATE_E2E_DAPR=1 but the `dapr` CLI is not on PATH. The full-local tier "
+                    + "runs the app under a sidecar; install the Dapr CLI or unset the variable "
+                    + "(and then the RequiresService=Dapr specs are not being exercised).");
+            }
+
+            // `autonate-web`, not a per-run id (#487). The pubsub component is
+            // SCOPED -- `scopes: [autonate-web, flowable]` in
+            // infra/mounts/dapr-dashboard/components/pubsub.yaml -- so a sidecar
+            // running under any other app-id loads no pub/sub at all and the
+            // firehose stays empty. Measured: with a per-run id the Bus Watcher
+            // log never appears. This is the same id `make app-dapr` uses.
+            _daprAppId = "autonate-web";
+
+            // PRIVATE PORTS, AND THE APP MUST BE POINTED AT THEM (#487).
+            //
+            // appsettings.Development.json hard-codes Dapr:HttpEndpoint to
+            // 127.0.0.1:3500 -- where the `autonate-web-dapr` CONTAINER answers,
+            // with app-id `autonate-web`. Measured: `curl 127.0.0.1:3500/v1.0/metadata`
+            // returns that container's metadata on a machine running `make infra-up`.
+            //
+            // So without this override the fixture would start a sidecar the app
+            // never talks to, `DaprSidecarProbe` would answer "available" from the
+            // container's sidecar, and the trait would be decoration a second
+            // time -- in a more expensive costume. Pointing the app at its OWN
+            // ports is what makes `available` mean this run's sidecar.
+            _daprHttpPort = FindFreePort();
+            _daprGrpcPort = FindFreePort();
+            var daprHttpPort = _daprHttpPort;
+            var daprGrpcPort = _daprGrpcPort;
+
+            info.FileName = "dapr";
+            info.ArgumentList.Add("run");
+            info.ArgumentList.Add("--app-id");
+            info.ArgumentList.Add(_daprAppId);
+            info.ArgumentList.Add("--app-port");
+            info.ArgumentList.Add(callbackPort.ToString(CultureInfo.InvariantCulture));
+            info.ArgumentList.Add("--dapr-http-port");
+            info.ArgumentList.Add(daprHttpPort.ToString(CultureInfo.InvariantCulture));
+            info.ArgumentList.Add("--dapr-grpc-port");
+            info.ArgumentList.Add(daprGrpcPort.ToString(CultureInfo.InvariantCulture));
+            info.ArgumentList.Add("--placement-host-address");
+            info.ArgumentList.Add("127.0.0.1:50006");
+            info.ArgumentList.Add("--scheduler-host-address");
+            info.ArgumentList.Add("127.0.0.1:50007");
+            info.ArgumentList.Add("--resources-path");
+            info.ArgumentList.Add(Path.Combine(repoRoot, "infra", "mounts", "dapr-dashboard", "components"));
+            info.ArgumentList.Add("--log-level");
+            info.ArgumentList.Add("warn");
+            info.ArgumentList.Add("--");
+            info.ArgumentList.Add("dotnet");
+        }
+
         info.ArgumentList.Add("run");
         info.ArgumentList.Add("--project");
         info.ArgumentList.Add("src/AutoNate.Web");
@@ -324,7 +432,6 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // host's LAN address from inside the container; loopback-only is
         // unreachable from there. Test host only — no compose file publishes this,
         // so the loopback-binding invariant is untouched.
-        var callbackPort = FindFreePort();
         info.Environment["ASPNETCORE_URLS"] = $"http://+:{callbackPort}";
         info.Environment["WorkflowBehaviors__CallbackBaseUrlOverride"] =
             $"http://host.docker.internal:{callbackPort}";
@@ -340,7 +447,21 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // than trading it away.
         info.Environment["Flowable__DeploymentNamePrefix"] = Support.FlowableDeploymentSweep.SuiteDeploymentPrefix;
         // Skip the dev Dapr sidecar probe so the host doesn't refuse to start.
-        info.Environment["AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR"] = "true";
+        // NOT set under a sidecar, and that is the proof (#487). Program.cs
+        // refuses to start in Development without a reachable sidecar unless this
+        // bypass is on -- so with it off, the app booting at all means
+        // DaprSidecarProbe found one. The guarantee is structural rather than an
+        // assertion somebody has to remember to write.
+        if (underDapr)
+        {
+            info.Environment["Dapr__AppId"] = _daprAppId!;
+            info.Environment["Dapr__HttpEndpoint"] = $"http://127.0.0.1:{_daprHttpPort}";
+            info.Environment["Dapr__GrpcEndpoint"] = $"http://127.0.0.1:{_daprGrpcPort}";
+        }
+        else
+        {
+            info.Environment["AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR"] = "true";
+        }
         // The whole point: the user-typed login flow is unreachable when
         // auto-login signs every GET in. Always off for E2E.
         info.Environment["DevelopmentAutoLogin__Enabled"] = "false";

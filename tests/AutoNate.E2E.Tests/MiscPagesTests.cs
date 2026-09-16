@@ -127,9 +127,15 @@ public sealed class MiscPagesTests : E2ETestBase
             .ToBeVisibleAsync();
     }
 
-    // The bus-event log renders from the Dapr streaming subscriber. No tier
-    // stands a sidecar up beside the app under test today (#487), so
-    // "Bus event log" never appears and this asserts the page heading instead.
+    // The app under test runs under a real Dapr sidecar in full-local (#487):
+    // `make test-full-local` sets AUTONATE_E2E_DAPR=1 and the fixture wraps the
+    // host in `dapr run` WITHOUT AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR -- so
+    // Program.cs's startup probe would have thrown if no sidecar answered.
+    //
+    // That makes the boot itself the guarantee. The assertion below still checks
+    // it explicitly, because a trait whose promise is only implied by the harness
+    // is the shape this spec had before: it asserted a heading that renders with
+    // no sidecar at all, so RequiresService=Dapr meant nothing.
     [Trait("RequiresService", "Dapr")]
     [Fact]
     public async Task BusWatcher_RendersHeadingForSuperAdmin()
@@ -149,6 +155,20 @@ public sealed class MiscPagesTests : E2ETestBase
         await Assertions.Expect(
             page.GetByRole(AriaRole.Heading, new() { Name = "Bus Watcher" }))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // THE SIDECAR IS ACTUALLY THERE (#487). `DaprSidecarProbe` answers this
+        // from the app's own side, so it is the same question Program.cs asks at
+        // startup -- and it is false for an app started bare, which is how this
+        // spec used to pass while proving nothing.
+        var probe = await page.APIRequest.GetAsync("/api/health/dapr");
+        Assert.True(probe.Ok, await probe.TextAsync());
+
+        var status = await probe.TextAsync();
+        Assert.Contains("\"available\":true", status, StringComparison.Ordinal);
+
+        // And the page does not tell the user the sidecar is missing.
+        await Assertions.Expect(page.GetByText("without a reachable Dapr sidecar"))
+            .ToHaveCountAsync(0, new() { Timeout = 10_000 });
 
         // The live-stream log uses aria-label="Bus event log"
         // (BusWatcher.tsx:110) — proves the SuperAdmin branch took.

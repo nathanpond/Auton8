@@ -196,6 +196,22 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
     }
   };
 
+  // Awaited, reported, rethrown (#495). This was
+  // `(id) => void deleteItem.mutateAsync(id)` -- fire and forget. On a refusal
+  // the row stayed gone (useDeleteMenuItem invalidates onSuccess only), NO
+  // banner appeared at all, and the rejection surfaced as an unhandled promise.
+  // That is worse than the rename bug #489 fixed, where the user at least saw
+  // red. The caller needs the failure so it can put the row back.
+  const handleDeleteItem = async (id: string) => {
+    setError(null);
+    try {
+      await deleteItem.mutateAsync(id);
+    } catch (err) {
+      setError(describeError(err));
+      throw err;
+    }
+  };
+
   const handleCancel = () => {
     setPendingItems(null);
     setError(null);
@@ -236,7 +252,16 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
       </Group>
 
       {error && (
-        <Alert color="red" variant="light" mb="md">
+        <Alert
+          color="red"
+          variant="light"
+          mb="md"
+          // Named, so a screen reader announces "Error" before the message and
+          // not just the message text -- and so a test can tell this apart from
+          // the informational Alert on the same page, which `role=alert` alone
+          // cannot (#495).
+          aria-label="Error"
+        >
           {error}
         </Alert>
       )}
@@ -260,7 +285,7 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
         menu={menu}
         onChange={setPendingItems}
         onAddRoot={handleAddRoot}
-        onDelete={(id) => void deleteItem.mutateAsync(id)}
+        onDelete={handleDeleteItem}
         onEditItem={handleEditItem}
         selectedId={selectedId}
         onSelect={setSelectedId}

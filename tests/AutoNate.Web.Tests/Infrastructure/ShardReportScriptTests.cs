@@ -327,15 +327,98 @@ public sealed class ShardReportScriptTests : IDisposable
         Assert.Equal(1, result.ExitCode);
     }
 
+
+    // ---- an unreadable count file is not zero skips (#492) -------------------
+
+    /// <summary>
+    /// An unreadable file fails the gate, and cannot cancel a real skip.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The previous hardening reported an unparseable <c>skipped=</c> as
+    /// <c>-1</c> and let <c>main</c> sum it with the real counts, so one bad
+    /// file <b>cancelled</b> one genuine skip. Measured against the true
+    /// pre-fix commit with this exact input: before <c>rc=1</c>, after
+    /// <c>rc=0</c> — a hardening that turned red into green.
+    /// </para>
+    /// <para>
+    /// "Unknown" is not a quantity. It must not be arithmetic.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_count_file_cannot_cancel_a_real_skip()
+    {
+        WriteRawCounts(("1", "shard=1\nexecuted=10\nskipped=abc\n"),
+                       ("2", "shard=2\nexecuted=10\nskipped=1\n"));
+
+        var result = Run("reconcile_shards.py",
+            "--counts-dir", _work, "--expected", "20", "--shards-result", "success");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("could not be read", result.Stderr, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A MISSING <c>skipped=</c> line fails too (#492).
+    /// </summary>
+    /// <remarks>
+    /// The old code excused this as "an old artifact". Shard count files are
+    /// written fresh by <c>shard_report.py</c> in the same workflow run, from
+    /// the same commit, with <c>retention-days: 1</c> — there is no old
+    /// artifact. A producer regression that DROPS the line is exactly as
+    /// dangerous as one that garbles it, and dropping it was the path that
+    /// still failed open.
+    /// </remarks>
+    [Fact]
+    public void A_missing_skipped_line_fails_the_gate()
+    {
+        WriteRawCounts(("1", "shard=1\nexecuted=3\n"));
+
+        var result = Run("reconcile_shards.py",
+            "--counts-dir", _work, "--expected", "3", "--shards-result", "success");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("no `skipped=` line", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_clean_set_of_count_files_still_passes()
+    {
+        // The complement. Every check above is satisfiable by always failing;
+        // this is what says they are not.
+        WriteRawCounts(("1", "shard=1\nexecuted=10\nskipped=0\n"),
+                       ("2", "shard=2\nexecuted=10\nskipped=0\n"));
+
+        var result = Run("reconcile_shards.py",
+            "--counts-dir", _work, "--expected", "20", "--shards-result", "success");
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    private void WriteRawCounts(params (string Shard, string Body)[] shards)
+    {
+        foreach (var (shard, body) in shards)
+        {
+            var dir = Path.Combine(_work, $"shard-count-{shard}");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "shard-count.txt"), body);
+        }
+    }
+
     private void WriteCounts(params (string Shard, int Executed)[] shards)
     {
         foreach (var (shard, executed) in shards)
         {
             var dir = Path.Combine(_work, $"shard-count-{shard}");
             Directory.CreateDirectory(dir);
+            // `skipped=0`, because the real producer always writes it (#492).
+            // These files used to omit it, which meant the suite depended on
+            // reconcile's fail-open for a missing line -- and that fail-open was
+            // the hole. A helper that writes something the producer never emits
+            // tests a shape that cannot occur.
             File.WriteAllText(
                 Path.Combine(dir, "shard-count.txt"),
-                $"shard={shard}\nexecuted={executed}\n");
+                $"shard={shard}\nexecuted={executed}\nskipped=0\n");
         }
     }
 }

@@ -204,9 +204,19 @@ public sealed class PagesMenusTests : E2ETestBase
         await dialog.GetByLabel("Display name").FillAsync(renamed);
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Save and Close" }).ClickAsync();
 
-        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        // THE BANNER IS THE BARRIER (#495). Asserting the dialog visible straight
+        // after the click had nothing to wait on: in a BROKEN build the close
+        // lands only after the 500 round-trip, so Playwright could sample
+        // visibility first and the bug would flake the test GREEN. Waiting for
+        // the error the refusal produces fixes the race and asserts the
+        // complement the test was missing -- delete `setError` from the catch and
+        // this fails, where before every test stayed green.
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert, new() { Name = "Error" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
         Assert.True(refused >= 1, "the PATCH was never intercepted, so nothing was refused");
+
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
 
         // The draft survives: closing on a refusal is how the first version lost work.
         Assert.Equal(renamed, await dialog.GetByLabel("Display name").InputValueAsync());
@@ -220,6 +230,117 @@ public sealed class PagesMenusTests : E2ETestBase
         var body = await stored.TextAsync();
         Assert.DoesNotContain(renamed, body, StringComparison.Ordinal);
         Assert.Contains(name, body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A refused visibility toggle reverts the badge (#495).
+    /// </summary>
+    /// <remarks>
+    /// <c>toggleVisible</c>'s rollback shipped with #489 and nothing exercised
+    /// it — remove the <c>try/catch</c> and the whole suite stayed green. The
+    /// badge renders from local state, so without the rollback the row claims a
+    /// visibility the server refused.
+    /// </remarks>
+    [Fact]
+    public async Task ARefusedVisibilityToggleRevertsTheBadge()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var name = TestNames.Prefixed("refused-toggle");
+
+        await CreateStandaloneItemAsync(page.APIRequest, name, "page", new
+        {
+            path = $"/e2e-toggle-{TestNames.ShortSlug()}",
+            contentType = "html",
+            content = "<h2>t</h2>"
+        });
+
+        var refused = 0;
+        await page.RouteAsync("**/api/admin/menus/items/**", async route =>
+        {
+            if (route.Request.Method == "PATCH")
+            {
+                Interlocked.Increment(ref refused);
+                await route.FulfillAsync(new() { Status = 500, Body = "nope" });
+                return;
+            }
+            await route.ContinueAsync();
+        });
+
+        await OpenStandaloneMenuAsync(page);
+        var row = MenuRow(page, name);
+        await row.GetByRole(AriaRole.Button, new() { Name = "Toggle visibility" }).ClickAsync();
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert, new() { Name = "Error" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        Assert.True(refused >= 1, "the PATCH was never intercepted, so nothing was refused");
+
+        // The badge must be back to visible -- it renders from local state, which
+        // is exactly why an un-rolled-back optimistic update lies here.
+        await Assertions.Expect(row.GetByText("hidden", new() { Exact = true }))
+            .ToHaveCountAsync(0, new() { Timeout = 10_000 });
+
+        var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        Assert.Contains("\"isVisible\":true", await stored.TextAsync(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A refused delete puts the row back, and says so (#495).
+    /// </summary>
+    /// <remarks>
+    /// The delete path was `void deleteItem.mutateAsync(id)` — fire and forget.
+    /// On a refusal the row stayed gone (the hook invalidates on success only),
+    /// <b>no banner appeared at all</b>, and the rejection surfaced as an
+    /// unhandled promise. Worse than the rename bug #489 fixed, where the user
+    /// at least saw red. And `onChange` had already marked the tree dirty with a
+    /// live item missing, so "Save order" would post a list that omits it.
+    /// </remarks>
+    [Fact]
+    public async Task ARefusedDeletePutsTheRowBackAndReportsIt()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var name = TestNames.Prefixed("refused-delete");
+
+        await CreateStandaloneItemAsync(page.APIRequest, name, "page", new
+        {
+            path = $"/e2e-del-{TestNames.ShortSlug()}",
+            contentType = "html",
+            content = "<h2>d</h2>"
+        });
+
+        var refused = 0;
+        await page.RouteAsync("**/api/admin/menus/items/**", async route =>
+        {
+            if (route.Request.Method == "DELETE")
+            {
+                Interlocked.Increment(ref refused);
+                await route.FulfillAsync(new() { Status = 500, Body = "nope" });
+                return;
+            }
+            await route.ContinueAsync();
+        });
+
+        await OpenStandaloneMenuAsync(page);
+        Task? accepted = null;
+        page.Dialog += (_, d) => accepted = d.AcceptAsync();
+        await MenuRow(page, name).GetByRole(AriaRole.Button, new() { Name = "Delete item" }).ClickAsync();
+        if (accepted is not null) await accepted;
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert, new() { Name = "Error" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        Assert.True(refused >= 1, "the DELETE was never intercepted, so nothing was refused");
+
+        // The row is back in the tree, not silently gone.
+        await Assertions.Expect(MenuRow(page, name))
+            .ToHaveCountAsync(1, new() { Timeout = 10_000 });
+
+        var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
+        Assert.True(stored.Ok, await stored.TextAsync());
+        Assert.Contains(name, await stored.TextAsync(), StringComparison.Ordinal);
     }
 
     [Fact]

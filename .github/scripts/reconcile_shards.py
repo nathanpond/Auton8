@@ -19,8 +19,18 @@ import sys
 from pathlib import Path
 
 
-def read_counts(root: Path) -> list[tuple[str, int, int]]:
+def read_counts(root: Path) -> tuple[list[tuple[str, int, int]], list[str]]:
+    """Returns (counts, unreadable) -- the second list is NEVER folded into the first.
+
+    #492: the previous version reported an unparseable `skipped=` as `-1` and let
+    `main` sum it with the real counts, so one bad file CANCELLED one genuine
+    skip. Measured against the true pre-fix commit, same input (one malformed
+    file, one real skip): before rc=1, after rc=0. A hardening that turned red
+    into green. "Unknown" is not a quantity and must not be arithmetic.
+    """
     counts = []
+    unreadable = []
+
     for path in sorted(root.glob("**/shard-count.txt")):
         fields = {}
         for line in path.read_text().splitlines():
@@ -28,29 +38,30 @@ def read_counts(root: Path) -> list[tuple[str, int, int]]:
                 key, _, value = line.partition("=")
                 fields[key.strip()] = value.strip()
         shard = fields.get("shard", "?")
+
         try:
             executed = int(fields.get("executed", "0"))
         except ValueError:
             executed = 0
-        # Absent in count files written before #476. Zero is the right default
-        # for those: an old artifact cannot report a skip it never looked for,
-        # and treating the absence as a failure would fail the gate for a reason
-        # that is not about the tests.
+
+        # ABSENT IS UNREADABLE TOO (#492). The previous comment here excused a
+        # missing `skipped=` as "an old artifact", but these files are written
+        # fresh in the same workflow run, from the same commit, with
+        # retention-days: 1. There is no old artifact. A shard_report.py
+        # regression that DROPS the line is exactly as dangerous as one that
+        # garbles it, and the absence was the path that still failed open.
+        raw = fields.get("skipped")
         try:
-            skipped = int(fields.get("skipped", "0"))
-        except ValueError:
-            # FAIL CLOSED (#490). `tier_gate.py` aborts on a missing trx; this
-            # defaulted a malformed count to zero, so a regression in
-            # shard_report.py would silently re-disable the skip gate -- the
-            # exact failure #485 was, arriving by a different door.
-            print(
-                f"::error::{path} has a malformed `skipped=` value: "
-                f"{fields.get('skipped')!r}. Refusing to read it as zero.",
-                file=sys.stderr,
-            )
-            skipped = -1
+            if raw is None:
+                raise ValueError("no `skipped=` line")
+            skipped = int(raw)
+        except ValueError as problem:
+            unreadable.append(f"{path}: {problem} (skipped={raw!r})")
+            continue
+
         counts.append((shard, executed, skipped))
-    return counts
+
+    return counts, unreadable
 
 
 def main() -> int:
@@ -62,7 +73,7 @@ def main() -> int:
     ap.add_argument("--summary-file", default="")
     args = ap.parse_args()
 
-    counts = read_counts(Path(args.counts_dir))
+    counts, unreadable = read_counts(Path(args.counts_dir))
     total = sum(executed for _, executed, _ in counts)
     skipped = sum(skip for _, _, skip in counts)
 
@@ -73,6 +84,7 @@ def main() -> int:
         "|---|---|---|",
     ]
     lines += [f"| {shard} | {executed} | {skip} |" for shard, executed, skip in counts]
+    lines += [f"| _(unreadable)_ | | {problem} |" for problem in unreadable]
     lines += [
         f"| **sum** | **{total}** | **{skipped}** |",
         f"| **discovered** | **{args.expected}** | |",
@@ -105,10 +117,17 @@ def main() -> int:
     if args.summary_file:
         Path(args.summary_file).open("a").write("\n".join(lines) + "\n")
 
-    if skipped < 0:
+    # BEFORE the arithmetic, and never part of it (#492). An unreadable file
+    # means the skip total is unknown, and an unknown number of skips is not
+    # zero skips -- nor is it a negative one that can offset a real skip
+    # somewhere else, which is what the previous sentinel allowed.
+    if unreadable:
+        for problem in unreadable:
+            print(f"::error::{problem}", file=sys.stderr)
         print(
-            "::error::A shard count file could not be parsed, so the skip total is unknown. "
-            "An unknown number of skips is not zero skips.",
+            f"::error::{len(unreadable)} shard count file(s) could not be read, so the skip "
+            "total is unknown. These are written fresh by shard_report.py in this same run, "
+            "so an unreadable one is a defect in the producer, not an old artifact.",
             file=sys.stderr,
         )
         return 1

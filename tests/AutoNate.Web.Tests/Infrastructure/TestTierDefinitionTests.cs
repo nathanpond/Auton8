@@ -498,4 +498,120 @@ public sealed class TestTierDefinitionTests
             + "and TestTierTraitTests cannot see it, because it reflects over the E2E "
             + "assembly (#490):\n  " + string.Join("\n  ", offenders));
     }
+
+    /// <summary>
+    /// Both new regexes can see what they forbid (#492).
+    /// </summary>
+    /// <remarks>
+    /// Without these, a pattern typo'd into matching nothing reports a clean
+    /// tree forever — the failure mode CLAUDE.md names for the Semgrep rule
+    /// floor, and the one <see cref="The_guard_can_see_a_real_offender"/>
+    /// already closes for the tee regex. Every string here is a form that
+    /// compiles or a filter that runs.
+    /// </remarks>
+    [Fact]
+    public void The_absence_guards_can_see_what_they_forbid()
+    {
+        foreach (var filter in new[]
+        {
+            "--filter \"RequiresService!=Flowable\"",
+            "--filter 'RequiresService!=Flowable'",
+            "--filter RequiresService!=Flowable",
+            "RequiresService != Flowable",
+        })
+        {
+            Assert.Matches(HandWrittenTierFilter, filter);
+        }
+
+        // And not on the shared definition, or the guard cannot coexist with
+        // the thing it protects.
+        Assert.DoesNotMatch(HandWrittenTierFilter, "--filter \"$AUTONATE_TIER_SLIM_FILTER\"");
+        Assert.DoesNotMatch(HandWrittenTierFilter, "--filter \"$(AUTONATE_TIER_FULL_LOCAL_FILTER)\"");
+
+        foreach (var trait in new[]
+        {
+            "[Trait(\"RequiresService\", \"Flowable\")]",
+            "[Xunit.Trait(\"RequiresService\", \"Flowable\")]",
+            "[ Trait ( \"RequiresService\" , \"Flowable\" )]",
+        })
+        {
+            Assert.Matches(ServiceTrait, trait);
+        }
+
+        Assert.DoesNotMatch(ServiceTrait, "[Trait(\"Category\", \"Slow\")]");
+    }
+
+    /// <summary>
+    /// `make test-slim` checks for skipped tests, as GitHub does (#492).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// GitHub fails on any skipped test — <c>tier_gate.py</c> in the e2e job,
+    /// <c>reconcile_shards.py</c> in the backend one. This target reproduced
+    /// neither, so <c>dotnet test</c>'s exit 0 and a discovery-count pin that a
+    /// <c>[Fact(Skip)]</c> does not move left it green while the PR went red.
+    /// </para>
+    /// <para>
+    /// That is the precise failure CLAUDE.md's "runs every test GitHub runs"
+    /// promise exists to prevent, so the promise needed the check rather than
+    /// another caveat.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Slim_checks_for_skipped_tests_the_way_github_does()
+    {
+        var recipe = Recipe("test-slim");
+
+        var gates = recipe.Split("tier_gate.py").Length - 1;
+        Assert.True(gates >= 2,
+            $"`make test-slim` invokes tier_gate.py {gates} time(s); it needs one per project. "
+            + "Without it a [Fact(Skip)] is green locally and red on the PR (#492).");
+
+        // A trx to read, or the gate has nothing to work from.
+        Assert.Contains("trx;LogFileName=slim-backend.trx", recipe, StringComparison.Ordinal);
+        Assert.Contains("trx;LogFileName=slim-e2e.trx", recipe, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// full-local runs the app under a Dapr sidecar (#487).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The trait promised an exercise no tier performed: the fixture started the
+    /// app bare with <c>AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true</c>, so the one
+    /// Dapr-traited spec passed on the no-sidecar path.
+    /// </para>
+    /// <para>
+    /// It is driven by the TIER rather than by the fixture, and that is
+    /// load-bearing: slim runs the same 200-odd untraited specs through the same
+    /// fixture on a runner with no Dapr at all, so a fixture that always
+    /// required a sidecar would take the merge gate down. The variable is the
+    /// seam.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Full_local_runs_the_app_under_a_dapr_sidecar()
+    {
+        Assert.Contains("AUTONATE_E2E_DAPR=1", Recipe("test-full-local"), StringComparison.Ordinal);
+
+        // And slim must NOT set it -- GitHub has no Dapr CLI, so a sidecar there
+        // would fail every E2E spec rather than the one that needs it.
+        Assert.DoesNotContain("AUTONATE_E2E_DAPR", Recipe("test-slim"), StringComparison.Ordinal);
+
+        var workflow = File.ReadAllText(
+            Path.Combine(RepoRoot.Path, ".github", "workflows", "ci.yml"));
+        Assert.DoesNotContain("AUTONATE_E2E_DAPR", workflow, StringComparison.Ordinal);
+
+        var fixture = File.ReadAllText(Path.Combine(
+            RepoRoot.Path, "tests", "AutoNate.E2E.Tests", "AutoNateE2EFixture.cs"));
+
+        // The bypass must be conditional. Unconditional, the app never checks for
+        // a sidecar and the whole arrangement is decoration again.
+        Assert.Contains("if (underDapr)", fixture, StringComparison.Ordinal);
+
+        // And the app must be pointed at THIS run's sidecar. appsettings hard-codes
+        // 127.0.0.1:3500, where the autonate-web-dapr CONTAINER answers -- without
+        // the override the fixture would start a sidecar the app never talks to.
+        Assert.Contains("Dapr__HttpEndpoint", fixture, StringComparison.Ordinal);
+    }
 }
