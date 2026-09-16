@@ -7342,3 +7342,64 @@ grepped, and sourcing it actually fails on the unquoted `&`.
 execution missed an issue open since M4 and reported in #360 and #362, and I
 described the finding as fresh. The evidence and the owner's M4d scheduling moved
 to #369.
+
+## M4c fix pass, round 2 — #492, #493, #495, #487 (2026-09-16)
+
+Owner decisions carried into this round: fix #492/#493/#495 and, from the Q2
+answer, #487's Dapr half by **launching under a sidecar**; guard-about-guard
+findings cap at `sev:low` and carry; verify until clean.
+
+**#492 — "unknown" is not a quantity.** The #490 hardening reported an
+unparseable `skipped=` as `-1` and let `main` sum it, so one bad file cancelled
+one real skip: measured against the true pre-fix commit, rc 1 → 0. Unreadable
+files are their own list now, fatal before any arithmetic. A *missing* line is
+unreadable too — the "old artifact" excuse does not survive the fact that these
+files are written fresh in the same run with `retention-days: 1`.
+
+**#492 — the guard-quality items were split to #497 rather than bundled.** Round
+2's only strict regression came from hardening a guard, and this commit was
+fixing that regression; piling four more guard-logic edits into it is how that
+happens twice.
+
+**#493 — instrumented, not fixed, and the issue stays open.** Both my filed
+diagnosis and my replacement hypothesis were wrong. The test already plants its
+own resources. The pooled-session theory (Npgsql keeps a session, so
+`SuiteDatabasesOlderThanAsync` skips the planted database) would have explained
+`schemas=0` and its intermittency exactly — a probe reported **0 sessions before
+the clear and 0 after**. Not the cause. What shipped is precondition assertions
+so the next occurrence names the broken precondition; `ClearAllPools` stays as
+defence in depth with a comment saying it was measured and did not explain it.
+
+**#495 — the delete path was worse than the bug #489 fixed.** Fire and forget,
+no banner at all, and `onChange` already dirty with a live item missing.
+Rollbacks are field-scoped now: restoring `previous` wholesale also restored
+`parentId`/`sortOrder`, so a drag landing mid-flight would silently revert while
+`pendingItems` kept the dragged order. The error `Alert` gained
+`aria-label="Error"` — a real a11y improvement, and the only way to distinguish
+it from the informational Alert on the same page.
+
+**#495 — a mutation gave a false negative and nearly shipped as evidence.** The
+banner mutation's anchor matched `handleDeleteItem`, which I had just added
+immediately above `handleCancel`, moving the pattern. It deleted the banner from
+the wrong function, the rename test passed for a correct reason, and that read as
+"the test cannot see this". Re-anchored by function name it fails in 16s. Third
+time in this milestone; the tell is always a pass that arrives too easily or a
+duration that does not fit.
+
+**#487 — two measurements changed the design mid-story.** The owner authorised
+"launch under a sidecar"; they could not have known either of these.
+(1) `appsettings.Development.json` hard-codes `Dapr:HttpEndpoint` to
+127.0.0.1:3500, where the `autonate-web-dapr` **container** answers — so the
+first version started a sidecar the app never talked to and the probe answered
+from the container's. The fixture now overrides the endpoints to private ports.
+(2) `pubsub.yaml` is `scopes: [autonate-web, flowable]`, so a per-run app-id
+loads no pub/sub and the firehose stays empty; the fixture uses `autonate-web`,
+as `make app-dapr` does.
+
+**#487 — the seam is the tier, not the fixture.** Slim runs the same 202
+untraited specs through the same fixture on a runner with no Dapr CLI, so
+`AUTONATE_E2E_DAPR` is set by `make test-full-local` and by nothing else. A
+fixture that always required a sidecar would take the merge gate down. Verified
+both ways: slim 202/202 without it; the Dapr spec 3/3 with it; a dead endpoint
+makes the app refuse to boot with Program.cs's own message; a missing CLI fails
+loudly naming the variable.
