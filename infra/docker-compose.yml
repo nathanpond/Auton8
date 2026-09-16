@@ -26,7 +26,7 @@ services:
     # rather than a leak being papered over.
     command: ["postgres", "-c", "max_connections=300"]
     volumes:
-      - ./mounts/postgres/data:/var/lib/postgresql/data
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/postgres/data:/var/lib/postgresql/data
       # Two scripts live here, and the asymmetry with the rest of the schema is
       # deliberate: both do things the application cannot do from a connection
       # to its own database. 01 creates the database; 02 provisions the
@@ -135,7 +135,7 @@ services:
         condition: service_started
     network_mode: "service:flowable"
     volumes:
-      - ./mounts/flowable-dapr/components:/components:ro
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/flowable-dapr/components:/components:ro
 
   redis:
     image: redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf  # redis:7.4-alpine
@@ -144,7 +144,7 @@ services:
     ports:
       - "127.0.0.1:${AUTONATE_REDIS_PORT:-6379}:6379"
     volumes:
-      - ./mounts/redis/data:/data
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/redis/data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -171,7 +171,7 @@ services:
       - "127.0.0.1:4222:4222"
       - "127.0.0.1:8222:8222"
     volumes:
-      - ./mounts/nats/data:/data
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/nats/data:/data
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
       interval: 10s
@@ -203,7 +203,7 @@ services:
       - "127.0.0.1:50007:50007"
     user: root
     volumes:
-      - ./mounts/dapr-scheduler/data:/data
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/dapr-scheduler/data:/data
 
   hocuspocus:
     build:
@@ -384,7 +384,7 @@ services:
         condition: service_started
     network_mode: "service:autonate-web"
     volumes:
-      - ./mounts/autonate-web-dapr/components:/components:ro
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/autonate-web-dapr/components:/components:ro
 
   # A real identity provider for developing and demonstrating #90 / #93 / #92
   # against software that actually implements the specifications, rather than
@@ -469,7 +469,7 @@ services:
     ports:
       - "127.0.0.1:${AUTONATE_DAPR_DASHBOARD_PORT:-8081}:8080"
     volumes:
-      - ./mounts/dapr-dashboard/components:/components:ro
+      - ${AUTONATE_MOUNTS_ROOT:-./mounts}/dapr-dashboard/components:/components:ro
     depends_on:
       nats:
         condition: service_healthy

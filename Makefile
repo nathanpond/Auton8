@@ -7,7 +7,17 @@ DAPR_HTTP_PORT := 3500
 DAPR_GRPC_PORT := 50001
 DAPR_PLACEMENT_HOST_ADDRESS := 127.0.0.1:50006
 DAPR_SCHEDULER_HOST_ADDRESS := 127.0.0.1:50007
-MOUNT_ROOT := ./infra/mounts
+# Absolute, and the SAME directory for every worktree -- see infra/mounts-root.sh.
+# A relative `./infra/mounts` made a worktree stand the stack up on an empty data
+# directory and replace the main checkout's, because compose resolves relative
+# bind mounts against the compose file's own directory (#505).
+#
+# Exported because that is how the compose file reads it: the bind mounts are
+# `${AUTONATE_MOUNTS_ROOT:-./mounts}/...`, so a plain `docker compose` run by
+# hand from infra/ still behaves as it always did, while everything that goes
+# through this Makefile agrees on one root.
+MOUNT_ROOT := $(shell ./infra/mounts-root.sh)
+export AUTONATE_MOUNTS_ROOT := $(MOUNT_ROOT)
 POSTGRES_MOUNT := $(MOUNT_ROOT)/postgres/data
 REDIS_MOUNT := $(MOUNT_ROOT)/redis/data
 NATS_MOUNT := $(MOUNT_ROOT)/nats/data

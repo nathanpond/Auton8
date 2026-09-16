@@ -14,9 +14,22 @@ COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
 # `infra_default`, so DNS for `postgres` failed and every Y.Doc load
 # returned empty (drawings appeared blank).
 COMPOSE=(docker compose -f "$COMPOSE_FILE" -p infra)
-FLOWABLE_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/flowable/.build-input-hash"
-HOCUSPOCUS_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/hocuspocus/.build-input-hash"
-EXECUTOR_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/executor/.build-input-hash"
+
+# One bind-mount root for every worktree, and the compose file reads it from
+# the environment (#505). Without this, `$REPO_ROOT/infra/mounts` in a linked
+# worktree is an empty directory that compose would happily stand a brand-new
+# Postgres cluster up in -- replacing the developer's, since `-p infra` above
+# pins the project name either way.
+#
+# The build stamps below have to follow the same root: they decide whether an
+# image needs rebuilding, and a stamp read from the worktree while the image
+# belongs to the shared stack answers the wrong question.
+MOUNTS_ROOT="${AUTONATE_MOUNTS_ROOT:-$("$SCRIPT_DIR/mounts-root.sh")}"
+export AUTONATE_MOUNTS_ROOT="$MOUNTS_ROOT"
+
+FLOWABLE_BUILD_STAMP_FILE="$MOUNTS_ROOT/flowable/.build-input-hash"
+HOCUSPOCUS_BUILD_STAMP_FILE="$MOUNTS_ROOT/hocuspocus/.build-input-hash"
+EXECUTOR_BUILD_STAMP_FILE="$MOUNTS_ROOT/executor/.build-input-hash"
 
 POSTGRES_PORT="${AUTONATE_POSTGRES_PORT:-5432}"
 FLOWABLE_PORT="${AUTONATE_FLOWABLE_PORT:-8080}"

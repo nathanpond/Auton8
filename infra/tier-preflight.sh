@@ -21,6 +21,45 @@ PORT_HOCUSPOCUS="${AUTONATE_HOCUSPOCUS_PORT:-1234}"
 
 missing=()
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXPECTED_MOUNTS_ROOT="${AUTONATE_MOUNTS_ROOT:-$("$SCRIPT_DIR/mounts-root.sh")}"
+
+# Does the stack that is already running belong to THIS checkout's data?
+#
+# Ports answering is not the same question. A stack serving a different
+# directory answers every probe below and is still the wrong stack: it was
+# measured standing up an empty Postgres cluster and a Flowable with no schema,
+# after which 161 of 407 E2E tests failed with "The workflow engine refused this
+# workflow" -- a product-regression-shaped message for an environment fault
+# (#505).
+#
+# `mounts-root.sh` makes every worktree resolve to one root, so this check
+# should now only fire when a stack was started by hand with a different
+# AUTONATE_MOUNTS_ROOT, or by a checkout that predates this fix. That is
+# exactly when the operator needs to be told, by name.
+check_stack_ownership() {
+    local actual
+    actual=$(docker inspect autonate-postgres \
+        --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' \
+        2>/dev/null) || return 0
+    [ -n "$actual" ] || return 0
+
+    local expected="$EXPECTED_MOUNTS_ROOT/postgres/data"
+    # Compare by resolved path: /tmp is a symlink to /private/tmp on macOS, so
+    # a string compare reports a mismatch between two names for one directory.
+    local actual_real expected_real
+    actual_real=$(cd "$actual" 2>/dev/null && pwd -P) || actual_real="$actual"
+    expected_real=$(cd "$expected" 2>/dev/null && pwd -P) || expected_real="$expected"
+
+    if [ "$actual_real" != "$expected_real" ]; then
+        printf '  MISMATCH %-17s %s\n' "running stack" "$actual_real"
+        printf '  %-26s %s\n' "this checkout expects" "$expected_real"
+        missing+=("the running stack serves a different data directory")
+    else
+        printf '  ok      %-18s %s\n' "stack ownership" "$actual_real"
+    fi
+}
+
 probe_port() { # name host port
   if nc -z "$2" "$3" >/dev/null 2>&1; then
     printf '  ok      %-18s %s:%s\n' "$1" "$2" "$3"
@@ -40,6 +79,7 @@ probe_http() { # name url
 }
 
 echo "Preflight for the full-local tier:"
+check_stack_ownership
 probe_port postgres       127.0.0.1 "$PORT_POSTGRES"
 probe_port nats           127.0.0.1 "$PORT_NATS"
 probe_port redis          127.0.0.1 "$PORT_REDIS"
@@ -59,10 +99,13 @@ probe_http flowable       "http://127.0.0.1:${PORT_FLOWABLE}/flowable-rest"
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo
-  echo "full-local cannot run. These services did not answer:"
+  echo "full-local cannot run. These checks did not pass:"
   for entry in "${missing[@]}"; do echo "  - $entry"; done
   echo
   echo "Bring them up with 'make infra-ensure', or 'make app-dapr' for the sidecar."
+  echo "If the failure above is a data-directory MISMATCH, the stack that is"
+  echo "running was started against a different checkout: stop it and re-run"
+  echo "'make infra-ensure' from here, or unset AUTONATE_MOUNTS_ROOT."
   echo "This is a FAILURE, not a smaller run: a tier that skips what it cannot"
   echo "reach reports success for the wrong reason, which is the defect this"
   echo "milestone exists to end."
