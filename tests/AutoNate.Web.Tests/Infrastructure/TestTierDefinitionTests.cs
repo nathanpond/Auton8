@@ -498,4 +498,77 @@ public sealed class TestTierDefinitionTests
             + "and TestTierTraitTests cannot see it, because it reflects over the E2E "
             + "assembly (#490):\n  " + string.Join("\n  ", offenders));
     }
+
+    /// <summary>
+    /// Both new regexes can see what they forbid (#492).
+    /// </summary>
+    /// <remarks>
+    /// Without these, a pattern typo'd into matching nothing reports a clean
+    /// tree forever — the failure mode CLAUDE.md names for the Semgrep rule
+    /// floor, and the one <see cref="The_guard_can_see_a_real_offender"/>
+    /// already closes for the tee regex. Every string here is a form that
+    /// compiles or a filter that runs.
+    /// </remarks>
+    [Fact]
+    public void The_absence_guards_can_see_what_they_forbid()
+    {
+        foreach (var filter in new[]
+        {
+            "--filter \"RequiresService!=Flowable\"",
+            "--filter 'RequiresService!=Flowable'",
+            "--filter RequiresService!=Flowable",
+            "RequiresService != Flowable",
+        })
+        {
+            Assert.Matches(HandWrittenTierFilter, filter);
+        }
+
+        // And not on the shared definition, or the guard cannot coexist with
+        // the thing it protects.
+        Assert.DoesNotMatch(HandWrittenTierFilter, "--filter \"$AUTONATE_TIER_SLIM_FILTER\"");
+        Assert.DoesNotMatch(HandWrittenTierFilter, "--filter \"$(AUTONATE_TIER_FULL_LOCAL_FILTER)\"");
+
+        foreach (var trait in new[]
+        {
+            "[Trait(\"RequiresService\", \"Flowable\")]",
+            "[Xunit.Trait(\"RequiresService\", \"Flowable\")]",
+            "[ Trait ( \"RequiresService\" , \"Flowable\" )]",
+        })
+        {
+            Assert.Matches(ServiceTrait, trait);
+        }
+
+        Assert.DoesNotMatch(ServiceTrait, "[Trait(\"Category\", \"Slow\")]");
+    }
+
+    /// <summary>
+    /// `make test-slim` checks for skipped tests, as GitHub does (#492).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// GitHub fails on any skipped test — <c>tier_gate.py</c> in the e2e job,
+    /// <c>reconcile_shards.py</c> in the backend one. This target reproduced
+    /// neither, so <c>dotnet test</c>'s exit 0 and a discovery-count pin that a
+    /// <c>[Fact(Skip)]</c> does not move left it green while the PR went red.
+    /// </para>
+    /// <para>
+    /// That is the precise failure CLAUDE.md's "runs every test GitHub runs"
+    /// promise exists to prevent, so the promise needed the check rather than
+    /// another caveat.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Slim_checks_for_skipped_tests_the_way_github_does()
+    {
+        var recipe = Recipe("test-slim");
+
+        var gates = recipe.Split("tier_gate.py").Length - 1;
+        Assert.True(gates >= 2,
+            $"`make test-slim` invokes tier_gate.py {gates} time(s); it needs one per project. "
+            + "Without it a [Fact(Skip)] is green locally and red on the PR (#492).");
+
+        // A trx to read, or the gate has nothing to work from.
+        Assert.Contains("trx;LogFileName=slim-backend.trx", recipe, StringComparison.Ordinal);
+        Assert.Contains("trx;LogFileName=slim-e2e.trx", recipe, StringComparison.Ordinal);
+    }
 }

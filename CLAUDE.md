@@ -101,6 +101,13 @@ build, the backend suite, the untraited E2E specs, and the same exact count pins
 Not the xUnit subset: a developer who runs a partial slim green and then eats a
 red build from lint or the a11y ratchet has been handed a false gate.
 
+That includes the **skip gates**: both projects run under a trx logger and
+through `tier_gate.py`, so a `[Fact(Skip)]` is red here exactly as it is on
+GitHub. It was not, until #492 — `dotnet test` exits 0 with skips present and a
+discovery-count pin cannot see a skipped fact, so the target was green while the
+PR went red. That is the failure this promise exists to prevent, so it needed the
+check rather than another caveat.
+
 Two GitHub jobs it does **not** reproduce, named so the promise stays honest: the
 coverage ratchet (`COVERAGE_THRESHOLD` in `ci.yml`, measured across merged shard
 reports) and the app-image build. Both need the sharded run or a Docker build, so

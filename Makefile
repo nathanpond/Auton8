@@ -205,7 +205,17 @@ test-slim: e2e-install
 	    exit 1; \
 	  fi; \
 	  echo "slim backend: $$discovered tests, at its pin"
-	dotnet test tests/AutoNate.Web.Tests --nologo
+	@# A TRX, AND A SKIP CHECK (#492). GitHub fails on any skipped test, via
+	@# reconcile_shards.py; this target did not, so CLAUDE.md's promise that it
+	@# "runs every test GitHub runs" was false in the direction it warns about --
+	@# green here, red on the PR. `dotnet test` exits 0 with skips present and
+	@# the count pin cannot see a [Fact(Skip)], so neither existing check helps.
+	@{ dotnet test tests/AutoNate.Web.Tests --nologo \
+	    --logger "trx;LogFileName=slim-backend.trx" --results-directory "$$PWD/trx" 2>&1; \
+	  echo $$? > /tmp/n8-slim-backend.rc; } | tee /tmp/n8-slim-backend.log; \
+	  python3 .github/scripts/tier_gate.py --trx trx/slim-backend.trx \
+	    --expected "$(AUTONATE_TIER_COUNT_SLIM_BACKEND)" --label "slim backend" || exit 1; \
+	  [ "$$(cat /tmp/n8-slim-backend.rc)" -eq 0 ] || exit 1
 	@echo "== slim: E2E (untraited only) =="
 	@# A filter that matches nothing runs no tests and exits 0 -- this repo's own
 	@# named failure mode. The pin subsumes it, and says which direction moved.
@@ -221,7 +231,13 @@ test-slim: e2e-install
 	    exit 1; \
 	  fi; \
 	  echo "slim E2E: $$count tests discovered, at its pin"
-	dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_SLIM_FILTER)"
+	@# Same trx + skip gate as ci.yml's e2e job (#492).
+	@{ dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_SLIM_FILTER)" \
+	    --logger "trx;LogFileName=slim-e2e.trx" --results-directory "$$PWD/trx" 2>&1; \
+	  echo $$? > /tmp/n8-slim-e2e.rc; } | tee /tmp/n8-slim-e2e.log; \
+	  python3 .github/scripts/tier_gate.py --trx trx/slim-e2e.trx \
+	    --expected "$(AUTONATE_TIER_COUNT_SLIM_E2E)" --label "slim E2E" || exit 1; \
+	  [ "$$(cat /tmp/n8-slim-e2e.rc)" -eq 0 ] || exit 1
 
 # full-local is everything except Keycloak, with real services. #473 gives this
 # target its service stand-up and its preflight; until then it runs the tier
