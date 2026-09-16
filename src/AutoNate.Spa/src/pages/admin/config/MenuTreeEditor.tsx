@@ -160,7 +160,6 @@ export default function MenuTreeEditor({
           : item
       )
     );
-    if (!options?.keepOpen) setEditing(null);
     await onEditItem(next.id, {
       displayName: next.displayName !== previous?.displayName ? next.displayName : null,
       icon: next.icon ?? null,
@@ -171,6 +170,17 @@ export default function MenuTreeEditor({
       clearPermissionRequired: next.permissionRequired === null,
       isVisible: next.isVisible !== previous?.isVisible ? next.isVisible : null
     });
+
+    // AFTER the write, not before (#227). Closing first made the dialog's
+    // disappearance mean "the request is in flight", while the list already
+    // showed the new name from local state -- so the UI reported a save that had
+    // not happened. Navigating away in that window aborted the PATCH and the
+    // rename was lost silently: the failure handler sets in-page error state,
+    // and an aborted request has no page left to show it on.
+    //
+    // Measured: with the PATCH delayed 1.5s, the rename never reached the server
+    // and the stored item still carried its original displayName.
+    if (!options?.keepOpen) setEditing(null);
   };
 
   return (

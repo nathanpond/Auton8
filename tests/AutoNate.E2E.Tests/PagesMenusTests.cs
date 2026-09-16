@@ -61,6 +61,80 @@ public sealed class PagesMenusTests : E2ETestBase
         await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
 
+    /// <summary>
+    /// A rename survives navigating away the instant the dialog closes (#227).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deterministic form of the flake. <c>applyEdit</c> used to dismiss the
+    /// modal and update the list optimistically <em>before</em> sending the PUT,
+    /// so "the dialog closed" meant "the request is in flight", not "the rename
+    /// is saved". Navigating immediately aborted it, and the rename was lost
+    /// with no error anywhere — the failure handler sets in-page state, and an
+    /// aborted request has no page left to show it on.
+    /// </para>
+    /// <para>
+    /// The delay is what makes it a test rather than a coin toss: under load the
+    /// real PUT is slow enough to lose the race, which is why this only ever
+    /// failed in a full run. Held at 1.5s deliberately — long enough that an
+    /// optimistic close always loses, short enough to cost nothing.
+    /// </para>
+    /// <para>
+    /// Asserted against the SERVER, not the list. The list is the thing that was
+    /// lying: it showed the new name from local state while the write was gone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task RenamingAMenuItem_SurvivesNavigatingAwayWhileTheSaveIsSlow()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var name = TestNames.Prefixed("slow-save");
+        var renamed = TestNames.Prefixed("slow-save-edited");
+        var path = $"/e2e-slow-{TestNames.ShortSlug()}";
+
+        await CreateStandaloneItemAsync(page.APIRequest, name, "page", new
+        {
+            path,
+            contentType = "html",
+            content = "<h2>slow</h2>"
+        });
+
+        // PATCH /api/admin/menus/items/{id} -- the update route is NOT under the
+        // menu key, unlike the create. Getting either half wrong makes this test
+        // pass for the wrong reason: the route never matches, no delay happens,
+        // and the race is a coin toss again.
+        await page.RouteAsync("**/api/admin/menus/items/**", async route =>
+        {
+            if (route.Request.Method == "PATCH") await Task.Delay(1_500);
+            await route.ContinueAsync();
+        });
+
+        await OpenStandaloneMenuAsync(page);
+        var row = MenuRow(page, name);
+        await row.GetByRole(AriaRole.Button, new() { Name = "Edit item" }).ClickAsync();
+
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit menu item" });
+        await dialog.GetByLabel("Display name").FillAsync(renamed);
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save and Close" }).ClickAsync();
+
+        // The contract: the dialog closing means the write is DONE, not sent.
+        await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // Leave immediately. This is the move that used to destroy the write.
+        await page.GotoAsync(path);
+
+        var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
+        Assert.True(stored.Ok, await stored.TextAsync());
+
+        var body = await stored.TextAsync();
+        Assert.True(
+            body.Contains(renamed, StringComparison.Ordinal),
+            $"The rename to '{renamed}' never reached the server. The dialog had closed and the "
+            + "list showed the new name from local state, so the UI reported a save that was "
+            + "aborted by the navigation (#227). Stored items:\n" + body[..Math.Min(1200, body.Length)]);
+    }
+
     [Fact]
     public async Task DynamicTemplateRoute_VisibilityAndDeleteLifecycle()
     {
