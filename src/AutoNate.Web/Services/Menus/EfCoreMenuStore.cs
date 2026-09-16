@@ -74,6 +74,12 @@ public sealed class EfCoreMenuStore(
         var items = await db.MenuItems.AsNoTracking()
             .Where(i => i.MenuId == menu.Id)
             .OrderBy(i => i.SortOrder)
+            // SortOrder alone is not a total order -- duplicates are legal and,
+            // before #509, universal. Without a tiebreak the display order of
+            // equal-keyed siblings is whatever the server returns, which is not
+            // promised to be stable across reloads.
+            .ThenBy(i => i.CreatedAtUtc)
+            .ThenBy(i => i.Id)
             .ToListAsync(cancellationToken);
 
         return ToMenuModel(menu) with { Items = BuildTree(items, parentId: null) };
@@ -231,13 +237,30 @@ public sealed class EfCoreMenuStore(
             }
         }
 
+        // Append when the caller did not choose a position (#509). Without
+        // this the endpoint's old `?? 0` put every UI-created item on the same
+        // sort key, and with no tiebreak in the reads their displayed order was
+        // whatever Postgres returned -- which could differ between reloads, and
+        // which made the editor read structurally dirty on first touch because
+        // its reindexed 0..n-1 never matched the stored zeros (#503).
+        var sortOrder = input.SortOrder;
+        if (sortOrder is null)
+        {
+            var siblings = db.MenuItems.Where(i => i.MenuId == menu.Id && i.ParentId == input.ParentId);
+            // Max() over an empty set throws for int; over int? it yields null.
+            var highest = await siblings
+                .Select(i => (int?)i.SortOrder)
+                .MaxAsync(cancellationToken);
+            sortOrder = highest + 1 ?? 0;
+        }
+
         var now = DateTime.UtcNow;
         var entity = new MenuItemEntity
         {
             Id = Guid.NewGuid(),
             MenuId = menu.Id,
             ParentId = input.ParentId,
-            SortOrder = input.SortOrder,
+            SortOrder = sortOrder.Value,
             DisplayName = displayName,
             Icon = string.IsNullOrWhiteSpace(input.Icon) ? null : input.Icon.Trim(),
             ItemType = input.ItemType,
@@ -755,6 +778,10 @@ public sealed class EfCoreMenuStore(
         return items
             .Where(i => i.ParentId == parentId)
             .OrderBy(i => i.SortOrder)
+            // Same reason as the query above: ties must resolve the same way
+            // every time, or the tree reorders itself between reloads (#509).
+            .ThenBy(i => i.CreatedAtUtc)
+            .ThenBy(i => i.Id)
             .Select(i => ToItemModel(i) with { Children = BuildTree(items, i.Id) })
             .ToList();
     }
