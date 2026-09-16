@@ -96,10 +96,15 @@ and Redis; GitHub runs Redis as a service container and Postgres as a
 `docker run`, deliberately, because a service container cannot take
 `-c max_connections=300`. Slim is *what GitHub already stands up*.
 
-**`make test-slim` runs everything GitHub runs** — SPA lint, typecheck, vitest,
-build, the backend suite, the untraited E2E specs. Not the xUnit subset: a
-developer who runs a partial slim green and then eats a red build from lint or
-the a11y ratchet has been handed a false gate.
+**`make test-slim` runs every *test* GitHub runs** — SPA lint, typecheck, vitest,
+build, the backend suite, the untraited E2E specs, and the same exact count pins.
+Not the xUnit subset: a developer who runs a partial slim green and then eats a
+red build from lint or the a11y ratchet has been handed a false gate.
+
+Two GitHub jobs it does **not** reproduce, named so the promise stays honest: the
+coverage ratchet (`COVERAGE_THRESHOLD` in `ci.yml`, measured across merged shard
+reports) and the app-image build. Both need the sharded run or a Docker build, so
+a green `test-slim` is necessary and not quite sufficient.
 
 **What slim cannot tell you.** No BPMN element is proven to *execute* in slim —
 that needs a live Flowable, and GitHub does not run one. This is why

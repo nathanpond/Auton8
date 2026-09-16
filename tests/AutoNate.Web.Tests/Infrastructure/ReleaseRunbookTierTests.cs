@@ -74,6 +74,56 @@ public sealed class ReleaseRunbookTierTests
     }
 
     /// <summary>
+    /// The step still says it is required, and still shows a pass (#490).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The heading and ordering checks close the failure the AC named — a
+    /// passing mention somewhere in the file. They do not notice the
+    /// instruction being <em>inverted</em>. Measured: retitling the step
+    /// "Why you do NOT need the full tier before tagging" and changing
+    /// <c>**Required.**</c> to <c>**Not required.**</c> left every assertion
+    /// green, because the heading still contained both phrases. So did deleting
+    /// the entire "what a pass looks like" block, which is itself an AC item.
+    /// </para>
+    /// <para>
+    /// A guard that survives the opposite instruction is worse than none: it
+    /// reads as protection.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_step_is_stated_as_required_and_shows_what_a_pass_looks_like()
+    {
+        var text = Runbook;
+        var lines = text.Split('\n');
+
+        var start = Array.FindIndex(lines, l =>
+            l.StartsWith("## ", StringComparison.Ordinal)
+            && l.Contains("full tier", StringComparison.OrdinalIgnoreCase)
+            && l.Contains("before tagging", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(start >= 0, "No pre-tag full-tier heading; see the sibling test.");
+
+        var end = Array.FindIndex(lines, start + 1, l => l.StartsWith("## ", StringComparison.Ordinal));
+        var step = string.Join('\n', lines[start..(end < 0 ? lines.Length : end)]);
+
+        Assert.Contains("Required", step, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var reversal in new[] { "not required", "optional", "skip this step" })
+        {
+            Assert.False(
+                step.Contains(reversal, StringComparison.OrdinalIgnoreCase),
+                $"The pre-tag step says \"{reversal}\". The heading can keep its wording while "
+                + "the instruction is inverted, which is how this guard was got past (#490).");
+        }
+
+        // The AC says "with what a pass looks like". Nothing asserted it, so
+        // deleting the whole sample block kept the guard green.
+        Assert.Contains("result  : PASS", step, StringComparison.Ordinal);
+        Assert.Contains("Tier integrity ok", step, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// It says what slim does not cover, as a consequence rather than a percentage.
     /// </summary>
     /// <remarks>

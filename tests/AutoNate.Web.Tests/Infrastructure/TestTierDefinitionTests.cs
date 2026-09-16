@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Reflection;
 using Xunit;
 
@@ -25,6 +26,22 @@ namespace AutoNate.Web.Tests.Infrastructure;
 public sealed class TestTierDefinitionTests
 {
     private static string TiersPath => Path.Combine(RepoRoot.Path, "tests", "tiers.env");
+
+    /// <summary>
+    /// A tier filter written out by hand, in any quoting (#490).
+    /// </summary>
+    /// <remarks>
+    /// `tests/tiers.env` says nothing else may spell a tier filter. The first
+    /// absence check matched one spelling — <c>--filter "RequiresService!=</c> —
+    /// so single quotes, no quotes, or an intermediate variable all walked past
+    /// it. This matches the trait comparison itself.
+    /// </remarks>
+    /// <summary>A <c>RequiresService</c> trait, however qualified (#490).</summary>
+    private static readonly Regex ServiceTrait =
+        new(@"Trait\s*\(\s*""RequiresService""", RegexOptions.Compiled);
+
+    private static readonly Regex HandWrittenTierFilter =
+        new(@"RequiresService\s*!=", RegexOptions.Compiled);
 
     private static IReadOnlyDictionary<string, string> Tiers()
     {
@@ -86,12 +103,16 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("$AUTONATE_TIER_SLIM_FILTER", workflow, StringComparison.Ordinal);
 
         // The literal must be gone, or there are two definitions again and one
-        // of them is the one that already drifted.
-        Assert.DoesNotContain("--filter \"RequiresService!=", workflow, StringComparison.Ordinal);
+        // of them is the one that already drifted. ANY quoting (#490): the
+        // original checked the double-quoted spelling only, so
+        // `--filter 'RequiresService!=Flowable'` walked past it.
+        Assert.DoesNotMatch(HandWrittenTierFilter, workflow);
 
-        // And the file must actually be loaded, or the filter expands to empty
-        // and the job silently runs every test including the traited ones.
-        Assert.Contains("tests/tiers.env", workflow, StringComparison.Ordinal);
+        // And the LOADER line, not a mention of the path (#490). ci.yml names
+        // tests/tiers.env in four places, so asserting the path left three ways
+        // to delete the one that matters -- and without it every filter expands
+        // to empty and the job runs the traited tests too.
+        Assert.Contains("grep -E '^AUTONATE_TIER_' tests/tiers.env", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -102,6 +123,11 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("include tests/tiers.env", makefile, StringComparison.Ordinal);
         Assert.Contains("$(AUTONATE_TIER_SLIM_FILTER)", makefile, StringComparison.Ordinal);
         Assert.Contains("$(AUTONATE_TIER_FULL_LOCAL_FILTER)", makefile, StringComparison.Ordinal);
+
+        // ABSENCE too (#490). This was presence-only, so a second, drifting copy
+        // of a filter in the Makefile was unguarded -- and "one definition, two
+        // readers" is the story's whole claim, with only one reader checked.
+        Assert.DoesNotMatch(HandWrittenTierFilter, makefile);
     }
 
     /// <summary>
@@ -427,4 +453,49 @@ public sealed class TestTierDefinitionTests
     /// tightened.
     /// </para>
     /// </remarks>
+
+    /// <summary>
+    /// The backend project carries no <c>RequiresService</c> trait (#490).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>TestTierTraitTests</c> validates every trait value against the known
+    /// services, but it reflects over its own assembly — the E2E one. A typo'd
+    /// trait in the backend project is invisible to it, and the backend is where
+    /// somebody who has just read CLAUDE.md's tier section would most plausibly
+    /// add one.
+    /// </para>
+    /// <para>
+    /// The backend shards run <b>unfiltered</b>, so a trait here would not move
+    /// the test out of slim — it would simply be inert, and the tier documents
+    /// would be describing a boundary that does not exist on this side. Both
+    /// <c>tests/tiers.env</c> and #476's own reasoning state this as fact; this
+    /// keeps it a fact.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_backend_project_carries_no_service_trait()
+    {
+        var offenders = Directory
+            .EnumerateFiles(Path.Combine(RepoRoot.Path, "tests", "AutoNate.Web.Tests"), "*.cs",
+                SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.EndsWith(nameof(TestTierDefinitionTests) + ".cs", StringComparison.Ordinal))
+            .Select(p => (Path: Path.GetRelativePath(RepoRoot.Path, p), Text: File.ReadAllText(p)))
+            // NOT the literal `[Trait("RequiresService"` (#490). Written that
+            // way this guard missed `[Xunit.Trait("RequiresService", ...)]` --
+            // caught by mutating it, which is the only reason I know. Match the
+            // attribute call however it is qualified or spaced.
+            .Where(f => ServiceTrait.IsMatch(f.Text))
+            .Select(f => f.Path)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "These backend tests carry a RequiresService trait. The backend shards run "
+            + "unfiltered, so the trait does nothing except make the tier documents wrong — "
+            + "and TestTierTraitTests cannot see it, because it reflects over the E2E "
+            + "assembly (#490):\n  " + string.Join("\n  ", offenders));
+    }
 }

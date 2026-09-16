@@ -39,7 +39,16 @@ def read_counts(root: Path) -> list[tuple[str, int, int]]:
         try:
             skipped = int(fields.get("skipped", "0"))
         except ValueError:
-            skipped = 0
+            # FAIL CLOSED (#490). `tier_gate.py` aborts on a missing trx; this
+            # defaulted a malformed count to zero, so a regression in
+            # shard_report.py would silently re-disable the skip gate -- the
+            # exact failure #485 was, arriving by a different door.
+            print(
+                f"::error::{path} has a malformed `skipped=` value: "
+                f"{fields.get('skipped')!r}. Refusing to read it as zero.",
+                file=sys.stderr,
+            )
+            skipped = -1
         counts.append((shard, executed, skipped))
     return counts
 
@@ -95,6 +104,14 @@ def main() -> int:
 
     if args.summary_file:
         Path(args.summary_file).open("a").write("\n".join(lines) + "\n")
+
+    if skipped < 0:
+        print(
+            "::error::A shard count file could not be parsed, so the skip total is unknown. "
+            "An unknown number of skips is not zero skips.",
+            file=sys.stderr,
+        )
+        return 1
 
     if skipped:
         print(

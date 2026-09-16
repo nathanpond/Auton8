@@ -36,10 +36,10 @@ make test-full-local
 # Or, step-by-step (equivalent):
 make infra-ensure
 dotnet build tests/AutoNate.E2E.Tests
-dotnet test tests/AutoNate.E2E.Tests --filter "RequiresService!=Keycloak"   # the full-local tier
+make test-full-local   # the full-local tier; the filter lives in tests/tiers.env
 
 # Headed — opens a real browser window
-PWDEBUG=1 dotnet test tests/AutoNate.E2E.Tests --filter "RequiresService!=Keycloak"   # the full-local tier
+PWDEBUG=1 make test-full-local   # the full-local tier; the filter lives in tests/tiers.env
 ```
 
 First run rebuilds the SPA into `wwwroot/` and warms `dotnet build`, so it can
