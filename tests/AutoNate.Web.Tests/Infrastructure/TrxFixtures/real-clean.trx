@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="3ef008f4-3284-4017-a310-8392e6e7c9c6" name="@Tecate 2026-09-16 09:47:57" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-16T09:47:57.1432000-04:00" queuing="2026-09-16T09:47:57.1432000-04:00" start="2026-09-16T09:47:56.8113040-04:00" finish="2026-09-16T09:47:57.1456670-04:00" />
+  <TestSettings name="default" id="c06fcad2-b51f-4657-b1fb-9548b1509d30">
+    <Deployment runDeploymentRoot="_Tecate_2026-09-16_09_47_57" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="53d451a2-021e-4f55-98b1-ab524ff79a76" testId="09a32875-bd84-e778-d3e8-5a003ceb0e3e" testName="T.C" computerName="Tecate" duration="00:00:00.0009550" startTime="2026-09-16T09:47:57.0950900-04:00" endTime="2026-09-16T09:47:57.0950990-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="53d451a2-021e-4f55-98b1-ab524ff79a76" />
+    <UnitTestResult executionId="fabae7c9-bc24-476a-b2a1-70e4b5d9005a" testId="d17ee333-2684-242d-423a-a1ac93d02d06" testName="T.A" computerName="Tecate" duration="00:00:00.0000171" startTime="2026-09-16T09:47:57.0968010-04:00" endTime="2026-09-16T09:47:57.0968010-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fabae7c9-bc24-476a-b2a1-70e4b5d9005a" />
+    <UnitTestResult executionId="71e7511f-d584-4f15-9d96-933f5c5e17c8" testId="7ce4ac61-8cdd-97f9-8a9b-5d1bb5bffd41" testName="T.B" computerName="Tecate" duration="00:00:00.0000504" startTime="2026-09-16T09:47:57.0966520-04:00" endTime="2026-09-16T09:47:57.0966520-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="71e7511f-d584-4f15-9d96-933f5c5e17c8" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="T.B" storage="/private/tmp/n8-skipprobe/bin/debug/net10.0/p.dll" id="7ce4ac61-8cdd-97f9-8a9b-5d1bb5bffd41">
+      <Execution id="71e7511f-d584-4f15-9d96-933f5c5e17c8" />
+      <TestMethod codeBase="/private/tmp/n8-skipprobe/bin/Debug/net10.0/p.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="T" name="B" />
+    </UnitTest>
+    <UnitTest name="T.C" storage="/private/tmp/n8-skipprobe/bin/debug/net10.0/p.dll" id="09a32875-bd84-e778-d3e8-5a003ceb0e3e">
+      <Execution id="53d451a2-021e-4f55-98b1-ab524ff79a76" />
+      <TestMethod codeBase="/private/tmp/n8-skipprobe/bin/Debug/net10.0/p.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="T" name="C" />
+    </UnitTest>
+    <UnitTest name="T.A" storage="/private/tmp/n8-skipprobe/bin/debug/net10.0/p.dll" id="d17ee333-2684-242d-423a-a1ac93d02d06">
+      <Execution id="fabae7c9-bc24-476a-b2a1-70e4b5d9005a" />
+      <TestMethod codeBase="/private/tmp/n8-skipprobe/bin/Debug/net10.0/p.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="T" name="A" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="09a32875-bd84-e778-d3e8-5a003ceb0e3e" executionId="53d451a2-021e-4f55-98b1-ab524ff79a76" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d17ee333-2684-242d-423a-a1ac93d02d06" executionId="fabae7c9-bc24-476a-b2a1-70e4b5d9005a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7ce4ac61-8cdd-97f9-8a9b-5d1bb5bffd41" executionId="71e7511f-d584-4f15-9d96-933f5c5e17c8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="3" executed="3" passed="3" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 10.0.5)
+[xUnit.net 00:00:00.03]   Discovering: p
+[xUnit.net 00:00:00.04]   Discovered:  p
+[xUnit.net 00:00:00.04]   Starting:    p
+[xUnit.net 00:00:00.07]   Finished:    p
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

@@ -47,7 +47,19 @@ def main() -> int:
     total = int(counters.get("total") or 0)
     passed = int(counters.get("passed") or 0)
     failed = int(counters.get("failed") or 0)
-    skipped = int(counters.get("notExecuted") or 0)
+    executed = int(counters.get("executed") or 0)
+
+    # NOT `notExecuted` alone (#485). VSTest does not populate it -- measured on
+    # this repo's exact versions (xunit 2.9.0 / runner.visualstudio 2.8.2 /
+    # Test.Sdk 17.10.0), a real `[Fact(Skip)]` produces
+    #   <Counters total="3" executed="2" ... notExecuted="0" ... />
+    # while the console prints `Skipped: 1`. The skip is the total-executed gap.
+    #
+    # The gap is also the better question: it counts everything that did not
+    # run, whatever the runner chose to call it, so an aborted or not-runnable
+    # test is caught too. `max` keeps this correct if a future SDK starts
+    # filling the attribute in.
+    skipped = max(int(counters.get("notExecuted") or 0), total - executed)
 
     lines = [
         f"### {args.label}",

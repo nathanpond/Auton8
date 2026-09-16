@@ -371,31 +371,23 @@ public sealed class TestTierDefinitionTests
     }
 
     /// <summary>
-    /// The gate scripts read the skip count, which is the field they lacked.
+    /// Removed in favour of behavioural tests (#485).
     /// </summary>
     /// <remarks>
-    /// A trx counts a skipped test in <c>total</c>, and
-    /// <c>shard_report.py</c> set <c>executed = total</c> — so a
-    /// <c>[Fact(Skip)]</c> reconciled perfectly while not running. The field is
-    /// <c>notExecuted</c>; asserting on the field name is the only way to pin
-    /// that it is still consulted.
+    /// <para>
+    /// This used to assert <c>text.Contains("notExecuted") || text.Contains("skipped")</c>
+    /// over each gate script. Two things were wrong with it. It was satisfied by
+    /// a <em>comment</em> — delete both functional lines, keep the prose, and it
+    /// stayed green. And the field it pinned was the wrong one:
+    /// <c>notExecuted</c> is never populated by VSTest, so the guard was
+    /// protecting a reader of an attribute that is always zero.
+    /// </para>
+    /// <para>
+    /// <c>ShardReportScriptTests</c> now drives all three scripts against trx
+    /// files captured from a real run with a real <c>[Fact(Skip)]</c>, and
+    /// reverting the fix turns exactly three of them red. A test that runs the
+    /// script beats any grep of its source, so this is deleted rather than
+    /// tightened.
+    /// </para>
     /// </remarks>
-    [Theory]
-    [InlineData("shard_report.py")]
-    [InlineData("reconcile_shards.py")]
-    [InlineData("tier_gate.py")]
-    public void The_gate_scripts_read_the_skip_count(string script)
-    {
-        var path = Path.Combine(RepoRoot.Path, ".github", "scripts", script);
-
-        Assert.True(File.Exists(path), $"{script} is missing.");
-
-        var text = File.ReadAllText(path);
-
-        Assert.True(
-            text.Contains("notExecuted", StringComparison.Ordinal)
-            || text.Contains("skipped", StringComparison.Ordinal),
-            $"{script} no longer reads the skip count. A trx counts a skipped test in `total`, "
-            + "so dropping this makes a [Fact(Skip)] invisible to the merge gate again (#476).");
-    }
 }
