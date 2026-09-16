@@ -78,26 +78,99 @@ public sealed class DatastoresDatabaseInitializer(
         };
 
         var quoted = QuoteIdentifier(targetDatabase);
-        // The owner keeps its own privileges — REVOKE ... FROM PUBLIC does not
-        // touch the `owner=CTc/owner` entry — so this does not lock out the
-        // connection string that just ran it.
-        var sql = $"REVOKE CONNECT ON DATABASE {quoted} FROM PUBLIC;";
-        if (!string.IsNullOrWhiteSpace(writerRole))
-        {
-            // The writer role is a plain LOGIN role and reached CONNECT only
-            // through PUBLIC. Granting it explicitly is what makes the revoke
-            // above safe rather than an outage for every SqlType datastore.
-            sql += $"\nGRANT CONNECT ON DATABASE {quoted} TO {QuoteIdentifier(writerRole)};";
-        }
 
         try
         {
             await using var conn = new NpgsqlConnection(maintenance.ConnectionString);
             await conn.OpenAsync(cancellationToken);
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
-            log.LogInformation(
-                "Datastores DB '{Name}': CONNECT revoked from PUBLIC.", targetDatabase);
+
+            // READ FIRST, and write only if something actually needs changing.
+            //
+            // REVOKE/GRANT on a database rewrites the `pg_database` tuple, and
+            // every application boot runs this. The test suite boots hundreds
+            // of hosts in parallel against one cluster, so an unconditional
+            // write made them all contend on a single catalog row: measured,
+            // 24 tests across unrelated areas failing with
+            // `XX000: tuple concurrently updated`. The sibling
+            // EnsureWriterRoleAsync documents the same hazard on `pg_authid`.
+            //
+            // Checking first makes this a no-op in the steady state — which is
+            // every boot after the first — so there is nothing to contend on.
+            await using (var probe = new NpgsqlCommand(
+                """
+                SELECT
+                    COALESCE(array_to_string(d.datacl, ','), '') AS acl,
+                    d.datacl IS NULL                             AS acl_is_default
+                FROM pg_database d
+                WHERE d.datname = @name
+                """, conn))
+            {
+                probe.Parameters.AddWithValue("name", targetDatabase);
+
+                string acl;
+                bool aclIsDefault;
+                // Scoped so the reader is CLOSED before anything else runs on
+                // this connection: Npgsql allows one command at a time, and
+                // leaving it open threw NpgsqlOperationInProgressException.
+                await using (var reader = await probe.ExecuteReaderAsync(cancellationToken))
+                {
+                    if (!await reader.ReadAsync(cancellationToken)) return;
+                    acl = reader.GetString(0);
+                    aclIsDefault = reader.GetBoolean(1);
+                }
+
+                // A NULL datacl is the PostgreSQL default and the default
+                // includes CONNECT for PUBLIC, so "no ACL" is the failing
+                // state, not a neutral one. Otherwise PUBLIC's entry is the
+                // one with an empty grantee before `=`; `c` in it is CONNECT.
+                var publicEntry = acl.Split(',').FirstOrDefault(e => e.StartsWith('='));
+                var publicHasConnect = aclIsDefault
+                    || (publicEntry is not null
+                        && publicEntry.Split('/')[0].Contains('c', StringComparison.Ordinal));
+
+                var writerNeedsConnect = false;
+                if (!string.IsNullOrWhiteSpace(writerRole))
+                {
+                    await using var wcmd = new NpgsqlCommand(
+                        "SELECT has_database_privilege(@role, @db, 'CONNECT')", conn);
+                    wcmd.Parameters.AddWithValue("role", writerRole);
+                    wcmd.Parameters.AddWithValue("db", targetDatabase);
+                    // False when the role does not exist yet; the grant below
+                    // would then fail and is skipped by the same flag.
+                    writerNeedsConnect = await wcmd.ExecuteScalarAsync(cancellationToken) is false;
+                }
+
+                if (!publicHasConnect && !writerNeedsConnect) return;
+
+                // The owner keeps its own privileges — REVOKE ... FROM PUBLIC
+                // does not touch the `owner=CTc/owner` entry — so this does not
+                // lock out the connection string that just ran it.
+                var sql = publicHasConnect
+                    ? $"REVOKE CONNECT ON DATABASE {quoted} FROM PUBLIC;"
+                    : string.Empty;
+                if (writerNeedsConnect)
+                {
+                    // The writer role is a plain LOGIN role and reached CONNECT
+                    // only through PUBLIC. Granting it explicitly is what makes
+                    // the revoke safe rather than an outage for every SqlType
+                    // datastore.
+                    sql += $"\nGRANT CONNECT ON DATABASE {quoted} TO {QuoteIdentifier(writerRole!)};";
+                }
+
+                await using var write = new NpgsqlCommand(sql, conn);
+                await write.ExecuteNonQueryAsync(cancellationToken);
+                log.LogInformation(
+                    "Datastores DB '{Name}': CONNECT revoked from PUBLIC.", targetDatabase);
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "XX000" or "40001" or "40P01")
+        {
+            // Another instance won the race and is applying the identical
+            // change. Losing it is not a fault: the end state is the same, and
+            // the next boot's probe will confirm it.
+            log.LogDebug(
+                "Datastores DB '{Name}': isolation applied concurrently by another instance.",
+                targetDatabase);
         }
         catch (PostgresException ex) when (ex.SqlState == "42501")
         {
