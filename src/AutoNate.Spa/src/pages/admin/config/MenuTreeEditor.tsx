@@ -34,7 +34,9 @@ type Props = {
   menu: Menu;
   onChange: (items: FlatMenuItem[]) => void;
   onAddRoot: (itemType?: MenuItemType) => void;
-  onDelete: (id: string) => void;
+  // May reject, and the caller relies on it: the row is removed optimistically
+  // and put back when the write is refused (#495).
+  onDelete: (id: string) => void | Promise<void>;
   onEditItem: (id: string, request: UpdateMenuItemRequest) => Promise<void>;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -148,7 +150,10 @@ export default function MenuTreeEditor({
     try {
       await onEditItem(id, { isVisible: nextVisible });
     } catch {
-      setItems((prev) => prev.map((item) => (item.id === id ? previous : item)));
+      // Field-scoped, for the reason in applyEdit's catch (#495).
+      setItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, isVisible: previous.isVisible } : item))
+      );
     }
   };
 
@@ -188,8 +193,27 @@ export default function MenuTreeEditor({
       //
       // The modal is deliberately NOT closed below: the user's draft is still in
       // it, and closing on a refusal is how the first version of this lost work.
+      // ONLY THE FIELDS THIS WRITE TOUCHED (#495). Restoring `previous`
+      // wholesale also restores `parentId`, `depth` and `sortOrder` as they were
+      // before the await -- so a drag that landed while the write was in flight
+      // would silently revert in the tree while `pendingItems` still held the
+      // dragged order.
       if (previous) {
-        setItems((prev) => prev.map((item) => (item.id === next.id ? previous : item)));
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === next.id
+              ? {
+                  ...item,
+                  displayName: previous.displayName,
+                  icon: previous.icon,
+                  itemType: previous.itemType,
+                  config: previous.config,
+                  permissionRequired: previous.permissionRequired,
+                  isVisible: previous.isVisible
+                }
+              : item
+          )
+        );
       }
       return;
     }
@@ -271,10 +295,23 @@ export default function MenuTreeEditor({
                   onDelete={() => {
                     if (confirm(`Delete '${item.displayName}' and any children?`)) {
                       const ids = new Set([item.id, ...getDescendantIds(items, item.id)]);
+                      const previousItems = items;
                       const next = reindex(items.filter((i) => !ids.has(i.id)));
                       setItems(next);
                       onChange(next);
-                      onDelete(item.id);
+
+                      // PUT THE ROW BACK IF THE SERVER REFUSES (#495). The
+                      // optimistic removal already told `onChange`, so without
+                      // this the tree is dirty with a live item missing and
+                      // "Save order" would post a node list that omits it.
+                      // Whole-list restore here, unlike the field-scoped
+                      // rollbacks above: a delete removes the item and its
+                      // descendants and reindexes everything, so there is no
+                      // narrower unit to put back.
+                      void Promise.resolve(onDelete(item.id)).catch(() => {
+                        setItems(previousItems);
+                        onChange(previousItems);
+                      });
                     }
                   }}
                 />
