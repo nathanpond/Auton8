@@ -134,6 +134,26 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
   const updateMenu = useUpdateMenu(menu?.id ?? "");
   const deleteMenu = useDeleteMenu();
 
+  // Drop a pending reorder as soon as the server's item SET changes underneath
+  // it (#509). `pendingItems` was cleared only by a successful save or an
+  // explicit Cancel, so a create or delete that succeeded mid-edit left it
+  // holding the pre-change list while MenuTreeEditor reset its own `items` from
+  // the refetched menu. Pressing "Save order" then PUT a node list describing a
+  // tree that no longer existed: ReplaceTreeAsync leaves unlisted items alone,
+  // so nothing was deleted, but the new item kept its own sort key and the
+  // saved order was not the order on screen.
+  //
+  // Keyed on the id SET, not on the array identity: every refetch produces new
+  // objects, and clearing on those would discard a drag the user is still in
+  // the middle of.
+  const serverItemIds = useMemo(
+    () => (menu ? flattenForCompare(menu).map((item) => item.id).sort().join(",") : null),
+    [menu]
+  );
+  useEffect(() => {
+    setPendingItems(null);
+  }, [serverItemIds]);
+
   const dirty = pendingItems !== null;
 
   const isStructurallyDirty = useMemo(() => {

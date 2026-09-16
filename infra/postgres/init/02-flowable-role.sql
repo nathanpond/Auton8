@@ -32,6 +32,23 @@ ALTER DATABASE flowable OWNER TO flowable_app;
 -- means revoking it. Guarded per database: `autonate_datastores` is created later
 -- by the application, and an unguarded REVOKE against a database that does not
 -- exist yet aborts the whole init script.
+--
+-- Which means the loop below is a NO-OP for `autonate_datastores` on the only
+-- run that matters. Init scripts execute exactly once, on an empty data
+-- directory; at that moment only `AutoNate` exists (01-create-autonate-db.sql),
+-- so the IF EXISTS is false and the revoke never happens for the datastores
+-- database. Measured on a fresh cluster: `AutoNate` had PUBLIC down to TEMP
+-- while `autonate_datastores` had an empty datacl -- the PostgreSQL default,
+-- PUBLIC keeping CONNECT (#506).
+--
+-- It is left listed here on purpose: the entry is correct for a cluster where
+-- an operator created the database ahead of time, and removing it would make
+-- that case silently worse. The case this script CANNOT cover -- the database
+-- the application creates for itself -- is handled where the creation happens,
+-- in DatastoresDatabaseInitializer.EnsureDatabaseIsolationAsync, which revokes
+-- on every startup and grants CONNECT back to the datastores writer role.
+-- Do not "simplify" this by dropping the guard: an unguarded REVOKE here
+-- aborts the entire init script, which is how the guard got here.
 DO $$
 DECLARE
     d TEXT;

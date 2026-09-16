@@ -158,7 +158,10 @@ public static class MenuEndpoints
             {
                 var item = await store.CreateItemAsync(key, new CreateMenuItemInput(
                     request.ParentId,
-                    request.SortOrder ?? 0,
+                    // Not `?? 0` any more: the store appends when this is null
+                    // (#509). Defaulting to 0 here is what collapsed every
+                    // UI-created item onto the same sort key.
+                    request.SortOrder,
                     request.DisplayName,
                     request.Icon,
                     request.ItemType,

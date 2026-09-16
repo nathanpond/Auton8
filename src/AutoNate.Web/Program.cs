@@ -1736,6 +1736,44 @@ app.MapYjsEndpoints();
     });
 }
 
+// OUTSIDE the wwwroot check on purpose (#388). This is a statement about
+// API routing, not about static files: an unknown /api path must answer a
+// clean, uncacheable 404 whether or not the SPA has been built. Nested
+// inside the conditional it vanished in every checkout without
+// src/AutoNate.Spa/dist -- which is every git worktree, and /n8-verify
+// runs in worktrees.
+//
+// /api/* must NOT fall through to the SPA index. A missing or
+// unregistered API route should produce a clean 404; serving index.html
+// for /api hides routing bugs and — because the static-files pipeline
+// attaches ETag/Last-Modified — lets the browser heuristically cache
+// the HTML body against that exact (path,query) pair. Subsequent
+// requests then keep returning the cached HTML even after the real
+// endpoint ships.
+//
+// Two pieces, deliberately NOT a MapFallback("/api/{**rest}") route:
+//   1. The SPA catch-all below carries a regex constraint that refuses
+//      any path starting with "api/", so an unknown /api path matches
+//      no endpoint at all.
+//   2. This middleware turns "no endpoint under /api" into an
+//      uncacheable 404.
+// A route endpoint would instead become a *candidate* in endpoint
+// selection, and AcceptsMatcherPolicy then prefers it over a real
+// endpoint whose JSON body contract the request doesn't satisfy — a
+// body-less POST to /api/system-issues/{id}/resolve (a legal call) got
+// 404 instead of reaching its handler. It would also need an
+// auth-decision marker to pass AuthorizationGatePresenceTests.
+app.Use(async (http, next) =>
+{
+    if (http.Request.Path.StartsWithSegments("/api") && http.GetEndpoint() is null)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next(http);
+});
+
 // MapStaticAssets and MapFallbackToFile both depend on WebRootPath (wwwroot/),
 // which only exists when the Vite build has run. In Debug the .csproj sets
 // BuildSpa=false (devs run Vite separately and serve the SPA from its own dev
@@ -1759,37 +1797,6 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // overhead behind MapStaticAssets's manifest hits in normal operation.
     app.UseStaticFiles();
     app.MapStaticAssets();
-
-    // /api/* must NOT fall through to the SPA index. A missing or
-    // unregistered API route should produce a clean 404; serving index.html
-    // for /api hides routing bugs and — because the static-files pipeline
-    // attaches ETag/Last-Modified — lets the browser heuristically cache
-    // the HTML body against that exact (path,query) pair. Subsequent
-    // requests then keep returning the cached HTML even after the real
-    // endpoint ships.
-    //
-    // Two pieces, deliberately NOT a MapFallback("/api/{**rest}") route:
-    //   1. The SPA catch-all below carries a regex constraint that refuses
-    //      any path starting with "api/", so an unknown /api path matches
-    //      no endpoint at all.
-    //   2. This middleware turns "no endpoint under /api" into an
-    //      uncacheable 404.
-    // A route endpoint would instead become a *candidate* in endpoint
-    // selection, and AcceptsMatcherPolicy then prefers it over a real
-    // endpoint whose JSON body contract the request doesn't satisfy — a
-    // body-less POST to /api/system-issues/{id}/resolve (a legal call) got
-    // 404 instead of reaching its handler. It would also need an
-    // auth-decision marker to pass AuthorizationGatePresenceTests.
-    app.Use(async (http, next) =>
-    {
-        if (http.Request.Path.StartsWithSegments("/api") && http.GetEndpoint() is null)
-        {
-            http.Response.Headers.CacheControl = "no-store";
-            http.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
-        }
-        await next(http);
-    });
 
     // React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
     // physical file, an explicitly-mapped endpoint, or under /api falls back to the SPA

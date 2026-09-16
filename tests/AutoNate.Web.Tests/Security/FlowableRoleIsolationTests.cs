@@ -110,6 +110,58 @@ public sealed class FlowableRoleIsolationTests
             "datasource is not isolated from application data.");
     }
 
+    // The theory above is a fresh-install measure and returns early on any
+    // cluster without `flowable_app` -- which is every developer machine whose
+    // data directory predates the init scripts. That is honest, and it is also
+    // why nobody noticed that `autonate_datastores` was never revoked at all:
+    // the check that would have said so does not run where the database exists,
+    // and does not exist where the check runs (#506).
+    //
+    // So this asserts the property directly, on the database the application
+    // creates for itself, with no dependence on `flowable_app` being present.
+    // Booting the factory is what runs DatastoresDatabaseInitializer; the
+    // assertion then reads the catalog the initializer was supposed to change.
+    [Fact]
+    public async Task The_datastores_database_does_not_leave_connect_with_public()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        // A request, so startup (and therefore the initializers) has certainly
+        // completed before the catalog is read.
+        (await factory.CreateClient().GetAsync("/api/health/live")).EnsureSuccessStatusCode();
+
+        await using var admin = new NpgsqlConnection(AdminTo("postgres"));
+        await admin.OpenAsync();
+
+        await using var command = admin.CreateCommand();
+        command.CommandText =
+            "SELECT COALESCE(array_to_string(datacl, ','), '') FROM pg_database "
+            + "WHERE datname = 'autonate_datastores'";
+        var acl = (string?)await command.ExecuteScalarAsync();
+
+        Assert.False(
+            acl is null,
+            "autonate_datastores does not exist, so this assertion proved nothing. "
+            + "It is created by DatastoresDatabaseInitializer at startup.");
+
+        // An EMPTY datacl is the PostgreSQL default, and the default includes
+        // CONNECT for PUBLIC -- so "no ACL" is the failing state, not a neutral
+        // one. This is exactly the shape the bug shipped in.
+        Assert.False(
+            acl!.Length == 0,
+            "autonate_datastores has an empty datacl, which is the PostgreSQL default: "
+            + "PUBLIC -- and so the Flowable engine's role -- retains CONNECT (#506).");
+
+        // PUBLIC's entry is the one with an empty grantee before `=`. `c` in it
+        // is CONNECT. Checking the parsed entry rather than the whole string
+        // matters: the owner's own entry legitimately contains `c`.
+        var publicEntry = acl.Split(',')
+            .FirstOrDefault(entry => entry.StartsWith('='));
+        Assert.False(
+            publicEntry is not null && publicEntry.Split('/')[0].Contains('c', StringComparison.Ordinal),
+            $"PUBLIC still holds CONNECT on autonate_datastores (datacl: {acl}). "
+            + "Every role on the cluster, including Flowable's, can reach it (#506).");
+    }
+
     // Positive control for the above: a role revoked out of everything would
     // pass that theory while being entirely broken.
     [Fact]

@@ -10,7 +10,13 @@ public sealed record class UpdateMenuInput(string? Name, string? Description);
 
 public sealed record class CreateMenuItemInput(
     Guid? ParentId,
-    int SortOrder,
+    // Null means "put it last among its siblings", which is what a caller
+    // adding an item almost always wants. It used to be a bare int that the
+    // endpoint defaulted to 0, so EVERY item created through the UI was stored
+    // at 0 and their relative order was whatever Postgres happened to return
+    // (#509). An explicit value is still honoured -- the tree PUT sends dense
+    // ones deliberately.
+    int? SortOrder,
     string DisplayName,
     string? Icon,
     string ItemType,
