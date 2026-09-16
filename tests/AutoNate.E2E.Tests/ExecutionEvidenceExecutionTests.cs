@@ -39,8 +39,16 @@ namespace AutoNate.E2E.Tests;
 /// </para>
 /// <para>
 /// <c>RequiresService=Flowable</c> by necessity: the engine is the oracle. That
-/// puts it outside CI, alongside ~49% of this suite — stated here because #325's
-/// Notes asked it be stated rather than discovered.
+/// puts this class in the <b>full-local</b> tier, not <b>slim</b> — so GitHub
+/// never runs it and <c>make test-full-local</c> is what does. Stated here
+/// because #325's Notes asked it be stated rather than discovered.
+/// </para>
+/// <para>
+/// The rule, not a count: <b>slim stands up no workflow engine, so nothing slim
+/// runs proves any BPMN element executes.</b> This used to read "alongside ~49%
+/// of this suite", and a number goes stale and then misleads with authority —
+/// which is how it came to say 49% in the first place. The live numbers are the
+/// pins in <c>tests/tiers.env</c>, where they are checked rather than recited.
 /// </para>
 /// </remarks>
 [Trait("RequiresService", "Flowable")]

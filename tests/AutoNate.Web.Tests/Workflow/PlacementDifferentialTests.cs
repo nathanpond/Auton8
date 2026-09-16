@@ -21,10 +21,11 @@ namespace AutoNate.Web.Tests.Workflow;
 /// Nothing here is reasoned; a cell that disagrees with the engine fails.
 /// </para>
 /// <para>
-/// <b>This runs in CI, and that is the point.</b> Its sibling
+/// <b>This runs in the slim tier, and that is the point.</b> Its sibling
 /// <c>StartEventPlacementDifferentialTests</c> asks the same question of a live
-/// engine and is <c>RequiresService=Flowable</c>, so it is outside the gate —
-/// which is how #333's broken cardinality survived four rounds. This half needs
+/// engine and is <c>RequiresService=Flowable</c>, so it is full-local only and
+/// no merge gate runs it — which is how #333's broken cardinality survived four
+/// rounds. This half needs
 /// no engine: it compares Auton8's validation against the <em>recorded</em>
 /// matrix, so Auton8 drifting from the engine fails the merge. The engine
 /// changing under the recording is the other half's job.

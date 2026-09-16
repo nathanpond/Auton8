@@ -9,10 +9,10 @@ namespace AutoNate.Web.Tests.Workflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Four guarantees this milestone rests on had no engine-free coverage at all,
-/// and CI excludes <c>RequiresService=Flowable</c> — so the whole of the callback
-/// stamping, the stored-versus-deployed split, call-activity pinning and the
-/// mapped output ran only on a developer machine, if at all.
+/// Four guarantees this milestone rests on had no slim-tier coverage at all,
+/// and <c>RequiresService=Flowable</c> is full-local only — so the whole of the
+/// callback stamping, the stored-versus-deployed split, call-activity pinning
+/// and the mapped output ran only under <c>make test-full-local</c>, if at all.
 /// </para>
 /// <para>
 /// The functions here are pure. There was never a reason for the only tests of

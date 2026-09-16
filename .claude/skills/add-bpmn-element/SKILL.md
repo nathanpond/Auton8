@@ -427,7 +427,7 @@ page; toast for transient feedback.
 
 - **Fixture** — a minimal `.bpmn` using the element. #103 landed these in `tests/fixtures/bpmn-inventory/`, one per manifest entry, generated and then deployed against a live engine. Yours almost certainly exists already; extend it rather than starting a new directory.
 - **`tests/AutoNate.Web.Tests/WorkflowBpmnXmlTests.cs`** — round-trip and every validation branch. No engine needed; these are where most per-element logic lives.
-- **E2E** — `RequiresService=Flowable` trait, or CI's exclusion stops holding and `ci.yml`'s shard reconciliation will notice.
+- **E2E** — `RequiresService=Flowable` trait. Without it the spec lands in **slim**, where GitHub runs it with no engine; `ci.yml`'s slim count pin goes red because the tier grew, which is the pin doing its job. See CLAUDE.md > Test tiers.
 - **`tests/AutoNate.Web.Tests/Invariants/DoNotRenameGuardTests.cs`** must still pass if you touched the namespace.
 
 Assert that the element *does something*. See `references/testing-bpmn-elements.md` —

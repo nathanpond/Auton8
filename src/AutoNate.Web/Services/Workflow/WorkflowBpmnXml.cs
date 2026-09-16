@@ -432,7 +432,8 @@ public static partial class WorkflowBpmnXml
     /// the studio produces. <c>BuildMissingRequiredAttributeErrors</c> did exactly
     /// that from #333 until #356, and a fixed-count multi-instance could not be
     /// published — the error told the author to set the thing they had set. It was
-    /// red for four rounds because CI excludes the Flowable suite.
+    /// red for four rounds because the Flowable suite is full-local only, and
+    /// nobody was running that tier.
     /// </para>
     /// <para>
     /// One reader now, because two readers of one thing disagreeing is the defect

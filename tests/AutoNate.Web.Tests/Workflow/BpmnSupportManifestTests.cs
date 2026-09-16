@@ -246,8 +246,8 @@ public sealed class BpmnSupportManifestTests
         // name -> a fragment that cannot survive the reason being replaced.
         //
         // #365 widened this past `cannot-execute`. The five message rows are
-        // `engine: executes` / `studio: withdrawn`, so they sat outside the gate
-        // and their restored engine-axis reasons -- restored BY #358, for exactly
+        // `engine: executes` / `studio: withdrawn`, so nothing in the slim tier
+        // covered them and their restored engine-axis reasons -- restored BY #358, for exactly
         // this reason -- were re-overwritable with the suite green. A guard for
         // unguarded fields that left the fields it had just repaired unguarded.
         var required = new Dictionary<string, string>(StringComparer.Ordinal)

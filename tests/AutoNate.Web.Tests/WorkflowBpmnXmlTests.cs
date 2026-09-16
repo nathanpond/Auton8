@@ -902,9 +902,10 @@ public sealed class WorkflowBpmnXmlTests
 
     // ── #218: the complex gateway expansion ──────────────────────────────────
     //
-    // CI excludes engine-backed specs, so these carry the expansion's guarantees
-    // without Flowable. What they cannot check is that the engine routes on the
-    // conditions written here; that is verified separately and recorded on #218.
+    // Engine-backed specs are full-local only, so these carry the expansion's
+    // guarantees in the slim tier without Flowable. What they cannot check is
+    // that the engine routes on the conditions written here; that is verified
+    // separately and recorded on #218.
 
     private const string ComplexGatewayXml = """
         <?xml version="1.0" encoding="UTF-8"?>

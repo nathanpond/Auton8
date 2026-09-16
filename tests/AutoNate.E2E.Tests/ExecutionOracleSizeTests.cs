@@ -7,11 +7,12 @@ namespace AutoNate.E2E.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>No trait, no fixture, no engine.</b> That is the entire point. Its sibling
+/// <b>No trait, no fixture, no engine.</b> That is the entire point: no trait is
+/// what puts a test in the <b>slim</b> tier. Its sibling
 /// <see cref="ExecutionEvidenceExecutionTests"/> is
-/// <c>RequiresService=Flowable</c> and therefore excluded from CI, so its own
+/// <c>RequiresService=Flowable</c> and therefore full-local only, so its own
 /// <c>The_oracle_runs_every_declared_cell</c> cannot fail a merge. This class
-/// runs in the same project, which CI does build and run, and calls the same
+/// runs in the same project under the slim filter, and calls the same
 /// <c>DeclaredEffects()</c> the theory feeds from.
 /// </para>
 /// <para>

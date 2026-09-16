@@ -342,7 +342,7 @@ public sealed class ExecutionEvidenceTests
     /// <remarks>
     /// <para>
     /// This assertion lived in <c>ExecutionEvidenceExecutionTests</c>, which is
-    /// <c>RequiresService=Flowable</c> and therefore excluded from CI — so the
+    /// <c>RequiresService=Flowable</c> and therefore full-local only — so the
     /// one check that a declaration is actually exercised could not fail a merge.
     /// A declaration with no diagram is skipped by that class's own
     /// <c>MemberData</c> filter, silently.
