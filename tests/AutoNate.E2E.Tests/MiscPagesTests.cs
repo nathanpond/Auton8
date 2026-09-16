@@ -140,6 +140,24 @@ public sealed class MiscPagesTests : E2ETestBase
     [Fact]
     public async Task BusWatcher_RendersHeadingForSuperAdmin()
     {
+        // THE SPEC MUST BE ABLE TO FAIL WITHOUT A SIDECAR (#501). Without this it
+        // could not: with AUTONATE_E2E_DAPR unset the fixture sets the bypass, so
+        // Program.cs never probes, and `/api/health/dapr` resolves appsettings'
+        // 127.0.0.1:3500 -- answered on a developer machine by whatever
+        // `make app-dapr` left running. Measured: the spec passed with no sidecar
+        // of its own, which is the thing `RequiresService=Dapr` exists to rule out.
+        //
+        // The trait names a service; this asserts the tier actually supplied it.
+        // Same discipline as #493 -- check the precondition, so a green cannot
+        // arrive from somewhere else.
+        Assert.True(
+            string.Equals(
+                Environment.GetEnvironmentVariable("AUTONATE_E2E_DAPR"), "1", StringComparison.Ordinal),
+            "AUTONATE_E2E_DAPR is not set, so the app under test is running with "
+            + "AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR and /api/health/dapr would answer from whatever "
+            + "sidecar happens to hold 127.0.0.1:3500. Run this through `make test-full-local`, "
+            + "which sets it (#501).");
+
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 

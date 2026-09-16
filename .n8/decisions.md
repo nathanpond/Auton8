@@ -7403,3 +7403,44 @@ fixture that always required a sidecar would take the merge gate down. Verified
 both ways: slim 202/202 without it; the Dapr spec 3/3 with it; a dead endpoint
 makes the app refuse to boot with Program.cs's own message; a missing CLI fails
 loudly naming the variable.
+
+## M4c fix pass, round 3 — #499, #501 (2026-09-16)
+
+Scope kept deliberately narrow: the blocker plus the two concrete defects in
+#501. #500, #502 and the rest carry.
+
+**#499 — the obvious assertion was the wrong one, and finding that out was the
+useful part.** "Save order is absent after a refused delete" fails against
+CORRECT code: `isStructurallyDirty` compares the editor's reindexed `sortOrder`
+against the server's stored values, and every item this suite creates is stored
+with `sortOrder = 0`, so the tree reads dirty for reasons unrelated to the
+delete. Filed as #503. Had I shipped that assertion it would have been red for a
+false reason, which is the mirror of the failure this milestone keeps finding.
+
+The test asserts the **harm** instead — intercept `PUT /api/admin/menus/*/tree`,
+press "Save order" when offered, require the posted node list to still carry the
+row's id. With the rollback removed the body is `{"nodes":[]}`. That
+discriminates exactly and does not depend on the dirty semantics.
+
+**#499 — an edit I made and reverted.** Moving the interception counter ahead of
+the banner wait deleted the banner assertion (the complement that catches
+`setError` being removed) and replaced it with a fixed sleep. Worse on both
+counts. Reverted; the diagnostics nicety is carried rather than bought at the
+price of an assertion.
+
+**#501 — the sidecar was loading components from a generated directory.**
+`infra/mounts/**` is gitignored, `infra-prepare` copies into it and `infra-reset`
+deletes it, so a clean checkout failed with "error validating resources path".
+Now `infra/dapr/components`, the tracked source. The guard checks the property
+(the directory and `pubsub.yaml` exist) rather than the fixture's text; the
+`DoesNotContain("mounts")` line is labelled in the source as the text match it
+is.
+
+**#501 — the spec could not fail, and the correction to the record matters.** My
+round-4 claim that the `autonate-web-dapr` CONTAINER answers on 127.0.0.1:3500 is
+wrong: that container publishes no ports. The responder is a stray host `daprd`
+from a `make app-dapr` on 2026-09-12. The substance stands -- something else
+answers there, so the endpoint override was necessary -- but on a machine without
+that stray process the first version would have failed loudly rather than quietly
+using the wrong sidecar. The spec now asserts `AUTONATE_E2E_DAPR=1` as a
+precondition, so a green cannot arrive from a sidecar the tier did not start.
