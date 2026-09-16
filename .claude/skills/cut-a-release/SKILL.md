@@ -41,14 +41,64 @@ gh run list --workflow ci.yml --branch master --limit 1
 The release workflow does not run the test suite. It builds and publishes what
 you point it at.
 
-## 3. Tag and push
+That green tick is the **slim** tier — what GitHub runs. See CLAUDE.md > Test
+tiers.
+
+## 3. Run the full tier locally, before tagging
+
+**Required.** Slim is green without a workflow engine anywhere in the picture,
+so **no BPMN element is proven to execute by the tick in step 2**. A release
+whose only evidence is that tick has never once started a process instance.
+
+```bash
+make test-full-local
+```
+
+It stands its own services up and refuses to run smaller than it is. A pass
+looks like this, and all four parts matter:
+
+```
+== tier integrity: skips ==
+ok   n8-full-backend.log  0 skipped (1 summary line(s))
+ok   n8-full-e2e.log  0 skipped (1 summary line(s))
+== tier integrity: discovered counts ==
+ok   RequiresService=Flowable  203 (pinned)
+...
+Tier integrity ok: nothing skipped, every count at its pin.
+
+== full-local summary ==
+  backend : Passed:  2665
+  E2E     : Passed:   402
+  skipped : Skipped: 0 Skipped: 0
+  result  : PASS
+```
+
+`result : PASS` on the last line, and the command exits 0. Anything else is a
+stop — including `Tier integrity ok` missing, which means the run did not finish
+and the counts above it are not evidence of anything.
+
+If a service will not start, the run fails in about a second naming the service
+and the endpoint it probed. That is a failure, not a smaller run: fix the
+service and run it again rather than tagging on a partial pass.
+
+**Known flake, do not ignore blindly.** A full backend run currently goes red on
+healthy code roughly one time in three, always with an Npgsql transport error
+(#481) and never an assertion failure. Re-run **the named tests in isolation**
+and confirm they pass before deciding it was the flake — a genuine regression
+that happens to fail during the flaky window looks identical until you check.
+
+This is a documented step, not an automated block: nothing stops you tagging
+without it. That was a deliberate choice, and it is why it is written down here
+rather than assumed.
+
+## 4. Tag and push
 
 ```bash
 git tag -a v1.2.0 -m "Auton8 1.2.0"
 git push origin v1.2.0
 ```
 
-## 4. Watch it
+## 5. Watch it
 
 ```bash
 gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --interval 30
@@ -67,7 +117,7 @@ very uneven — measured on the first real run:
 A cold `autonate-web` build approaching an hour is expected, not a hang. If that
 becomes intolerable, native ARM runners are the remedy.
 
-## 5. Verify provenance from outside the workflow
+## 6. Verify provenance from outside the workflow
 
 The workflow verifies its own attestations, and that is not the same as you
 verifying them. Do this from your machine:
@@ -94,7 +144,7 @@ Confirm both platforms are really there:
 docker buildx imagetools inspect "$BASE/autonate-web:1.2.0" | grep -oE 'linux/(amd64|arm64)' | sort -u
 ```
 
-## 6. Smoke-test the released stack
+## 7. Smoke-test the released stack
 
 The point of a release is that a stranger can run it. Prove that, in an empty
 directory, with nothing from the source tree:
@@ -130,7 +180,7 @@ curl -s -b /tmp/cj http://127.0.0.1:5108/api/auth/me   # {"authenticated":true,.
 
 Tear it down: `docker compose -p auton8smoke down --volumes`.
 
-## 7. Write the notes
+## 8. Write the notes
 
 `--generate-notes` gives a commit list. Replace the top of it with what a reader
 must know **before** upgrading. The 0.1.0 notes are the model: they led with the
