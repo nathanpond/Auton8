@@ -181,12 +181,18 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
     }
   };
 
+  // RETHROWS after reporting (#489). Swallowing the error here made the promise
+  // `applyEdit` awaits resolve on failure, so the editor closed the dialog,
+  // discarded the draft, and left its optimistic name in the tree -- a write the
+  // UI reported as done and the server never accepted. The banner is still set
+  // here; the caller needs to know as well.
   const handleEditItem = async (id: string, request: UpdateMenuItemRequest) => {
     setError(null);
     try {
       await updateItem.mutateAsync({ id, request });
     } catch (err) {
       setError(describeError(err));
+      throw err;
     }
   };
 

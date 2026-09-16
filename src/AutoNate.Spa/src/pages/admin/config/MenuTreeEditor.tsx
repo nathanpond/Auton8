@@ -140,7 +140,16 @@ export default function MenuTreeEditor({
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, isVisible: nextVisible } : item))
     );
-    await onEditItem(id, { isVisible: nextVisible });
+
+    // Same rollback as applyEdit (#489). The badge renders from this local
+    // state, so without it a refused toggle leaves the row claiming a
+    // visibility the server rejected -- and the E2E assertion on that badge
+    // would be reading the lie rather than the write.
+    try {
+      await onEditItem(id, { isVisible: nextVisible });
+    } catch {
+      setItems((prev) => prev.map((item) => (item.id === id ? previous : item)));
+    }
   };
 
   const applyEdit = async (next: MenuItem, options?: { keepOpen?: boolean }) => {
@@ -160,16 +169,30 @@ export default function MenuTreeEditor({
           : item
       )
     );
-    await onEditItem(next.id, {
-      displayName: next.displayName !== previous?.displayName ? next.displayName : null,
-      icon: next.icon ?? null,
-      clearIcon: next.icon === null,
-      itemType: next.itemType !== previous?.itemType ? next.itemType : null,
-      config: next.config,
-      permissionRequired: next.permissionRequired,
-      clearPermissionRequired: next.permissionRequired === null,
-      isVisible: next.isVisible !== previous?.isVisible ? next.isVisible : null
-    });
+    try {
+      await onEditItem(next.id, {
+        displayName: next.displayName !== previous?.displayName ? next.displayName : null,
+        icon: next.icon ?? null,
+        clearIcon: next.icon === null,
+        itemType: next.itemType !== previous?.itemType ? next.itemType : null,
+        config: next.config,
+        permissionRequired: next.permissionRequired,
+        clearPermissionRequired: next.permissionRequired === null,
+        isVisible: next.isVisible !== previous?.isVisible ? next.isVisible : null
+      });
+    } catch {
+      // ROLL THE OPTIMISTIC UPDATE BACK (#489). The write was refused, so the
+      // name above it is fiction. Locally, from `previous` -- a refetch would
+      // race the error banner the page is setting on the same tick, and the
+      // optimistic change was local in the first place.
+      //
+      // The modal is deliberately NOT closed below: the user's draft is still in
+      // it, and closing on a refusal is how the first version of this lost work.
+      if (previous) {
+        setItems((prev) => prev.map((item) => (item.id === next.id ? previous : item)));
+      }
+      return;
+    }
 
     // AFTER the write, not before (#227). Closing first made the dialog's
     // disappearance mean "the request is in flight", while the list already
