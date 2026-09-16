@@ -229,9 +229,21 @@ test-slim: e2e-install
 # Dapr is IN this tier -- the owner's split is "everything except keycloak" --
 # so the app runs with a sidecar and the RequiresService=Dapr specs are actually
 # exercised rather than quietly excluded.
-test-full-local: infra-ensure e2e-install
-	@# Before anything else: a dead endpoint fails in a second, named, rather
-	@# than after ensure-up's 120s generic timeout.
+test-full-local: e2e-install
+	@# ensure-up runs FIRST, and that is not a regression -- it is what STARTS
+	@# the services, so a preflight ahead of it would fail on every cold machine
+	@# (#487). The claim that it ran "before the compose-up" was simply false:
+	@# `infra-ensure` was a prerequisite, and make builds prerequisites before
+	@# the recipe.
+	@#
+	@# What the preflight adds on the failure path is the NAME. ensure-up waits
+	@# 120s and then says "Compose stack did not become ready", which cannot
+	@# distinguish "Docker is not running" from "Flowable crashed on boot". So a
+	@# failure there hands off to the preflight, which says which service and
+	@# which endpoint before the target gives up.
+	@$(MAKE) --no-print-directory infra-ensure || { 	  echo ""; 	  echo "== the stack did not come up. which service? =="; 	  ./infra/tier-preflight.sh || true; 	  exit 1; 	}
+	@# And again after it is up, because a container can be `healthy` while the
+	@# endpoint behind it is dead -- which IS the fast case: it fails in a second.
 	./infra/tier-preflight.sh
 	@# Every step's status is captured and OR-ed into rc rather than allowed to
 	@# abort the recipe, so the integrity check and the summary run even when the

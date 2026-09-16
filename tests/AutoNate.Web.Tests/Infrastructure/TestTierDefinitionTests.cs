@@ -105,18 +105,55 @@ public sealed class TestTierDefinitionTests
     }
 
     /// <summary>
-    /// full-local stands its services up and fails closed when it cannot (#473).
+    /// full-local stands its services up and names what it cannot reach (#473, #487).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to be called <c>Full_local_preflights_before_it_runs</c> and
+    /// asserted nothing about "before" — it read the whole Makefile and checked
+    /// that the preflight was mentioned somewhere in it. The name was also
+    /// describing something untrue: <c>infra-ensure</c> was a prerequisite, and
+    /// make builds prerequisites before the recipe, so the preflight ran
+    /// <em>after</em> the 120-second compose wait it claimed to precede.
+    /// </para>
+    /// <para>
+    /// The ordering it asserted for cannot work: <c>ensure-up.sh</c> is what
+    /// starts the services, so probing ahead of it fails on any cold machine.
+    /// What is checkable, and what actually helps, is that a failed compose-up
+    /// hands off to the preflight for the named diagnosis.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void Full_local_preflights_before_it_runs()
+    public void Full_local_names_the_service_it_cannot_reach()
     {
-        var makefile = File.ReadAllText(Path.Combine(RepoRoot.Path, "Makefile"));
         var preflight = Path.Combine(RepoRoot.Path, "infra", "tier-preflight.sh");
 
         Assert.True(File.Exists(preflight), "infra/tier-preflight.sh is missing, so full-local "
             + "has nothing that names a missing service (#473).");
 
-        Assert.Contains("./infra/tier-preflight.sh", makefile, StringComparison.Ordinal);
+        var recipe = Recipe("test-full-local");
+
+        // In the RECIPE, not anywhere in the Makefile. The class defines this
+        // helper precisely so an assertion cannot be satisfied by a matching
+        // line in some other target -- and this test was the one not using it.
+        Assert.Contains("./infra/tier-preflight.sh", recipe, StringComparison.Ordinal);
+
+        // Twice: once on ensure-up's failure path, where it turns "did not
+        // become ready" into a service and an endpoint, and once after the
+        // stack is up, where a container can be healthy with a dead endpoint
+        // behind it.
+        var runs = recipe.Split("./infra/tier-preflight.sh").Length - 1;
+        Assert.True(runs >= 2,
+            $"The recipe runs the preflight {runs} time(s). It needs both: the failure hand-off "
+            + "after ensure-up (otherwise a dead service still reports only `Compose stack did "
+            + "not become ready`), and the post-up probe (#487).");
+
+        // And `infra-ensure` must NOT be a prerequisite -- as one it is ordered
+        // ahead of everything in the recipe, which is how the hand-off was lost.
+        var declaration = File.ReadAllLines(Path.Combine(RepoRoot.Path, "Makefile"))
+            .First(l => l.StartsWith("test-full-local:", StringComparison.Ordinal));
+
+        Assert.DoesNotContain("infra-ensure", declaration, StringComparison.Ordinal);
 
         var script = File.ReadAllText(preflight);
 
