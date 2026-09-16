@@ -277,7 +277,8 @@ test-full-local: e2e-install
 	    | tee /tmp/n8-full-backend.log; \
 	  [ "$$(cat /tmp/n8-full-backend.rc)" -eq 0 ] || rc=1; \
 	  echo "== full-local: E2E (all but Keycloak) =="; \
-	  { dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1; \
+	  echo "   (app under a Dapr sidecar -- AUTONATE_E2E_DAPR=1, #487)"; \
+	  { AUTONATE_E2E_DAPR=1 dotnet test tests/AutoNate.E2E.Tests --nologo --filter "$(AUTONATE_TIER_FULL_LOCAL_FILTER)" 2>&1; \
 	    echo $$? > /tmp/n8-full-e2e.rc; } | tee /tmp/n8-full-e2e.log; \
 	  [ "$$(cat /tmp/n8-full-e2e.rc)" -eq 0 ] || rc=1; \
 	  echo ""; \

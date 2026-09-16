@@ -571,4 +571,47 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("trx;LogFileName=slim-backend.trx", recipe, StringComparison.Ordinal);
         Assert.Contains("trx;LogFileName=slim-e2e.trx", recipe, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// full-local runs the app under a Dapr sidecar (#487).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The trait promised an exercise no tier performed: the fixture started the
+    /// app bare with <c>AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true</c>, so the one
+    /// Dapr-traited spec passed on the no-sidecar path.
+    /// </para>
+    /// <para>
+    /// It is driven by the TIER rather than by the fixture, and that is
+    /// load-bearing: slim runs the same 200-odd untraited specs through the same
+    /// fixture on a runner with no Dapr at all, so a fixture that always
+    /// required a sidecar would take the merge gate down. The variable is the
+    /// seam.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Full_local_runs_the_app_under_a_dapr_sidecar()
+    {
+        Assert.Contains("AUTONATE_E2E_DAPR=1", Recipe("test-full-local"), StringComparison.Ordinal);
+
+        // And slim must NOT set it -- GitHub has no Dapr CLI, so a sidecar there
+        // would fail every E2E spec rather than the one that needs it.
+        Assert.DoesNotContain("AUTONATE_E2E_DAPR", Recipe("test-slim"), StringComparison.Ordinal);
+
+        var workflow = File.ReadAllText(
+            Path.Combine(RepoRoot.Path, ".github", "workflows", "ci.yml"));
+        Assert.DoesNotContain("AUTONATE_E2E_DAPR", workflow, StringComparison.Ordinal);
+
+        var fixture = File.ReadAllText(Path.Combine(
+            RepoRoot.Path, "tests", "AutoNate.E2E.Tests", "AutoNateE2EFixture.cs"));
+
+        // The bypass must be conditional. Unconditional, the app never checks for
+        // a sidecar and the whole arrangement is decoration again.
+        Assert.Contains("if (underDapr)", fixture, StringComparison.Ordinal);
+
+        // And the app must be pointed at THIS run's sidecar. appsettings hard-codes
+        // 127.0.0.1:3500, where the autonate-web-dapr CONTAINER answers -- without
+        // the override the fixture would start a sidecar the app never talks to.
+        Assert.Contains("Dapr__HttpEndpoint", fixture, StringComparison.Ordinal);
+    }
 }
