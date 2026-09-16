@@ -153,30 +153,44 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// the control for its effect on the next run.
     /// </para>
     /// </remarks>
-    public static TheoryData<string, string> InertDiagrams() => new()
+    /// <remarks>
+    /// Keyed on a CONTROL id, not on the effect (#488). An effect may need more
+    /// than one inert diagram: `tasks-appear-together` has two, because "does
+    /// not hold" has two distinct shapes for it — the wrong kind of marker, and
+    /// the right kind asking for one instance.
+    /// </remarks>
+    public static TheoryData<string, string, string> InertDiagrams() => new()
     {
-        { "instance-ends", "a parallel branch parks on a user task, so the instance never ends" },
-        { "instance-waits", "nothing waits, so the instance runs straight through" },
-        { "task-appears", "the only task is outside the sub-process, so the container creates none" },
-        { "variable-written", "no script writes `proof`" },
+        { "instance-ends", "instance-ends", "a parallel branch parks on a user task, so the instance never ends" },
+        { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through" },
+        { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none" },
+        { "variable-written", "variable-written", "no script writes `proof`" },
 
         // These two are each other's control (#471). Each diagram is a real,
         // deployable, WORKING multi-instance activity carrying the other kind of
         // marker -- so neither observer can be satisfied by a diagram that simply
         // does nothing, which is the usual way a negative control goes soft.
-        { "tasks-appear-together", "the marker is sequential, so only one instance is live at a time" },
-        { "tasks-appear-in-turn", "the marker is parallel, so all three appear at once" },
+        { "tasks-appear-together", "tasks-appear-together", "the marker is sequential, so only one instance is live at a time" },
+        { "tasks-appear-in-turn", "tasks-appear-in-turn", "the marker is parallel, so all three appear at once" },
+
+        // THE FLOOR, as a live control (#488). A parallel marker asking for ONE
+        // instance is the founding defect's own result -- "it ran once where the
+        // author asked for three" -- reached from the diagram side instead of
+        // the engine side. Without the `wanted < 2` guard the observer reports
+        // "1 live task(s) on Ev_1 at once, as authored" and this control fails,
+        // which is the asymmetry #488 was filed for.
+        { "tasks-appear-together", "tasks-appear-together:one", "the marker asks for a single instance, so nothing runs at once" },
     };
 
     [Theory]
     [MemberData(nameof(InertDiagrams))]
-    public async Task An_inert_diagram_is_observed_as_not_holding(string effect, string why)
+    public async Task An_inert_diagram_is_observed_as_not_holding(string effect, string control, string why)
     {
         await using var session = await NewSignedInAsAdminAsync();
         var api = session.Page.APIRequest;
 
         var key = $"nc{Guid.NewGuid():N}"[..18];
-        var xml = InertDiagram(effect, key);
+        var xml = InertDiagram(control, key);
 
         await PublishAsync(api, key, xml);
         var instance = await StartAsync(api, key);
@@ -242,7 +256,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         + """<sequenceFlow id="f2" sourceRef="Ev_1" targetRef="End_1"/>""";
 
     /// <summary>A diagram built so that one effect deliberately does not hold (#463).</summary>
-    private static string InertDiagram(string effect, string key) => effect switch
+    private static string InertDiagram(string control, string key) => control switch
     {
         // Ev_1 is entered and its own branch completes, but a parallel branch
         // parks forever -- so the INSTANCE does not end.
@@ -290,6 +304,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<multiInstanceLoopCharacteristics isSequential="true" autonate:loopCardinality="3"/>"""
             + """</userTask>""")),
 
+        // A parallel marker that asks for ONE. The marker is present and the
+        // manifest identity still matches; only the count is the founding bug's.
+        "tasks-appear-together:one" => WrapIn(key, "", LinearIn(
+            """<userTask id="Ev_1" name="approve">"""
+            + """<multiInstanceLoopCharacteristics isSequential="false" autonate:loopCardinality="1"/>"""
+            + """</userTask>""")),
+
         // Parallel creates all three at once, so "one at a time" must not hold.
         "tasks-appear-in-turn" => WrapIn(key, "", LinearIn(
             """<userTask id="Ev_1" name="approve">"""
@@ -297,7 +318,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """</userTask>""")),
 
         _ => throw new InvalidOperationException(
-            $"No inert diagram for effect '{effect}'. Every observable effect needs one, or the "
+            $"No inert diagram for control '{control}'. Every observable effect needs one, or the "
             + "observer it belongs to has no negative control (#463)."),
     };
 
@@ -969,6 +990,15 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             {
                 var wanted = LoopCardinalityIn(xml);
                 if (wanted is null) return new(false, "this diagram declares no loopCardinality");
+
+                // A FLOOR, matching the sequential arm below (#488). Without it
+                // the diagram can lower the bar to the exact value the founding
+                // defect produced: with `loopCardinality="1"`, one task satisfies
+                // `mine.Count == wanted` and the cell reports "1 live task(s) on
+                // Ev_1 at once, as authored" for a marker that multiplied
+                // nothing. That is #325's own sentence, greened by a one-token
+                // edit to the thing under test.
+                if (wanted < 2) return new(false, $"loopCardinality is {wanted}; nothing to run at once");
 
                 var mine = (await TasksAsync(api, instance)).Where(t => t.Owner == "Ev_1").ToList();
 

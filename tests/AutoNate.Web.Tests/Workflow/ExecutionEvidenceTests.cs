@@ -264,7 +264,7 @@ public sealed class ExecutionEvidenceTests
         // Measured, and LOWERED as elements gain declarations -- 38 when this
         // ratchet was written, 22 now that #325's AC5 tranche is proven. Never
         // raise it.
-        const int Ceiling = 22;
+        const int Ceiling = 19;
 
         var undeclared = Elements()
             .Where(e => e!["declaredEffect"] is null)
