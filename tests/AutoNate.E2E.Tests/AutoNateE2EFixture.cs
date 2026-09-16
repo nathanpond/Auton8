@@ -367,7 +367,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 
             // `autonate-web`, not a per-run id (#487). The pubsub component is
             // SCOPED -- `scopes: [autonate-web, flowable]` in
-            // infra/mounts/dapr-dashboard/components/pubsub.yaml -- so a sidecar
+            // infra/dapr/components/pubsub.yaml -- so a sidecar
             // running under any other app-id loads no pub/sub at all and the
             // firehose stays empty. Measured: with a per-run id the Bus Watcher
             // log never appears. This is the same id `make app-dapr` uses.
@@ -405,7 +405,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             info.ArgumentList.Add("--scheduler-host-address");
             info.ArgumentList.Add("127.0.0.1:50007");
             info.ArgumentList.Add("--resources-path");
-            info.ArgumentList.Add(Path.Combine(repoRoot, "infra", "mounts", "dapr-dashboard", "components"));
+            // THE TRACKED SOURCE, not the generated copy (#501). This pointed at
+            // infra/mounts/dapr-dashboard/components, which `.gitignore` excludes
+            // (`git ls-files infra/mounts` is empty), `infra-prepare` creates by
+            // copying, and `make infra-reset` deletes. A clean checkout failed
+            // instantly with "error validating resources path"; only
+            // `make test-full-local` hid it, because infra-ensure runs first.
+            info.ArgumentList.Add(Path.Combine(repoRoot, "infra", "dapr", "components"));
             info.ArgumentList.Add("--log-level");
             info.ArgumentList.Add("warn");
             info.ArgumentList.Add("--");

@@ -610,8 +610,31 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("if (underDapr)", fixture, StringComparison.Ordinal);
 
         // And the app must be pointed at THIS run's sidecar. appsettings hard-codes
-        // 127.0.0.1:3500, where the autonate-web-dapr CONTAINER answers -- without
-        // the override the fixture would start a sidecar the app never talks to.
+        // 127.0.0.1:3500, and on a developer machine a stray `make app-dapr`
+        // daprd answers there -- without the override the fixture would start a
+        // sidecar the app never talks to.
         Assert.Contains("Dapr__HttpEndpoint", fixture, StringComparison.Ordinal);
+
+        // THE COMPONENTS MUST COME FROM THE TRACKED TREE (#501). This is the
+        // real check: the directory has to exist in a fresh clone. The fixture
+        // used to point at infra/mounts/dapr-dashboard/components, which
+        // `.gitignore` excludes, `infra-prepare` creates by copying and
+        // `infra-reset` deletes -- so a clean checkout failed with
+        // "error validating resources path" and only `make test-full-local` hid
+        // it, because infra-ensure runs first.
+        var components = Path.Combine(RepoRoot.Path, "infra", "dapr", "components");
+
+        Assert.True(Directory.Exists(components),
+            $"{components} is missing. The E2E sidecar loads its pub/sub component from there, "
+            + "and it must be a tracked directory rather than one a make target generates.");
+
+        Assert.True(File.Exists(Path.Combine(components, "pubsub.yaml")),
+            "infra/dapr/components/pubsub.yaml is missing; without it the sidecar starts with no "
+            + "pub/sub and the Bus Watcher firehose stays empty.");
+
+        // A text match, and named as one: it pins the specific regression rather
+        // than the property. The two assertions above are what actually check
+        // the property.
+        Assert.DoesNotContain("\"mounts\"", fixture, StringComparison.Ordinal);
     }
 }
