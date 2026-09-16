@@ -41,10 +41,10 @@ namespace AutoNate.E2E.Tests;
 /// status-stat-card render and the deep-link error path; those aren't
 /// duplicated here.
 /// </summary>
-// Needs the Flowable engine (infra/docker-compose.yml `flowable`), which the
-// CI E2E job does not host — publishing a workflow there fails with
-// "Connection refused". Traited so CI can exclude it by capability rather
-// than by a hand-maintained list of class names that would silently rot.
+// Needs the Flowable engine (infra/docker-compose.yml `flowable`), which slim
+// does not stand up — publishing a workflow there fails with
+// "Connection refused". Traited so the tier boundary is a capability rather
+// than a hand-maintained list of class names that would silently rot.
 [Trait("RequiresService", "Flowable")]
 public sealed class WorkflowExecutionTests : E2ETestBase
 {

@@ -82,7 +82,7 @@ public sealed class ExecutionEvidenceTests
     /// <remarks>
     /// The file declares what would prove each element ran; the proof happens in
     /// <c>ExecutionEvidenceExecutionTests</c>, which starts an instance. This is
-    /// the in-CI half: it cannot run an engine, so it checks that the
+    /// the slim-tier half: it cannot run an engine, so it checks that the
     /// declarations are answerable — an effect name the oracle has no observer
     /// for is a declaration nothing can ever discharge.
     /// </remarks>
@@ -264,7 +264,7 @@ public sealed class ExecutionEvidenceTests
         // Measured, and LOWERED as elements gain declarations -- 38 when this
         // ratchet was written, 22 now that #325's AC5 tranche is proven. Never
         // raise it.
-        const int Ceiling = 22;
+        const int Ceiling = 19;
 
         var undeclared = Elements()
             .Where(e => e!["declaredEffect"] is null)

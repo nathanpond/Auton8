@@ -19,8 +19,8 @@ namespace AutoNate.E2E.Tests;
 /// </para>
 /// <para>
 /// Deliberately not <c>RequiresService=Flowable</c>: nothing here publishes, so it
-/// runs everywhere CI runs — which is the point, since the drift it guards is a
-/// build-time property and CI is exactly where you want to catch it.
+/// runs in slim, on every push — which is the point, since the drift it guards
+/// is a build-time property and the merge gate is where you want to catch it.
 /// </para>
 /// </remarks>
 [Collection(AutoNateE2ECollection.Name)]

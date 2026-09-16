@@ -83,7 +83,12 @@ public sealed class BpmnDiagramHelperTests
 
         // Silently returning null here would make every downstream read say
         // "no" rather than "this diagram is not the one you think it is".
-        Assert.ThrowsAny<Exception>(() => BpmnDiagram.ElementIn(xml, "Ev_1"));
+        //
+        // On the MESSAGE, not on `ThrowsAny<Exception>` (#490): any exception
+        // satisfied that, so an XmlException from a malformed fixture would have
+        // greened it while proving nothing about the id search.
+        var thrown = Assert.ThrowsAny<Exception>(() => BpmnDiagram.ElementIn(xml, "Ev_1"));
+        Assert.Contains("No element in this diagram carries id", thrown.Message, StringComparison.Ordinal);
     }
 
     // ---- EventDefinitionIn ---------------------------------------------------

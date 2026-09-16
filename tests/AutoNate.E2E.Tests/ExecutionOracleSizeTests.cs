@@ -3,7 +3,7 @@ using Xunit;
 namespace AutoNate.E2E.Tests;
 
 /// <summary>
-/// The live-engine oracle is this many cells, asserted where CI can see it (#447).
+/// The live-engine oracle is this many cells, asserted in the slim tier (#447).
 /// </summary>
 /// <remarks>
 /// <para>

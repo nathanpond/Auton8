@@ -104,9 +104,20 @@ public sealed class PagesMenusTests : E2ETestBase
         // menu key, unlike the create. Getting either half wrong makes this test
         // pass for the wrong reason: the route never matches, no delay happens,
         // and the race is a coin toss again.
+        // COUNTED, not assumed (#489). The first draft of this test used the
+        // wrong verb AND the wrong path, so nothing was delayed, the race was a
+        // coin toss, and it failed on an unrelated assertion with an empty
+        // message. Had it failed one line later it would have "proved" the bug
+        // while testing nothing. If the endpoint ever moves, this fails loudly
+        // instead of going quietly green.
+        var intercepted = 0;
         await page.RouteAsync("**/api/admin/menus/items/**", async route =>
         {
-            if (route.Request.Method == "PATCH") await Task.Delay(1_500);
+            if (route.Request.Method == "PATCH")
+            {
+                Interlocked.Increment(ref intercepted);
+                await Task.Delay(1_500);
+            }
             await route.ContinueAsync();
         });
 
@@ -124,6 +135,12 @@ public sealed class PagesMenusTests : E2ETestBase
         // Leave immediately. This is the move that used to destroy the write.
         await page.GotoAsync(path);
 
+        Assert.True(
+            intercepted >= 1,
+            "The PATCH was never intercepted, so nothing was delayed and this test proved "
+            + "nothing about the race. The update route is PATCH /api/admin/menus/items/{id} "
+            + "-- check the glob and the method before reading any other assertion (#489).");
+
         var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
         Assert.True(stored.Ok, await stored.TextAsync());
 
@@ -133,6 +150,76 @@ public sealed class PagesMenusTests : E2ETestBase
             $"The rename to '{renamed}' never reached the server. The dialog had closed and the "
             + "list showed the new name from local state, so the UI reported a save that was "
             + "aborted by the navigation (#227). Stored items:\n" + body[..Math.Min(1200, body.Length)]);
+    }
+
+    /// <summary>
+    /// A refused save keeps the draft and does not leave a lie in the tree (#489).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #227 closed the <em>abort</em> path — navigating away no longer destroys
+    /// the write. The <em>rejection</em> path told the same lie one step over:
+    /// <c>handleEditItem</c> swallowed the error and returned normally, so the
+    /// editor closed the dialog, discarded what the user had typed, and kept its
+    /// optimistic name in the list. The page showed a red banner above a tree
+    /// still displaying a name the server had refused.
+    /// </para>
+    /// <para>
+    /// Asserted from the list AND the server, because the list is the thing that
+    /// was lying.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ARefusedRenameKeepsTheDialogOpenAndDoesNotChangeTheTree()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var name = TestNames.Prefixed("refused-save");
+        var renamed = TestNames.Prefixed("refused-save-edited");
+        var path = $"/e2e-refused-{TestNames.ShortSlug()}";
+
+        await CreateStandaloneItemAsync(page.APIRequest, name, "page", new
+        {
+            path,
+            contentType = "html",
+            content = "<h2>refused</h2>"
+        });
+
+        var refused = 0;
+        await page.RouteAsync("**/api/admin/menus/items/**", async route =>
+        {
+            if (route.Request.Method == "PATCH")
+            {
+                Interlocked.Increment(ref refused);
+                await route.FulfillAsync(new() { Status = 500, Body = "nope" });
+                return;
+            }
+            await route.ContinueAsync();
+        });
+
+        await OpenStandaloneMenuAsync(page);
+        await MenuRow(page, name).GetByRole(AriaRole.Button, new() { Name = "Edit item" }).ClickAsync();
+
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit menu item" });
+        await dialog.GetByLabel("Display name").FillAsync(renamed);
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save and Close" }).ClickAsync();
+
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        Assert.True(refused >= 1, "the PATCH was never intercepted, so nothing was refused");
+
+        // The draft survives: closing on a refusal is how the first version lost work.
+        Assert.Equal(renamed, await dialog.GetByLabel("Display name").InputValueAsync());
+
+        // And the tree does not show a name the server rejected.
+        await Assertions.Expect(MenuRow(page, renamed)).ToHaveCountAsync(0, new() { Timeout = 10_000 });
+
+        var stored = await page.APIRequest.GetAsync("/api/admin/menus/standalone");
+        Assert.True(stored.Ok, await stored.TextAsync());
+
+        var body = await stored.TextAsync();
+        Assert.DoesNotContain(renamed, body, StringComparison.Ordinal);
+        Assert.Contains(name, body, StringComparison.Ordinal);
     }
 
     [Fact]

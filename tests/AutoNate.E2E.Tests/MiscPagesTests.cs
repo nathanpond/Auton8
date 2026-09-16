@@ -127,8 +127,9 @@ public sealed class MiscPagesTests : E2ETestBase
             .ToBeVisibleAsync();
     }
 
-    // The bus-event log renders from the Dapr streaming subscriber, which the
-    // CI E2E job does not host, so "Bus event log" never appears there.
+    // The bus-event log renders from the Dapr streaming subscriber. No tier
+    // stands a sidecar up beside the app under test today (#487), so
+    // "Bus event log" never appears and this asserts the page heading instead.
     [Trait("RequiresService", "Dapr")]
     [Fact]
     public async Task BusWatcher_RendersHeadingForSuperAdmin()

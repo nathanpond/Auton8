@@ -27,7 +27,7 @@ namespace AutoNate.Web.Tests.Workflow;
 /// reached".
 /// </para>
 /// <para>
-/// These tests run in CI: no engine, no browser. The complement — that the
+/// These tests run in slim: no engine, no browser. The complement — that the
 /// provider is what the studio actually renders, rather than a module nothing
 /// imports, which is precisely how the old array died — is
 /// <c>WorkflowPaletteTests</c>.

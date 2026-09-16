@@ -28,7 +28,7 @@ namespace AutoNate.Web.Tests.Workflow;
 /// <b>Why node and not a JS test tier.</b> The SPA has none — no vitest, no
 /// <c>test</c> script, zero <c>*.test.*</c> files — and adding one is a bigger
 /// decision than this bug. Running the real module from the existing backend
-/// suite gets the property asserted today, and keeps it inside the CI test-count
+/// suite gets the property asserted today, and keeps it inside slim's test-count
 /// reconciliation, which a new tier would not be.
 /// </para>
 /// <para>

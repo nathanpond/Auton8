@@ -13,7 +13,7 @@ namespace AutoNate.E2E.Tests;
 /// <para>
 /// Deliberately not <c>RequiresService=Flowable</c>, unlike
 /// <see cref="WorkflowStudioTests"/>: nothing here publishes. Both assertions are
-/// about the studio's own behaviour, so they run everywhere CI runs.
+/// about the studio's own behaviour, so they run in slim, on every push.
 /// </para>
 /// <para>
 /// The panel's content is asserted against the manifest rather than snapshotted,

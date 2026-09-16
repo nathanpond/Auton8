@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Reflection;
 using Xunit;
 
@@ -25,6 +26,22 @@ namespace AutoNate.Web.Tests.Infrastructure;
 public sealed class TestTierDefinitionTests
 {
     private static string TiersPath => Path.Combine(RepoRoot.Path, "tests", "tiers.env");
+
+    /// <summary>
+    /// A tier filter written out by hand, in any quoting (#490).
+    /// </summary>
+    /// <remarks>
+    /// `tests/tiers.env` says nothing else may spell a tier filter. The first
+    /// absence check matched one spelling — <c>--filter "RequiresService!=</c> —
+    /// so single quotes, no quotes, or an intermediate variable all walked past
+    /// it. This matches the trait comparison itself.
+    /// </remarks>
+    /// <summary>A <c>RequiresService</c> trait, however qualified (#490).</summary>
+    private static readonly Regex ServiceTrait =
+        new(@"Trait\s*\(\s*""RequiresService""", RegexOptions.Compiled);
+
+    private static readonly Regex HandWrittenTierFilter =
+        new(@"RequiresService\s*!=", RegexOptions.Compiled);
 
     private static IReadOnlyDictionary<string, string> Tiers()
     {
@@ -86,12 +103,16 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("$AUTONATE_TIER_SLIM_FILTER", workflow, StringComparison.Ordinal);
 
         // The literal must be gone, or there are two definitions again and one
-        // of them is the one that already drifted.
-        Assert.DoesNotContain("--filter \"RequiresService!=", workflow, StringComparison.Ordinal);
+        // of them is the one that already drifted. ANY quoting (#490): the
+        // original checked the double-quoted spelling only, so
+        // `--filter 'RequiresService!=Flowable'` walked past it.
+        Assert.DoesNotMatch(HandWrittenTierFilter, workflow);
 
-        // And the file must actually be loaded, or the filter expands to empty
-        // and the job silently runs every test including the traited ones.
-        Assert.Contains("tests/tiers.env", workflow, StringComparison.Ordinal);
+        // And the LOADER line, not a mention of the path (#490). ci.yml names
+        // tests/tiers.env in four places, so asserting the path left three ways
+        // to delete the one that matters -- and without it every filter expands
+        // to empty and the job runs the traited tests too.
+        Assert.Contains("grep -E '^AUTONATE_TIER_' tests/tiers.env", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -102,21 +123,63 @@ public sealed class TestTierDefinitionTests
         Assert.Contains("include tests/tiers.env", makefile, StringComparison.Ordinal);
         Assert.Contains("$(AUTONATE_TIER_SLIM_FILTER)", makefile, StringComparison.Ordinal);
         Assert.Contains("$(AUTONATE_TIER_FULL_LOCAL_FILTER)", makefile, StringComparison.Ordinal);
+
+        // ABSENCE too (#490). This was presence-only, so a second, drifting copy
+        // of a filter in the Makefile was unguarded -- and "one definition, two
+        // readers" is the story's whole claim, with only one reader checked.
+        Assert.DoesNotMatch(HandWrittenTierFilter, makefile);
     }
 
     /// <summary>
-    /// full-local stands its services up and fails closed when it cannot (#473).
+    /// full-local stands its services up and names what it cannot reach (#473, #487).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to be called <c>Full_local_preflights_before_it_runs</c> and
+    /// asserted nothing about "before" — it read the whole Makefile and checked
+    /// that the preflight was mentioned somewhere in it. The name was also
+    /// describing something untrue: <c>infra-ensure</c> was a prerequisite, and
+    /// make builds prerequisites before the recipe, so the preflight ran
+    /// <em>after</em> the 120-second compose wait it claimed to precede.
+    /// </para>
+    /// <para>
+    /// The ordering it asserted for cannot work: <c>ensure-up.sh</c> is what
+    /// starts the services, so probing ahead of it fails on any cold machine.
+    /// What is checkable, and what actually helps, is that a failed compose-up
+    /// hands off to the preflight for the named diagnosis.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void Full_local_preflights_before_it_runs()
+    public void Full_local_names_the_service_it_cannot_reach()
     {
-        var makefile = File.ReadAllText(Path.Combine(RepoRoot.Path, "Makefile"));
         var preflight = Path.Combine(RepoRoot.Path, "infra", "tier-preflight.sh");
 
         Assert.True(File.Exists(preflight), "infra/tier-preflight.sh is missing, so full-local "
             + "has nothing that names a missing service (#473).");
 
-        Assert.Contains("./infra/tier-preflight.sh", makefile, StringComparison.Ordinal);
+        var recipe = Recipe("test-full-local");
+
+        // In the RECIPE, not anywhere in the Makefile. The class defines this
+        // helper precisely so an assertion cannot be satisfied by a matching
+        // line in some other target -- and this test was the one not using it.
+        Assert.Contains("./infra/tier-preflight.sh", recipe, StringComparison.Ordinal);
+
+        // Twice: once on ensure-up's failure path, where it turns "did not
+        // become ready" into a service and an endpoint, and once after the
+        // stack is up, where a container can be healthy with a dead endpoint
+        // behind it.
+        var runs = recipe.Split("./infra/tier-preflight.sh").Length - 1;
+        Assert.True(runs >= 2,
+            $"The recipe runs the preflight {runs} time(s). It needs both: the failure hand-off "
+            + "after ensure-up (otherwise a dead service still reports only `Compose stack did "
+            + "not become ready`), and the post-up probe (#487).");
+
+        // And `infra-ensure` must NOT be a prerequisite -- as one it is ordered
+        // ahead of everything in the recipe, which is how the hand-off was lost.
+        var declaration = File.ReadAllLines(Path.Combine(RepoRoot.Path, "Makefile"))
+            .First(l => l.StartsWith("test-full-local:", StringComparison.Ordinal));
+
+        Assert.DoesNotContain("infra-ensure", declaration, StringComparison.Ordinal);
 
         var script = File.ReadAllText(preflight);
 
@@ -371,31 +434,68 @@ public sealed class TestTierDefinitionTests
     }
 
     /// <summary>
-    /// The gate scripts read the skip count, which is the field they lacked.
+    /// Removed in favour of behavioural tests (#485).
     /// </summary>
     /// <remarks>
-    /// A trx counts a skipped test in <c>total</c>, and
-    /// <c>shard_report.py</c> set <c>executed = total</c> — so a
-    /// <c>[Fact(Skip)]</c> reconciled perfectly while not running. The field is
-    /// <c>notExecuted</c>; asserting on the field name is the only way to pin
-    /// that it is still consulted.
+    /// <para>
+    /// This used to assert <c>text.Contains("notExecuted") || text.Contains("skipped")</c>
+    /// over each gate script. Two things were wrong with it. It was satisfied by
+    /// a <em>comment</em> — delete both functional lines, keep the prose, and it
+    /// stayed green. And the field it pinned was the wrong one:
+    /// <c>notExecuted</c> is never populated by VSTest, so the guard was
+    /// protecting a reader of an attribute that is always zero.
+    /// </para>
+    /// <para>
+    /// <c>ShardReportScriptTests</c> now drives all three scripts against trx
+    /// files captured from a real run with a real <c>[Fact(Skip)]</c>, and
+    /// reverting the fix turns exactly three of them red. A test that runs the
+    /// script beats any grep of its source, so this is deleted rather than
+    /// tightened.
+    /// </para>
     /// </remarks>
-    [Theory]
-    [InlineData("shard_report.py")]
-    [InlineData("reconcile_shards.py")]
-    [InlineData("tier_gate.py")]
-    public void The_gate_scripts_read_the_skip_count(string script)
+
+    /// <summary>
+    /// The backend project carries no <c>RequiresService</c> trait (#490).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>TestTierTraitTests</c> validates every trait value against the known
+    /// services, but it reflects over its own assembly — the E2E one. A typo'd
+    /// trait in the backend project is invisible to it, and the backend is where
+    /// somebody who has just read CLAUDE.md's tier section would most plausibly
+    /// add one.
+    /// </para>
+    /// <para>
+    /// The backend shards run <b>unfiltered</b>, so a trait here would not move
+    /// the test out of slim — it would simply be inert, and the tier documents
+    /// would be describing a boundary that does not exist on this side. Both
+    /// <c>tests/tiers.env</c> and #476's own reasoning state this as fact; this
+    /// keeps it a fact.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_backend_project_carries_no_service_trait()
     {
-        var path = Path.Combine(RepoRoot.Path, ".github", "scripts", script);
+        var offenders = Directory
+            .EnumerateFiles(Path.Combine(RepoRoot.Path, "tests", "AutoNate.Web.Tests"), "*.cs",
+                SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.EndsWith(nameof(TestTierDefinitionTests) + ".cs", StringComparison.Ordinal))
+            .Select(p => (Path: Path.GetRelativePath(RepoRoot.Path, p), Text: File.ReadAllText(p)))
+            // NOT the literal `[Trait("RequiresService"` (#490). Written that
+            // way this guard missed `[Xunit.Trait("RequiresService", ...)]` --
+            // caught by mutating it, which is the only reason I know. Match the
+            // attribute call however it is qualified or spaced.
+            .Where(f => ServiceTrait.IsMatch(f.Text))
+            .Select(f => f.Path)
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
-        Assert.True(File.Exists(path), $"{script} is missing.");
-
-        var text = File.ReadAllText(path);
-
-        Assert.True(
-            text.Contains("notExecuted", StringComparison.Ordinal)
-            || text.Contains("skipped", StringComparison.Ordinal),
-            $"{script} no longer reads the skip count. A trx counts a skipped test in `total`, "
-            + "so dropping this makes a [Fact(Skip)] invisible to the merge gate again (#476).");
+        Assert.True(offenders.Count == 0,
+            "These backend tests carry a RequiresService trait. The backend shards run "
+            + "unfiltered, so the trait does nothing except make the tier documents wrong — "
+            + "and TestTierTraitTests cannot see it, because it reflects over the E2E "
+            + "assembly (#490):\n  " + string.Join("\n  ", offenders));
     }
 }

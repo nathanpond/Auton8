@@ -38,17 +38,25 @@ def read_trx(path: Path) -> dict:
         first = message.splitlines()[0] if message else ""
         failures.append((result.get("testName") or "?", first))
 
-    # `notExecuted` is the skip count, and it was missing here (#476). It
-    # matters twice over: a trx's `total` INCLUDES skipped tests, so
-    # `executed = total` below counted a `[Fact(Skip)]` as having run, and
-    # reconciliation -- which compares that sum against discovery -- saw a whole
-    # suite. One attribute argument removed a test from the merge gate with
-    # every number still matching.
+    # The skip count is the total-executed GAP, not `notExecuted` (#485). A
+    # trx's `total` includes skipped tests, so `executed = total` below counted
+    # a `[Fact(Skip)]` as having run and reconciliation saw a whole suite.
+    #
+    # #476 read `notExecuted` to fix that. VSTest never populates it -- measured
+    # on this repo's exact versions, a real skipped test gives
+    #   <Counters total="3" executed="2" ... notExecuted="0" ... />
+    # so the gate went on reporting zero. The fixtures in
+    # Infrastructure/TrxFixtures/ are real runner output, captured from an
+    # actual skipped test, precisely so this cannot be "fixed" again against a
+    # hand-written shape the toolchain does not emit.
+    total = int(counters.get("total") or 0)
+    executed = int(counters.get("executed") or 0)
+
     return {
-        "total": int(counters.get("total") or 0),
+        "total": total,
         "passed": int(counters.get("passed") or 0),
         "failed": int(counters.get("failed") or 0),
-        "skipped": int(counters.get("notExecuted") or 0),
+        "skipped": max(int(counters.get("notExecuted") or 0), total - executed),
         "failures": failures,
     }
 

@@ -113,7 +113,7 @@ public sealed class TaskConversionTests : E2ETestBase
 /// </summary>
 /// <remarks>
 /// Separate class because this half needs the engine and the conversion half does
-/// not — traiting the conversion test would exclude it from CI for no reason.
+/// not — traiting the conversion test would move it out of slim for no reason.
 ///
 /// Passing straight through is *correct* here, unlike the manual task it ships
 /// beside. BPMN defines a none throw as a marker in the flow with no behaviour of its
