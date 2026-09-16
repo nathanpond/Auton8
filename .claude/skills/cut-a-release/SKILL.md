@@ -62,16 +62,27 @@ looks like this, and all four parts matter:
 ok   n8-full-backend.log  0 skipped (1 summary line(s))
 ok   n8-full-e2e.log  0 skipped (1 summary line(s))
 == tier integrity: discovered counts ==
-ok   RequiresService=Flowable  203 (pinned)
+ok   RequiresService=Flowable  <AUTONATE_TIER_COUNT_FLOWABLE> (pinned)
 ...
+ok   full-local (backend)  <AUTONATE_TIER_COUNT_SLIM_BACKEND> (pinned)
+
 Tier integrity ok: nothing skipped, every count at its pin.
 
 == full-local summary ==
-  backend : Passed:  2665
-  E2E     : Passed:   402
+  backend : Passed:  ...
+  E2E     : Passed:  ...
   skipped : Skipped: 0 Skipped: 0
   result  : PASS
 ```
+
+The counts are shown as the names they come from, not as numbers, on purpose
+(#510). This block previously carried `203`, `2665` and `402` against a
+`tests/tiers.env` reading 204, 2716 and 407 — so a releaser comparing their own
+run against the runbook, exactly as the sentence above tells them to, would
+conclude their run was wrong. The more damaging direction is the mirror: after a
+genuine shrink the stale numbers start *matching*, and the doc reassures them.
+The live values are in `tests/tiers.env`; a test asserts no literal counts come
+back here.
 
 `result : PASS` on the last line, and the command exits 0. Anything else is a
 stop — including `Tier integrity ok` missing, which means the run did not finish

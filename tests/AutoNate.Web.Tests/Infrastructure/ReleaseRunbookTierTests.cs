@@ -121,6 +121,33 @@ public sealed class ReleaseRunbookTierTests
         // deleting the whole sample block kept the guard green.
         Assert.Contains("result  : PASS", step, StringComparison.Ordinal);
         Assert.Contains("Tier integrity ok", step, StringComparison.Ordinal);
+
+        // And no literal counts (#510). The block used to show 203 / 2665 / 402
+        // against a tests/tiers.env reading 204 / 2716 / 407, under a sentence
+        // telling the releaser that all four parts matter -- so the doc invited
+        // exactly the comparison it would lose. Asserting the numbers match the
+        // file would just move the staleness; having none to go stale ends it.
+        //
+        // Scoped to the fenced sample itself, not the whole step: the prose
+        // around it legitimately cites issue numbers and the historical values
+        // this replaced. It is the SAMPLE that makes a claim about a real run.
+        var fence = System.Text.RegularExpressions.Regex.Match(
+            step, @"```[^\n]*\n(?<body>(?:(?!```)[\s\S])*?== tier integrity[\s\S]*?)```");
+        Assert.True(fence.Success, "the runbook no longer shows a sample tier-output block.");
+
+        // Three or more digits, so "0 skipped" and "(1 summary line(s))" stay.
+        var literals = System.Text.RegularExpressions.Regex
+            .Matches(fence.Groups["body"].Value, @"(?<![\w<])\d{3,}(?![\w>])")
+            .Select(match => match.Value)
+            .Distinct()
+            .ToList();
+
+        Assert.True(
+            literals.Count == 0,
+            "The release runbook's sample tier output carries literal counts "
+            + $"({string.Join(", ", literals)}). Those go stale against tests/tiers.env and then "
+            + "teach the wrong number with authority. Use the pin's NAME, as the rest of the "
+            + "block does.");
     }
 
     /// <summary>
