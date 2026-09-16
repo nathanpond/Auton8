@@ -44,6 +44,73 @@ public sealed class DatastoresDatabaseInitializer(
 
         await EnsureDatabaseExistsAsync(builder, targetDatabase, cancellationToken);
         await EnsureWriterRoleAsync(connectionString, options.Value, cancellationToken);
+        // After the writer role exists, because the revoke below would
+        // otherwise lock it out of the database it is created to write to.
+        await EnsureDatabaseIsolationAsync(
+            builder, targetDatabase, options.Value.WriterRole, cancellationToken);
+    }
+
+    // PUBLIC gets CONNECT on every new database, so isolating this one means
+    // revoking it (#506).
+    //
+    // `infra/postgres/init/02-flowable-role.sql` intends to do exactly that,
+    // and cannot: it guards the REVOKE on the database already existing, and
+    // init scripts run only on an empty data directory, at which point this
+    // database does not exist yet — it is created here, later, by the
+    // application. So the guard was always false for `autonate_datastores` and
+    // the revoke never ran. Measured on a fresh cluster: `AutoNate` came up
+    // with `datacl = {=T/autonate,...}` (PUBLIC has TEMP only) while
+    // `autonate_datastores` had an empty datacl, which is the PostgreSQL
+    // default — PUBLIC, and therefore `flowable_app`, keeping CONNECT.
+    //
+    // Run on EVERY startup rather than only on creation: the databases this
+    // needs to fix most are the ones that already exist.
+    private async Task EnsureDatabaseIsolationAsync(
+        NpgsqlConnectionStringBuilder builder,
+        string targetDatabase,
+        string? writerRole,
+        CancellationToken cancellationToken)
+    {
+        var maintenance = new NpgsqlConnectionStringBuilder(builder.ConnectionString)
+        {
+            Database = "postgres",
+            Pooling = false,
+        };
+
+        var quoted = QuoteIdentifier(targetDatabase);
+        // The owner keeps its own privileges — REVOKE ... FROM PUBLIC does not
+        // touch the `owner=CTc/owner` entry — so this does not lock out the
+        // connection string that just ran it.
+        var sql = $"REVOKE CONNECT ON DATABASE {quoted} FROM PUBLIC;";
+        if (!string.IsNullOrWhiteSpace(writerRole))
+        {
+            // The writer role is a plain LOGIN role and reached CONNECT only
+            // through PUBLIC. Granting it explicitly is what makes the revoke
+            // above safe rather than an outage for every SqlType datastore.
+            sql += $"\nGRANT CONNECT ON DATABASE {quoted} TO {QuoteIdentifier(writerRole)};";
+        }
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(maintenance.ConnectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+            log.LogInformation(
+                "Datastores DB '{Name}': CONNECT revoked from PUBLIC.", targetDatabase);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42501")
+        {
+            // Not the owner. A deployment can legitimately run the app as a
+            // role that may use the database but not re-grant on it, and
+            // refusing to start would be a worse failure than the one this
+            // closes — so warn, by name, and carry on.
+            log.LogWarning(
+                "Could not revoke PUBLIC CONNECT on '{Name}': {Message}. The Flowable engine's "
+                + "role can reach this database (#506). Run it as the database owner, or revoke "
+                + "by hand: REVOKE CONNECT ON DATABASE {Name} FROM PUBLIC;",
+                targetDatabase, ex.MessageText, targetDatabase);
+        }
     }
 
     // CREATE DATABASE cannot run inside a transaction, and there's no
