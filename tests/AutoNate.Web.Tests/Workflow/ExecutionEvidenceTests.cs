@@ -99,7 +99,7 @@ public sealed class ExecutionEvidenceTests
     [
         "task-appears", "variable-written", "instance-waits", "instance-ends",
         "tasks-appear-together", "tasks-appear-in-turn",
-        "instance-starts", "host-cancelled",
+        "instance-starts", "host-cancelled", "value-carried",
     ];
 
     /// <summary>
@@ -216,6 +216,7 @@ public sealed class ExecutionEvidenceTests
             ("Compensation End", "instance-ends"),
             ("Conditional Boundary", "host-cancelled"),
             ("Conditional Start Event", "variable-written"),
+            ("Data Object Reference", "value-carried"),
             ("End Event (None)", "instance-ends"),
             ("End Event (Terminate)", "instance-ends"),
             ("Error Boundary", "host-cancelled"),
@@ -316,7 +317,7 @@ public sealed class ExecutionEvidenceTests
         // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
-        const int Ceiling = 7;
+        const int Ceiling = 6;
 
         var unaccounted = Elements()
             .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)
@@ -503,6 +504,75 @@ public sealed class ExecutionEvidenceTests
             "These elements declare an effect and have no minimal diagram in "
             + "ExecutionEvidenceExecutionTests, so that class skips them without saying so:\n  "
             + string.Join("\n  ", missing));
+    }
+
+    /// <summary>
+    /// Exactly these elements may skip the oracle's entry check (#534).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #412's entry assertion is what stops a same-id stand-in satisfying a cell.
+    /// <c>NeverEntered</c> exempts a row from it, which is correct for the two
+    /// elements the engine records no activity instance for and catastrophic for
+    /// anything else: adding <c>("userTask", null)</c> to that set would let a
+    /// user-task row pass without the engine ever having entered it, and nothing
+    /// would say so.
+    /// </para>
+    /// <para>
+    /// That is the same shape as #429 — a set whose membership is load-bearing
+    /// and unpinned. So it is pinned here, in the SLIM tier, where a merge can
+    /// see it. Growing it is a visible diff next to a test name that says what it
+    /// costs.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Exactly_these_elements_may_skip_the_entry_check()
+    {
+        string[] exempt =
+        [
+            """("boundaryEvent", "compensate")""",
+            """("dataObjectReference", null)""",
+        ];
+
+        var source = OracleSource();
+        var start = source.IndexOf("NeverEntered =", StringComparison.Ordinal);
+
+        Assert.True(
+            start >= 0,
+            "Found no `NeverEntered` set in ExecutionEvidenceExecutionTests. Either the entry "
+            + "exemption was removed — in which case delete this test in the same commit — or "
+            + "this guard has stopped reading the thing it guards, which reads as a clean bill "
+            + "of health against nothing (#429).");
+
+        var end = source.IndexOf("];", start, StringComparison.Ordinal);
+        Assert.True(end > start, "The `NeverEntered` set is not in the shape this guard reads.");
+
+        var declared = System.Text.RegularExpressions.Regex
+            .Matches(source[start..end], """\("[a-zA-Z]+", (?:"[a-zA-Z]+"|null)\)""")
+            .Select(m => m.Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var added = declared.Except(exempt, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            added.Count == 0,
+            "These elements were added to `NeverEntered`, so their oracle cells no longer assert "
+            + "that the engine entered the element at all:\n  "
+            + string.Join("\n  ", added)
+            + "\n\nThat exemption exists for elements the engine records NO activity instance "
+            + "for — a compensation boundary and a data object reference, both measured. For "
+            + "anything else it removes #412's stand-in check and a cell can pass on an element "
+            + "that never ran. If the addition is genuinely right, add it here too and say what "
+            + "was measured (#534).");
+
+        var removed = exempt.Except(declared, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            removed.Count == 0,
+            "These elements are no longer exempt from the entry check:\n  "
+            + string.Join("\n  ", removed)
+            + "\n\nIf the engine started recording them, that is good news and this list should "
+            + "shrink in the same commit. If not, their cells now fail for the wrong reason.");
     }
 
     /// <summary>The live-engine oracle's source, read rather than referenced.</summary>

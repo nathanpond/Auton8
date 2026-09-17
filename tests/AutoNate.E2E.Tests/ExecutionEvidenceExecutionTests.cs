@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(41, DeclaredEffects().Count);
+        Assert.Equal(42, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -187,6 +187,10 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // never runs. An observer that accepted "the handler is in the diagram"
         // rather than "the engine recorded it writing" is satisfied by this.
         { "variable-written", "variable-written:no-compensation-thrown", "nothing throws compensation, so the handler never runs", "not-entered" },
+
+        // A real, correctly wired reference whose declaration simply carries no
+        // value (#534). Deployable, resolving, and the variable is not there.
+        { "value-carried", "value-carried", "the declaration carries no value, so nothing reaches the instance", "not-entered" },
 
         // These two are each other's control (#471). Each diagram is a real,
         // deployable, WORKING multi-instance activity carrying the other kind of
@@ -361,6 +365,15 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<sequenceFlow id="f3" sourceRef="Fork_1" targetRef="Outside_1"/>"""
             + """<sequenceFlow id="f4" sourceRef="Ev_1" targetRef="End_1"/>"""
             + """<sequenceFlow id="f5" sourceRef="Outside_1" targetRef="End_2"/>"""),
+
+        // The same reference, resolving to the same declaration, with no
+        // <flowable:value> on it. Nothing else differs.
+        "value-carried" => WrapIn(key, "",
+            """<dataObject id="Decl_1" name="carried" autonate:dataType="xsd:double"/>"""
+            + """<dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1"/>"""
+            + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
 
         // The compensation apparatus, complete and deployable, with an ORDINARY
         // end event where the compensate throw would be (#531). Ev_1 is the
@@ -1280,6 +1293,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     private static readonly HashSet<(string Local, string? Definition)> NeverEntered =
     [
         ("boundaryEvent", "compensate"),
+
+        // A data object reference is a DECLARATION, not a step (#534). It is
+        // never on any path, so the engine has no activity instance to record --
+        // which is why this row's effect is a value on the instance rather than
+        // anything an activity did.
+        ("dataObjectReference", null),
     ];
 
     private static readonly Dictionary<(string Local, string? Definition), string> EngineNames = new()
@@ -1773,6 +1792,63 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     + "is gone");
             }
 
+            // THE DECLARATION'S VALUE REACHED THE INSTANCE (#534).
+            //
+            // `variable-written` cannot express this, and bending it to would
+            // weaken the thing that makes it strong: it attributes a write to an
+            // ACTIVITY INSTANCE, and a data object's value is seeded by a
+            // declaration, so no activity writes it.
+            //
+            // The diagram supplies the author's intent -- which declaration this
+            // reference resolves to, and what value it declares -- and the engine
+            // supplies the behaviour. Neither derives the other (#412).
+            case "value-carried":
+            {
+                var (declaredName, declaredValue) = DataObjectDeclarationOf(xml, "Ev_1");
+
+                if (declaredName is null)
+                {
+                    return new(false,
+                        "Ev_1 is not a data object reference that resolves to a declaration, so "
+                        + "there is nothing for it to carry");
+                }
+
+                if (declaredValue is null)
+                {
+                    return new(false,
+                        $"the declaration '{declaredName}' declares no value, so a variable "
+                        + "carrying one would not be this element's doing");
+                }
+
+                // AND NO ACTIVITY MAY HAVE WRITTEN IT. This is the half that
+                // makes the cell mean something: a script task setting the same
+                // name satisfies "the variable is there and equal" while the data
+                // object carries nothing, which is this element's entire job.
+                var writer = await VariableWriterAsync(api, instance, declaredName);
+                if (writer is not null)
+                {
+                    return new(false,
+                        $"'{declaredName}' was written by activity '{writer.Value.Activity}'. The "
+                        + "value on this instance is that activity's doing, so nothing here says "
+                        + "the data object reference carried anything (#534)");
+                }
+
+                var actual = await VariableValueAsync(api, instance, declaredName);
+
+                if (actual is null)
+                {
+                    return new(false,
+                        $"the declaration '{declaredName}' names no variable on this instance -- "
+                        + "the reference resolved to it and its value never arrived");
+                }
+
+                return string.Equals(actual, declaredValue, StringComparison.Ordinal)
+                    ? new(true, $"'{declaredName}' = '{actual}', from the declaration and no activity")
+                    : new(false,
+                        $"'{declaredName}' is '{actual}' on the instance and the declaration says "
+                        + $"'{declaredValue}'");
+            }
+
             default:
                 return new(false, $"no observer for effect '{effect}'");
         }
@@ -1851,6 +1927,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // ARTIFACT, and the BPMN schema puts artifacts after every flow
             // element. Earlier, and Flowable refuses the deployment with
             // cvc-complex-type.2.4.a naming whichever element follows it.
+            // AN ACTUAL dataObjectReference (#534). `DataObjectExecutionTests`
+            // authors a bare <bpmn:dataObject>, which is the DECLARATION -- this
+            // row is about the reference that resolves to one, and the two are
+            // different elements. A user task keeps the instance alive so the
+            // variable is still readable.
+            "Data Object Reference" => Wrap("",
+                """<dataObject id="Decl_1" name="carried" autonate:dataType="xsd:double">"""
+                + """<extensionElements><flowable:value>42.5</flowable:value></extensionElements></dataObject>"""
+                + """<dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1"/>"""
+                + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
             "Compensation Boundary" => Wrap("",
                 """<startEvent id="Start_1"/>"""
                 + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""

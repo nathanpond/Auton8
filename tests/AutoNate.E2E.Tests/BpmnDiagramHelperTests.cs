@@ -451,6 +451,56 @@ public sealed class BpmnDiagramHelperTests
     /// observer asks this about Ev_1 specifically, and an answer borrowed from a
     /// neighbour would have it assert a cancellation somebody else caused (#522).
     /// </summary>
+    // ---- DataObjectDeclarationOf ---------------------------------------------
+
+    [Fact]
+    public void DataObjectDeclarationOf_resolves_the_reference_to_its_declaration()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="carried"><extensionElements><value>42.5</value></extensionElements></dataObject>
+                <dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1" />
+            """);
+
+        Assert.Equal(("carried", "42.5"), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// A reference resolves to ITS declaration (#534). Following a neighbour's
+    /// would let the cell certify a value this element never pointed at, which is
+    /// the resolution under test.
+    /// </summary>
+    [Fact]
+    public void DataObjectDeclarationOf_does_not_follow_another_references_target()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="mine"><extensionElements><value>1</value></extensionElements></dataObject>
+                <dataObject id="Decl_2" name="theirs"><extensionElements><value>2</value></extensionElements></dataObject>
+                <dataObjectReference id="Ev_1" name="mine" dataObjectRef="Decl_1" />
+                <dataObjectReference id="Other_1" name="theirs" dataObjectRef="Decl_2" />
+            """);
+
+        Assert.Equal(("mine", "1"), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void DataObjectDeclarationOf_reports_a_declaration_that_carries_no_value()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="carried" />
+                <dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1" />
+            """);
+
+        Assert.Equal(("carried", null), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void DataObjectDeclarationOf_is_empty_when_Ev_1_is_not_a_reference()
+    {
+        var xml = Diagram("""    <userTask id="Ev_1" />""");
+
+        Assert.Equal((null, null), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
     // ---- CompensationHandlersOf ----------------------------------------------
 
     [Fact]

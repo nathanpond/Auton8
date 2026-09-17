@@ -206,6 +206,36 @@ internal static class BpmnDiagram
     }
 
     /// <summary>
+    /// What a data object reference resolves to: the declared name and value (#534).
+    /// </summary>
+    /// <remarks>
+    /// Follows this reference's own <c>dataObjectRef</c> to the
+    /// <c>&lt;bpmn:dataObject&gt;</c> it points at, and reads that declaration's
+    /// <c>name</c> plus its <c>&lt;flowable:value&gt;</c>. Following a *different*
+    /// reference's target would let the cell certify a value this element never
+    /// pointed at, which is the resolution being tested.
+    /// </remarks>
+    internal static (string? Name, string? Value) DataObjectDeclarationOf(string xml, string id)
+    {
+        var root = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "dataObjectReference"
+                                 && (string?)e.Attribute("id") == id);
+
+        if ((string?)root?.Attribute("dataObjectRef") is not { } target) return (null, null);
+
+        var declaration = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "dataObject"
+                                 && (string?)e.Attribute("id") == target);
+
+        if (declaration is null) return (null, null);
+
+        var value = declaration.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "value")?.Value;
+
+        return ((string?)declaration.Attribute("name"), value);
+    }
+
+    /// <summary>
     /// The compensation handler a boundary event is associated with (#531).
     /// </summary>
     /// <remarks>
