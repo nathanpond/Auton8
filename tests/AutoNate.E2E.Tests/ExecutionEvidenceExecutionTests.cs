@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(42, DeclaredEffects().Count);
+        Assert.Equal(43, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -530,6 +530,14 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Only the vocabulary differs.
         var isMarkerRow = string.Equals(declaredLocalName, "*", StringComparison.Ordinal);
 
+        // AN IDENTITY CARRIED AS AN ATTRIBUTE (#532). An event sub-process is
+        // `(subProcess, "triggeredByEvent")`, and that is an attribute -- so
+        // `EventDefinitionIn` answers null and the identity assert compares it
+        // against "triggeredByEvent". The tag is still asserted from the manifest
+        // as usual; only the second half of the identity reads a different place.
+        var isAttributeRow = !isMarkerRow
+            && string.Equals(declaredEventDefinition, "triggeredByEvent", StringComparison.Ordinal);
+
         if (isMarkerRow)
         {
             Assert.Equal(declaredEventDefinition, MarkerIn(xml));
@@ -550,7 +558,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // "draws fine, does nothing" lives. The manifest already keys every row
         // on (localName, eventDefinition) because that pair, not the tag, names
         // an element.
-        Assert.Equal(declaredEventDefinition, EventDefinitionIn(xml));
+        Assert.Equal(
+            declaredEventDefinition,
+            isAttributeRow ? AttributeIdentityIn(xml) : EventDefinitionIn(xml));
         }
 
         // For a marker row the host is whatever the diagram builds, so the
@@ -648,6 +658,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             Assert.Equal(declaredEventDefinition, MarkerOf(deployed));
         }
 
+        // AND AN ATTRIBUTE IDENTITY MUST SURVIVE PUBLISH TOO (#532). The block
+        // below asserts the deployed element carries exactly one *EventDefinition
+        // child; an event sub-process carries none, so this row would fail there
+        // after passing its identity assert. The marker rows met this first and
+        // answered it by asserting the MARKER survived instead of skipping the
+        // deployed-form check -- same answer here. An attribute that draws fine
+        // and is gone by the time the engine sees it is the founding bug's shape.
+        if (isAttributeRow)
+        {
+            Assert.Equal(declaredLocalName, deployed!.Name.LocalName);
+
+            Assert.Equal(declaredEventDefinition, AttributeIdentityOf(deployed));
+        }
+
         var wasRewritten = !isMarkerRow && !string.Equals(
             deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal);
 
@@ -656,7 +680,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // the cell. An early return in this stretch skips it, which is head 5b of
         // #453 -- a cell that runs, stays green, and observes nothing -- and the
         // first draft of the marker branch above did exactly that.
-        if (!isMarkerRow && (declaredEventDefinition is not null || wasRewritten))
+        if (!isMarkerRow && !isAttributeRow && (declaredEventDefinition is not null || wasRewritten))
         {
             if (deployed.Name.LocalName == "serviceTask")
             {
@@ -1314,6 +1338,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         [("sendTask", null)] = "serviceTask",
         [("eventBasedGateway", null)] = "eventGateway",
         [("adHocSubProcess", null)] = "adhocSubProcess",
+
+        // #532, measured the same way as every other row here: the cell failed
+        // with "ran, but as a 'eventSubProcess' rather than a 'subProcess'". The
+        // key is the manifest's own (localName, eventDefinition) pair, and for
+        // this row the second half is an ATTRIBUTE -- which the keying already
+        // supports, because it is a pair of strings rather than a pair of shapes.
+        [("subProcess", "triggeredByEvent")] = "eventSubProcess",
     };
 
 
@@ -1932,6 +1963,22 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // row is about the reference that resolves to one, and the two are
             // different elements. A user task keeps the instance alive so the
             // variable is still readable.
+            // A timer inside the handler, non-interrupting, so the main flow
+            // parks and the instance is still readable while the handler's task
+            // is observed. `task-appears` is already container-aware -- it falls
+            // back to the ids nested inside Ev_1 -- so the handler's own user task
+            // is exactly the shape it looks for (#532).
+            "Event Sub-Process" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Main_1" targetRef="End_1"/>"""
+                + """<subProcess id="Ev_1" triggeredByEvent="true">"""
+                + """<startEvent id="Esp_1" isInterrupting="false"><timerEventDefinition>"""
+                + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
+                + """<userTask id="Handled_1" name="handled"/><endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Esp_1" targetRef="Handled_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="Handled_1" targetRef="Ee_1"/></subProcess>"""),
+
             "Data Object Reference" => Wrap("",
                 """<dataObject id="Decl_1" name="carried" autonate:dataType="xsd:double">"""
                 + """<extensionElements><flowable:value>42.5</flowable:value></extensionElements></dataObject>"""

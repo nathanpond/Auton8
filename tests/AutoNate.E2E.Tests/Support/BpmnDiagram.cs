@@ -206,6 +206,33 @@ internal static class BpmnDiagram
     }
 
     /// <summary>
+    /// An identity carried as an ATTRIBUTE rather than a child element (#532).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An event sub-process is <c>(subProcess, "triggeredByEvent")</c>, and
+    /// <c>triggeredByEvent</c> is an attribute — so <see cref="EventDefinitionIn"/>,
+    /// which reads a child whose name ends in <c>EventDefinition</c>, answers
+    /// <c>null</c> and the identity assertion compares it against
+    /// <c>"triggeredByEvent"</c>. Same shape as the marker rows, which needed
+    /// their own vocabulary branch for the same reason.
+    /// </para>
+    /// <para>
+    /// A plain <c>subProcess</c> answers <c>null</c> here, which is the point: the
+    /// branch must not let a row with a MISSING identity pass. Nothing is OR-ed
+    /// into the assertion — one reader is swapped for another on the rows whose
+    /// manifest identity says so.
+    /// </para>
+    /// </remarks>
+    internal static string? AttributeIdentityIn(string xml) => AttributeIdentityOf(ElementIn(xml, "Ev_1"));
+
+    internal static string? AttributeIdentityOf(XElement element) =>
+        string.Equals(
+            (string?)element.Attribute("triggeredByEvent"), "true", StringComparison.OrdinalIgnoreCase)
+            ? "triggeredByEvent"
+            : null;
+
+    /// <summary>
     /// What a data object reference resolves to: the declared name and value (#534).
     /// </summary>
     /// <remarks>

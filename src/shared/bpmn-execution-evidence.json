@@ -601,7 +601,7 @@
       "name": "Event Sub-Process",
       "localName": "subProcess",
       "eventDefinition": "triggeredByEvent",
-      "declaredEffect": null,
+      "declaredEffect": "task-appears",
       "liveEngineTestsMentioningIt": [
         "EventSubProcessExecutionTests",
         "EventSubProcessStudioTests",

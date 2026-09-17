@@ -451,6 +451,55 @@ public sealed class BpmnDiagramHelperTests
     /// observer asks this about Ev_1 specifically, and an answer borrowed from a
     /// neighbour would have it assert a cancellation somebody else caused (#522).
     /// </summary>
+    // ---- AttributeIdentityIn -------------------------------------------------
+
+    [Fact]
+    public void AttributeIdentityIn_reads_triggeredByEvent_off_the_element()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1" triggeredByEvent="true"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Equal("triggeredByEvent", BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    /// <summary>
+    /// The complement that keeps the attribute branch from widening the oracle
+    /// (#532). A plain sub-process must NOT satisfy the event sub-process row's
+    /// identity — otherwise the branch lets a row with a missing identity pass,
+    /// which is worse than the assertion it replaced.
+    /// </summary>
+    [Fact]
+    public void AttributeIdentityIn_is_null_for_a_plain_sub_process()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Null(BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    /// <summary>`triggeredByEvent="false"` is a sub-process that says it is not one.</summary>
+    [Fact]
+    public void AttributeIdentityIn_is_null_when_the_attribute_says_false()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1" triggeredByEvent="false"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Null(BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    [Fact]
+    public void AttributeIdentityIn_sees_through_a_namespace_prefix()
+    {
+        var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:subProcess id="Ev_1" triggeredByEvent="true"><bpmn:startEvent id="In_1" /></bpmn:subProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal("triggeredByEvent", BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
     // ---- DataObjectDeclarationOf ---------------------------------------------
 
     [Fact]
