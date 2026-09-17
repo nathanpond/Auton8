@@ -7734,3 +7734,16 @@ so that nesting is meaningful rather than a workaround.
   admitting the one string it was written to reject. All three existing reasons
   clear the predicate today, so the guard lands green and bites tomorrow.
   **Issue:** #522
+
+- **Finding:** #369 is a test-fixture defect, not a product defect. The studio was
+  right to decline the save.
+  **Why it matters:** the user's M4d closure rule is "product defects block;
+  tooling carries", and #369 was triaged as a studio Save bug three times (#360,
+  #362, #480) on the strength of a failure message that said only "the studio
+  never POSTed the save". `prepareAndStore` returns early when prepare reports
+  errors, and prepare was reporting one: the seeded diagram carried a
+  multi-instance marker with neither a collection nor a cardinality, which
+  `WorkflowBpmnXml` refuses because Flowable refuses the whole deployment for it.
+  The one case of three that passed was the one whose own edit set the collection
+  — it repaired the fixture before pressing Save. No product code changed.
+  **Issue:** #369
