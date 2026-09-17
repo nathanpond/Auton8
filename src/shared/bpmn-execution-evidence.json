@@ -255,7 +255,7 @@
       "name": "Conditional Start Event",
       "localName": "startEvent",
       "eventDefinition": "conditional",
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "AdhocSubProcessExecutionTests",
         "ConditionalEventExecutionTests",
@@ -433,7 +433,7 @@
       "name": "Conditional Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "conditional",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "AdhocSubProcessExecutionTests",
         "ConditionalEventExecutionTests",

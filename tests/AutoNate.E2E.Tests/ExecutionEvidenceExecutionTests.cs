@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(34, DeclaredEffects().Count);
+        Assert.Equal(36, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -1784,6 +1784,48 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // afterwards so the instance is still there to read -- one that
             // started and finished inside the poll interval would make "no
             // instance appeared" and "it already ended" the same observation.
+            // NOT A SELF-STARTING ELEMENT, and that is the finding (#526). A
+            // conditional start is an EVENT SUB-PROCESS start -- `WorkflowBpmnXml`
+            // says so in its own refusal, listing "an error, message, timer,
+            // signal, escalation or condition" as what an event subprocess reacts
+            // to. It fires inside a RUNNING instance, so `instance-starts` would
+            // be the wrong claim; what proves it ran is that its handler's body
+            // executed.
+            //
+            // The condition is `${taken == true}`, which `StartAsync` supplies.
+            // Flowable never fires conditional events by itself (#158), so Auton8
+            // POSTs `.../evaluate-conditions`, and instance start is one of the
+            // paths that does (FlowableClient.cs:196). So this fires through a
+            // path the product genuinely drives rather than one #271 says it
+            // cannot -- this cell neither needs #271 fixed nor pretends it is.
+            //
+            // Non-interrupting, so the main flow's own user task survives and the
+            // instance is still readable while the handler's write is observed.
+            "Conditional Start Event" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Main_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1" isInterrupting="false"><conditionalEventDefinition>"""
+                + """<condition>${taken == true}</condition></conditionalEventDefinition></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // Same condition, same nudge, and `cancelActivity="true"` written out
+            // because the negative control's whole difference is that attribute.
+            "Conditional Boundary" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<conditionalEventDefinition><condition>${taken == true}</condition>"""
+                + """</conditionalEventDefinition></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
             "Timer Start Event" => Wrap("",
                 """<startEvent id="Ev_1"><timerEventDefinition>"""
                 + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
