@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(36, DeclaredEffects().Count);
+        Assert.Equal(38, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -1801,6 +1801,51 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             //
             // Non-interrupting, so the main flow's own user task survives and the
             // instance is still readable while the handler's write is observed.
+            // AN EVENT SUB-PROCESS START, like the conditional one (#527, #526).
+            // BPMN has no top-level error start, and `WorkflowBpmnXml` lists
+            // error among what an event subprocess reacts to. So what proves it
+            // ran is that its handler's body executed.
+            //
+            // The error is thrown from an error END inside an embedded
+            // sub-process, which is the one shape an error end is publishable in
+            // here -- Auton8 refuses an uncaught one, naming the cost, and the
+            // `Error End` arm below documents the same constraint.
+            "Error Start Event" => Wrap(
+                """<error id="Err_1" errorCode="E1" name="e1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Sub_1"><startEvent id="In_1"/>"""
+                + """<endEvent id="Thrown_1"><errorEventDefinition errorRef="Err_1"/></endEvent>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/></subProcess>"""
+                + """<endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Sub_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Sub_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1"><errorEventDefinition errorRef="Err_1"/></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // NO `cancelActivity` HERE, and that is not an omission (#527). An
+            // error boundary cannot be non-interrupting: BPMN forbids it and
+            // `WorkflowBpmnXml` refuses it in as many words, saying the engine
+            // interrupts regardless so the diagram would promise something it
+            // does not do. There is therefore no same-element control carrying
+            // the other configuration for this row; the `host-cancelled` control
+            // is per-EFFECT and is #522's non-interrupting timer boundary.
+            "Error Boundary" => Wrap(
+                """<error id="Err_1" errorCode="E1" name="e1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Host_1"><startEvent id="In_1"/>"""
+                + """<endEvent id="Thrown_1"><errorEventDefinition errorRef="Err_1"/></endEvent>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/></subProcess>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1"><errorEventDefinition errorRef="Err_1"/></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
             "Conditional Start Event" => Wrap("",
                 """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
                 + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""

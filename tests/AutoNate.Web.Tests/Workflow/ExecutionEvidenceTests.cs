@@ -217,7 +217,9 @@ public sealed class ExecutionEvidenceTests
             ("Conditional Start Event", "variable-written"),
             ("End Event (None)", "instance-ends"),
             ("End Event (Terminate)", "instance-ends"),
+            ("Error Boundary", "host-cancelled"),
             ("Error End", "instance-ends"),
+            ("Error Start Event", "variable-written"),
             ("Escalation End", "instance-ends"),
             ("Event-Based Gateway", "instance-waits"),
             ("Exclusive Gateway (XOR)", "variable-written"),
@@ -311,7 +313,7 @@ public sealed class ExecutionEvidenceTests
         // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
-        const int Ceiling = 12;
+        const int Ceiling = 10;
 
         var unaccounted = Elements()
             .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)

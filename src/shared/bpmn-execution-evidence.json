@@ -267,7 +267,7 @@
       "name": "Error Start Event",
       "localName": "startEvent",
       "eventDefinition": "error",
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "BehaviorErrorBoundaryExecutionTests",
         "ErrorEscalationExecutionTests",
@@ -445,7 +445,7 @@
       "name": "Error Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "error",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "BehaviorErrorBoundaryExecutionTests",
         "ErrorEscalationExecutionTests",
