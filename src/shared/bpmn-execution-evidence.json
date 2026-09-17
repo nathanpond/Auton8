@@ -59,7 +59,7 @@
       "name": "Timer Start Event",
       "localName": "startEvent",
       "eventDefinition": "timer",
-      "declaredEffect": null,
+      "declaredEffect": "instance-starts",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",
@@ -409,7 +409,7 @@
       "name": "Timer Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "timer",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",

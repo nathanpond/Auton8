@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(32, DeclaredEffects().Count);
+        Assert.Equal(34, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -264,68 +264,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + $"{why} -- and the observer reported the effect as HELD, saying: {observed.Detail}. "
             + "The observer has stopped discriminating, so every cell that declares this effect "
             + "is now passing on nothing (#463).");
-    }
-
-    /// <summary>
-    /// One diagram per effect that no manifest row declares yet, which MUST hold (#522).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// An observer's positive arm is normally proven by the manifest rows that
-    /// declare its effect -- sixteen cells ride on <c>instance-ends</c>. A brand
-    /// new name has none of that: it arrives with a negative control and nothing
-    /// at all asserting it can ever report HELD. An observer hard-wired to
-    /// <c>false</c> would pass its negative control perfectly.
-    /// </para>
-    /// <para>
-    /// So a name no row declares owes a positive control too, and
-    /// <c>An_observable_effect_no_row_declares_has_a_positive_control</c> in the
-    /// backend suite is what makes that an obligation rather than a habit. The
-    /// rule retires itself per-name: once a row declares the effect, its cell is
-    /// the positive proof and the entry here may go.
-    /// </para>
-    /// </remarks>
-    public static TheoryData<string, string> LiveControls() => new()
-    {
-        { "host-cancelled", "an interrupting boundary fires, its path runs, and the host is gone" },
-        { "instance-starts", "a timer start event creates an instance with nobody calling start" },
-    };
-
-    [Theory]
-    [MemberData(nameof(LiveControls))]
-    public async Task A_live_control_is_observed_as_holding(string effect, string why)
-    {
-        await using var session = await NewSignedInAsAdminAsync();
-        var api = session.Page.APIRequest;
-
-        var key = $"pc{Guid.NewGuid():N}"[..18];
-        var xml = LiveControlDiagram(effect, key);
-
-        string instance;
-        if (string.Equals(effect, "instance-starts", StringComparison.Ordinal))
-        {
-            instance = await SelfStartAsync(api, key, xml, effect);
-        }
-        else
-        {
-            await PublishAsync(api, key, xml);
-            instance = await StartAsync(api, key);
-        }
-
-        var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
-        Assert.True(
-            entered is not null,
-            $"positive control for '{effect}': the engine never entered 'Ev_1', so this control "
-            + "would fail for the wrong reason (#522).");
-
-        var observed = await ObserveAsync(api, instance, effect, ElementTypeIn(xml), xml);
-
-        Assert.True(
-            observed.Held,
-            $"POSITIVE CONTROL FAILED for '{effect}'. This diagram makes the effect hold by "
-            + $"construction -- {why} -- and the observer reported it as NOT held, saying: "
-            + $"{observed.Detail}. An observer that can never report HELD passes its negative "
-            + "control perfectly and proves nothing (#522).");
     }
 
     // The DI section is not decoration: /api/executions/{id}/diagram renders the
@@ -468,41 +406,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         _ => throw new InvalidOperationException(
             $"No inert diagram for control '{control}'. Every observable effect needs one, or the "
             + "observer it belongs to has no negative control (#463)."),
-    };
-
-    /// <summary>A diagram built so that one effect deliberately DOES hold (#522).</summary>
-    private static string LiveControlDiagram(string effect, string key) => effect switch
-    {
-        // Interrupting -- `cancelActivity` defaults to true and is written out
-        // anyway, because the negative control's entire difference from this
-        // diagram is that one attribute and a reader should not have to know the
-        // default to see it.
-        "host-cancelled" => WrapIn(key, "",
-            """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
-            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
-            + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
-            + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
-            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
-            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
-            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
-            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
-
-        // NOBODY CALLS START. Publishing this diagram is the whole trigger: the
-        // engine's timer job fires a second later and creates the instance. It
-        // parks on a user task afterwards so the instance is still there to be
-        // read -- an instance that started and finished within the poll interval
-        // would make "no instance appeared" and "it already ended" the same
-        // observation.
-        "instance-starts" => WrapIn(key, "",
-            """<startEvent id="Ev_1"><timerEventDefinition>"""
-            + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
-            + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
-            + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
-            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
-
-        _ => throw new InvalidOperationException(
-            $"No positive control for effect '{effect}'. An effect no manifest row declares has "
-            + "nothing else asserting its observer can ever report HELD (#522)."),
     };
 
     [Theory]
@@ -1873,6 +1776,39 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Gw_1" targetRef="Ev_1"/>"""),
 
             "Intermediate Throw (None)" => Wrap("", Linear("""<intermediateThrowEvent id="Ev_1"/>""")),
+
+            // NOBODY CALLS START (#525). Publishing is the whole trigger: the
+            // engine's timer job fires a second later and creates the instance,
+            // which is why this row declares `instance-starts` and the shared
+            // theory makes no POST /start for it. It parks on a user task
+            // afterwards so the instance is still there to read -- one that
+            // started and finished inside the poll interval would make "no
+            // instance appeared" and "it already ended" the same observation.
+            "Timer Start Event" => Wrap("",
+                """<startEvent id="Ev_1"><timerEventDefinition>"""
+                + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
+                + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+            // `cancelActivity="true"` is the default and is written out anyway,
+            // because the negative control's entire difference from this diagram
+            // is that one attribute (#525). A reader should not have to know the
+            // default to see which feature is under test -- the non-interrupting
+            // variant is the opposite feature, not a near miss.
+            //
+            // The host is a user task, so it parks and stays parked: nothing but
+            // this boundary can remove it, which is what makes "the host is gone"
+            // attributable to Ev_1.
+            "Timer Boundary" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
             "Intermediate Catch (Timer)" => Wrap("", Linear(
                 """<intermediateCatchEvent id="Ev_1"><timerEventDefinition>"""
