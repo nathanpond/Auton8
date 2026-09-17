@@ -204,4 +204,19 @@ internal static class BpmnDiagram
             .Select(target => target!)
             .ToHashSet(StringComparer.Ordinal);
     }
+
+    /// <summary>The activity a boundary event is attached to, or null if it is not one (#522).</summary>
+    /// <remarks>
+    /// Read from the DIAGRAM, because the `host-cancelled` observer has to name
+    /// the host it expects to be gone, and taking that name from the engine
+    /// would be deriving the expectation from the thing under test -- the defect
+    /// #412 exists for. The author says which activity the boundary interrupts;
+    /// the engine says whether it is still live.
+    /// </remarks>
+    internal static string? AttachedHostOf(string xml, string id) =>
+        XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "boundaryEvent")
+            .Where(e => (string?)e.Attribute("id") == id)
+            .Select(e => (string?)e.Attribute("attachedToRef"))
+            .FirstOrDefault();
 }

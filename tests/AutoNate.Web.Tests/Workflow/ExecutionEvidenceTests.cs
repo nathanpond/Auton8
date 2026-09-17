@@ -77,6 +77,32 @@ public sealed class ExecutionEvidenceTests
 
 
     /// <summary>
+    /// The oracle's whole effect vocabulary, in one place (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two marker effects arrived with #471: the four-name vocabulary could
+    /// not say "more than one" or "one at a time", which is why the Loop Marker
+    /// archetype -- the bug #325 opens on, and the reason the oracle exists --
+    /// went unproven through the whole of M4b. The last two arrived with #522,
+    /// for the same reason one step further out: nothing could say "an instance
+    /// exists because the trigger fired" or "the host activity was cancelled",
+    /// so no start event and no boundary event could declare anything.
+    /// </para>
+    /// <para>
+    /// Three tests read this one array, and that is the point. It was a literal
+    /// inside a single fact, with the file's <c>$fields</c> and a comment both
+    /// asserting a pairing obligation that nothing checked.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] Observable =
+    [
+        "task-appears", "variable-written", "instance-waits", "instance-ends",
+        "tasks-appear-together", "tasks-appear-in-turn",
+        "instance-starts", "host-cancelled",
+    ];
+
+    /// <summary>
     /// Every declared effect is one the E2E oracle can observe (#325 AC3).
     /// </summary>
     /// <remarks>
@@ -95,11 +121,7 @@ public sealed class ExecutionEvidenceTests
         // went unproven through the whole of M4b. Every name here owes a negative
         // control in `InertDiagrams`; the `default` arm of `InertDiagram` throws
         // rather than letting one arrive without.
-        string[] observable =
-        [
-            "task-appears", "variable-written", "instance-waits", "instance-ends",
-            "tasks-appear-together", "tasks-appear-in-turn",
-        ];
+        string[] observable = Observable;
 
         var unobservable = Elements()
             .Select(e => (Name: e!["name"]!.GetValue<string>(),
@@ -249,35 +271,101 @@ public sealed class ExecutionEvidenceTests
     }
 
     /// <summary>
-    /// AC3's finding is visible to the merge gate, and may only shrink (#429).
+    /// AC3's finding is visible to the merge gate, and may only shrink (#429, #522).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The evidence file's own <c>$fields</c> says a null <c>declaredEffect</c> is
     /// <i>"a FINDING, not a pass"</i>. Nothing asserted that, so 38 elements sat
     /// in that state where only prose could see them. This is a ratchet, not a
     /// target: the number may fall as elements are proven, and a rise means an
     /// obligation was deleted.
+    /// </para>
+    /// <para>
+    /// WHAT IT COUNTS CHANGED (#522). It counted rows with no
+    /// <c>declaredEffect</c>, which meant a row carrying a written, measured
+    /// <c>undeclaredReason</c> still counted as a finding -- and a measured
+    /// reason is a legitimate terminal state for an element the product refuses
+    /// to publish at all. Under the old rule the ratchet could not reach zero by
+    /// construction, so it stopped being a thing anyone could finish. It now
+    /// counts rows with <b>neither</b>, which is the set that is genuinely
+    /// unaccounted for.
+    /// </para>
+    /// <para>
+    /// That is only safe because prose cannot launder a row into "accounted":
+    /// <c>Every_undeclared_reason_records_a_measurement</c> holds every reason to
+    /// the same floor the manifest's reasons answer to. Without it this change
+    /// would have converted a finding into a sentence.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void The_undeclared_elements_are_a_finding_and_the_count_only_falls()
+    public void The_unaccounted_elements_are_a_finding_and_the_count_only_falls()
     {
         // Measured, and LOWERED as elements gain declarations -- 38 when this
-        // ratchet was written, 22 now that #325's AC5 tranche is proven. Never
-        // raise it.
-        const int Ceiling = 19;
+        // ratchet was written, 22 once #325's AC5 tranche was proven, 16 under
+        // #522's counting rule (19 rows declare nothing; 3 of them say why).
+        // Never raise it.
+        const int Ceiling = 16;
 
-        var undeclared = Elements()
-            .Where(e => e!["declaredEffect"] is null)
+        var unaccounted = Elements()
+            .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)
             .Select(e => e!["name"]!.GetValue<string>())
             .Order(StringComparer.Ordinal)
             .ToList();
 
         Assert.True(
-            undeclared.Count <= Ceiling,
-            $"{undeclared.Count} elements have no declared effect, up from {Ceiling}. An "
-            + "element losing its declaration removes a cell from the live-engine oracle "
-            + "with every suite green, which is #429:\n  "
-            + string.Join("\n  ", undeclared));
+            unaccounted.Count <= Ceiling,
+            $"{unaccounted.Count} elements have neither a declared effect nor a reason for "
+            + $"having none, up from {Ceiling}. An element losing its declaration removes a cell "
+            + "from the live-engine oracle with every suite green, which is #429:\n  "
+            + string.Join("\n  ", unaccounted));
+    }
+
+    /// <summary>
+    /// A reason is a measurement or it is not a reason (#380, #522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ratchet above now treats a written <c>undeclaredReason</c> as a
+    /// terminal state rather than a finding. That trade is only sound if a
+    /// reason has to be worth something: otherwise the cheapest way to move the
+    /// number is to type a sentence, and the ratchet measures prose.
+    /// </para>
+    /// <para>
+    /// The floor is <c>BpmnSupportManifestTests.ReasonLooksLikeAMeasurement</c>
+    /// -- the REAL predicate, CALLED, not a private copy of it. #380 is exactly
+    /// what a copy costs: a meta-test that reimplements what it checks cannot
+    /// notice the original drifting, and it did not, which is how that floor
+    /// shipped admitting the one string it was written to reject. Three versions
+    /// of its length, evidence and repetition rules are behind this one call.
+    /// </para>
+    /// <para>
+    /// What this does NOT cover, stated rather than implied: a reason can be
+    /// well-formed, specific and false. Nothing mechanical reads the engine to
+    /// check it. That is the residue this guard leaves, and it is smaller than
+    /// the residue of not having it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_undeclared_reason_records_a_measurement()
+    {
+        var gutted = Elements()
+            .Select(e => (Name: e!["name"]!.GetValue<string>(),
+                          Reason: (e!["undeclaredReason"]?.GetValue<string>() ?? "").Trim()))
+            .Where(row => row.Reason.Length > 0)
+            .Where(row => !BpmnSupportManifestTests.ReasonLooksLikeAMeasurement(row.Reason))
+            .Select(row => $"{row.Name}: \"{row.Reason}\"")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            gutted.Count == 0,
+            "These reasons no longer record a measurement, and the unaccounted ratchet counts "
+            + "the row they sit on as accounted for:\n  "
+            + string.Join("\n  ", gutted)
+            + "\n\nA reason that says nothing is a row laundered out of the finding it belongs "
+            + "in. Either measure something and write it down, or delete the reason and let the "
+            + "ratchet see the row (#522).");
     }
 
     /// <summary>
@@ -404,5 +492,157 @@ public sealed class ExecutionEvidenceTests
             "These elements declare an effect and have no minimal diagram in "
             + "ExecutionEvidenceExecutionTests, so that class skips them without saying so:\n  "
             + string.Join("\n  ", missing));
+    }
+
+    /// <summary>The live-engine oracle's source, read rather than referenced.</summary>
+    /// <remarks>
+    /// The two test projects do not reference each other, so the source-level
+    /// read is how every cross-project guard in this class already works.
+    /// </remarks>
+    private static string OracleSource() => File.ReadAllText(Path.Combine(
+        RepoRoot.Path, "tests", "AutoNate.E2E.Tests", "ExecutionEvidenceExecutionTests.cs"));
+
+    /// <summary>
+    /// The effect names of one control table in the live-engine oracle (#522).
+    /// </summary>
+    /// <remarks>
+    /// Both tables are <c>TheoryData</c> initializers whose first column is the
+    /// effect, so one reader serves both. The assertion that the reader still
+    /// finds anything is in each caller, because a regex that silently stops
+    /// matching reports a clean bill of health against nothing -- the failure
+    /// mode this milestone has found more often than any other.
+    /// </remarks>
+    private static IReadOnlyCollection<string> ControlEffects(string table)
+    {
+        var source = OracleSource();
+        var start = source.IndexOf($"TheoryData<string, string, string, string> {table}()",
+            StringComparison.Ordinal);
+        if (start < 0)
+        {
+            start = source.IndexOf($"TheoryData<string, string> {table}()", StringComparison.Ordinal);
+        }
+
+        if (start < 0) return [];
+
+        var end = source.IndexOf("\n    };", start, StringComparison.Ordinal);
+        if (end < 0) return [];
+
+        return System.Text.RegularExpressions.Regex
+            .Matches(source[start..end], """^\s+\{ "(?<effect>[^"]+)",""",
+                System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(m => m.Groups["effect"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Every observable effect owes a negative control, and that is now tested (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The evidence file's <c>$fields</c> said <i>"every name here owes a
+    /// negative control in ExecutionEvidenceExecutionTests.InertDiagrams"</i>,
+    /// and the comment above <c>observable[]</c> in this file said it again.
+    /// Nothing tested it. Adding a name to <c>observable[]</c> with no control
+    /// was silent, and the <c>default</c> arm of <c>InertDiagram</c> that
+    /// supposedly caught it only throws when a control is REQUESTED -- which is
+    /// exactly what does not happen for a name no table mentions.
+    /// </para>
+    /// <para>
+    /// #463's outcome rests entirely on those controls: an observer gutted to a
+    /// tautology is caught by its negative control and by nothing else. A name
+    /// admitted without one is an observer with no discrimination check at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_observable_effect_has_a_negative_control()
+    {
+        var controlled = ControlEffects("InertDiagrams");
+
+        Assert.True(
+            controlled.Count > 0,
+            "Found no entries in ExecutionEvidenceExecutionTests.InertDiagrams. This guard has "
+            + "stopped reading the table it guards, which reads as a clean bill of health "
+            + "against nothing (#429, #522).");
+
+        var uncontrolled = Observable
+            .Where(effect => !controlled.Contains(effect))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            uncontrolled.Count == 0,
+            "These effects are declared observable and have no negative control in "
+            + "ExecutionEvidenceExecutionTests.InertDiagrams:\n  "
+            + string.Join("\n  ", uncontrolled)
+            + "\n\nAn observer with no inert diagram can be gutted to a tautology and every "
+            + "cell that declares its effect passes on nothing (#463).");
+
+        // And the other direction: a control for a name nothing may declare is a
+        // cell running against a vocabulary that has moved on.
+        var orphaned = controlled
+            .Where(effect => !Observable.Contains(effect, StringComparer.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            orphaned.Count == 0,
+            "These negative controls guard effects no row may declare:\n  "
+            + string.Join("\n  ", orphaned));
+    }
+
+    /// <summary>
+    /// A brand new effect proves it can hold, too (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An observer's positive arm is normally proven by the manifest rows that
+    /// declare its effect -- sixteen cells ride on <c>instance-ends</c>. A name
+    /// no row declares yet has none of that, and arrives carrying only a negative
+    /// control. An observer hard-wired to <c>false</c> passes a negative control
+    /// perfectly.
+    /// </para>
+    /// <para>
+    /// So the obligation is conditional, and it retires itself: once a row
+    /// declares the effect, that row's cell is the positive proof and the entry
+    /// in <c>LiveControls</c> may go. Nothing has to remember to remove it, and
+    /// nothing has to remember to add one for the next new name either.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void An_observable_effect_no_row_declares_has_a_positive_control()
+    {
+        var declared = Elements()
+            .Select(e => e!["declaredEffect"]?.GetValue<string>())
+            .Where(effect => effect is not null)
+            .ToHashSet(StringComparer.Ordinal)!;
+
+        var undeclaredNames = Observable.Where(effect => !declared.Contains(effect)).ToList();
+
+        // Not vacuous by accident. When every name is declared there is nothing
+        // to require, and that is the healthy end state -- but it must be reached
+        // because rows arrived, not because the reader broke, so the table read
+        // is asserted whenever the requirement is live.
+        if (undeclaredNames.Count == 0) return;
+
+        var proven = ControlEffects("LiveControls");
+
+        Assert.True(
+            proven.Count > 0,
+            "Found no entries in ExecutionEvidenceExecutionTests.LiveControls, while these "
+            + "effects have no declaring row to prove them:\n  "
+            + string.Join("\n  ", undeclaredNames.Order(StringComparer.Ordinal)));
+
+        var unproven = undeclaredNames
+            .Where(effect => !proven.Contains(effect))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            unproven.Count == 0,
+            "These effects are declared observable, no evidence row declares one, and there is "
+            + "no positive control for them in ExecutionEvidenceExecutionTests.LiveControls:\n  "
+            + string.Join("\n  ", unproven)
+            + "\n\nNothing asserts their observer can ever report HELD, so an observer returning "
+            + "a constant false would satisfy every guard in this suite (#522).");
     }
 }

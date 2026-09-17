@@ -411,4 +411,55 @@ public sealed class BpmnDiagramHelperTests
         Assert.Null(BpmnDiagram.LoopCardinalityIn(Diagram(
             """    <userTask id="Ev_1"><multiInstanceLoopCharacteristics isSequential="false" /></userTask>""")));
     }
+
+    // ---- AttachedHostOf ------------------------------------------------------
+
+    [Fact]
+    public void AttachedHostOf_names_the_activity_the_boundary_interrupts()
+    {
+        var xml = Diagram("""
+                <userTask id="Host_1" name="host" />
+                <boundaryEvent id="Ev_1" attachedToRef="Host_1"><timerEventDefinition /></boundaryEvent>
+            """);
+
+        Assert.Equal("Host_1", BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// A prefixed boundary event is the shape every real modeller writes, and it
+    /// is the one a regex over the document text could not see (#448).
+    /// </summary>
+    [Fact]
+    public void AttachedHostOf_sees_through_a_namespace_prefix()
+    {
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:userTask id="Host_1" name="host" />
+                <bpmn:boundaryEvent id="Ev_1" attachedToRef="Host_1"><bpmn:timerEventDefinition /></bpmn:boundaryEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal("Host_1", BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// Null, not the first boundary event in the document. The `host-cancelled`
+    /// observer asks this about Ev_1 specifically, and an answer borrowed from a
+    /// neighbour would have it assert a cancellation somebody else caused (#522).
+    /// </summary>
+    [Fact]
+    public void AttachedHostOf_is_null_when_Ev_1_is_not_a_boundary_event()
+    {
+        var xml = Diagram("""
+                <userTask id="Ev_1" name="plain" />
+                <userTask id="Other_1" name="other" />
+                <boundaryEvent id="Bnd_1" attachedToRef="Other_1"><timerEventDefinition /></boundaryEvent>
+            """);
+
+        Assert.Null(BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
 }

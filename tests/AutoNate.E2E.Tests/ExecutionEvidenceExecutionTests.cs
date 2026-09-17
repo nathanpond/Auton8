@@ -159,19 +159,29 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// not hold" has two distinct shapes for it — the wrong kind of marker, and
     /// the right kind asking for one instance.
     /// </remarks>
-    public static TheoryData<string, string, string> InertDiagrams() => new()
+    /// <remarks>
+    /// The fourth column is the control's PRECONDITION (#522). Every control
+    /// here used to owe the same one -- the engine entered `Ev_1` -- and that
+    /// made "the element did not fire" inexpressible: a control whose whole
+    /// point is that nothing happened cannot assert it was entered first. The
+    /// two values are `entered`, which is the original obligation, and
+    /// `no-instance`, which is the self-starting shape's complement: nothing is
+    /// started, nothing may appear, and there is no instance to have entered
+    /// anything.
+    /// </remarks>
+    public static TheoryData<string, string, string, string> InertDiagrams() => new()
     {
-        { "instance-ends", "instance-ends", "a parallel branch parks on a user task, so the instance never ends" },
-        { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through" },
-        { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none" },
-        { "variable-written", "variable-written", "no script writes `proof`" },
+        { "instance-ends", "instance-ends", "a parallel branch parks on a user task, so the instance never ends", "entered" },
+        { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through", "entered" },
+        { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none", "entered" },
+        { "variable-written", "variable-written", "no script writes `proof`", "entered" },
 
         // These two are each other's control (#471). Each diagram is a real,
         // deployable, WORKING multi-instance activity carrying the other kind of
         // marker -- so neither observer can be satisfied by a diagram that simply
         // does nothing, which is the usual way a negative control goes soft.
-        { "tasks-appear-together", "tasks-appear-together", "the marker is sequential, so only one instance is live at a time" },
-        { "tasks-appear-in-turn", "tasks-appear-in-turn", "the marker is parallel, so all three appear at once" },
+        { "tasks-appear-together", "tasks-appear-together", "the marker is sequential, so only one instance is live at a time", "entered" },
+        { "tasks-appear-in-turn", "tasks-appear-in-turn", "the marker is parallel, so all three appear at once", "entered" },
 
         // THE FLOOR, as a live control (#488). A parallel marker asking for ONE
         // instance is the founding defect's own result -- "it ran once where the
@@ -179,18 +189,63 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // the engine side. Without the `wanted < 2` guard the observer reports
         // "1 live task(s) on Ev_1 at once, as authored" and this control fails,
         // which is the asymmetry #488 was filed for.
-        { "tasks-appear-together", "tasks-appear-together:one", "the marker asks for a single instance, so nothing runs at once" },
+        { "tasks-appear-together", "tasks-appear-together:one", "the marker asks for a single instance, so nothing runs at once", "entered" },
+
+        // THE OPPOSITE FEATURE, not a diagram that does nothing (#522). A
+        // NON-interrupting boundary fires for real -- its own path runs, and the
+        // host keeps running beside it. That is the same construction the two
+        // marker controls use on each other, and it is the strongest form this
+        // complement can take: an observer that has stopped discriminating
+        // cannot hide behind "well, nothing happened", because something did.
+        { "host-cancelled", "host-cancelled", "the boundary is non-interrupting, so its path runs and the host survives", "entered" },
+
+        // "DID NOT FIRE", which no control could previously express. The start
+        // event is stripped of its trigger and nothing else changes, so the
+        // assertion is that no instance ever comes into being -- reached from
+        // the DIAGRAM side, which is the mutation the positive cell must go red
+        // for. There is no instance, so there is nothing to have entered `Ev_1`,
+        // which is why the precondition column exists.
+        { "instance-starts", "instance-starts:no-trigger", "the start event carries no trigger, so nothing ever creates an instance", "no-instance" },
     };
 
     [Theory]
     [MemberData(nameof(InertDiagrams))]
-    public async Task An_inert_diagram_is_observed_as_not_holding(string effect, string control, string why)
+    public async Task An_inert_diagram_is_observed_as_not_holding(
+        string effect, string control, string why, string precondition)
     {
         await using var session = await NewSignedInAsAdminAsync();
         var api = session.Page.APIRequest;
 
         var key = $"nc{Guid.NewGuid():N}"[..18];
         var xml = InertDiagram(control, key);
+
+        // "DID NOT FIRE" (#522). There is no instance to start, observe or enter
+        // anything, so the whole shape differs: publish, wait the SAME budget the
+        // positive path is allowed, and assert nothing appeared. Waiting less
+        // than the positive path would make this control weaker than the claim it
+        // guards -- "did not fire" has to mean "did not fire in the window where
+        // firing is proven to happen", or it is just an impatient read.
+        if (string.Equals(precondition, "no-instance", StringComparison.Ordinal))
+        {
+            var before = await InstancesOfAsync(key);
+            Assert.True(
+                before.Count == 0,
+                $"negative control for '{effect}': an instance of '{key}' existed before this "
+                + "control published anything, so its verdict is about somebody else's run (#522).");
+
+            await PublishAsync(api, key, xml);
+
+            var appeared = await SelfStartedInstanceAsync(key);
+
+            Assert.True(
+                appeared is null,
+                $"NEGATIVE CONTROL FAILED for '{effect}'. This diagram is inert by construction -- "
+                + $"{why} -- and instance '{appeared?.Id}' appeared anyway. Either the engine is "
+                + "starting instances nothing asked for, or the harness started this one, and in "
+                + "both cases every cell that declares this effect is passing on nothing (#463, #522).");
+
+            return;
+        }
 
         await PublishAsync(api, key, xml);
         var instance = await StartAsync(api, key);
@@ -209,6 +264,68 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + $"{why} -- and the observer reported the effect as HELD, saying: {observed.Detail}. "
             + "The observer has stopped discriminating, so every cell that declares this effect "
             + "is now passing on nothing (#463).");
+    }
+
+    /// <summary>
+    /// One diagram per effect that no manifest row declares yet, which MUST hold (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An observer's positive arm is normally proven by the manifest rows that
+    /// declare its effect -- sixteen cells ride on <c>instance-ends</c>. A brand
+    /// new name has none of that: it arrives with a negative control and nothing
+    /// at all asserting it can ever report HELD. An observer hard-wired to
+    /// <c>false</c> would pass its negative control perfectly.
+    /// </para>
+    /// <para>
+    /// So a name no row declares owes a positive control too, and
+    /// <c>An_observable_effect_no_row_declares_has_a_positive_control</c> in the
+    /// backend suite is what makes that an obligation rather than a habit. The
+    /// rule retires itself per-name: once a row declares the effect, its cell is
+    /// the positive proof and the entry here may go.
+    /// </para>
+    /// </remarks>
+    public static TheoryData<string, string> LiveControls() => new()
+    {
+        { "host-cancelled", "an interrupting boundary fires, its path runs, and the host is gone" },
+        { "instance-starts", "a timer start event creates an instance with nobody calling start" },
+    };
+
+    [Theory]
+    [MemberData(nameof(LiveControls))]
+    public async Task A_live_control_is_observed_as_holding(string effect, string why)
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"pc{Guid.NewGuid():N}"[..18];
+        var xml = LiveControlDiagram(effect, key);
+
+        string instance;
+        if (string.Equals(effect, "instance-starts", StringComparison.Ordinal))
+        {
+            instance = await SelfStartAsync(api, key, xml, effect);
+        }
+        else
+        {
+            await PublishAsync(api, key, xml);
+            instance = await StartAsync(api, key);
+        }
+
+        var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
+        Assert.True(
+            entered is not null,
+            $"positive control for '{effect}': the engine never entered 'Ev_1', so this control "
+            + "would fail for the wrong reason (#522).");
+
+        var observed = await ObserveAsync(api, instance, effect, ElementTypeIn(xml), xml);
+
+        Assert.True(
+            observed.Held,
+            $"POSITIVE CONTROL FAILED for '{effect}'. This diagram makes the effect hold by "
+            + $"construction -- {why} -- and the observer reported it as NOT held, saying: "
+            + $"{observed.Detail}. An observer that can never report HELD passes its negative "
+            + "control perfectly and proves nothing (#522).");
     }
 
     // The DI section is not decoration: /api/executions/{id}/diagram renders the
@@ -317,9 +434,75 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<multiInstanceLoopCharacteristics isSequential="false" autonate:loopCardinality="3"/>"""
             + """</userTask>""")),
 
+        // THE OPPOSITE FEATURE (#522). `cancelActivity="false"` is the only
+        // difference from the positive control below: the boundary genuinely
+        // fires, `Ev_1` is genuinely entered, its onward path genuinely runs --
+        // and `Host_1` is still there, because a non-interrupting boundary does
+        // not cancel anything. An observer that checks only "the path ran" is
+        // satisfied by this diagram, and that is the whole point: asserting the
+        // path without asserting the cancellation passes for the opposite
+        // feature.
+        //
+        // The host is a user task, so it parks and stays parked; nothing but the
+        // boundary can remove it.
+        "host-cancelled" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="false">"""
+            + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+            + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+        // THE TRIGGER, REMOVED (#522). Identical to the positive control except
+        // that `Ev_1` carries no <timerEventDefinition>, making it a plain None
+        // start -- which the engine will never fire on its own. This is the
+        // test-plan mutation reached from the diagram side: if the self-starting
+        // cell can pass without a trigger present, it was never observing one.
+        "instance-starts:no-trigger" => WrapIn(key, "",
+            """<startEvent id="Ev_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
         _ => throw new InvalidOperationException(
             $"No inert diagram for control '{control}'. Every observable effect needs one, or the "
             + "observer it belongs to has no negative control (#463)."),
+    };
+
+    /// <summary>A diagram built so that one effect deliberately DOES hold (#522).</summary>
+    private static string LiveControlDiagram(string effect, string key) => effect switch
+    {
+        // Interrupting -- `cancelActivity` defaults to true and is written out
+        // anyway, because the negative control's entire difference from this
+        // diagram is that one attribute and a reader should not have to know the
+        // default to see it.
+        "host-cancelled" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+            + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+            + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+        // NOBODY CALLS START. Publishing this diagram is the whole trigger: the
+        // engine's timer job fires a second later and creates the instance. It
+        // parks on a user task afterwards so the instance is still there to be
+        // read -- an instance that started and finished within the poll interval
+        // would make "no instance appeared" and "it already ended" the same
+        // observation.
+        "instance-starts" => WrapIn(key, "",
+            """<startEvent id="Ev_1"><timerEventDefinition>"""
+            + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
+            + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+        _ => throw new InvalidOperationException(
+            $"No positive control for effect '{effect}'. An effect no manifest row declares has "
+            + "nothing else asserting its observer can ever report HELD (#522)."),
     };
 
     [Theory]
@@ -348,8 +531,27 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             await PublishAsync(api, $"{key}r", receiver);
         }
 
-        await PublishAsync(api, key, xml);
-        var instance = await StartAsync(api, key);
+        // A SELF-STARTING ELEMENT HAS NO CALLER (#522).
+        //
+        // A Timer, Message, Signal or Conditional START event is not reached by
+        // `POST /api/workflows/{key}/start` -- the trigger creates the instance,
+        // and calling start would create a SECOND one that proves nothing about
+        // the trigger. So the row's effect decides the path: `instance-starts`
+        // publishes and then goes looking for what the engine did on its own.
+        //
+        // The effect name carries this rather than a new manifest key, so
+        // `obliged` still pins the (element, effect) pair that selects the path
+        // and no row can quietly change lanes.
+        string instance;
+        if (string.Equals(effect, SelfStarting, StringComparison.Ordinal))
+        {
+            instance = await SelfStartAsync(api, key, xml, name);
+        }
+        else
+        {
+            await PublishAsync(api, key, xml);
+            instance = await StartAsync(api, key);
+        }
 
         // ENTRY, AND OF THE RIGHT KIND (#412).
         //
@@ -680,6 +882,134 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         return body.RootElement.GetProperty("id").GetString()!;
     }
 
+    /// <summary>The effect name that means "the trigger creates the instance" (#522).</summary>
+    private const string SelfStarting = "instance-starts";
+
+    /// <summary>
+    /// Publish, trigger nothing, and return the instance the engine made itself (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two preconditions are not the same check twice. The first -- nothing
+    /// exists before publish -- catches a reused key, so the cell cannot certify
+    /// somebody else's run. The second is the one the acceptance criterion is
+    /// actually about: the instance must carry NO START USER. "An instance
+    /// exists" is otherwise satisfiable by the harness itself, and a cell that
+    /// called <c>POST /start</c> and then found an instance would report a
+    /// perfect green while proving only that starting a workflow starts a
+    /// workflow.
+    /// </para>
+    /// <para>
+    /// Flowable records the start user on every instance begun through Auton8's
+    /// route, because that route is authenticated and passes the caller through;
+    /// an instance a timer, message or signal created has none. So the assertion
+    /// is checkable from the engine's own record rather than from this class
+    /// promising it did not call start.
+    /// </para>
+    /// </remarks>
+    private static async Task<string> SelfStartAsync(
+        IAPIRequestContext api, string key, string xml, string name)
+    {
+        var before = await InstancesOfAsync(key);
+        Assert.True(
+            before.Count == 0,
+            $"{name}: {before.Count} instance(s) of '{key}' existed before this cell published "
+            + "anything, so whatever it finds afterwards is not evidence the trigger fired (#522).");
+
+        await PublishAsync(api, key, xml);
+
+        var found = await SelfStartedInstanceAsync(key);
+
+        Assert.True(
+            found is not null,
+            $"{name}: nothing called start, and after {SelfStartBudgetSeconds}s the engine had "
+            + $"created no instance of '{key}' either. This element is supposed to start its own "
+            + "instance; it deployed and did nothing, which is #325.");
+
+        Assert.True(
+            string.IsNullOrEmpty(found!.Value.StartUserId),
+            $"{name}: the instance this cell observed was started by "
+            + $"'{found.Value.StartUserId}'. A self-starting element's proof is that the TRIGGER "
+            + "created the instance -- an instance somebody called start for satisfies "
+            + "\"an instance exists\" while saying nothing about the trigger (#522).");
+
+        return found.Value.Id;
+    }
+
+    private readonly record struct EngineInstance(string Id, string? StartUserId);
+
+    /// <summary>
+    /// How long a trigger-driven cell may wait for the engine to act (#522).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT <c>ObserveAsync</c>'s five seconds. Flowable acquires
+    /// timer and async jobs on its own schedule and can exceed that, but raising
+    /// the shared budget would slow every FAILING cell in the class -- which is
+    /// the cost #452 deliberately bought down. So the longer wait lives only
+    /// here, on the cells that need it. Thirty seconds is what
+    /// <c>TimerBoundaryExecutionTests.EventuallyAsync</c> already allows a timer.
+    /// </remarks>
+    private const int SelfStartBudgetSeconds = 30;
+
+    /// <summary>Poll until the engine creates an instance of this key, or the budget runs out.</summary>
+    private static async Task<EngineInstance?> SelfStartedInstanceAsync(string key)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(SelfStartBudgetSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = await InstancesOfAsync(key);
+            if (found.Count > 0) return found[0];
+            await Task.Delay(500);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Every instance of a process key the engine knows about, running or finished.
+    /// </summary>
+    /// <remarks>
+    /// Asked of Flowable directly, and of its HISTORY rather than its runtime.
+    /// Auton8's own list route answers a bounded, engine-wide page, so on a busy
+    /// suite "no instance" could mean "not on this page" -- and the negative
+    /// control's entire verdict is "no instance". A key-filtered history query
+    /// has neither problem, and it sees an instance that started and finished,
+    /// which a runtime query does not. Reading the engine directly is already
+    /// this class's habit for questions Auton8's API cannot answer exactly
+    /// (<c>DeployedElementAsync</c>, <c>VariableWriterAsync</c>); what it refuses
+    /// to do is PUBLISH around Auton8's validation, which this does not.
+    /// </remarks>
+    private static async Task<IReadOnlyList<EngineInstance>> InstancesOfAsync(string key)
+    {
+        using var engine = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var response = await engine.GetAsync(
+            "service/history/historic-process-instances"
+            + $"?processDefinitionKey={Uri.EscapeDataString(key)}&size=100");
+
+        if (!response.IsSuccessStatusCode) return [];
+
+        using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        if (!page.RootElement.TryGetProperty("data", out var rows)) return [];
+        if (rows.ValueKind != JsonValueKind.Array) return [];
+
+        var instances = new List<EngineInstance>();
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (!row.TryGetProperty("id", out var id)) continue;
+            if (id.GetString() is not { } instanceId) continue;
+
+            instances.Add(new EngineInstance(
+                instanceId,
+                row.TryGetProperty("startUserId", out var user) ? user.GetString() : null));
+        }
+
+        return instances;
+    }
+
     /// <summary>
     /// What did the engine enter this activity AS? Null if it never entered it.
     /// </summary>
@@ -899,11 +1229,45 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
     private readonly record struct Observation(bool Held, string Detail);
 
+    /// <summary>
+    /// Effects whose observation waits on a job the ENGINE schedules (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every other effect here is the synchronous consequence of starting an
+    /// instance: the task is created, the variable is written, the instance ends,
+    /// all within the transaction. Five seconds is generous for those, and #452
+    /// deliberately bought that budget down -- a failing cell used to take 100
+    /// seconds and an eight-minute run of a sixteen-second suite.
+    /// </para>
+    /// <para>
+    /// A boundary event's firing is not synchronous. Flowable acquires the timer
+    /// job on its own schedule, and MEASURED against the live engine the
+    /// interrupting control exhausted the five-second budget with the boundary
+    /// still parked -- reported, correctly and uselessly, as "that is a
+    /// NON-INTERRUPTING boundary". The observer was right about what it saw and
+    /// wrong about what it meant.
+    /// </para>
+    /// <para>
+    /// So the longer budget is keyed on the EFFECT rather than raised for
+    /// everyone. The negative control gets it too, and that is the point rather
+    /// than a side effect: a control that waits less than the claim it guards
+    /// reports "did not happen" by being impatient, which is the same false pass
+    /// in the other direction.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> TriggerDriven =
+        new(StringComparer.Ordinal) { "host-cancelled" };
+
     private static async Task<Observation> ObserveAsync(
         IAPIRequestContext api, string instance, string effect, string elementType,
         string xml)
     {
-        for (var attempt = 0; attempt < 20; attempt++)
+        // 250ms a turn either way: 5s for the synchronous effects, the
+        // trigger-driven budget for the ones waiting on the engine's own clock.
+        var attempts = TriggerDriven.Contains(effect) ? SelfStartBudgetSeconds * 4 : 20;
+
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             var seen = await LookAsync(api, instance, effect, elementType, xml);
             if (seen.Held) return seen;
@@ -1319,6 +1683,103 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     current.Count == 0
                         ? "nothing is current -- the instance finished"
                         : $"still parked at [{string.Join(", ", current)}]");
+
+            // AN INSTANCE CAME INTO BEING, AND IT BEGAN HERE (#522).
+            //
+            // "An instance exists" alone is not an observation -- by the time
+            // this runs, one does, or the cell already failed finding it. What
+            // this adds is WHERE it began: the trigger's own event has to be the
+            // entry point, so an instance that arrived some other way and merely
+            // passed through `Ev_1` later does not satisfy it.
+            //
+            // The other half of the claim -- that nobody called start -- cannot
+            // be seen from here, because the instance carries the answer, not the
+            // diagram. It is asserted in `SelfStartAsync`, against the engine's
+            // own `startUserId`, before this observer is ever reached.
+            case SelfStarting:
+            {
+                var order = await EntryOrderAsync(api, instance);
+                if (order.Count == 0)
+                {
+                    return new(false,
+                        "the engine has recorded no activity at all on this instance, so nothing "
+                        + "here can say where it began");
+                }
+
+                if (!order.TryGetValue("Ev_1", out var mine))
+                {
+                    return new(false,
+                        $"this instance entered [{string.Join(", ", order.Keys)}] and never Ev_1, "
+                        + "so whatever started it, it was not this element");
+                }
+
+                // STRICTLY earlier, not "is the minimum". Two activities can
+                // share a millisecond on the engine's clock, and a tie would make
+                // this flaky rather than wrong. What it must reject is an
+                // activity that demonstrably ran BEFORE the start event, which is
+                // what "something else started this instance" looks like.
+                var earlier = order.Where(kv => kv.Value < mine).Select(kv => kv.Key).ToList();
+
+                return earlier.Count == 0
+                    ? new(true, $"the instance began at Ev_1, with nobody calling start")
+                    : new(false,
+                        $"[{string.Join(", ", earlier)}] ran before Ev_1 on this instance, so it "
+                        + "did not begin here -- this element is not what created it");
+            }
+
+            // THE PATH RAN *AND* THE HOST IS GONE (#522).
+            //
+            // Both halves, in one observer, because either alone is the opposite
+            // feature. A non-interrupting boundary runs its path and leaves the
+            // host alive; a host that vanished for some other reason says nothing
+            // about the boundary. The host comes from the DIAGRAM's
+            // `attachedToRef` -- the author's statement of what this boundary
+            // interrupts -- and whether it is still live comes from the engine.
+            case "host-cancelled":
+            {
+                var host = AttachedHostOf(xml, "Ev_1");
+                if (host is null)
+                {
+                    return new(false,
+                        "Ev_1 is not a boundary event in this diagram, so it is attached to "
+                        + "nothing and there is no host for it to have cancelled");
+                }
+
+                var order = await EntryOrderAsync(api, instance);
+
+                if (!order.ContainsKey(host))
+                {
+                    return new(false,
+                        $"the host '{host}' never ran, so there was nothing for Ev_1 to cancel -- "
+                        + "an absent host is not a cancelled one");
+                }
+
+                if (current.Contains(host))
+                {
+                    return new(false,
+                        $"Ev_1 fired and its host '{host}' is still live [{string.Join(", ", current)}]. "
+                        + "That is a NON-INTERRUPTING boundary, which is the opposite feature, not a "
+                        + "near miss.");
+                }
+
+                // And the boundary's own path. Without this, a host that ended
+                // normally -- completed by anyone, at any time -- reads as a
+                // cancellation, and the boundary need never have fired at all.
+                var onward = FlowTargetsOf(xml, "Ev_1");
+                var ran = onward.Where(order.ContainsKey).ToList();
+
+                if (ran.Count == 0)
+                {
+                    return new(false,
+                        $"the host '{host}' is gone, but nothing Ev_1 flows to "
+                        + $"[{string.Join(", ", onward)}] ever ran. The host ended on its own; this "
+                        + "boundary did not interrupt it.");
+                }
+
+                return new(true,
+                    $"Ev_1 fired, its path ran [{string.Join(", ", ran)}], and the host '{host}' "
+                    + "is gone");
+            }
 
             default:
                 return new(false, $"no observer for effect '{effect}'");

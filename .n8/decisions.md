@@ -7670,3 +7670,67 @@ proofs rather than rebuild them.
 **Structural note:** epic #40 is at GitHub's 100 sub-issue cap. M4d's stories
 attach under #325 instead, giving #40 → #325 → stories. #325's AC5 *is* Outcome 1,
 so that nesting is meaningful rather than a workaround.
+
+## /n8-exec M4d — 2026-09-17
+
+- **Decision:** The no-explicit-start path is selected by the *effect name*
+  (`instance-starts`), not by a new manifest key.
+  **Why:** A new key would have to be added to `An_evidence_row_carries_only_permitted_keys`
+  and would give a row two independent switches — the effect and the lane — that
+  could disagree. Keying on the effect means `obliged` already pins which lane a
+  row takes, so a row cannot quietly change lanes without failing a slim-tier
+  guard. Cost if wrong: an element that self-starts *and* wants some other effect
+  cannot be expressed. No such element exists in the 51 rows, and the way out is
+  a second effect name rather than a redesign.
+  **Issue:** #522
+
+- **Decision:** `host-cancelled` asserts both halves — the boundary's path ran
+  **and** the host is gone — in one observer, rather than asserting the
+  cancellation outside the declared-effect machinery.
+  **Why:** The issue left this to discretion. Either half alone passes for the
+  opposite feature: a non-interrupting boundary runs its path and leaves the host
+  alive, and a host that ended normally looks cancelled to anything that does not
+  check the boundary fired. Measured — gutting the `current.Contains(host)` check
+  turned the non-interrupting negative control green while it was demonstrably
+  false.
+  **Issue:** #522
+
+- **Decision:** The trigger-created instance is discovered through Flowable's
+  key-filtered history query, not Auton8's `GET /api/executions/`.
+  **Why:** That route answers a bounded, engine-wide page, and a negative
+  control's entire verdict is "no instance" — "not on this page" would read the
+  same. The history query is exact, sees an instance that started and finished,
+  and reading the engine directly is already this class's habit
+  (`DeployedElementAsync`, `VariableWriterAsync`). What it still refuses to do is
+  *publish* around Auton8's validation.
+  **Issue:** #522
+
+- **Decision:** The longer wait budget is keyed on the effect
+  (`TriggerDriven`), not raised for every cell.
+  **Why:** #452 deliberately bought `ObserveAsync` down from 100s to 5s per
+  failing cell. Measured here: the interrupting boundary control exhausted 5s
+  with Flowable's timer job still unacquired, and the observer reported "that is
+  a NON-INTERRUPTING boundary" — right about what it saw, wrong about what it
+  meant. The negative control gets the same budget deliberately: a control that
+  waits less than the claim it guards reports "did not happen" by being
+  impatient.
+  **Issue:** #522
+
+- **Decision:** A new effect name owes a *positive* control (`LiveControls`) as
+  well as a negative one, until some row declares it.
+  **Why:** An observer's positive arm is normally proven by the rows declaring
+  its effect — sixteen cells ride on `instance-ends`. A brand new name has none,
+  and an observer hard-wired to `false` passes a negative control perfectly.
+  #522 adds two names that no row declares yet, so without this they would sit
+  unproven in one direction until the sibling stories land. The obligation
+  retires itself per name as rows arrive.
+  **Issue:** #522
+
+- **Decision:** The unaccounted ratchet's anti-laundering floor *calls*
+  `BpmnSupportManifestTests.ReasonLooksLikeAMeasurement` rather than
+  reimplementing it.
+  **Why:** #380 is what a copy costs: a meta-test that reimplements what it
+  checks cannot notice the original drifting, and it did not — that floor shipped
+  admitting the one string it was written to reject. All three existing reasons
+  clear the predicate today, so the guard lands green and bites tomorrow.
+  **Issue:** #522
