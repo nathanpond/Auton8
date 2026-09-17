@@ -1,11 +1,31 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration name="infra: Local Stack" type="docker-deploy" factoryName="docker-compose.yml" server-name="Docker">
-    <deployment type="docker-compose.yml">
-      <settings>
-        <option name="sourceFilePath" value="infra/docker-compose.yml" />
-      </settings>
-    </deployment>
-    <EXTENSION ID="com.jetbrains.rider.docker.debug" isFastModeEnabled="true" isSslEnabled="false" />
+  <!--
+    Runs `make infra-up` rather than deploying infra/docker-compose.yml directly.
+
+    This used to be a `docker-deploy` configuration with an empty <envs />, which
+    meant Rider started the stack with no AUTONATE_MOUNTS_ROOT. Compose then
+    resolved the bind mounts against the compose file's own directory, so opening
+    a git worktree in Rider and pressing Run stood a brand-new, empty Postgres
+    cluster up, and because the compose project name is `infra` either way,
+    replaced the developer's stack rather than starting a second one (see issues 505 and 513).
+
+    Going through make is what supplies that variable, so every entry point
+    agrees on one data directory. The compose file now also refuses to start
+    without it, so this cannot regress quietly.
+  -->
+  <configuration default="false" name="infra: Local Stack" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="make infra-up" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <option name="SCRIPT_PATH" value="$PROJECT_DIR$/Makefile" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+    <option name="INTERPRETER_PATH" value="/bin/bash" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="EXECUTE_IN_TERMINAL" value="true" />
+    <option name="EXECUTE_SCRIPT_FILE" value="false" />
+    <envs />
     <method v="2" />
   </configuration>
 </component>

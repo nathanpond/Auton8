@@ -125,6 +125,16 @@ infra-reset:
 	# doesn't get word-split into a much wider deletion target.
 	@test -n "$(MOUNT_ROOT)" || { echo "MOUNT_ROOT is empty; refusing to rm -rf"; exit 1; }
 	@test -n "$(POSTGRES_MOUNT)" || { echo "POSTGRES_MOUNT is empty; refusing to rm -rf"; exit 1; }
+	# Say WHICH directory, because it is no longer necessarily this one (#513).
+	# Every worktree resolves MOUNT_ROOT to the main checkout, so `infra-reset`
+	# run from a worktree deletes the shared cluster -- correct under
+	# one-stack-per-machine, and a bigger gun than the command reads like.
+	@echo ""
+	@echo "infra-reset will DELETE the data directories under:"
+	@echo "    $(MOUNT_ROOT)"
+	@test "$(MOUNT_ROOT)" = "$(CURDIR)/infra/mounts" \
+	  || echo "    ^ NOTE: that is NOT this checkout ($(CURDIR)); it is the shared stack."
+	@echo ""
 	rm -rf "$(POSTGRES_MOUNT)" "$(REDIS_MOUNT)" "$(NATS_MOUNT)" "$(SCHEDULER_MOUNT)" "$(DAPR_DASHBOARD_COMPONENTS)" "$(FLOWABLE_DAPR_COMPONENTS)"
 	$(MAKE) infra-prepare
 

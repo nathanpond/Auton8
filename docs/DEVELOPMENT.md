@@ -112,7 +112,9 @@ If you intentionally want a full reset, including PostgreSQL, Redis, and Dapr sc
 make infra-reset
 ```
 
-`make infra-reset` now clears the bind-mounted data directories under `infra/mounts/` and recreates the expected folder structure. It no longer relies on Docker named volumes.
+`make infra-reset` clears the bind-mounted data directories and recreates the expected folder structure. It no longer relies on Docker named volumes.
+
+**It deletes the *shared* stack's data, which is not always this checkout's.** Every git worktree resolves the bind-mount root to the main checkout (see `infra/mounts-root.sh`), so one machine has one stack and `infra-reset` from a worktree destroys the cluster the main checkout is using. The target is printed before the deletion, and flagged when it is not the directory you are standing in — read that line before confirming.
 
 ## Build and test
 
