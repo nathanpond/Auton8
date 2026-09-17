@@ -13,9 +13,11 @@ DAPR_SCHEDULER_HOST_ADDRESS := 127.0.0.1:50007
 # bind mounts against the compose file's own directory (#505).
 #
 # Exported because that is how the compose file reads it: the bind mounts are
-# `${AUTONATE_MOUNTS_ROOT:-./mounts}/...`, so a plain `docker compose` run by
-# hand from infra/ still behaves as it always did, while everything that goes
-# through this Makefile agrees on one root.
+# `${AUTONATE_MOUNTS_ROOT:?...}` -- REQUIRED, with no default. A hand-run
+# `docker compose` from infra/ therefore fails with a message naming this
+# variable rather than quietly resolving `./mounts` against its own directory,
+# which was the silent fallback every unconverted entry point could hit. That
+# reverses what this comment used to promise; the promise was the hole.
 MOUNT_ROOT := $(shell ./infra/mounts-root.sh)
 export AUTONATE_MOUNTS_ROOT := $(MOUNT_ROOT)
 POSTGRES_MOUNT := $(MOUNT_ROOT)/postgres/data
@@ -27,7 +29,7 @@ FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
 include tests/tiers.env
 
-.PHONY: test-slim test-full-local app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+.PHONY: stack-ownership test-slim test-full-local app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
 
 # Verify the documented prerequisites and port availability before anything
 # tries to start. Reports every problem in one pass so a machine is fixed once,
@@ -46,7 +48,21 @@ lockfiles:
 preflight:
 	./infra/preflight.sh
 
-infra-prepare:
+# Refuse to start a stack over another checkout's data (#517).
+#
+# `infra-prepare` is the first mutating step of every target that brings the
+# stack up -- infra-up, infra-up-dashboard, app-container and keycloak-up all
+# depend on it -- so guarding it once covers all four. They previously had no
+# ownership check at all: only `infra-ensure` did, through ensure-up.sh, and
+# #513 then pointed Rider's Run button at `infra-up`, one of the unguarded ones.
+#
+# Worktrees are not the trigger any more (mounts-root.sh gives them one root).
+# Two CLONES on one machine are, and the compose project name is `infra` either
+# way, so whichever starts last replaces the other's containers.
+stack-ownership:
+	@./infra/assert-stack-ownership.sh
+
+infra-prepare: stack-ownership
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
 	cp ./infra/dapr/components/*.yaml $(DAPR_DASHBOARD_COMPONENTS)/
 	# Rewrite the flowable-dapr pubsub copy to use host.docker.internal.

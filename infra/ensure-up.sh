@@ -201,47 +201,14 @@ record_executor_build_hash() {
   printf '%s\n' "$1" > "$EXECUTOR_BUILD_STAMP_FILE"
 }
 
-# Is the stack that is already running serving THIS checkout's data?
-#
-# "Required infrastructure is already running and ready" was true of the
-# containers and false of the data (#513): a stack started against a different
-# AUTONATE_MOUNTS_ROOT answers every health check and every port probe while
-# serving another directory entirely. Because `-p infra` pins the project name,
-# a second checkout does not get a second stack -- it silently inherits, or
-# replaces, the first one's.
-#
-# Only the postgres data mount is checked. It is the one that carries state
-# worth losing, and a stack cannot have it right while having the others wrong:
-# they all come from the same compose file and the same variable.
+# Delegated to infra/assert-stack-ownership.sh (#517), which is also a make
+# prerequisite and tier-preflight.sh's implementation. Three copies of one check
+# is how two of them drift, and the two that existed already had: this one
+# hard-failed on an unreadable mount while tier-preflight.sh returned 0 (#519).
 assert_stack_serves_this_checkout() {
-  local container_id actual expected
-  container_id="$(compose_service_container_id postgres 2>/dev/null || true)"
-  [[ -n "$container_id" ]] || return 0
-
-  actual="$(docker inspect "$container_id" \
-    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' \
-    2>/dev/null || true)"
-  # An empty answer means the mount destination moved (a Postgres image bump
-  # relocates PGDATA) -- which is exactly when a silent pass would be worst, so
-  # it is a failure rather than a shrug.
-  [[ -n "$actual" ]] || fail "Could not read the running postgres container's data mount.
-  If the postgres image changed, the data directory inside the container moved and
-  this check needs updating alongside infra/docker-compose.yml."
-
-  expected="$MOUNTS_ROOT/postgres/data"
-  # Resolved, because /tmp is a symlink to /private/tmp on macOS and two names
-  # for one directory would otherwise read as a mismatch.
-  actual="$(cd "$actual" 2>/dev/null && pwd -P || printf '%s' "$actual")"
-  expected="$(cd "$expected" 2>/dev/null && pwd -P || printf '%s' "$expected")"
-
-  if [[ "$actual" != "$expected" ]]; then
-    fail "The running stack serves a different data directory.
-  stack mounts  : $actual
-  this checkout : $expected
-  Both cannot run at once: the compose project name is 'infra' either way, so
-  starting this one would replace the other. Stop that stack first, or run from
-  the checkout that owns it."
-  fi
+  AUTONATE_MOUNTS_ROOT="$MOUNTS_ROOT" AUTONATE_STACK_OWNERSHIP_QUIET=1 \
+    "$SCRIPT_DIR/assert-stack-ownership.sh" \
+    || exit 1
 }
 
 compose_service_container_id() {
