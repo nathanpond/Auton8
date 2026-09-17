@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(45, DeclaredEffects().Count);
+        Assert.Equal(47, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -952,6 +952,31 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// promising it did not call start.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The signal a self-starting row needs fired after publish (#529).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A signal start event cannot be triggered from inside its own diagram --
+    /// there is no instance yet, which is the whole point of the element. So one
+    /// narrow hook: a row NAMES a signal, and the cell fires it through
+    /// <c>POST /api/workflow-signals</c>, the route #523 added.
+    /// </para>
+    /// <para>
+    /// Narrow on purpose. This is not "a row may run arbitrary setup". Everything
+    /// else about the self-start path is unchanged -- no <c>POST /start</c>, an
+    /// assertion that no instance existed before, and an assertion that the
+    /// instance found carries NO START USER. That last one is what keeps this
+    /// honest: firing a signal is not starting an instance, and the check that
+    /// nobody started it still has to hold afterwards.
+    /// </para>
+    /// </remarks>
+    private static string? SelfStartTriggerSignal(string name, string key) => name switch
+    {
+        "Signal Start Event" => $"st{key}",
+        _ => null
+    };
+
     private static async Task<string> SelfStartAsync(
         IAPIRequestContext api, string key, string xml, string name)
     {
@@ -963,6 +988,34 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
         await PublishAsync(api, key, xml);
 
+        var trigger = SelfStartTriggerSignal(name, key);
+
+        if (trigger is { } signal)
+        {
+            // PUBLISHING IS NOT TRIGGERING. Checked here rather than only before
+            // publish, so the window in which the instance may appear starts
+            // AFTER the diagram is deployed. Without it, a publish that started
+            // an instance by itself would satisfy "it appeared after the trigger"
+            // without the trigger having done anything (#529).
+            var afterPublish = await InstancesOfAsync(key);
+            Assert.True(
+                afterPublish.Count == 0,
+                $"{name}: publishing created {afterPublish.Count} instance(s) of '{key}' before "
+                + "anything fired the trigger, so whatever appears next is not the trigger's "
+                + "doing (#529).");
+
+            var fired = await api.PostAsync("/api/workflow-signals/", new APIRequestContextOptions
+            {
+                DataObject = new { signalName = signal }
+            });
+
+            Assert.True(
+                fired.Ok,
+                $"{name}: firing '{signal}' failed with {fired.Status} {await fired.TextAsync()}. "
+                + "The element cannot be triggered from inside its own diagram, so this cell "
+                + "proves nothing without it (#529).");
+        }
+
         var found = await SelfStartedInstanceAsync(key);
 
         Assert.True(
@@ -971,12 +1024,31 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + $"created no instance of '{key}' either. This element is supposed to start its own "
             + "instance; it deployed and did nothing, which is #325.");
 
-        Assert.True(
-            string.IsNullOrEmpty(found!.Value.StartUserId),
-            $"{name}: the instance this cell observed was started by "
-            + $"'{found.Value.StartUserId}'. A self-starting element's proof is that the TRIGGER "
-            + "created the instance -- an instance somebody called start for satisfies "
-            + "\"an instance exists\" while saying nothing about the trigger (#522).");
+        // NO START USER -- BUT ONLY WHERE NOTHING WAS FIRED (#529 correcting #522).
+        //
+        // The check exists to rule out the harness having called POST /start.
+        // For a timer that works: no user is involved anywhere, so any start user
+        // is evidence of exactly the false pass it guards against. For a row with
+        // a TRIGGER it is simply wrong -- Auton8's own API is authenticated, and
+        // MEASURED, Flowable records the REST user as the start user of an
+        // instance a signal broadcast created. The cell failed with "started by
+        // 'rest-admin'" while doing precisely what it was supposed to.
+        //
+        // What carries the weight for a triggered row instead: no instance
+        // existed before publish, none existed after publish and before the
+        // trigger, and one appeared afterwards. The theory never calls
+        // `StartAsync` on this path at all -- and for this diagram shape it could
+        // not succeed if it did, because Flowable refuses to start a process by
+        // key when its start event waits on a signal.
+        if (trigger is null)
+        {
+            Assert.True(
+                string.IsNullOrEmpty(found!.Value.StartUserId),
+                $"{name}: the instance this cell observed was started by "
+                + $"'{found.Value.StartUserId}'. A self-starting element's proof is that the TRIGGER "
+                + "created the instance -- an instance somebody called start for satisfies "
+                + "\"an instance exists\" while saying nothing about the trigger (#522).");
+        }
 
         return found.Value.Id;
     }
@@ -1910,10 +1982,22 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
                 if (current.Contains(host))
                 {
+                    // NOT "Ev_1 fired and the host is still live" (#529). That
+                    // was the wording, and it asserts something this observer
+                    // cannot see: a boundary event appears in `current` as a
+                    // REGISTERED subscription as well as after firing, so both
+                    // "it fired and did not interrupt" and "it never fired at
+                    // all" arrive here. Measured while mutating a signal boundary
+                    // to listen for a name nothing throws -- the verdict was
+                    // right and the sentence was not. A message that claims more
+                    // than the code checked is how a reader is sent to the wrong
+                    // place, which this suite has paid for before (#445).
                     return new(false,
-                        $"Ev_1 fired and its host '{host}' is still live [{string.Join(", ", current)}]. "
-                        + "That is a NON-INTERRUPTING boundary, which is the opposite feature, not a "
-                        + "near miss.");
+                        $"the host '{host}' is still live [{string.Join(", ", current)}], so Ev_1 "
+                        + "did not interrupt it. Either the boundary fired and is NON-INTERRUPTING "
+                        + "-- the opposite feature, not a near miss -- or it never fired at all; "
+                        + "this observer cannot tell those apart, because a boundary is `current` "
+                        + "while merely subscribed.");
                 }
 
                 // And the boundary's own path. Without this, a host that ended
@@ -2355,6 +2439,49 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+            // NOTHING INSIDE THE DIAGRAM CAN FIRE THIS (#529). There is no
+            // instance until the signal arrives, which is what a signal start
+            // event is. The cell fires it through Auton8's own API after publish
+            // -- see `SelfStartTriggerSignal` -- and every other part of the
+            // self-start contract still applies, including that the instance it
+            // finds carries no start user.
+            //
+            // The signal name carries the run's key: Flowable keeps signal START
+            // subscriptions per name across the engine, and a fixed name would
+            // make every run after the first ambiguous -- the same hazard the
+            // three message rows already hit (#454).
+            "Signal Start Event" => Wrap(
+                $"""<signal id="Sig_1" name="st{key}"/>""",
+                """<startEvent id="Ev_1"><signalEventDefinition signalRef="Sig_1"/></startEvent>"""
+                + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+            // THE DIAGRAM TRIGGERS ITSELF (#529), deliberately, rather than
+            // reaching for #523's route. This row is about the boundary catching
+            // and cancelling its host; a cell that needed a second feature to
+            // fire would go red for two different reasons and only one of them
+            // would be this element.
+            //
+            // A parallel gateway forks: one branch parks on the host, the other
+            // throws the signal.
+            "Signal Boundary" => Wrap(
+                $"""<signal id="Sig_1" name="sb{key}"/>""",
+                """<startEvent id="Start_1"/><parallelGateway id="Fork_1"/>"""
+                + """<userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<signalEventDefinition signalRef="Sig_1"/></boundaryEvent>"""
+                + """<intermediateThrowEvent id="Throw_1"><signalEventDefinition signalRef="Sig_1"/></intermediateThrowEvent>"""
+                + """<userTask id="After_1" name="after"/>"""
+                + """<endEvent id="End_1"/><endEvent id="End_2"/><endEvent id="End_3"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Fork_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Fork_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Fork_1" targetRef="Throw_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f5" sourceRef="Throw_1" targetRef="End_2"/>"""
+                + """<sequenceFlow id="f6" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f7" sourceRef="After_1" targetRef="End_3"/>"""),
 
             "Timer Start Event" => Wrap("",
                 """<startEvent id="Ev_1"><timerEventDefinition>"""

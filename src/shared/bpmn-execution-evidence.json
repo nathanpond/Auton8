@@ -47,7 +47,7 @@
       "name": "Signal Start Event",
       "localName": "startEvent",
       "eventDefinition": "signal",
-      "declaredEffect": null,
+      "declaredEffect": "instance-starts",
       "liveEngineTestsMentioningIt": [
         "EventSubProcessExecutionTests",
         "MessageCorrelationStudioTests",
@@ -420,7 +420,7 @@
       "name": "Signal Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "signal",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "EventSubProcessExecutionTests",
         "MessageCorrelationStudioTests",
