@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(40, DeclaredEffects().Count);
+        Assert.Equal(41, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -164,10 +164,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// here used to owe the same one -- the engine entered `Ev_1` -- and that
     /// made "the element did not fire" inexpressible: a control whose whole
     /// point is that nothing happened cannot assert it was entered first. The
-    /// two values are `entered`, which is the original obligation, and
-    /// `no-instance`, which is the self-starting shape's complement: nothing is
-    /// started, nothing may appear, and there is no instance to have entered
-    /// anything.
+    /// three values are `entered`, which is the original obligation;
+    /// `no-instance`, the self-starting shape's complement, where nothing is
+    /// started and nothing may appear; and `not-entered`, for an element the
+    /// engine never records as an activity at all. The last is not a relaxation
+    /// granted on request — it is the same fact `NeverEntered` records, measured,
+    /// and a control claiming it for an element the engine DOES enter would be
+    /// giving up #463's precondition for nothing.
     /// </remarks>
     public static TheoryData<string, string, string, string> InertDiagrams() => new()
     {
@@ -175,6 +178,15 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through", "entered" },
         { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none", "entered" },
         { "variable-written", "variable-written", "no script writes `proof`", "entered" },
+
+        // A SECOND SHAPE FOR THE SAME EFFECT (#531), which this table already
+        // supports -- `tasks-appear-together` has two for the same reason. A real,
+        // working, deployable compensation apparatus whose throw is an ORDINARY
+        // end event: the boundary is attached, the handler exists and is
+        // reachable, and compensation is simply never triggered, so the handler
+        // never runs. An observer that accepted "the handler is in the diagram"
+        // rather than "the engine recorded it writing" is satisfied by this.
+        { "variable-written", "variable-written:no-compensation-thrown", "nothing throws compensation, so the handler never runs", "not-entered" },
 
         // These two are each other's control (#471). Each diagram is a real,
         // deployable, WORKING multi-instance activity carrying the other kind of
@@ -225,6 +237,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // than the positive path would make this control weaker than the claim it
         // guards -- "did not fire" has to mean "did not fire in the window where
         // firing is proven to happen", or it is just an impatient read.
+        // An instance exists and ran; this element simply leaves no activity
+        // record (#531). The observation is still real -- the effect must not
+        // hold -- so only the entry precondition is dropped, and only for the
+        // elements `NeverEntered` names.
+        var mustHaveEntered = !string.Equals(precondition, "not-entered", StringComparison.Ordinal);
+
         if (string.Equals(precondition, "no-instance", StringComparison.Ordinal))
         {
             var before = await InstancesOfAsync(key);
@@ -250,11 +268,14 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         await PublishAsync(api, key, xml);
         var instance = await StartAsync(api, key);
 
-        var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
-        Assert.True(
-            entered is not null,
-            $"negative control for '{effect}': the engine never entered 'Ev_1', so this control "
-            + "is not testing the observer -- it would fail for the wrong reason (#463).");
+        if (mustHaveEntered)
+        {
+            var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
+            Assert.True(
+                entered is not null,
+                $"negative control for '{effect}': the engine never entered 'Ev_1', so this control "
+                + "is not testing the observer -- it would fail for the wrong reason (#463).");
+        }
 
         var observed = await ObserveAsync(api, instance, effect, ElementTypeIn(xml), xml);
 
@@ -340,6 +361,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<sequenceFlow id="f3" sourceRef="Fork_1" targetRef="Outside_1"/>"""
             + """<sequenceFlow id="f4" sourceRef="Ev_1" targetRef="End_1"/>"""
             + """<sequenceFlow id="f5" sourceRef="Outside_1" targetRef="End_2"/>"""),
+
+        // The compensation apparatus, complete and deployable, with an ORDINARY
+        // end event where the compensate throw would be (#531). Ev_1 is the
+        // boundary; the handler is attached and reachable and never runs.
+        "variable-written:no-compensation-thrown" => WrapIn(key, "",
+            """<startEvent id="Start_1"/>"""
+            + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition/></boundaryEvent>"""
+            + """<scriptTask id="Undo_1" name="undo" isForCompensation="true" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+            + """<endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Doer_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
+            + """<association id="Assoc_1" associationDirection="One" sourceRef="Ev_1" targetRef="Undo_1"/>"""),
 
         // Ev_1 runs and writes something that is not `proof`.
         "variable-written" => WrapIn(key, "", LinearIn(
@@ -514,13 +548,28 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // stops a stand-in here is the effect: `tasks-appear-together` is not
         // satisfiable by a scriptTask, an unmarked userTask, or a sequential one.
         var expectedType = isMarkerRow ? ElementTypeIn(xml) : declaredLocalName;
-        var enteredAs = await EventuallyEnteredAsync(api, instance, "Ev_1");
+
+        // SOME ELEMENTS ARE NEVER ENTERED, AND THAT IS THE ENGINE'S ANSWER (#531).
+        //
+        // Measured: a compensation boundary produces no activity instance whether
+        // or not compensation fires, so #412's entry check cannot anchor the cell
+        // and asserting it would fail every such row for the wrong reason. The
+        // deployed-form check below carries the identity instead -- see
+        // `NeverEntered` for exactly what that trade gives up.
+        var neverEntered = !isMarkerRow
+            && NeverEntered.Contains((declaredLocalName, declaredEventDefinition));
+
+        var enteredAs = neverEntered ? null : await EventuallyEnteredAsync(api, instance, "Ev_1");
 
         Assert.True(
-            enteredAs is not null,
+            neverEntered || enteredAs is not null,
             $"{name}: the engine never entered activity 'Ev_1'. The instance ran, so "
             + "whatever effect follows is some other element's (#412).");
 
+        // Guarded rather than OR-ed into the assertion, because `out var alias`
+        // is not definitely assigned on a short-circuited disjunct (#531).
+        if (!neverEntered)
+        {
         Assert.True(
             // EXCLUSIVE, not OR-ed (#446). Where an entry exists the engine name
             // is the ONLY acceptable one, because for five of these rows Auton8
@@ -538,6 +587,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "A same-id stand-in satisfies every effect this class observes (#412), and where "
             + "Auton8 rewrites the element at publish the un-rewritten name is the defect the "
             + "rewrite exists to prevent (#446).");
+        }
 
         // THE REWRITE MUST PRESERVE THE SEMANTICS (#454).
         //
@@ -1204,6 +1254,34 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// beside it claimed a third would fail loudly.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Elements the engine never records as an activity instance at all (#531).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// MEASURED, like <see cref="EngineNames"/>, and for the same reason: every
+    /// entry was discovered by a cell failing against the real engine. A
+    /// compensation boundary is never entered — not when compensation fires and
+    /// not when it does not. Flowable records the HANDLER running; the attachment
+    /// leaves no activity instance behind.
+    /// </para>
+    /// <para>
+    /// <b>What this costs, stated rather than implied.</b> #412's entry check is
+    /// what stops a same-id stand-in satisfying a cell, and these rows do not get
+    /// it. What replaces it is the deployed-form check, which is not weaker here
+    /// by accident: the element read back from the engine must still be the
+    /// declared tag carrying the declared event definition, so a stand-in would
+    /// have to BE a compensation boundary. The effect then has to be produced by
+    /// the activity that element points at. A row in this set trades one
+    /// independent check for a chain of two, and it is in this set only because
+    /// the engine gives it no third option.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<(string Local, string? Definition)> NeverEntered =
+    [
+        ("boundaryEvent", "compensate"),
+    ];
+
     private static readonly Dictionary<(string Local, string? Definition), string> EngineNames = new()
     {
         [("intermediateThrowEvent", null)] = "throwEvent",
@@ -1455,6 +1533,17 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 {
                     "Ev_1",
                 };
+
+                // A COMPENSATION BOUNDARY'S OUTGOING EDGE IS AN ASSOCIATION (#531).
+                //
+                // Not a widening of "one hop from Ev_1" -- the same rule, applied
+                // to the edge this element actually has. A compensation handler is
+                // attached by <association>, so `FlowTargetsOf` is empty for one
+                // and the handler's write would be rejected as somebody else's.
+                // Only the association whose sourceRef is Ev_1 qualifies; "any
+                // association in the diagram" would admit a write from wherever an
+                // artifact happened to point.
+                writers.UnionWith(CompensationHandlersOf(xml, "Ev_1"));
 
                 if (!writers.Contains(wrote))
                 {
@@ -1750,6 +1839,28 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // "the reason is in the server log" for a code it has no sentence
                 // for, and the E2E fixture buffers that log in memory.
                 + """<association id="Assoc_1" associationDirection="One" sourceRef="Bnd_1" targetRef="Ev_1"/>"""),
+            // Ev_1 IS THE BOUNDARY, not the handler (#531). The `Compensation
+            // Marker` row above builds the same apparatus with Ev_1 as the
+            // handler; this row is about the attachment itself, so the ids swap
+            // and the handler becomes an ordinary element. What proves the
+            // boundary ran is that the thing it is associated with executed --
+            // and its edge to that thing is an <association>, which is why the
+            // `variable-written` observer had to learn about them.
+            //
+            // <association> LAST, as in the Compensation Marker arm: it is an
+            // ARTIFACT, and the BPMN schema puts artifacts after every flow
+            // element. Earlier, and Flowable refuses the deployment with
+            // cvc-complex-type.2.4.a naming whichever element follows it.
+            "Compensation Boundary" => Wrap("",
+                """<startEvent id="Start_1"/>"""
+                + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition/></boundaryEvent>"""
+                + """<scriptTask id="Undo_1" name="undo" isForCompensation="true" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="End_1"><compensateEventDefinition/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Doer_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
+                + """<association id="Assoc_1" associationDirection="One" sourceRef="Ev_1" targetRef="Undo_1"/>"""),
+
             "Script Task" => Wrap("", Linear(Script)),
             "Receive Task" => Wrap("", Linear("""<receiveTask id="Ev_1" name="wait"/>""")),
 

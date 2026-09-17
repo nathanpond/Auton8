@@ -472,7 +472,7 @@
       "name": "Compensation Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate",
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "CompensationExecutionTests",
         "ComplexGatewayStudioRoundTripTests",

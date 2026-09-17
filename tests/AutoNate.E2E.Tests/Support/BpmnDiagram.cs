@@ -205,6 +205,27 @@ internal static class BpmnDiagram
             .ToHashSet(StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// The compensation handler a boundary event is associated with (#531).
+    /// </summary>
+    /// <remarks>
+    /// A compensation boundary's outgoing edge is an <c>&lt;association&gt;</c>,
+    /// not a <c>&lt;sequenceFlow&gt;</c> — so <see cref="FlowTargetsOf"/> returns
+    /// nothing for one and the `variable-written` observer would reject the
+    /// handler's write as somebody else's. This is that one edge, and only that
+    /// one: the association whose <c>sourceRef</c> is this element. Not "any
+    /// association in the diagram", which would admit a write from anywhere an
+    /// artifact happens to point.
+    /// </remarks>
+    internal static IReadOnlyCollection<string> CompensationHandlersOf(string xml, string source) =>
+        XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "association")
+            .Where(e => (string?)e.Attribute("sourceRef") == source)
+            .Select(e => (string?)e.Attribute("targetRef"))
+            .Where(target => target is not null)
+            .Select(target => target!)
+            .ToHashSet(StringComparer.Ordinal);
+
     /// <summary>The activity a boundary event is attached to, or null if it is not one (#522).</summary>
     /// <remarks>
     /// Read from the DIAGRAM, because the `host-cancelled` observer has to name

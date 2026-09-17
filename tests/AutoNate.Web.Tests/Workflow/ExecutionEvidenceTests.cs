@@ -211,6 +211,7 @@ public sealed class ExecutionEvidenceTests
         [
             ("Ad-Hoc Sub-Process", "instance-waits"),
             ("Call Activity", "task-appears"),
+            ("Compensation Boundary", "variable-written"),
             ("Compensation Marker", "variable-written"),
             ("Compensation End", "instance-ends"),
             ("Conditional Boundary", "host-cancelled"),
@@ -315,7 +316,7 @@ public sealed class ExecutionEvidenceTests
         // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
-        const int Ceiling = 8;
+        const int Ceiling = 7;
 
         var unaccounted = Elements()
             .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)

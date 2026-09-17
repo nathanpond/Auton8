@@ -451,6 +451,60 @@ public sealed class BpmnDiagramHelperTests
     /// observer asks this about Ev_1 specifically, and an answer borrowed from a
     /// neighbour would have it assert a cancellation somebody else caused (#522).
     /// </summary>
+    // ---- CompensationHandlersOf ----------------------------------------------
+
+    [Fact]
+    public void CompensationHandlersOf_follows_the_association_off_the_boundary()
+    {
+        var xml = Diagram("""
+                <scriptTask id="Doer_1" />
+                <boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <scriptTask id="Undo_1" isForCompensation="true" />
+                <association id="Assoc_1" sourceRef="Ev_1" targetRef="Undo_1" />
+            """);
+
+        Assert.Equal(["Undo_1"], BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// Not "any association in the diagram" (#531). The `variable-written`
+    /// observer admits this element's handler as a writer, and an answer borrowed
+    /// from a neighbour's association would admit a write from wherever some
+    /// other artifact happened to point.
+    /// </summary>
+    [Fact]
+    public void CompensationHandlersOf_ignores_an_association_off_something_else()
+    {
+        var xml = Diagram("""
+                <scriptTask id="Doer_1" />
+                <boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <boundaryEvent id="Other_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <scriptTask id="Undo_1" isForCompensation="true" />
+                <association id="Assoc_1" sourceRef="Other_1" targetRef="Undo_1" />
+            """);
+
+        Assert.Empty(BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void CompensationHandlersOf_sees_through_a_namespace_prefix()
+    {
+        var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:scriptTask id="Doer_1" />
+                <bpmn:boundaryEvent id="Ev_1" attachedToRef="Doer_1"><bpmn:compensateEventDefinition /></bpmn:boundaryEvent>
+                <bpmn:scriptTask id="Undo_1" isForCompensation="true" />
+                <bpmn:association id="Assoc_1" sourceRef="Ev_1" targetRef="Undo_1" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal(["Undo_1"], BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
     [Fact]
     public void AttachedHostOf_is_null_when_Ev_1_is_not_a_boundary_event()
     {
