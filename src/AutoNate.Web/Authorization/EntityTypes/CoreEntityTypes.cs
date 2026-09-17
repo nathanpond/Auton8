@@ -26,7 +26,7 @@ public static class CoreEntityTypes
         new IEntityType[]
         {
             User!, Group!, Role!, RecordType!, Record!,
-            WorkflowModel!, WorkflowExecution!, WorkflowTask!, WorkflowMessage!, Plugin!,
+            WorkflowModel!, WorkflowExecution!, WorkflowTask!, WorkflowMessage!, WorkflowSignal!, Plugin!,
             Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
             IdentityProvider!,
             Project!, Cabinet!, Notebook!, Page!, Document!, Folder!
@@ -145,6 +145,27 @@ public static class CoreEntityTypes
         // Only the process key is knowable before correlation runs, so it is the
         // only thing a selector can usefully narrow on.
         tags: new[] { "processkey" });
+
+    // #523. The right to wake every instance in the engine that is waiting on a
+    // name. Kind-level only, for the same reason as WorkflowMessage and one
+    // stronger: a signal is addressed by name to EVERYTHING listening, so there
+    // is not even a process key to gate on before the broadcast happens.
+    //
+    // A separate kind rather than reusing WorkflowMessage, deliberately. The
+    // message right is "advance ONE process you name, at a correlation value you
+    // supply". This one is "wake every waiting instance of every workflow that
+    // declares this name". Folding the second into a grant that reads as the
+    // first would widen an existing permission silently, which is the kind of
+    // change nobody sees in a diff of an endpoint.
+    public static EntityTypeDefinition WorkflowSignal { get; } = new(
+        kind: EntityKinds.WorkflowSignal,
+        clrType: typeof(object),
+        idClrType: typeof(string),
+        actions: new[] { Actions.Send },
+        // Nothing narrower is knowable: the caller supplies a signal name and the
+        // engine decides who hears it. A `processkey` tag would suggest a grant
+        // could scope a broadcast to one workflow, and it cannot.
+        tags: Array.Empty<string>());
 
     // Single coarse Manage action gates list/view/upload/enable/disable/delete
     // for plugins. Granular split is a v2 conversation if it ever comes up.

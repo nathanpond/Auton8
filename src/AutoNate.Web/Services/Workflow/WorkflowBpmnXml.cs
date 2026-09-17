@@ -2553,6 +2553,86 @@ public static partial class WorkflowBpmnXml
         ?? new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
+    /// The signal names this definition CATCHES, by name (#523).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Catches only: <c>startEvent</c>, <c>boundaryEvent</c> and
+    /// <c>intermediateCatchEvent</c>. A signal <b>throw</b> — an
+    /// <c>endEvent</c> or <c>intermediateThrowEvent</c> — is deliberately
+    /// excluded. A workflow that only raises a name is not waiting for it, and
+    /// counting it as a declaration would make "nothing declares this signal"
+    /// unreachable for any name already in use, which is the refusal AC4 asks
+    /// for.
+    /// </para>
+    /// <para>
+    /// <b>Why not <c>IWorkflowSignalRegistry</c>.</b> That registry holds signal
+    /// START events, because its job is deciding which Dapr topics to subscribe
+    /// to. Refusing against it alone would refuse a name caught only by a
+    /// boundary or intermediate event — a running instance waiting on a signal,
+    /// which is precisely what a broadcast is for.
+    /// </para>
+    /// <para>
+    /// A <c>signalRef</c> pointing at nothing is skipped rather than guessed at,
+    /// the same rule <see cref="ExtractMessageDeclarations"/> applies to
+    /// <c>messageRef</c>: the engine subscribes under the signal's NAME, so an
+    /// unresolvable reference is not addressable.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyCollection<string> ExtractCaughtSignalNames(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<string>();
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch
+        {
+            // An unparseable stored diagram is somebody else's finding; this
+            // answers "declares nothing" rather than throwing at a caller who
+            // asked about a different workflow.
+            return Array.Empty<string>();
+        }
+
+        var signalNamesById = document.Root?
+            .Elements(BpmnNamespace + "signal")
+            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
+            .ToDictionary(
+                signal => signal.Attribute("id")!.Value,
+                signal => signal.Attribute("name")?.Value ?? string.Empty,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var caught = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var catches = element.Name.LocalName is
+                "startEvent" or "boundaryEvent" or "intermediateCatchEvent";
+            if (!catches) continue;
+
+            var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var signalRef = definition.Attribute("signalRef")?.Value;
+            if (string.IsNullOrWhiteSpace(signalRef)) continue;
+            if (!signalNamesById.TryGetValue(signalRef, out var name)) continue;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            caught.Add(name);
+        }
+
+        return caught;
+    }
+
+    /// <summary>
     /// Every point in a published definition that can be advanced from outside,
     /// with the variable that addresses it (#112).
     /// </summary>

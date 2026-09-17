@@ -391,6 +391,7 @@ builder.Services.AddScoped<IInstanceAuthorizer, PipelineInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowMessageInstanceAuthorizer>();
 
 builder.Services.AddScoped<AutoNate.Web.Services.Workflow.WorkflowMessageCorrelator>();
+builder.Services.AddScoped<AutoNate.Web.Services.Workflow.WorkflowSignalBroadcaster>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 // Content hierarchy — separate authorization path (project-role baseline +
@@ -1654,6 +1655,7 @@ app.MapUserEndpoints();
 app.MapEventCatalogEndpoints();
 app.MapWorkflowEndpoints();
 app.MapWorkflowMessageEndpoints();
+app.MapWorkflowSignalEndpoints();
 app.MapWorkflowBehaviorEndpoints();
 app.MapWorkflowScriptTaskEndpoints();
 app.MapExecutionEndpoints();

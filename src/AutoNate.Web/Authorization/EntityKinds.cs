@@ -16,6 +16,8 @@ public static class EntityKinds
     // integration account saying "payment cleared", and it must be grantable
     // without also granting cancel/override/delete on every execution.
     public const string WorkflowMessage = "workflowmessage";
+
+    public const string WorkflowSignal = "workflowsignal";
     public const string SiteConfig = "siteconfig";
     public const string Plugin = "plugin";
 

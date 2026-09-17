@@ -12,7 +12,7 @@ public sealed class EntityRegistryTests
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(21, kinds.Count);
+        Assert.Equal(22, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -25,6 +25,13 @@ public sealed class EntityRegistryTests
         // integration account can be granted exactly "may advance a process"
         // without also gaining cancel, override and delete on every execution.
         Assert.Contains(EntityKinds.WorkflowMessage, kinds);
+        // #523. Its own kind rather than an action on WorkflowMessage, for the
+        // same reason one step further out: the message right advances ONE
+        // process the caller names, at a correlation value they supply. This one
+        // wakes every waiting instance of every workflow that declares the name.
+        // Folding the second into a grant that reads as the first would widen an
+        // existing permission without anything in the diff saying so.
+        Assert.Contains(EntityKinds.WorkflowSignal, kinds);
         Assert.Contains(EntityKinds.Plugin, kinds);
         Assert.Contains(EntityKinds.Form, kinds);
         Assert.Contains(EntityKinds.ExternalConnection, kinds);
