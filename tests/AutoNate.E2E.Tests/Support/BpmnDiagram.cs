@@ -204,4 +204,119 @@ internal static class BpmnDiagram
             .Select(target => target!)
             .ToHashSet(StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// Does this element choose its branch with a routing script (#533)?
+    /// </summary>
+    /// <remarks>
+    /// The routing complement asks one question: did this diagram ask the element
+    /// to take ONE branch? For an exclusive or inclusive gateway that is
+    /// conditions on the outgoing flows (<see cref="ConditionalFlowsFrom"/>). A
+    /// complex gateway's authored flows carry no conditions — publish adds them —
+    /// so the author's instruction lives in the gateway's own
+    /// <c>&lt;bpmn:script&gt;</c> instead. Same question, read where this element
+    /// answers it.
+    /// </remarks>
+    internal static bool RoutesByScript(string xml, string id)
+    {
+        var element = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => (string?)e.Attribute("id") == id);
+
+        return element is not null
+               && element.Name.LocalName == "complexGateway"
+               && element.Elements().Any(child => child.Name.LocalName == "script");
+    }
+
+    /// <summary>
+    /// An identity carried as an ATTRIBUTE rather than a child element (#532).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An event sub-process is <c>(subProcess, "triggeredByEvent")</c>, and
+    /// <c>triggeredByEvent</c> is an attribute — so <see cref="EventDefinitionIn"/>,
+    /// which reads a child whose name ends in <c>EventDefinition</c>, answers
+    /// <c>null</c> and the identity assertion compares it against
+    /// <c>"triggeredByEvent"</c>. Same shape as the marker rows, which needed
+    /// their own vocabulary branch for the same reason.
+    /// </para>
+    /// <para>
+    /// A plain <c>subProcess</c> answers <c>null</c> here, which is the point: the
+    /// branch must not let a row with a MISSING identity pass. Nothing is OR-ed
+    /// into the assertion — one reader is swapped for another on the rows whose
+    /// manifest identity says so.
+    /// </para>
+    /// </remarks>
+    internal static string? AttributeIdentityIn(string xml) => AttributeIdentityOf(ElementIn(xml, "Ev_1"));
+
+    internal static string? AttributeIdentityOf(XElement element) =>
+        string.Equals(
+            (string?)element.Attribute("triggeredByEvent"), "true", StringComparison.OrdinalIgnoreCase)
+            ? "triggeredByEvent"
+            : null;
+
+    /// <summary>
+    /// What a data object reference resolves to: the declared name and value (#534).
+    /// </summary>
+    /// <remarks>
+    /// Follows this reference's own <c>dataObjectRef</c> to the
+    /// <c>&lt;bpmn:dataObject&gt;</c> it points at, and reads that declaration's
+    /// <c>name</c> plus its <c>&lt;flowable:value&gt;</c>. Following a *different*
+    /// reference's target would let the cell certify a value this element never
+    /// pointed at, which is the resolution being tested.
+    /// </remarks>
+    internal static (string? Name, string? Value) DataObjectDeclarationOf(string xml, string id)
+    {
+        var root = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "dataObjectReference"
+                                 && (string?)e.Attribute("id") == id);
+
+        if ((string?)root?.Attribute("dataObjectRef") is not { } target) return (null, null);
+
+        var declaration = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "dataObject"
+                                 && (string?)e.Attribute("id") == target);
+
+        if (declaration is null) return (null, null);
+
+        var value = declaration.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "value")?.Value;
+
+        return ((string?)declaration.Attribute("name"), value);
+    }
+
+    /// <summary>
+    /// The compensation handler a boundary event is associated with (#531).
+    /// </summary>
+    /// <remarks>
+    /// A compensation boundary's outgoing edge is an <c>&lt;association&gt;</c>,
+    /// not a <c>&lt;sequenceFlow&gt;</c> — so <see cref="FlowTargetsOf"/> returns
+    /// nothing for one and the `variable-written` observer would reject the
+    /// handler's write as somebody else's. This is that one edge, and only that
+    /// one: the association whose <c>sourceRef</c> is this element. Not "any
+    /// association in the diagram", which would admit a write from anywhere an
+    /// artifact happens to point.
+    /// </remarks>
+    internal static IReadOnlyCollection<string> CompensationHandlersOf(string xml, string source) =>
+        XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "association")
+            .Where(e => (string?)e.Attribute("sourceRef") == source)
+            .Select(e => (string?)e.Attribute("targetRef"))
+            .Where(target => target is not null)
+            .Select(target => target!)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>The activity a boundary event is attached to, or null if it is not one (#522).</summary>
+    /// <remarks>
+    /// Read from the DIAGRAM, because the `host-cancelled` observer has to name
+    /// the host it expects to be gone, and taking that name from the engine
+    /// would be deriving the expectation from the thing under test -- the defect
+    /// #412 exists for. The author says which activity the boundary interrupts;
+    /// the engine says whether it is still live.
+    /// </remarks>
+    internal static string? AttachedHostOf(string xml, string id) =>
+        XDocument.Parse(xml).Descendants()
+            .Where(e => e.Name.LocalName == "boundaryEvent")
+            .Where(e => (string?)e.Attribute("id") == id)
+            .Select(e => (string?)e.Attribute("attachedToRef"))
+            .FirstOrDefault();
 }

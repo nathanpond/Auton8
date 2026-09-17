@@ -7670,3 +7670,94 @@ proofs rather than rebuild them.
 **Structural note:** epic #40 is at GitHub's 100 sub-issue cap. M4d's stories
 attach under #325 instead, giving #40 → #325 → stories. #325's AC5 *is* Outcome 1,
 so that nesting is meaningful rather than a workaround.
+
+## /n8-exec M4d — 2026-09-17
+
+- **Decision:** The no-explicit-start path is selected by the *effect name*
+  (`instance-starts`), not by a new manifest key.
+  **Why:** A new key would have to be added to `An_evidence_row_carries_only_permitted_keys`
+  and would give a row two independent switches — the effect and the lane — that
+  could disagree. Keying on the effect means `obliged` already pins which lane a
+  row takes, so a row cannot quietly change lanes without failing a slim-tier
+  guard. Cost if wrong: an element that self-starts *and* wants some other effect
+  cannot be expressed. No such element exists in the 51 rows, and the way out is
+  a second effect name rather than a redesign.
+  **Issue:** #522
+
+- **Decision:** `host-cancelled` asserts both halves — the boundary's path ran
+  **and** the host is gone — in one observer, rather than asserting the
+  cancellation outside the declared-effect machinery.
+  **Why:** The issue left this to discretion. Either half alone passes for the
+  opposite feature: a non-interrupting boundary runs its path and leaves the host
+  alive, and a host that ended normally looks cancelled to anything that does not
+  check the boundary fired. Measured — gutting the `current.Contains(host)` check
+  turned the non-interrupting negative control green while it was demonstrably
+  false.
+  **Issue:** #522
+
+- **Decision:** The trigger-created instance is discovered through Flowable's
+  key-filtered history query, not Auton8's `GET /api/executions/`.
+  **Why:** That route answers a bounded, engine-wide page, and a negative
+  control's entire verdict is "no instance" — "not on this page" would read the
+  same. The history query is exact, sees an instance that started and finished,
+  and reading the engine directly is already this class's habit
+  (`DeployedElementAsync`, `VariableWriterAsync`). What it still refuses to do is
+  *publish* around Auton8's validation.
+  **Issue:** #522
+
+- **Decision:** The longer wait budget is keyed on the effect
+  (`TriggerDriven`), not raised for every cell.
+  **Why:** #452 deliberately bought `ObserveAsync` down from 100s to 5s per
+  failing cell. Measured here: the interrupting boundary control exhausted 5s
+  with Flowable's timer job still unacquired, and the observer reported "that is
+  a NON-INTERRUPTING boundary" — right about what it saw, wrong about what it
+  meant. The negative control gets the same budget deliberately: a control that
+  waits less than the claim it guards reports "did not happen" by being
+  impatient.
+  **Issue:** #522
+
+- **Decision:** A new effect name owes a *positive* control (`LiveControls`) as
+  well as a negative one, until some row declares it.
+  **Why:** An observer's positive arm is normally proven by the rows declaring
+  its effect — sixteen cells ride on `instance-ends`. A brand new name has none,
+  and an observer hard-wired to `false` passes a negative control perfectly.
+  #522 adds two names that no row declares yet, so without this they would sit
+  unproven in one direction until the sibling stories land. The obligation
+  retires itself per name as rows arrive.
+  **Issue:** #522
+
+- **Decision:** The unaccounted ratchet's anti-laundering floor *calls*
+  `BpmnSupportManifestTests.ReasonLooksLikeAMeasurement` rather than
+  reimplementing it.
+  **Why:** #380 is what a copy costs: a meta-test that reimplements what it
+  checks cannot notice the original drifting, and it did not — that floor shipped
+  admitting the one string it was written to reject. All three existing reasons
+  clear the predicate today, so the guard lands green and bites tomorrow.
+  **Issue:** #522
+
+- **Finding:** #369 is a test-fixture defect, not a product defect. The studio was
+  right to decline the save.
+  **Why it matters:** the user's M4d closure rule is "product defects block;
+  tooling carries", and #369 was triaged as a studio Save bug three times (#360,
+  #362, #480) on the strength of a failure message that said only "the studio
+  never POSTed the save". `prepareAndStore` returns early when prepare reports
+  errors, and prepare was reporting one: the seeded diagram carried a
+  multi-instance marker with neither a collection nor a cardinality, which
+  `WorkflowBpmnXml` refuses because Flowable refuses the whole deployment for it.
+  The one case of three that passed was the one whose own edit set the collection
+  — it repaired the fixture before pressing Save. No product code changed.
+  **Issue:** #369
+
+- **Correction to an earlier entry.** The `/n8-exec M4b` entry above, item 3,
+  states: *"`autonate.noop` is registered by a test fixture, not by the running
+  app; the E2E stack answers 404."* The second clause is true and the first is
+  false — **nothing** registers `autonate.noop`, not the app and not a fixture.
+  The 404 was the whole story. That false half was copied into the evidence row's
+  `undeclaredReason` and into `tools/bpmn-execution-probe/probe.py`, where the
+  comment claimed it "is a behaviour that actually exists".
+  **Why it matters:** it made the row look blocked on test-fixture plumbing when
+  it was blocked on nothing. #535's own analysis caught it by grepping rather
+  than by reading the reason. The ledger is append-only, so the original entry
+  stands and this is the correction beside it; the reason and the probe comment
+  are fixed at source.
+  **Issue:** #535

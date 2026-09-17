@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(32, DeclaredEffects().Count);
+        Assert.Equal(45, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -159,19 +159,59 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// not hold" has two distinct shapes for it — the wrong kind of marker, and
     /// the right kind asking for one instance.
     /// </remarks>
-    public static TheoryData<string, string, string> InertDiagrams() => new()
+    /// <remarks>
+    /// The fourth column is the control's PRECONDITION (#522). Every control
+    /// here used to owe the same one -- the engine entered `Ev_1` -- and that
+    /// made "the element did not fire" inexpressible: a control whose whole
+    /// point is that nothing happened cannot assert it was entered first. The
+    /// three values are `entered`, which is the original obligation;
+    /// `no-instance`, the self-starting shape's complement, where nothing is
+    /// started and nothing may appear; and `not-entered`, for an element the
+    /// engine never records as an activity at all. The last is not a relaxation
+    /// granted on request — it is the same fact `NeverEntered` records, measured,
+    /// and a control claiming it for an element the engine DOES enter would be
+    /// giving up #463's precondition for nothing.
+    /// </remarks>
+    public static TheoryData<string, string, string, string> InertDiagrams() => new()
     {
-        { "instance-ends", "instance-ends", "a parallel branch parks on a user task, so the instance never ends" },
-        { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through" },
-        { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none" },
-        { "variable-written", "variable-written", "no script writes `proof`" },
+        { "instance-ends", "instance-ends", "a parallel branch parks on a user task, so the instance never ends", "entered" },
+        { "instance-waits", "instance-waits", "nothing waits, so the instance runs straight through", "entered" },
+        { "task-appears", "task-appears", "the only task is outside the sub-process, so the container creates none", "entered" },
+        { "variable-written", "variable-written", "no script writes `proof`", "entered" },
+
+        // A SECOND SHAPE FOR THE SAME EFFECT (#531), which this table already
+        // supports -- `tasks-appear-together` has two for the same reason. A real,
+        // working, deployable compensation apparatus whose throw is an ORDINARY
+        // end event: the boundary is attached, the handler exists and is
+        // reachable, and compensation is simply never triggered, so the handler
+        // never runs. An observer that accepted "the handler is in the diagram"
+        // rather than "the engine recorded it writing" is satisfied by this.
+        { "variable-written", "variable-written:no-compensation-thrown", "nothing throws compensation, so the handler never runs", "not-entered" },
+
+        // THE SAME GATEWAY, ROUTING CORRECTLY, THE OTHER WAY (#533). Real,
+        // deployable and working: the script returns the flow to the branch that
+        // does NOT write `proof`. An observer satisfied by this is one that reads
+        // "the diagram contains a script that writes proof" rather than "the
+        // engine recorded this element routing to it".
+        { "variable-written", "variable-written:complex-routes-away", "the routing script picks the branch that writes nothing", "entered" },
+
+        // A REGISTERED behaviour that writes a DIFFERENT variable (#535). It has
+        // to be registered: an unknown key fails the callback, the job fails, and
+        // the element is never entered -- so the control would fail its own
+        // precondition instead of testing the observer. `send-message` runs, does
+        // its work, reports `sendMessageResult`, and never writes `unlockResult`.
+        { "behavior-ran", "behavior-ran", "a different registered behaviour runs and reports its own variable", "entered" },
+
+        // A real, correctly wired reference whose declaration simply carries no
+        // value (#534). Deployable, resolving, and the variable is not there.
+        { "value-carried", "value-carried", "the declaration carries no value, so nothing reaches the instance", "not-entered" },
 
         // These two are each other's control (#471). Each diagram is a real,
         // deployable, WORKING multi-instance activity carrying the other kind of
         // marker -- so neither observer can be satisfied by a diagram that simply
         // does nothing, which is the usual way a negative control goes soft.
-        { "tasks-appear-together", "tasks-appear-together", "the marker is sequential, so only one instance is live at a time" },
-        { "tasks-appear-in-turn", "tasks-appear-in-turn", "the marker is parallel, so all three appear at once" },
+        { "tasks-appear-together", "tasks-appear-together", "the marker is sequential, so only one instance is live at a time", "entered" },
+        { "tasks-appear-in-turn", "tasks-appear-in-turn", "the marker is parallel, so all three appear at once", "entered" },
 
         // THE FLOOR, as a live control (#488). A parallel marker asking for ONE
         // instance is the founding defect's own result -- "it ran once where the
@@ -179,12 +219,29 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // the engine side. Without the `wanted < 2` guard the observer reports
         // "1 live task(s) on Ev_1 at once, as authored" and this control fails,
         // which is the asymmetry #488 was filed for.
-        { "tasks-appear-together", "tasks-appear-together:one", "the marker asks for a single instance, so nothing runs at once" },
+        { "tasks-appear-together", "tasks-appear-together:one", "the marker asks for a single instance, so nothing runs at once", "entered" },
+
+        // THE OPPOSITE FEATURE, not a diagram that does nothing (#522). A
+        // NON-interrupting boundary fires for real -- its own path runs, and the
+        // host keeps running beside it. That is the same construction the two
+        // marker controls use on each other, and it is the strongest form this
+        // complement can take: an observer that has stopped discriminating
+        // cannot hide behind "well, nothing happened", because something did.
+        { "host-cancelled", "host-cancelled", "the boundary is non-interrupting, so its path runs and the host survives", "entered" },
+
+        // "DID NOT FIRE", which no control could previously express. The start
+        // event is stripped of its trigger and nothing else changes, so the
+        // assertion is that no instance ever comes into being -- reached from
+        // the DIAGRAM side, which is the mutation the positive cell must go red
+        // for. There is no instance, so there is nothing to have entered `Ev_1`,
+        // which is why the precondition column exists.
+        { "instance-starts", "instance-starts:no-trigger", "the start event carries no trigger, so nothing ever creates an instance", "no-instance" },
     };
 
     [Theory]
     [MemberData(nameof(InertDiagrams))]
-    public async Task An_inert_diagram_is_observed_as_not_holding(string effect, string control, string why)
+    public async Task An_inert_diagram_is_observed_as_not_holding(
+        string effect, string control, string why, string precondition)
     {
         await using var session = await NewSignedInAsAdminAsync();
         var api = session.Page.APIRequest;
@@ -192,14 +249,51 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         var key = $"nc{Guid.NewGuid():N}"[..18];
         var xml = InertDiagram(control, key);
 
+        // "DID NOT FIRE" (#522). There is no instance to start, observe or enter
+        // anything, so the whole shape differs: publish, wait the SAME budget the
+        // positive path is allowed, and assert nothing appeared. Waiting less
+        // than the positive path would make this control weaker than the claim it
+        // guards -- "did not fire" has to mean "did not fire in the window where
+        // firing is proven to happen", or it is just an impatient read.
+        // An instance exists and ran; this element simply leaves no activity
+        // record (#531). The observation is still real -- the effect must not
+        // hold -- so only the entry precondition is dropped, and only for the
+        // elements `NeverEntered` names.
+        var mustHaveEntered = !string.Equals(precondition, "not-entered", StringComparison.Ordinal);
+
+        if (string.Equals(precondition, "no-instance", StringComparison.Ordinal))
+        {
+            var before = await InstancesOfAsync(key);
+            Assert.True(
+                before.Count == 0,
+                $"negative control for '{effect}': an instance of '{key}' existed before this "
+                + "control published anything, so its verdict is about somebody else's run (#522).");
+
+            await PublishAsync(api, key, xml);
+
+            var appeared = await SelfStartedInstanceAsync(key);
+
+            Assert.True(
+                appeared is null,
+                $"NEGATIVE CONTROL FAILED for '{effect}'. This diagram is inert by construction -- "
+                + $"{why} -- and instance '{appeared?.Id}' appeared anyway. Either the engine is "
+                + "starting instances nothing asked for, or the harness started this one, and in "
+                + "both cases every cell that declares this effect is passing on nothing (#463, #522).");
+
+            return;
+        }
+
         await PublishAsync(api, key, xml);
         var instance = await StartAsync(api, key);
 
-        var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
-        Assert.True(
-            entered is not null,
-            $"negative control for '{effect}': the engine never entered 'Ev_1', so this control "
-            + "is not testing the observer -- it would fail for the wrong reason (#463).");
+        if (mustHaveEntered)
+        {
+            var entered = await EventuallyEnteredAsync(api, instance, "Ev_1");
+            Assert.True(
+                entered is not null,
+                $"negative control for '{effect}': the engine never entered 'Ev_1', so this control "
+                + "is not testing the observer -- it would fail for the wrong reason (#463).");
+        }
 
         var observed = await ObserveAsync(api, instance, effect, ElementTypeIn(xml), xml);
 
@@ -286,6 +380,45 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<sequenceFlow id="f4" sourceRef="Ev_1" targetRef="End_1"/>"""
             + """<sequenceFlow id="f5" sourceRef="Outside_1" targetRef="End_2"/>"""),
 
+        // The same reference, resolving to the same declaration, with no
+        // <flowable:value> on it. Nothing else differs.
+        "value-carried" => WrapIn(key, "",
+            """<dataObject id="Decl_1" name="carried" autonate:dataType="xsd:double"/>"""
+            + """<dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1"/>"""
+            + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+        // A real, registered behaviour doing real work -- just not this one.
+        "behavior-ran" => WrapIn(key, $"""<message id="Msg_1" name="m1{key}"/>""", LinearIn(
+            $"""<sendTask id="Ev_1" name="send" flowable:behaviorKey="autonate.send-message" flowable:autonateMessageName="m1{key}" flowable:autonateTargetProcessKey="{key}r"/>""")),
+
+        // The same complex gateway, routing correctly to the other branch.
+        "variable-written:complex-routes-away" => WrapIn(key, "",
+            """<startEvent id="Start_1"/>"""
+            + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""
+            + """<script>return 'fb';</script></complexGateway>"""
+            + """<scriptTask id="S_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+            + """<userTask id="Other_1" name="other"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f0" sourceRef="Start_1" targetRef="Ev_1"/>"""
+            + """<sequenceFlow id="fa" sourceRef="Ev_1" targetRef="S_1"/>"""
+            + """<sequenceFlow id="fb" sourceRef="Ev_1" targetRef="Other_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="S_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f5" sourceRef="Other_1" targetRef="End_2"/>"""),
+
+        // The compensation apparatus, complete and deployable, with an ORDINARY
+        // end event where the compensate throw would be (#531). Ev_1 is the
+        // boundary; the handler is attached and reachable and never runs.
+        "variable-written:no-compensation-thrown" => WrapIn(key, "",
+            """<startEvent id="Start_1"/>"""
+            + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition/></boundaryEvent>"""
+            + """<scriptTask id="Undo_1" name="undo" isForCompensation="true" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+            + """<endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Doer_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
+            + """<association id="Assoc_1" associationDirection="One" sourceRef="Ev_1" targetRef="Undo_1"/>"""),
+
         // Ev_1 runs and writes something that is not `proof`.
         "variable-written" => WrapIn(key, "", LinearIn(
             """<scriptTask id="Ev_1" name="inert" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('echo', 'x');</script></scriptTask>""")),
@@ -316,6 +449,37 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             """<userTask id="Ev_1" name="approve">"""
             + """<multiInstanceLoopCharacteristics isSequential="false" autonate:loopCardinality="3"/>"""
             + """</userTask>""")),
+
+        // THE OPPOSITE FEATURE (#522). `cancelActivity="false"` is the only
+        // difference from the positive control below: the boundary genuinely
+        // fires, `Ev_1` is genuinely entered, its onward path genuinely runs --
+        // and `Host_1` is still there, because a non-interrupting boundary does
+        // not cancel anything. An observer that checks only "the path ran" is
+        // satisfied by this diagram, and that is the whole point: asserting the
+        // path without asserting the cancellation passes for the opposite
+        // feature.
+        //
+        // The host is a user task, so it parks and stays parked; nothing but the
+        // boundary can remove it.
+        "host-cancelled" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="false">"""
+            + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+            + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+        // THE TRIGGER, REMOVED (#522). Identical to the positive control except
+        // that `Ev_1` carries no <timerEventDefinition>, making it a plain None
+        // start -- which the engine will never fire on its own. This is the
+        // test-plan mutation reached from the diagram side: if the self-starting
+        // cell can pass without a trigger present, it was never observing one.
+        "instance-starts:no-trigger" => WrapIn(key, "",
+            """<startEvent id="Ev_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
 
         _ => throw new InvalidOperationException(
             $"No inert diagram for control '{control}'. Every observable effect needs one, or the "
@@ -348,8 +512,27 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             await PublishAsync(api, $"{key}r", receiver);
         }
 
-        await PublishAsync(api, key, xml);
-        var instance = await StartAsync(api, key);
+        // A SELF-STARTING ELEMENT HAS NO CALLER (#522).
+        //
+        // A Timer, Message, Signal or Conditional START event is not reached by
+        // `POST /api/workflows/{key}/start` -- the trigger creates the instance,
+        // and calling start would create a SECOND one that proves nothing about
+        // the trigger. So the row's effect decides the path: `instance-starts`
+        // publishes and then goes looking for what the engine did on its own.
+        //
+        // The effect name carries this rather than a new manifest key, so
+        // `obliged` still pins the (element, effect) pair that selects the path
+        // and no row can quietly change lanes.
+        string instance;
+        if (string.Equals(effect, SelfStarting, StringComparison.Ordinal))
+        {
+            instance = await SelfStartAsync(api, key, xml, name);
+        }
+        else
+        {
+            await PublishAsync(api, key, xml);
+            instance = await StartAsync(api, key);
+        }
 
         // ENTRY, AND OF THE RIGHT KIND (#412).
         //
@@ -378,6 +561,14 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Only the vocabulary differs.
         var isMarkerRow = string.Equals(declaredLocalName, "*", StringComparison.Ordinal);
 
+        // AN IDENTITY CARRIED AS AN ATTRIBUTE (#532). An event sub-process is
+        // `(subProcess, "triggeredByEvent")`, and that is an attribute -- so
+        // `EventDefinitionIn` answers null and the identity assert compares it
+        // against "triggeredByEvent". The tag is still asserted from the manifest
+        // as usual; only the second half of the identity reads a different place.
+        var isAttributeRow = !isMarkerRow
+            && string.Equals(declaredEventDefinition, "triggeredByEvent", StringComparison.Ordinal);
+
         if (isMarkerRow)
         {
             Assert.Equal(declaredEventDefinition, MarkerIn(xml));
@@ -398,7 +589,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // "draws fine, does nothing" lives. The manifest already keys every row
         // on (localName, eventDefinition) because that pair, not the tag, names
         // an element.
-        Assert.Equal(declaredEventDefinition, EventDefinitionIn(xml));
+        Assert.Equal(
+            declaredEventDefinition,
+            isAttributeRow ? AttributeIdentityIn(xml) : EventDefinitionIn(xml));
         }
 
         // For a marker row the host is whatever the diagram builds, so the
@@ -409,13 +602,28 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // stops a stand-in here is the effect: `tasks-appear-together` is not
         // satisfiable by a scriptTask, an unmarked userTask, or a sequential one.
         var expectedType = isMarkerRow ? ElementTypeIn(xml) : declaredLocalName;
-        var enteredAs = await EventuallyEnteredAsync(api, instance, "Ev_1");
+
+        // SOME ELEMENTS ARE NEVER ENTERED, AND THAT IS THE ENGINE'S ANSWER (#531).
+        //
+        // Measured: a compensation boundary produces no activity instance whether
+        // or not compensation fires, so #412's entry check cannot anchor the cell
+        // and asserting it would fail every such row for the wrong reason. The
+        // deployed-form check below carries the identity instead -- see
+        // `NeverEntered` for exactly what that trade gives up.
+        var neverEntered = !isMarkerRow
+            && NeverEntered.Contains((declaredLocalName, declaredEventDefinition));
+
+        var enteredAs = neverEntered ? null : await EventuallyEnteredAsync(api, instance, "Ev_1");
 
         Assert.True(
-            enteredAs is not null,
+            neverEntered || enteredAs is not null,
             $"{name}: the engine never entered activity 'Ev_1'. The instance ran, so "
             + "whatever effect follows is some other element's (#412).");
 
+        // Guarded rather than OR-ed into the assertion, because `out var alias`
+        // is not definitely assigned on a short-circuited disjunct (#531).
+        if (!neverEntered)
+        {
         Assert.True(
             // EXCLUSIVE, not OR-ed (#446). Where an entry exists the engine name
             // is the ONLY acceptable one, because for five of these rows Auton8
@@ -433,6 +641,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "A same-id stand-in satisfies every effect this class observes (#412), and where "
             + "Auton8 rewrites the element at publish the un-rewritten name is the defect the "
             + "rewrite exists to prevent (#446).");
+        }
 
         // THE REWRITE MUST PRESERVE THE SEMANTICS (#454).
         //
@@ -480,6 +689,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             Assert.Equal(declaredEventDefinition, MarkerOf(deployed));
         }
 
+        // AND AN ATTRIBUTE IDENTITY MUST SURVIVE PUBLISH TOO (#532). The block
+        // below asserts the deployed element carries exactly one *EventDefinition
+        // child; an event sub-process carries none, so this row would fail there
+        // after passing its identity assert. The marker rows met this first and
+        // answered it by asserting the MARKER survived instead of skipping the
+        // deployed-form check -- same answer here. An attribute that draws fine
+        // and is gone by the time the engine sees it is the founding bug's shape.
+        if (isAttributeRow)
+        {
+            Assert.Equal(declaredLocalName, deployed!.Name.LocalName);
+
+            Assert.Equal(declaredEventDefinition, AttributeIdentityOf(deployed));
+        }
+
         var wasRewritten = !isMarkerRow && !string.Equals(
             deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal);
 
@@ -488,7 +711,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // the cell. An early return in this stretch skips it, which is head 5b of
         // #453 -- a cell that runs, stays green, and observes nothing -- and the
         // first draft of the marker branch above did exactly that.
-        if (!isMarkerRow && (declaredEventDefinition is not null || wasRewritten))
+        if (!isMarkerRow && !isAttributeRow && (declaredEventDefinition is not null || wasRewritten))
         {
             if (deployed.Name.LocalName == "serviceTask")
             {
@@ -597,7 +820,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // message rows recorded `sendMessageResult = "noTargetProcess"` or
         // `"noMessageName"`. `instance-ends` was satisfied by a BehaviorResult
         // FAILURE, so three cells certified a send that had never once happened.
-        if (deployed.Name.LocalName == "serviceTask")
+        // ONLY WHERE PUBLISH REWROTE SOMETHING INTO A SEND (#535). This was
+        // `deployed.Name.LocalName == "serviceTask"` alone, which assumed every
+        // deployed service task is one of the three message rewrites. It was true
+        // of every row that existed when it was written and false the moment a row
+        // authored a service task ON PURPOSE: Service Task (Behavior) failed with
+        // "Auton8 rewrote this into a send, and the engine recorded
+        // `sendMessageResult = '(nothing)'`" -- a correct observation about a send
+        // that was never supposed to happen.
+        //
+        // `wasRewritten` is exactly the distinction: the send rows are authored as
+        // an endEvent, a sendTask or an intermediateThrowEvent and come back as a
+        // serviceTask. A behaviour task is authored as one and stays one.
+        if (wasRewritten && deployed.Name.LocalName == "serviceTask")
         {
             var sent = await VariableValueAsync(api, instance, "sendMessageResult");
 
@@ -672,12 +907,152 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     {
         var response = await api.PostAsync($"/api/workflows/{key}/start", new APIRequestContextOptions
         {
-            DataObject = new { variables = new { items = new[] { "a", "b" }, ok = false, approver = "ana", taken = true } }
+            // `userId` is a well-shaped id that resolves to nobody (#535), so
+            // `UnlockAccountBehavior` reaches ILocalUserStore and reports
+            // `userNotFound` -- an outcome only reachable by the behaviour
+            // actually running against the app, rather than merely being
+            // constructed.
+            DataObject = new
+            {
+                variables = new
+                {
+                    items = new[] { "a", "b" }, ok = false, approver = "ana", taken = true,
+                    userId = "999999999",
+                }
+            }
         });
         Assert.True(response.Ok, $"Starting failed: {response.Status} {await response.TextAsync()}");
 
         using var body = JsonDocument.Parse(await response.TextAsync());
         return body.RootElement.GetProperty("id").GetString()!;
+    }
+
+    /// <summary>The effect name that means "the trigger creates the instance" (#522).</summary>
+    private const string SelfStarting = "instance-starts";
+
+    /// <summary>
+    /// Publish, trigger nothing, and return the instance the engine made itself (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two preconditions are not the same check twice. The first -- nothing
+    /// exists before publish -- catches a reused key, so the cell cannot certify
+    /// somebody else's run. The second is the one the acceptance criterion is
+    /// actually about: the instance must carry NO START USER. "An instance
+    /// exists" is otherwise satisfiable by the harness itself, and a cell that
+    /// called <c>POST /start</c> and then found an instance would report a
+    /// perfect green while proving only that starting a workflow starts a
+    /// workflow.
+    /// </para>
+    /// <para>
+    /// Flowable records the start user on every instance begun through Auton8's
+    /// route, because that route is authenticated and passes the caller through;
+    /// an instance a timer, message or signal created has none. So the assertion
+    /// is checkable from the engine's own record rather than from this class
+    /// promising it did not call start.
+    /// </para>
+    /// </remarks>
+    private static async Task<string> SelfStartAsync(
+        IAPIRequestContext api, string key, string xml, string name)
+    {
+        var before = await InstancesOfAsync(key);
+        Assert.True(
+            before.Count == 0,
+            $"{name}: {before.Count} instance(s) of '{key}' existed before this cell published "
+            + "anything, so whatever it finds afterwards is not evidence the trigger fired (#522).");
+
+        await PublishAsync(api, key, xml);
+
+        var found = await SelfStartedInstanceAsync(key);
+
+        Assert.True(
+            found is not null,
+            $"{name}: nothing called start, and after {SelfStartBudgetSeconds}s the engine had "
+            + $"created no instance of '{key}' either. This element is supposed to start its own "
+            + "instance; it deployed and did nothing, which is #325.");
+
+        Assert.True(
+            string.IsNullOrEmpty(found!.Value.StartUserId),
+            $"{name}: the instance this cell observed was started by "
+            + $"'{found.Value.StartUserId}'. A self-starting element's proof is that the TRIGGER "
+            + "created the instance -- an instance somebody called start for satisfies "
+            + "\"an instance exists\" while saying nothing about the trigger (#522).");
+
+        return found.Value.Id;
+    }
+
+    private readonly record struct EngineInstance(string Id, string? StartUserId);
+
+    /// <summary>
+    /// How long a trigger-driven cell may wait for the engine to act (#522).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT <c>ObserveAsync</c>'s five seconds. Flowable acquires
+    /// timer and async jobs on its own schedule and can exceed that, but raising
+    /// the shared budget would slow every FAILING cell in the class -- which is
+    /// the cost #452 deliberately bought down. So the longer wait lives only
+    /// here, on the cells that need it. Thirty seconds is what
+    /// <c>TimerBoundaryExecutionTests.EventuallyAsync</c> already allows a timer.
+    /// </remarks>
+    private const int SelfStartBudgetSeconds = 30;
+
+    /// <summary>Poll until the engine creates an instance of this key, or the budget runs out.</summary>
+    private static async Task<EngineInstance?> SelfStartedInstanceAsync(string key)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(SelfStartBudgetSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = await InstancesOfAsync(key);
+            if (found.Count > 0) return found[0];
+            await Task.Delay(500);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Every instance of a process key the engine knows about, running or finished.
+    /// </summary>
+    /// <remarks>
+    /// Asked of Flowable directly, and of its HISTORY rather than its runtime.
+    /// Auton8's own list route answers a bounded, engine-wide page, so on a busy
+    /// suite "no instance" could mean "not on this page" -- and the negative
+    /// control's entire verdict is "no instance". A key-filtered history query
+    /// has neither problem, and it sees an instance that started and finished,
+    /// which a runtime query does not. Reading the engine directly is already
+    /// this class's habit for questions Auton8's API cannot answer exactly
+    /// (<c>DeployedElementAsync</c>, <c>VariableWriterAsync</c>); what it refuses
+    /// to do is PUBLISH around Auton8's validation, which this does not.
+    /// </remarks>
+    private static async Task<IReadOnlyList<EngineInstance>> InstancesOfAsync(string key)
+    {
+        using var engine = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var response = await engine.GetAsync(
+            "service/history/historic-process-instances"
+            + $"?processDefinitionKey={Uri.EscapeDataString(key)}&size=100");
+
+        if (!response.IsSuccessStatusCode) return [];
+
+        using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        if (!page.RootElement.TryGetProperty("data", out var rows)) return [];
+        if (rows.ValueKind != JsonValueKind.Array) return [];
+
+        var instances = new List<EngineInstance>();
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (!row.TryGetProperty("id", out var id)) continue;
+            if (id.GetString() is not { } instanceId) continue;
+
+            instances.Add(new EngineInstance(
+                instanceId,
+                row.TryGetProperty("startUserId", out var user) ? user.GetString() : null));
+        }
+
+        return instances;
     }
 
     /// <summary>
@@ -899,11 +1274,45 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
     private readonly record struct Observation(bool Held, string Detail);
 
+    /// <summary>
+    /// Effects whose observation waits on a job the ENGINE schedules (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every other effect here is the synchronous consequence of starting an
+    /// instance: the task is created, the variable is written, the instance ends,
+    /// all within the transaction. Five seconds is generous for those, and #452
+    /// deliberately bought that budget down -- a failing cell used to take 100
+    /// seconds and an eight-minute run of a sixteen-second suite.
+    /// </para>
+    /// <para>
+    /// A boundary event's firing is not synchronous. Flowable acquires the timer
+    /// job on its own schedule, and MEASURED against the live engine the
+    /// interrupting control exhausted the five-second budget with the boundary
+    /// still parked -- reported, correctly and uselessly, as "that is a
+    /// NON-INTERRUPTING boundary". The observer was right about what it saw and
+    /// wrong about what it meant.
+    /// </para>
+    /// <para>
+    /// So the longer budget is keyed on the EFFECT rather than raised for
+    /// everyone. The negative control gets it too, and that is the point rather
+    /// than a side effect: a control that waits less than the claim it guards
+    /// reports "did not happen" by being impatient, which is the same false pass
+    /// in the other direction.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> TriggerDriven =
+        new(StringComparer.Ordinal) { "host-cancelled" };
+
     private static async Task<Observation> ObserveAsync(
         IAPIRequestContext api, string instance, string effect, string elementType,
         string xml)
     {
-        for (var attempt = 0; attempt < 20; attempt++)
+        // 250ms a turn either way: 5s for the synchronous effects, the
+        // trigger-driven budget for the ones waiting on the engine's own clock.
+        var attempts = TriggerDriven.Contains(effect) ? SelfStartBudgetSeconds * 4 : 20;
+
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             var seen = await LookAsync(api, instance, effect, elementType, xml);
             if (seen.Held) return seen;
@@ -937,6 +1346,65 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// beside it claimed a third would fail loudly.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Elements the engine never records as an activity instance at all (#531).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// MEASURED, like <see cref="EngineNames"/>, and for the same reason: every
+    /// entry was discovered by a cell failing against the real engine. A
+    /// compensation boundary is never entered — not when compensation fires and
+    /// not when it does not. Flowable records the HANDLER running; the attachment
+    /// leaves no activity instance behind.
+    /// </para>
+    /// <para>
+    /// <b>What this costs, stated rather than implied.</b> #412's entry check is
+    /// what stops a same-id stand-in satisfying a cell, and these rows do not get
+    /// it. What replaces it is the deployed-form check, which is not weaker here
+    /// by accident: the element read back from the engine must still be the
+    /// declared tag carrying the declared event definition, so a stand-in would
+    /// have to BE a compensation boundary. The effect then has to be produced by
+    /// the activity that element points at. A row in this set trades one
+    /// independent check for a chain of two, and it is in this set only because
+    /// the engine gives it no third option.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<(string Local, string? Definition)> NeverEntered =
+    [
+        ("boundaryEvent", "compensate"),
+
+        // A data object reference is a DECLARATION, not a step (#534). It is
+        // never on any path, so the engine has no activity instance to record --
+        // which is why this row's effect is a value on the instance rather than
+        // anything an activity did.
+        ("dataObjectReference", null),
+    ];
+
+    /// <summary>
+    /// The behaviour the Service Task row proves, and what it writes (#535).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// MEASURED and pinned HERE rather than read from the diagram, and that is
+    /// the whole point. A behaviour chooses its own result variable, so an
+    /// observer that asked the diagram which behaviour it used and then looked
+    /// for THAT behaviour's variable would be deriving its expectation from the
+    /// thing under test — #412's founding defect — and the negative control would
+    /// pass for the wrong reason, because `send-message` does write its own
+    /// result variable.
+    /// </para>
+    /// <para>
+    /// `autonate.unlock-account` is registered UNCONDITIONALLY
+    /// (<c>Program.cs:881</c>), unlike `always-declines` and
+    /// `always-fails-undeclared`, which are Development-only. A row proving the
+    /// running app serves a behaviour should not rest on a registration that an
+    /// environment flag can remove.
+    /// </para>
+    /// </remarks>
+    private const string ProvenBehaviorKey = "autonate.unlock-account";
+
+    private const string ProvenBehaviorResult = "unlockResult";
+
     private static readonly Dictionary<(string Local, string? Definition), string> EngineNames = new()
     {
         [("intermediateThrowEvent", null)] = "throwEvent",
@@ -950,6 +1418,27 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         [("sendTask", null)] = "serviceTask",
         [("eventBasedGateway", null)] = "eventGateway",
         [("adHocSubProcess", null)] = "adhocSubProcess",
+
+        // #532, measured the same way as every other row here: the cell failed
+        // with "ran, but as a 'eventSubProcess' rather than a 'subProcess'". The
+        // key is the manifest's own (localName, eventDefinition) pair, and for
+        // this row the second half is an ATTRIBUTE -- which the keying already
+        // supports, because it is a pair of strings rather than a pair of shapes.
+        [("subProcess", "triggeredByEvent")] = "eventSubProcess",
+
+        // #533, and NOT the value the story predicted -- which is exactly why its
+        // AC asked for this to be measured against the EXPANDED deployment rather
+        // than recalled. Flowable 8.0.0 has no ComplexGatewayActivityBehavior, so
+        // publish expands the element, and MEASURED the engine records the
+        // author's `Ev_1` as a scriptTask: the cell failed with "ran, but as a
+        // 'scriptTask' rather than a 'exclusiveGateway'" and passes with this.
+        //
+        // `ComplexGatewayExecutionTests`' "recorded as activityType
+        // exclusiveGateway" is a true statement about an IMPORTED complexGateway
+        // that Auton8 never expanded. That is the finding which motivated the
+        // expansion, not a description of what the expansion produces -- and
+        // taking it for the latter is what predicted the wrong value here.
+        [("complexGateway", null)] = "scriptTask",
     };
 
 
@@ -1189,6 +1678,17 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                     "Ev_1",
                 };
 
+                // A COMPENSATION BOUNDARY'S OUTGOING EDGE IS AN ASSOCIATION (#531).
+                //
+                // Not a widening of "one hop from Ev_1" -- the same rule, applied
+                // to the edge this element actually has. A compensation handler is
+                // attached by <association>, so `FlowTargetsOf` is empty for one
+                // and the handler's write would be rejected as somebody else's.
+                // Only the association whose sourceRef is Ev_1 qualifies; "any
+                // association in the diagram" would admit a write from wherever an
+                // artifact happened to point.
+                writers.UnionWith(CompensationHandlersOf(xml, "Ev_1"));
+
                 if (!writers.Contains(wrote))
                 {
                     return new(false,
@@ -1223,7 +1723,25 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // does not, and scoping by tag left the inclusive row defeated by
                 // the same listener attack the exclusive row now catches.
                 var targets = FlowTargetsOf(xml, "Ev_1");
-                if (targets.Count > 1 && ConditionalFlowsFrom(xml, "Ev_1"))
+                // OR A ROUTING SCRIPT (#533). The gate asks whether this diagram
+                // asked the element to take ONE branch. A complex gateway's
+                // authored flows carry no conditions -- publish adds them -- so
+                // the author's instruction is the gateway's own <script>.
+                //
+                // WHAT IT GUARDS HERE IS FORKING, and that is narrower than the
+                // listener attack it guards on the other three gateways. Measured
+                // while checking: publish gives the generated routing task its own
+                // id (`Ev_1__autonateRoute`), so a write from inside the routing
+                // script is already rejected by the ATTRIBUTION check above, one
+                // step earlier -- with or without this clause. What is left for
+                // the complement is a complex gateway that takes BOTH branches
+                // rather than choosing, which is a real failure mode for this
+                // element (an unexpanded complexGateway silently picks a branch;
+                // a broken expansion could fork) but is not reachable by mutating
+                // the diagram, only by breaking publish. So it is kept and
+                // disclosed rather than claimed as exercised.
+                if (targets.Count > 1
+                    && (ConditionalFlowsFrom(xml, "Ev_1") || RoutesByScript(xml, "Ev_1")))
                 {
                     var entered = await EntryOrderAsync(api, instance);
                     var alsoRan = targets.Where(t => t != wrote && entered.ContainsKey(t)).ToList();
@@ -1320,6 +1838,198 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                         ? "nothing is current -- the instance finished"
                         : $"still parked at [{string.Join(", ", current)}]");
 
+            // AN INSTANCE CAME INTO BEING, AND IT BEGAN HERE (#522).
+            //
+            // "An instance exists" alone is not an observation -- by the time
+            // this runs, one does, or the cell already failed finding it. What
+            // this adds is WHERE it began: the trigger's own event has to be the
+            // entry point, so an instance that arrived some other way and merely
+            // passed through `Ev_1` later does not satisfy it.
+            //
+            // The other half of the claim -- that nobody called start -- cannot
+            // be seen from here, because the instance carries the answer, not the
+            // diagram. It is asserted in `SelfStartAsync`, against the engine's
+            // own `startUserId`, before this observer is ever reached.
+            case SelfStarting:
+            {
+                var order = await EntryOrderAsync(api, instance);
+                if (order.Count == 0)
+                {
+                    return new(false,
+                        "the engine has recorded no activity at all on this instance, so nothing "
+                        + "here can say where it began");
+                }
+
+                if (!order.TryGetValue("Ev_1", out var mine))
+                {
+                    return new(false,
+                        $"this instance entered [{string.Join(", ", order.Keys)}] and never Ev_1, "
+                        + "so whatever started it, it was not this element");
+                }
+
+                // STRICTLY earlier, not "is the minimum". Two activities can
+                // share a millisecond on the engine's clock, and a tie would make
+                // this flaky rather than wrong. What it must reject is an
+                // activity that demonstrably ran BEFORE the start event, which is
+                // what "something else started this instance" looks like.
+                var earlier = order.Where(kv => kv.Value < mine).Select(kv => kv.Key).ToList();
+
+                return earlier.Count == 0
+                    ? new(true, $"the instance began at Ev_1, with nobody calling start")
+                    : new(false,
+                        $"[{string.Join(", ", earlier)}] ran before Ev_1 on this instance, so it "
+                        + "did not begin here -- this element is not what created it");
+            }
+
+            // THE PATH RAN *AND* THE HOST IS GONE (#522).
+            //
+            // Both halves, in one observer, because either alone is the opposite
+            // feature. A non-interrupting boundary runs its path and leaves the
+            // host alive; a host that vanished for some other reason says nothing
+            // about the boundary. The host comes from the DIAGRAM's
+            // `attachedToRef` -- the author's statement of what this boundary
+            // interrupts -- and whether it is still live comes from the engine.
+            case "host-cancelled":
+            {
+                var host = AttachedHostOf(xml, "Ev_1");
+                if (host is null)
+                {
+                    return new(false,
+                        "Ev_1 is not a boundary event in this diagram, so it is attached to "
+                        + "nothing and there is no host for it to have cancelled");
+                }
+
+                var order = await EntryOrderAsync(api, instance);
+
+                if (!order.ContainsKey(host))
+                {
+                    return new(false,
+                        $"the host '{host}' never ran, so there was nothing for Ev_1 to cancel -- "
+                        + "an absent host is not a cancelled one");
+                }
+
+                if (current.Contains(host))
+                {
+                    return new(false,
+                        $"Ev_1 fired and its host '{host}' is still live [{string.Join(", ", current)}]. "
+                        + "That is a NON-INTERRUPTING boundary, which is the opposite feature, not a "
+                        + "near miss.");
+                }
+
+                // And the boundary's own path. Without this, a host that ended
+                // normally -- completed by anyone, at any time -- reads as a
+                // cancellation, and the boundary need never have fired at all.
+                var onward = FlowTargetsOf(xml, "Ev_1");
+                var ran = onward.Where(order.ContainsKey).ToList();
+
+                if (ran.Count == 0)
+                {
+                    return new(false,
+                        $"the host '{host}' is gone, but nothing Ev_1 flows to "
+                        + $"[{string.Join(", ", onward)}] ever ran. The host ended on its own; this "
+                        + "boundary did not interrupt it.");
+                }
+
+                return new(true,
+                    $"Ev_1 fired, its path ran [{string.Join(", ", ran)}], and the host '{host}' "
+                    + "is gone");
+            }
+
+            // THE DECLARATION'S VALUE REACHED THE INSTANCE (#534).
+            //
+            // `variable-written` cannot express this, and bending it to would
+            // weaken the thing that makes it strong: it attributes a write to an
+            // ACTIVITY INSTANCE, and a data object's value is seeded by a
+            // declaration, so no activity writes it.
+            //
+            // The diagram supplies the author's intent -- which declaration this
+            // reference resolves to, and what value it declares -- and the engine
+            // supplies the behaviour. Neither derives the other (#412).
+            case "value-carried":
+            {
+                var (declaredName, declaredValue) = DataObjectDeclarationOf(xml, "Ev_1");
+
+                if (declaredName is null)
+                {
+                    return new(false,
+                        "Ev_1 is not a data object reference that resolves to a declaration, so "
+                        + "there is nothing for it to carry");
+                }
+
+                if (declaredValue is null)
+                {
+                    return new(false,
+                        $"the declaration '{declaredName}' declares no value, so a variable "
+                        + "carrying one would not be this element's doing");
+                }
+
+                // AND NO ACTIVITY MAY HAVE WRITTEN IT. This is the half that
+                // makes the cell mean something: a script task setting the same
+                // name satisfies "the variable is there and equal" while the data
+                // object carries nothing, which is this element's entire job.
+                var writer = await VariableWriterAsync(api, instance, declaredName);
+                if (writer is not null)
+                {
+                    return new(false,
+                        $"'{declaredName}' was written by activity '{writer.Value.Activity}'. The "
+                        + "value on this instance is that activity's doing, so nothing here says "
+                        + "the data object reference carried anything (#534)");
+                }
+
+                var actual = await VariableValueAsync(api, instance, declaredName);
+
+                if (actual is null)
+                {
+                    return new(false,
+                        $"the declaration '{declaredName}' names no variable on this instance -- "
+                        + "the reference resolved to it and its value never arrived");
+                }
+
+                return string.Equals(actual, declaredValue, StringComparison.Ordinal)
+                    ? new(true, $"'{declaredName}' = '{actual}', from the declaration and no activity")
+                    : new(false,
+                        $"'{declaredName}' is '{actual}' on the instance and the declaration says "
+                        + $"'{declaredValue}'");
+            }
+
+            // THE ENGINE CALLED BACK INTO THE RUNNING APP AND A BEHAVIOUR RAN (#535).
+            //
+            // The attribution is what makes this a proof rather than a variable
+            // check: the engine records that `Ev_1` performed the update, which
+            // is a chain nothing in the diagram can fake -- the job ran, the
+            // callback reached the app, the app resolved the key, the behaviour
+            // executed and reported an outcome.
+            //
+            // The expected variable comes from `ProvenBehaviorResult`, not from
+            // the diagram's own behaviorKey. See that constant for why.
+            case "behavior-ran":
+            {
+                var write = await VariableWriterAsync(api, instance, ProvenBehaviorResult);
+
+                if (write is null)
+                {
+                    return new(false,
+                        $"no activity in this instance wrote `{ProvenBehaviorResult}`. The element "
+                        + $"deployed, and '{ProvenBehaviorKey}' either never ran or never reported "
+                        + "-- which is the same thing from outside (#535)");
+                }
+
+                if (!string.Equals(write.Value.Activity, "Ev_1", StringComparison.Ordinal))
+                {
+                    return new(false,
+                        $"`{ProvenBehaviorResult}` was written by activity "
+                        + $"'{write.Value.Activity}', not Ev_1, so it is not this element's doing");
+                }
+
+                var outcome = await VariableValueAsync(api, instance, ProvenBehaviorResult);
+
+                return string.IsNullOrEmpty(outcome)
+                    ? new(false,
+                        $"Ev_1 wrote `{ProvenBehaviorResult}` and it is empty, so the behaviour "
+                        + "reported no outcome")
+                    : new(true, $"Ev_1 ran '{ProvenBehaviorKey}', which reported '{outcome}'");
+            }
+
             default:
                 return new(false, $"no observer for effect '{effect}'");
         }
@@ -1386,6 +2096,97 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // "the reason is in the server log" for a code it has no sentence
                 // for, and the E2E fixture buffers that log in memory.
                 + """<association id="Assoc_1" associationDirection="One" sourceRef="Bnd_1" targetRef="Ev_1"/>"""),
+            // Ev_1 IS THE BOUNDARY, not the handler (#531). The `Compensation
+            // Marker` row above builds the same apparatus with Ev_1 as the
+            // handler; this row is about the attachment itself, so the ids swap
+            // and the handler becomes an ordinary element. What proves the
+            // boundary ran is that the thing it is associated with executed --
+            // and its edge to that thing is an <association>, which is why the
+            // `variable-written` observer had to learn about them.
+            //
+            // <association> LAST, as in the Compensation Marker arm: it is an
+            // ARTIFACT, and the BPMN schema puts artifacts after every flow
+            // element. Earlier, and Flowable refuses the deployment with
+            // cvc-complex-type.2.4.a naming whichever element follows it.
+            // AN ACTUAL dataObjectReference (#534). `DataObjectExecutionTests`
+            // authors a bare <bpmn:dataObject>, which is the DECLARATION -- this
+            // row is about the reference that resolves to one, and the two are
+            // different elements. A user task keeps the instance alive so the
+            // variable is still readable.
+            // A timer inside the handler, non-interrupting, so the main flow
+            // parks and the instance is still readable while the handler's task
+            // is observed. `task-appears` is already container-aware -- it falls
+            // back to the ids nested inside Ev_1 -- so the handler's own user task
+            // is exactly the shape it looks for (#532).
+            // `GatewayDiagram` cannot be reused: publish EXPANDS this element --
+            // a script task in front, conditions synthesised onto its own
+            // outgoing flows -- so the author writes a routing script returning a
+            // FLOW ID, not conditions. The script sits on one branch and a user
+            // task on the other, so `proof` can only be written if the gateway
+            // routed (#533).
+            // A BEHAVIOUR THE RUNNING APP SERVES (#535). Not a fixture's: the
+            // row's old reason claimed `autonate.noop` was "registered by a test
+            // fixture", and nothing registers it at all. `autonate.unlock-account`
+            // is registered unconditionally by Program.cs.
+            //
+            // The start request supplies a `userId` that resolves to nobody, so
+            // the behaviour reaches ILocalUserStore and reports `userNotFound` --
+            // an outcome only a behaviour that really ran can produce.
+            //
+            // `delegateExpression`, `autonateServiceKind` and `async` are not
+            // decoration: publish REFUSES a behaviour task carrying only a
+            // behaviorKey ("has no behaviour chosen yet"), because the studio's
+            // prepare step is what normally writes the delegate and this class
+            // publishes the diagram an author would end up with. Measured -- the
+            // first version omitted them and was refused with that sentence.
+            // `BehaviorErrorBoundaryExecutionTests` authors the same four.
+            "Service Task (Behavior)" => Wrap("", Linear(
+                """<serviceTask id="Ev_1" name="unlock" flowable:delegateExpression="${autonateBehaviorDelegate}" """
+                + """flowable:autonateServiceKind="behavior" """
+                + $"""flowable:behaviorKey="{ProvenBehaviorKey}" """
+                + """flowable:async="true"/>""")),
+
+            "Complex Gateway" => Wrap("",
+                """<startEvent id="Start_1"/>"""
+                + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""
+                + """<script>return 'fa';</script></complexGateway>"""
+                + """<scriptTask id="S_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<userTask id="Other_1" name="other"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f0" sourceRef="Start_1" targetRef="Ev_1"/>"""
+                + """<sequenceFlow id="fa" sourceRef="Ev_1" targetRef="S_1"/>"""
+                + """<sequenceFlow id="fb" sourceRef="Ev_1" targetRef="Other_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="S_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f5" sourceRef="Other_1" targetRef="End_2"/>"""),
+
+            "Event Sub-Process" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Main_1" targetRef="End_1"/>"""
+                + """<subProcess id="Ev_1" triggeredByEvent="true">"""
+                + """<startEvent id="Esp_1" isInterrupting="false"><timerEventDefinition>"""
+                + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
+                + """<userTask id="Handled_1" name="handled"/><endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Esp_1" targetRef="Handled_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="Handled_1" targetRef="Ee_1"/></subProcess>"""),
+
+            "Data Object Reference" => Wrap("",
+                """<dataObject id="Decl_1" name="carried" autonate:dataType="xsd:double">"""
+                + """<extensionElements><flowable:value>42.5</flowable:value></extensionElements></dataObject>"""
+                + """<dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1"/>"""
+                + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+            "Compensation Boundary" => Wrap("",
+                """<startEvent id="Start_1"/>"""
+                + """<scriptTask id="Doer_1" name="do" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('did', 'yes');</script></scriptTask>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition/></boundaryEvent>"""
+                + """<scriptTask id="Undo_1" name="undo" isForCompensation="true" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="End_1"><compensateEventDefinition/></endEvent>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Doer_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
+                + """<association id="Assoc_1" associationDirection="One" sourceRef="Ev_1" targetRef="Undo_1"/>"""),
+
             "Script Task" => Wrap("", Linear(Script)),
             "Receive Task" => Wrap("", Linear("""<receiveTask id="Ev_1" name="wait"/>""")),
 
@@ -1412,6 +2213,174 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Gw_1" targetRef="Ev_1"/>"""),
 
             "Intermediate Throw (None)" => Wrap("", Linear("""<intermediateThrowEvent id="Ev_1"/>""")),
+
+            // NOBODY CALLS START (#525). Publishing is the whole trigger: the
+            // engine's timer job fires a second later and creates the instance,
+            // which is why this row declares `instance-starts` and the shared
+            // theory makes no POST /start for it. It parks on a user task
+            // afterwards so the instance is still there to read -- one that
+            // started and finished inside the poll interval would make "no
+            // instance appeared" and "it already ended" the same observation.
+            // NOT A SELF-STARTING ELEMENT, and that is the finding (#526). A
+            // conditional start is an EVENT SUB-PROCESS start -- `WorkflowBpmnXml`
+            // says so in its own refusal, listing "an error, message, timer,
+            // signal, escalation or condition" as what an event subprocess reacts
+            // to. It fires inside a RUNNING instance, so `instance-starts` would
+            // be the wrong claim; what proves it ran is that its handler's body
+            // executed.
+            //
+            // The condition is `${taken == true}`, which `StartAsync` supplies.
+            // Flowable never fires conditional events by itself (#158), so Auton8
+            // POSTs `.../evaluate-conditions`, and instance start is one of the
+            // paths that does (FlowableClient.cs:196). So this fires through a
+            // path the product genuinely drives rather than one #271 says it
+            // cannot -- this cell neither needs #271 fixed nor pretends it is.
+            //
+            // Non-interrupting, so the main flow's own user task survives and the
+            // instance is still readable while the handler's write is observed.
+            // AN EVENT SUB-PROCESS START, like the conditional one (#527, #526).
+            // BPMN has no top-level error start, and `WorkflowBpmnXml` lists
+            // error among what an event subprocess reacts to. So what proves it
+            // ran is that its handler's body executed.
+            //
+            // The error is thrown from an error END inside an embedded
+            // sub-process, which is the one shape an error end is publishable in
+            // here -- Auton8 refuses an uncaught one, naming the cost, and the
+            // `Error End` arm below documents the same constraint.
+            // THE THROW SITS ONE SCOPE DOWN FROM THE HANDLER (#530). BPMN
+            // propagates an escalation to the PARENT scope, so a throw at process
+            // level has no parent to be caught by. Thrown inside an embedded
+            // sub-process, caught by the event sub-process at process level.
+            //
+            // Non-interrupting, which for an escalation is the point of the
+            // element: `WorkflowBpmnXml`'s error refusal says so itself -- "catch
+            // an escalation instead if the work should carry on."
+            "Escalation Start Event" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Sub_1"><startEvent id="In_1"/>"""
+                + """<intermediateThrowEvent id="Thrown_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>"""
+                + """<endEvent id="In_2"/>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/>"""
+                + """<sequenceFlow id="i2" sourceRef="Thrown_1" targetRef="In_2"/></subProcess>"""
+                + """<endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Sub_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Sub_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1" isInterrupting="false"><escalationEventDefinition escalationRef="Esc_1"/></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // `cancelActivity="true"` written out, and here it is a REAL choice
+            // rather than the only legal one (#530). An error boundary cannot be
+            // non-interrupting; an escalation boundary can, and that difference is
+            // why BPMN has both. So flipping this one attribute produces a valid
+            // diagram describing the opposite feature, which is the strongest
+            // form the #471 complement can take.
+            "Escalation Boundary" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Host_1"><startEvent id="In_1"/>"""
+                + """<intermediateThrowEvent id="Thrown_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>"""
+                + """<userTask id="In_2" name="inner"/><endEvent id="In_3"/>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/>"""
+                + """<sequenceFlow id="i2" sourceRef="Thrown_1" targetRef="In_2"/>"""
+                + """<sequenceFlow id="i3" sourceRef="In_2" targetRef="In_3"/></subProcess>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true"><escalationEventDefinition escalationRef="Esc_1"/></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+            "Error Start Event" => Wrap(
+                """<error id="Err_1" errorCode="E1" name="e1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Sub_1"><startEvent id="In_1"/>"""
+                + """<endEvent id="Thrown_1"><errorEventDefinition errorRef="Err_1"/></endEvent>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/></subProcess>"""
+                + """<endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Sub_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Sub_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1"><errorEventDefinition errorRef="Err_1"/></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // NO `cancelActivity` HERE, and that is not an omission (#527). An
+            // error boundary cannot be non-interrupting: BPMN forbids it and
+            // `WorkflowBpmnXml` refuses it in as many words, saying the engine
+            // interrupts regardless so the diagram would promise something it
+            // does not do. There is therefore no same-element control carrying
+            // the other configuration for this row; the `host-cancelled` control
+            // is per-EFFECT and is #522's non-interrupting timer boundary.
+            "Error Boundary" => Wrap(
+                """<error id="Err_1" errorCode="E1" name="e1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Host_1"><startEvent id="In_1"/>"""
+                + """<endEvent id="Thrown_1"><errorEventDefinition errorRef="Err_1"/></endEvent>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/></subProcess>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1"><errorEventDefinition errorRef="Err_1"/></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+            "Conditional Start Event" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Main_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1" isInterrupting="false"><conditionalEventDefinition>"""
+                + """<condition>${taken == true}</condition></conditionalEventDefinition></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // Same condition, same nudge, and `cancelActivity="true"` written out
+            // because the negative control's whole difference is that attribute.
+            "Conditional Boundary" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<conditionalEventDefinition><condition>${taken == true}</condition>"""
+                + """</conditionalEventDefinition></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+            "Timer Start Event" => Wrap("",
+                """<startEvent id="Ev_1"><timerEventDefinition>"""
+                + """<timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>"""
+                + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+            // `cancelActivity="true"` is the default and is written out anyway,
+            // because the negative control's entire difference from this diagram
+            // is that one attribute (#525). A reader should not have to know the
+            // default to see which feature is under test -- the non-interrupting
+            // variant is the opposite feature, not a near miss.
+            //
+            // The host is a user task, so it parks and stays parked: nothing but
+            // this boundary can remove it, which is what makes "the host is gone"
+            // attributable to Ev_1.
+            "Timer Boundary" => Wrap("",
+                """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
             "Intermediate Catch (Timer)" => Wrap("", Linear(
                 """<intermediateCatchEvent id="Ev_1"><timerEventDefinition>"""

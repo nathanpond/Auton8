@@ -203,14 +203,22 @@ def diagram(name, key):
             '<sequenceFlow id="f2" sourceRef="Ev_1" targetRef="End_1"/>'))
     if name == "Service Task (Behavior)":
         # The real shape, learned from the engine's refusals: the delegate
-        # expression is on the do-not-rename list, `autonateServiceKind` is
-        # REQUIRED, and `autonate.noop` is a behaviour that actually exists.
-        # `autonate.set-variable` was invented and the product said so.
+        # expression is on the do-not-rename list and `autonateServiceKind` is
+        # REQUIRED.
+        #
+        # `autonate.noop` WAS WRONG and this is the correction (#535). The comment
+        # here said it "is a behaviour that actually exists"; nothing registers it
+        # -- not the app, not a fixture -- and the probe's own recorded result says
+        # so: the callback to /api/workflow-behaviors/autonate.noop/execute
+        # returned HTTP 404. `autonate.unlock-account` is registered
+        # unconditionally by Program.cs, and with a `userId` that resolves to
+        # nobody it reports `unlockResult = userNotFound`, which only a behaviour
+        # that really ran can produce.
         return wrap(key, "", shell.format(
             elem='<serviceTask id="Ev_1" name="behave" '
                  'flowable:delegateExpression="${autonateBehaviorDelegate}" '
                  'flowable:autonateServiceKind="behavior" '
-                 'flowable:behaviorKey="autonate.noop"/>'))
+                 'flowable:behaviorKey="autonate.unlock-account"/>'))
     if name == "Call Activity":
         # Needs a callee, which is a second definition in the same deployment.
         return f"""<?xml version="1.0" encoding="UTF-8"?>

@@ -383,6 +383,41 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
         });
         Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
 
+        // THE FIXTURE MUST BE SAVEABLE BEFORE THE UI IS DRIVEN (#369).
+        //
+        // `prepareAndStore` returns early on prepare errors, so an invalid seed
+        // does not fail here -- it fails thirty steps later, as "the studio never
+        // POSTed the save", which reads like a Save bug and was triaged as one
+        // three times. It was a multi-instance marker with nothing to repeat
+        // over: refused, correctly, and the one case that passed was the one
+        // whose own edit happened to repair it.
+        //
+        // Asked at the seed, where the answer is one line instead of a browser
+        // session.
+        var seedCheck = await page.APIRequest.PostAsync("/api/workflows/prepare",
+            new APIRequestContextOptions
+            {
+                DataObject = new
+                {
+                    model = new { id, name, processKey, bpmnXml = ElementDataDiagram(processKey) },
+                    elementSnapshots = Array.Empty<object>()
+                }
+            });
+        Assert.True(seedCheck.Ok,
+            $"Preparing the seed failed: {seedCheck.Status} {await seedCheck.TextAsync()}");
+        using (var seedBody = JsonDocument.Parse(await seedCheck.TextAsync()))
+        {
+            var seedErrors = seedBody.RootElement.GetProperty("errors")
+                .EnumerateArray().Select(e => e.GetString()).ToList();
+
+            Assert.True(
+                seedErrors.Count == 0,
+                "The seed diagram is refused before this test types anything, so Save is blocked "
+                + "for a reason that has nothing to do with the panel under test:\n  "
+                + string.Join("\n  ", seedErrors));
+        }
+
+
         await page.GotoAsync("/workflow");
         var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
         await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 20_000 });
@@ -478,7 +513,31 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
             $"prepare's RESPONSE dropped '{storedAs}'. Response was:\n" +
             preparedBody[..Math.Min(1800, preparedBody.Length)]);
 
-        Assert.True(savedBody is not null, "the studio never POSTed the save");
+        // WHY, NOT JUST WHETHER (#369). `prepareAndStore` returns early when
+        // prepare reports errors, so "no save was POSTed" is the studio DECLINING
+        // to save an invalid diagram just as often as it is the studio being
+        // broken -- and the bare message could not tell those apart. Four rounds
+        // of triage went into the second reading while the first was true.
+        if (savedBody is null)
+        {
+            var reason = "(prepare returned nothing to read)";
+            if (preparedBody is not null)
+            {
+                using var prepared = JsonDocument.Parse(preparedBody);
+                var errors = prepared.RootElement.TryGetProperty("errors", out var list)
+                    && list.ValueKind == JsonValueKind.Array
+                        ? list.EnumerateArray().Select(e => e.GetString()).ToList()
+                        : [];
+
+                reason = errors.Count == 0
+                    ? "prepare reported NO errors, so the save path itself is at fault"
+                    : "prepare refused the diagram, which is the studio working:\n  "
+                      + string.Join("\n  ", errors);
+            }
+
+            Assert.Fail($"the studio never POSTed the save -- {reason}");
+        }
+
         Assert.True(savedBody!.Contains(storedAs, StringComparison.Ordinal),
             $"the SAVE request dropped '{storedAs}' (prepare's response had it). Sent:\n" +
             savedBody[..Math.Min(1500, savedBody.Length)]);
@@ -516,8 +575,16 @@ public sealed class ComplexGatewayStudioRoundTripTests : E2ETestBase
             <bpmn:dataObjectReference id="amountObj" name="amount" dataObjectRef="amountObjData" />
             <bpmn:startEvent id="s" />
             <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="t1" />
+            <!-- A collection from the start, for the same reason the ad-hoc
+                 element below carries a completion condition: a marker with
+                 nothing to repeat over is REFUSED, and prepare's errors block
+                 SAVE, not just publish. The `t1` case overwrites this through the
+                 panel. Without it, the two cases that never touch `t1` pressed
+                 Save on a diagram the product was right to decline. That is
+                 #369, red for four rounds and triaged three times as a studio
+                 Save bug. -->
             <bpmn:userTask id="t1" name="Handle order">
-              <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false" flowable:collection="${seeded}" />
             </bpmn:userTask>
             <bpmn:sequenceFlow id="f1" sourceRef="t1" targetRef="adhoc" />
             <!-- A completion condition from the start: without one the whole

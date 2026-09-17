@@ -411,4 +411,208 @@ public sealed class BpmnDiagramHelperTests
         Assert.Null(BpmnDiagram.LoopCardinalityIn(Diagram(
             """    <userTask id="Ev_1"><multiInstanceLoopCharacteristics isSequential="false" /></userTask>""")));
     }
+
+    // ---- AttachedHostOf ------------------------------------------------------
+
+    [Fact]
+    public void AttachedHostOf_names_the_activity_the_boundary_interrupts()
+    {
+        var xml = Diagram("""
+                <userTask id="Host_1" name="host" />
+                <boundaryEvent id="Ev_1" attachedToRef="Host_1"><timerEventDefinition /></boundaryEvent>
+            """);
+
+        Assert.Equal("Host_1", BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// A prefixed boundary event is the shape every real modeller writes, and it
+    /// is the one a regex over the document text could not see (#448).
+    /// </summary>
+    [Fact]
+    public void AttachedHostOf_sees_through_a_namespace_prefix()
+    {
+        var xml = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:userTask id="Host_1" name="host" />
+                <bpmn:boundaryEvent id="Ev_1" attachedToRef="Host_1"><bpmn:timerEventDefinition /></bpmn:boundaryEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal("Host_1", BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// Null, not the first boundary event in the document. The `host-cancelled`
+    /// observer asks this about Ev_1 specifically, and an answer borrowed from a
+    /// neighbour would have it assert a cancellation somebody else caused (#522).
+    /// </summary>
+    // ---- AttributeIdentityIn -------------------------------------------------
+
+    [Fact]
+    public void AttributeIdentityIn_reads_triggeredByEvent_off_the_element()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1" triggeredByEvent="true"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Equal("triggeredByEvent", BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    /// <summary>
+    /// The complement that keeps the attribute branch from widening the oracle
+    /// (#532). A plain sub-process must NOT satisfy the event sub-process row's
+    /// identity — otherwise the branch lets a row with a missing identity pass,
+    /// which is worse than the assertion it replaced.
+    /// </summary>
+    [Fact]
+    public void AttributeIdentityIn_is_null_for_a_plain_sub_process()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Null(BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    /// <summary>`triggeredByEvent="false"` is a sub-process that says it is not one.</summary>
+    [Fact]
+    public void AttributeIdentityIn_is_null_when_the_attribute_says_false()
+    {
+        var xml = Diagram("""    <subProcess id="Ev_1" triggeredByEvent="false"><startEvent id="In_1" /></subProcess>""");
+
+        Assert.Null(BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    [Fact]
+    public void AttributeIdentityIn_sees_through_a_namespace_prefix()
+    {
+        var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:subProcess id="Ev_1" triggeredByEvent="true"><bpmn:startEvent id="In_1" /></bpmn:subProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal("triggeredByEvent", BpmnDiagram.AttributeIdentityIn(xml));
+    }
+
+    // ---- DataObjectDeclarationOf ---------------------------------------------
+
+    [Fact]
+    public void DataObjectDeclarationOf_resolves_the_reference_to_its_declaration()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="carried"><extensionElements><value>42.5</value></extensionElements></dataObject>
+                <dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1" />
+            """);
+
+        Assert.Equal(("carried", "42.5"), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// A reference resolves to ITS declaration (#534). Following a neighbour's
+    /// would let the cell certify a value this element never pointed at, which is
+    /// the resolution under test.
+    /// </summary>
+    [Fact]
+    public void DataObjectDeclarationOf_does_not_follow_another_references_target()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="mine"><extensionElements><value>1</value></extensionElements></dataObject>
+                <dataObject id="Decl_2" name="theirs"><extensionElements><value>2</value></extensionElements></dataObject>
+                <dataObjectReference id="Ev_1" name="mine" dataObjectRef="Decl_1" />
+                <dataObjectReference id="Other_1" name="theirs" dataObjectRef="Decl_2" />
+            """);
+
+        Assert.Equal(("mine", "1"), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void DataObjectDeclarationOf_reports_a_declaration_that_carries_no_value()
+    {
+        var xml = Diagram("""
+                <dataObject id="Decl_1" name="carried" />
+                <dataObjectReference id="Ev_1" name="carried" dataObjectRef="Decl_1" />
+            """);
+
+        Assert.Equal(("carried", null), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void DataObjectDeclarationOf_is_empty_when_Ev_1_is_not_a_reference()
+    {
+        var xml = Diagram("""    <userTask id="Ev_1" />""");
+
+        Assert.Equal((null, null), BpmnDiagram.DataObjectDeclarationOf(xml, "Ev_1"));
+    }
+
+    // ---- CompensationHandlersOf ----------------------------------------------
+
+    [Fact]
+    public void CompensationHandlersOf_follows_the_association_off_the_boundary()
+    {
+        var xml = Diagram("""
+                <scriptTask id="Doer_1" />
+                <boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <scriptTask id="Undo_1" isForCompensation="true" />
+                <association id="Assoc_1" sourceRef="Ev_1" targetRef="Undo_1" />
+            """);
+
+        Assert.Equal(["Undo_1"], BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// Not "any association in the diagram" (#531). The `variable-written`
+    /// observer admits this element's handler as a writer, and an answer borrowed
+    /// from a neighbour's association would admit a write from wherever some
+    /// other artifact happened to point.
+    /// </summary>
+    [Fact]
+    public void CompensationHandlersOf_ignores_an_association_off_something_else()
+    {
+        var xml = Diagram("""
+                <scriptTask id="Doer_1" />
+                <boundaryEvent id="Ev_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <boundaryEvent id="Other_1" attachedToRef="Doer_1"><compensateEventDefinition /></boundaryEvent>
+                <scriptTask id="Undo_1" isForCompensation="true" />
+                <association id="Assoc_1" sourceRef="Other_1" targetRef="Undo_1" />
+            """);
+
+        Assert.Empty(BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void CompensationHandlersOf_sees_through_a_namespace_prefix()
+    {
+        var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:scriptTask id="Doer_1" />
+                <bpmn:boundaryEvent id="Ev_1" attachedToRef="Doer_1"><bpmn:compensateEventDefinition /></bpmn:boundaryEvent>
+                <bpmn:scriptTask id="Undo_1" isForCompensation="true" />
+                <bpmn:association id="Assoc_1" sourceRef="Ev_1" targetRef="Undo_1" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.Equal(["Undo_1"], BpmnDiagram.CompensationHandlersOf(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void AttachedHostOf_is_null_when_Ev_1_is_not_a_boundary_event()
+    {
+        var xml = Diagram("""
+                <userTask id="Ev_1" name="plain" />
+                <userTask id="Other_1" name="other" />
+                <boundaryEvent id="Bnd_1" attachedToRef="Other_1"><timerEventDefinition /></boundaryEvent>
+            """);
+
+        Assert.Null(BpmnDiagram.AttachedHostOf(xml, "Ev_1"));
+    }
 }
