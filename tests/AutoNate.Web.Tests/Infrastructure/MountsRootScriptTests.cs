@@ -262,6 +262,84 @@ public sealed class MountsRootScriptTests
             + "the point is that the change is visible, not that 7 is sacred.");
     }
 
+    /// <summary>
+    /// Every target that starts the stack reaches the ownership check (#517).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The check used to live only in <c>ensure-up.sh</c>, so <c>infra-up</c>,
+    /// <c>infra-up-dashboard</c>, <c>app-container</c> and <c>keycloak-up</c>
+    /// all brought the stack up with nothing in the way — and #513 then pointed
+    /// Rider's Run button at <c>infra-up</c>, one of the unguarded four. The
+    /// compose project name is <c>infra</c> on every path, so a second checkout
+    /// replaces the first one's containers rather than starting its own.
+    /// </para>
+    /// <para>
+    /// This asserts the property rather than the current spelling: any recipe
+    /// that runs <c>compose … up</c> must reach <c>stack-ownership</c>, whether
+    /// directly or through a prerequisite. A new target added later without one
+    /// fails here instead of silently reopening #505.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_target_that_starts_the_stack_reaches_the_ownership_check()
+    {
+        var makefile = File.ReadAllLines(Path.Combine(RepoRoot.Path, "Makefile"));
+
+        // target -> its declared prerequisites, for every rule in the file.
+        var prerequisites = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        string? current = null;
+        var recipes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        foreach (var line in makefile)
+        {
+            var rule = System.Text.RegularExpressions.Regex.Match(
+                line, @"^(?<target>[A-Za-z0-9._-]+):(?!=)\s*(?<prereqs>.*)$");
+            if (rule.Success)
+            {
+                current = rule.Groups["target"].Value;
+                prerequisites[current] = rule.Groups["prereqs"].Value
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                recipes[current] = [];
+                continue;
+            }
+
+            if (current is not null && line.StartsWith('\t')) recipes[current].Add(line);
+            else if (line.Length > 0 && !char.IsWhiteSpace(line[0])) current = null;
+        }
+
+        bool Reaches(string target, HashSet<string> seen)
+        {
+            if (target == "stack-ownership") return true;
+            if (!seen.Add(target)) return false;
+            return prerequisites.TryGetValue(target, out var prereqs)
+                && prereqs.Any(prereq => Reaches(prereq, seen));
+        }
+
+        // A recipe line that brings containers up. `down`, `rm`, `ps` and `logs`
+        // are not starts and are deliberately not matched.
+        var starters = recipes
+            .Where(entry => entry.Value.Any(line =>
+                System.Text.RegularExpressions.Regex.IsMatch(line, @"\$\(COMPOSE\).*\bup\b")))
+            .Select(entry => entry.Key)
+            .ToList();
+
+        Assert.True(
+            starters.Count > 0,
+            "no Makefile recipe appears to start the stack — this guard has stopped "
+            + "looking at anything, which is the failure it exists to prevent.");
+
+        var unguarded = starters.Where(target => !Reaches(target, [])).ToList();
+
+        Assert.True(
+            unguarded.Count == 0,
+            "These targets start the stack without reaching `stack-ownership`, so they can "
+            + "replace another checkout's running containers with no warning (#505, #517):\n  "
+            + string.Join("\n  ", unguarded)
+            + "\n\nAdd `stack-ownership` to the target's prerequisites, or depend on "
+            + "`infra-prepare`, which already does.");
+    }
+
     [Fact]
     public void The_tier_preflight_checks_stack_ownership_before_it_probes_ports()
     {
@@ -306,7 +384,24 @@ public sealed class MountsRootScriptTests
         var body = string.Join("\n", script[functionStart..(functionEnd + 1)]
             .Where(line => !line.TrimStart().StartsWith('#')));
 
-        Assert.Contains("docker inspect", body, StringComparison.Ordinal);
-        Assert.Contains("/var/lib/postgresql/data", body, StringComparison.Ordinal);
+        // It delegates to the shared script now (#517) rather than carrying a
+        // second copy of the check — the two copies had already drifted, one
+        // hard-failing on an unreadable mount where the other returned 0 (#519).
+        // So the "not a no-op" property is asserted in two halves: this function
+        // must actually invoke the script, and the script must actually inspect
+        // a container's mount.
+        Assert.Contains("assert-stack-ownership.sh", body, StringComparison.Ordinal);
+
+        var shared = File.ReadAllLines(
+                Path.Combine(RepoRoot.Path, "infra", "assert-stack-ownership.sh"))
+            .Where(line => !line.TrimStart().StartsWith('#'))
+            .ToArray();
+        var sharedBody = string.Join("\n", shared);
+
+        Assert.Contains("docker inspect", sharedBody, StringComparison.Ordinal);
+        Assert.Contains("/var/lib/postgresql/data", sharedBody, StringComparison.Ordinal);
+        // And it must be able to REFUSE: a script that only ever exits 0 would
+        // satisfy everything above while checking nothing.
+        Assert.Contains("exit 1", sharedBody, StringComparison.Ordinal);
     }
 }

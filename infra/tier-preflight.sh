@@ -24,39 +24,22 @@ missing=()
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPECTED_MOUNTS_ROOT="${AUTONATE_MOUNTS_ROOT:-$("$SCRIPT_DIR/mounts-root.sh")}"
 
-# Does the stack that is already running belong to THIS checkout's data?
-#
-# Ports answering is not the same question. A stack serving a different
-# directory answers every probe below and is still the wrong stack: it was
-# measured standing up an empty Postgres cluster and a Flowable with no schema,
-# after which 161 of 407 E2E tests failed with "The workflow engine refused this
-# workflow" -- a product-regression-shaped message for an environment fault
-# (#505).
-#
-# `mounts-root.sh` makes every worktree resolve to one root, so this check
-# should now only fire when a stack was started by hand with a different
-# AUTONATE_MOUNTS_ROOT, or by a checkout that predates this fix. That is
-# exactly when the operator needs to be told, by name.
+# Delegated to infra/assert-stack-ownership.sh (#517). This used to be a second,
+# subtly different copy: it returned 0 when the mount destination stopped
+# matching, where ensure-up.sh's copy hard-failed on the identical condition
+# (#519 item 1). One implementation, one behaviour -- and an unreadable mount is
+# now a failure here too, which matters because a Postgres image bump relocates
+# PGDATA and the silent pass would land exactly then.
 check_stack_ownership() {
-    local actual
-    actual=$(docker inspect autonate-postgres \
-        --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' \
-        2>/dev/null) || return 0
-    [ -n "$actual" ] || return 0
-
-    local expected="$EXPECTED_MOUNTS_ROOT/postgres/data"
-    # Compare by resolved path: /tmp is a symlink to /private/tmp on macOS, so
-    # a string compare reports a mismatch between two names for one directory.
-    local actual_real expected_real
-    actual_real=$(cd "$actual" 2>/dev/null && pwd -P) || actual_real="$actual"
-    expected_real=$(cd "$expected" 2>/dev/null && pwd -P) || expected_real="$expected"
-
-    if [ "$actual_real" != "$expected_real" ]; then
-        printf '  MISMATCH %-17s %s\n' "running stack" "$actual_real"
-        printf '  %-26s %s\n' "this checkout expects" "$expected_real"
-        missing+=("the running stack serves a different data directory")
+    local output
+    if output=$(AUTONATE_MOUNTS_ROOT="$EXPECTED_MOUNTS_ROOT" \
+                "$SCRIPT_DIR/assert-stack-ownership.sh" 2>&1); then
+        # The script prints its own `ok` line; reformat it to match the
+        # column layout of the probes below.
+        printf '  ok      %-18s %s\n' "stack ownership" "${output##*ok  }"
     else
-        printf '  ok      %-18s %s\n' "stack ownership" "$actual_real"
+        printf '%s\n' "$output"
+        missing+=("the running stack does not serve this checkout's data")
     fi
 }
 
