@@ -7747,3 +7747,17 @@ so that nesting is meaningful rather than a workaround.
   The one case of three that passed was the one whose own edit set the collection
   — it repaired the fixture before pressing Save. No product code changed.
   **Issue:** #369
+
+- **Correction to an earlier entry.** The `/n8-exec M4b` entry above, item 3,
+  states: *"`autonate.noop` is registered by a test fixture, not by the running
+  app; the E2E stack answers 404."* The second clause is true and the first is
+  false — **nothing** registers `autonate.noop`, not the app and not a fixture.
+  The 404 was the whole story. That false half was copied into the evidence row's
+  `undeclaredReason` and into `tools/bpmn-execution-probe/probe.py`, where the
+  comment claimed it "is a behaviour that actually exists".
+  **Why it matters:** it made the row look blocked on test-fixture plumbing when
+  it was blocked on nothing. #535's own analysis caught it by grepping rather
+  than by reading the reason. The ledger is append-only, so the original entry
+  stands and this is the correction beside it; the reason and the probe comment
+  are fixed at source.
+  **Issue:** #535

@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(44, DeclaredEffects().Count);
+        Assert.Equal(45, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -194,6 +194,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // "the diagram contains a script that writes proof" rather than "the
         // engine recorded this element routing to it".
         { "variable-written", "variable-written:complex-routes-away", "the routing script picks the branch that writes nothing", "entered" },
+
+        // A REGISTERED behaviour that writes a DIFFERENT variable (#535). It has
+        // to be registered: an unknown key fails the callback, the job fails, and
+        // the element is never entered -- so the control would fail its own
+        // precondition instead of testing the observer. `send-message` runs, does
+        // its work, reports `sendMessageResult`, and never writes `unlockResult`.
+        { "behavior-ran", "behavior-ran", "a different registered behaviour runs and reports its own variable", "entered" },
 
         // A real, correctly wired reference whose declaration simply carries no
         // value (#534). Deployable, resolving, and the variable is not there.
@@ -381,6 +388,10 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
             + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
             + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+        // A real, registered behaviour doing real work -- just not this one.
+        "behavior-ran" => WrapIn(key, $"""<message id="Msg_1" name="m1{key}"/>""", LinearIn(
+            $"""<sendTask id="Ev_1" name="send" flowable:behaviorKey="autonate.send-message" flowable:autonateMessageName="m1{key}" flowable:autonateTargetProcessKey="{key}r"/>""")),
 
         // The same complex gateway, routing correctly to the other branch.
         "variable-written:complex-routes-away" => WrapIn(key, "",
@@ -809,7 +820,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // message rows recorded `sendMessageResult = "noTargetProcess"` or
         // `"noMessageName"`. `instance-ends` was satisfied by a BehaviorResult
         // FAILURE, so three cells certified a send that had never once happened.
-        if (deployed.Name.LocalName == "serviceTask")
+        // ONLY WHERE PUBLISH REWROTE SOMETHING INTO A SEND (#535). This was
+        // `deployed.Name.LocalName == "serviceTask"` alone, which assumed every
+        // deployed service task is one of the three message rewrites. It was true
+        // of every row that existed when it was written and false the moment a row
+        // authored a service task ON PURPOSE: Service Task (Behavior) failed with
+        // "Auton8 rewrote this into a send, and the engine recorded
+        // `sendMessageResult = '(nothing)'`" -- a correct observation about a send
+        // that was never supposed to happen.
+        //
+        // `wasRewritten` is exactly the distinction: the send rows are authored as
+        // an endEvent, a sendTask or an intermediateThrowEvent and come back as a
+        // serviceTask. A behaviour task is authored as one and stays one.
+        if (wasRewritten && deployed.Name.LocalName == "serviceTask")
         {
             var sent = await VariableValueAsync(api, instance, "sendMessageResult");
 
@@ -884,7 +907,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     {
         var response = await api.PostAsync($"/api/workflows/{key}/start", new APIRequestContextOptions
         {
-            DataObject = new { variables = new { items = new[] { "a", "b" }, ok = false, approver = "ana", taken = true } }
+            // `userId` is a well-shaped id that resolves to nobody (#535), so
+            // `UnlockAccountBehavior` reaches ILocalUserStore and reports
+            // `userNotFound` -- an outcome only reachable by the behaviour
+            // actually running against the app, rather than merely being
+            // constructed.
+            DataObject = new
+            {
+                variables = new
+                {
+                    items = new[] { "a", "b" }, ok = false, approver = "ana", taken = true,
+                    userId = "999999999",
+                }
+            }
         });
         Assert.True(response.Ok, $"Starting failed: {response.Status} {await response.TextAsync()}");
 
@@ -1344,6 +1379,31 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // anything an activity did.
         ("dataObjectReference", null),
     ];
+
+    /// <summary>
+    /// The behaviour the Service Task row proves, and what it writes (#535).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// MEASURED and pinned HERE rather than read from the diagram, and that is
+    /// the whole point. A behaviour chooses its own result variable, so an
+    /// observer that asked the diagram which behaviour it used and then looked
+    /// for THAT behaviour's variable would be deriving its expectation from the
+    /// thing under test — #412's founding defect — and the negative control would
+    /// pass for the wrong reason, because `send-message` does write its own
+    /// result variable.
+    /// </para>
+    /// <para>
+    /// `autonate.unlock-account` is registered UNCONDITIONALLY
+    /// (<c>Program.cs:881</c>), unlike `always-declines` and
+    /// `always-fails-undeclared`, which are Development-only. A row proving the
+    /// running app serves a behaviour should not rest on a registration that an
+    /// environment flag can remove.
+    /// </para>
+    /// </remarks>
+    private const string ProvenBehaviorKey = "autonate.unlock-account";
+
+    private const string ProvenBehaviorResult = "unlockResult";
 
     private static readonly Dictionary<(string Local, string? Definition), string> EngineNames = new()
     {
@@ -1932,6 +1992,44 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                         + $"'{declaredValue}'");
             }
 
+            // THE ENGINE CALLED BACK INTO THE RUNNING APP AND A BEHAVIOUR RAN (#535).
+            //
+            // The attribution is what makes this a proof rather than a variable
+            // check: the engine records that `Ev_1` performed the update, which
+            // is a chain nothing in the diagram can fake -- the job ran, the
+            // callback reached the app, the app resolved the key, the behaviour
+            // executed and reported an outcome.
+            //
+            // The expected variable comes from `ProvenBehaviorResult`, not from
+            // the diagram's own behaviorKey. See that constant for why.
+            case "behavior-ran":
+            {
+                var write = await VariableWriterAsync(api, instance, ProvenBehaviorResult);
+
+                if (write is null)
+                {
+                    return new(false,
+                        $"no activity in this instance wrote `{ProvenBehaviorResult}`. The element "
+                        + $"deployed, and '{ProvenBehaviorKey}' either never ran or never reported "
+                        + "-- which is the same thing from outside (#535)");
+                }
+
+                if (!string.Equals(write.Value.Activity, "Ev_1", StringComparison.Ordinal))
+                {
+                    return new(false,
+                        $"`{ProvenBehaviorResult}` was written by activity "
+                        + $"'{write.Value.Activity}', not Ev_1, so it is not this element's doing");
+                }
+
+                var outcome = await VariableValueAsync(api, instance, ProvenBehaviorResult);
+
+                return string.IsNullOrEmpty(outcome)
+                    ? new(false,
+                        $"Ev_1 wrote `{ProvenBehaviorResult}` and it is empty, so the behaviour "
+                        + "reported no outcome")
+                    : new(true, $"Ev_1 ran '{ProvenBehaviorKey}', which reported '{outcome}'");
+            }
+
             default:
                 return new(false, $"no observer for effect '{effect}'");
         }
@@ -2026,6 +2124,28 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // FLOW ID, not conditions. The script sits on one branch and a user
             // task on the other, so `proof` can only be written if the gateway
             // routed (#533).
+            // A BEHAVIOUR THE RUNNING APP SERVES (#535). Not a fixture's: the
+            // row's old reason claimed `autonate.noop` was "registered by a test
+            // fixture", and nothing registers it at all. `autonate.unlock-account`
+            // is registered unconditionally by Program.cs.
+            //
+            // The start request supplies a `userId` that resolves to nobody, so
+            // the behaviour reaches ILocalUserStore and reports `userNotFound` --
+            // an outcome only a behaviour that really ran can produce.
+            //
+            // `delegateExpression`, `autonateServiceKind` and `async` are not
+            // decoration: publish REFUSES a behaviour task carrying only a
+            // behaviorKey ("has no behaviour chosen yet"), because the studio's
+            // prepare step is what normally writes the delegate and this class
+            // publishes the diagram an author would end up with. Measured -- the
+            // first version omitted them and was refused with that sentence.
+            // `BehaviorErrorBoundaryExecutionTests` authors the same four.
+            "Service Task (Behavior)" => Wrap("", Linear(
+                """<serviceTask id="Ev_1" name="unlock" flowable:delegateExpression="${autonateBehaviorDelegate}" """
+                + """flowable:autonateServiceKind="behavior" """
+                + $"""flowable:behaviorKey="{ProvenBehaviorKey}" """
+                + """flowable:async="true"/>""")),
+
             "Complex Gateway" => Wrap("",
                 """<startEvent id="Start_1"/>"""
                 + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""

@@ -99,7 +99,7 @@ public sealed class ExecutionEvidenceTests
     [
         "task-appears", "variable-written", "instance-waits", "instance-ends",
         "tasks-appear-together", "tasks-appear-in-turn",
-        "instance-starts", "host-cancelled", "value-carried",
+        "instance-starts", "host-cancelled", "value-carried", "behavior-ran",
     ];
 
     /// <summary>
@@ -246,6 +246,7 @@ public sealed class ExecutionEvidenceTests
             ("Receive Task", "instance-waits"),
             ("Script Task", "variable-written"),
             ("Send Task", "instance-ends"),
+            ("Service Task (Behavior)", "behavior-ran"),
             ("Sequence Flow", "instance-ends"),
             ("Signal End", "instance-ends"),
             ("Start Event (None)", "instance-ends"),
