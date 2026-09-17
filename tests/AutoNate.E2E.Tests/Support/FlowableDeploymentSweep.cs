@@ -89,6 +89,28 @@ internal static class FlowableDeploymentSweep
     /// </remarks>
     internal static readonly TimeSpan MinimumAge = TimeSpan.FromHours(2);
 
+    /// <summary>How many deployments to ask for at a time (#537).</summary>
+    /// <remarks>
+    /// A page size, not a limit. The sweep asks again until a page comes back
+    /// short — the previous version treated exactly this number as the whole
+    /// population and reported 0 once the engine held more.
+    /// </remarks>
+    private const int PageSize = 500;
+
+    /// <summary>One deployment row, as the engine reports it (#537).</summary>
+    private static (string Id, string Name, DateTimeOffset? CreatedAt) Read(JsonElement element) => (
+        Id: element.GetProperty("id").GetString() ?? string.Empty,
+        Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
+        CreatedAt: element.TryGetProperty("deploymentTime", out var deployedAt)
+            && DateTimeOffset.TryParse(
+                deployedAt.GetString(),
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal
+                    | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var parsed)
+            ? parsed
+            : (DateTimeOffset?)null);
+
     internal static async Task<int> SweepAsync(HttpClient client) =>
         await SweepAsync(client, DateTimeOffset.UtcNow - MinimumAge);
 
@@ -105,28 +127,41 @@ internal static class FlowableDeploymentSweep
         List<(string Id, string Name)> deployments;
         try
         {
-            // Oldest first, so a backlog larger than one page is drained from the
-            // end that matters. The engine reached 1,306 deployments while this
-            // swept nothing; a single unsorted page would keep missing the
-            // oldest ones even once the matching is fixed.
-            using var response = await client.GetAsync(
-                "service/repository/deployments?size=1000&sort=deployTime&order=asc");
-            if (!response.IsSuccessStatusCode) return 0;
+            // EVERY PAGE, NOT ONE (#537).
+            //
+            // Oldest first, so a backlog larger than a page is drained from the
+            // end that matters -- but the sort alone was not enough and the
+            // previous round only fixed the sort. `size=1000` is a CAP: once the
+            // engine held 1101 deployments, everything newer than the thousandth
+            // oldest was off the page, which includes every deployment the
+            // current run just made. The sweep then answered 0, and 0 reads as
+            // "nothing to do" rather than "I could not see it" -- a query
+            // returning nothing reading like a verdict, for the nth time here.
+            //
+            // It was also self-sustaining: a sweep that cannot see the newest
+            // deployments cannot bring the backlog back under the page size, so
+            // once crossed the condition never clears on its own.
+            var raw = new List<(string Id, string Name, DateTimeOffset? CreatedAt)>();
 
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            deployments = document.RootElement.GetProperty("data").EnumerateArray()
-                .Select(element => (
-                    Id: element.GetProperty("id").GetString() ?? string.Empty,
-                    Name: element.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
-                    CreatedAt: element.TryGetProperty("deploymentTime", out var deployedAt)
-                        && DateTimeOffset.TryParse(
-                            deployedAt.GetString(),
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.AdjustToUniversal
-                                | System.Globalization.DateTimeStyles.AssumeUniversal,
-                            out var parsed)
-                        ? parsed
-                        : (DateTimeOffset?)null))
+            for (var start = 0; ; start += PageSize)
+            {
+                using var response = await client.GetAsync(
+                    "service/repository/deployments"
+                    + $"?size={PageSize}&start={start}&sort=deployTime&order=asc");
+                if (!response.IsSuccessStatusCode) return 0;
+
+                using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                var rows = page.RootElement.GetProperty("data").EnumerateArray().ToList();
+                if (rows.Count == 0) break;
+
+                raw.AddRange(rows.Select(Read));
+
+                // A short page is the last page. Asking again would be a round
+                // trip to learn what this already says.
+                if (rows.Count < PageSize) break;
+            }
+
+            deployments = raw
                 // Only what the suite deployed. A deployment this rule does not
                 // match is somebody's work, at any age.
                 .Where(deployment =>
