@@ -246,7 +246,13 @@ public sealed class MountsRootScriptTests
         // named volume nobody meant — shows up as a number that moved.
         var text = File.ReadAllText(ComposePath);
         var through = System.Text.RegularExpressions.Regex
-            .Matches(text, @"^\s*-\s+\$\{AUTONATE_MOUNTS_ROOT:-\./mounts\}/", System.Text.RegularExpressions.RegexOptions.Multiline)
+            // `:?`, not `:-`. The default was removed on purpose (#513): it was
+            // the silent fallback every unconverted entry point could hit, so
+            // compose now refuses to start without the variable rather than
+            // quietly resolving `./mounts` against its own directory. Pinning
+            // the `:?` form here means restoring a default is a failure, not a
+            // detail — which is the whole reason the default went.
+            .Matches(text, @"^\s*-\s+\$\{AUTONATE_MOUNTS_ROOT:\?[^}]*\}/", System.Text.RegularExpressions.RegexOptions.Multiline)
             .Count;
 
         Assert.True(
