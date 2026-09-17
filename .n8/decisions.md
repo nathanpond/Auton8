@@ -7576,3 +7576,34 @@ than it was.
 guard that cannot fail on GitHub and a login oracle that accepts failure are not
 guard-quality findings; they are tests that report the wrong answer. The
 remaining eight are carried with the series.
+
+## M4c fix pass, round 6 — #517 (2026-09-17)
+
+**One implementation, not a third copy.** The ownership check existed twice and
+the two had already drifted — ensure-up.sh hard-failed on an unreadable mount
+where tier-preflight.sh returned 0 (#519 item 1), and they disagreed on whether
+to find the container by compose project or by pinned name (#519 item 9).
+Adding a third copy for the make prerequisite would have guaranteed a third
+divergence. `infra/assert-stack-ownership.sh` is now the only implementation;
+both callers delegate. That closes those two #519 items as a side effect of
+doing #517 properly rather than as scope creep.
+
+**Guarded at `infra-prepare`, not on each target.** All four mutating targets
+(`infra-up`, `infra-up-dashboard`, `app-container`, `keycloak-up`) already
+depend on it, and it is the first step that writes anything. One prerequisite
+covers them all. The risk of that choice — a future target that starts the
+stack WITHOUT `infra-prepare` would be unguarded again — is why the new test
+asserts the property (every recipe running `$(COMPOSE) ... up` reaches
+`stack-ownership` through some chain) rather than the current spelling.
+
+**An unreadable mount is a failure now, on both paths.** The previous
+tier-preflight behaviour returned 0, which is worst precisely when it matters:
+the official Postgres images relocated PGDATA at 18, so a routine image bump
+would have silenced the guard with every test green.
+
+**Trigger confirmed live, not hypothetical.** `/Users/npond/codex/AutoNate.Tests/AutoNate`
+is a second clone with its own 168 MB `infra/mounts` and a compose file that
+predates round 7 (bare `./mounts/postgres/data`, no variable). Switching
+between the two checkouts silently swapped which cluster the stack served.
+Note the old clone can still displace this one — it has none of this code — so
+the fix protects this checkout from taking over, not the reverse.
