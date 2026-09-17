@@ -7508,3 +7508,71 @@ release runbook requires a full-tier run before tagging, and says so in
 writing", which is what #475 actually delivered. release.yml is unchanged and
 still has no gate. The stale "30 files carry RequiresService" was corrected to
 33 in the same PATCH.
+
+## M4c fix pass, round 5 — #515, #512, #513, #514 (partial) (2026-09-17)
+
+Scope follows the precedent the owner set last round: the blocker plus every
+open medium. #514 is `sev:low` and carried, except two items that are oracle
+defects rather than guard quality and sit in files this round already touched.
+
+**#515 — the guard's oracle had to change, not its expectation.** The obvious
+repair was to special-case the worktree. Instead the test now finds the main
+checkout with `git worktree list --porcelain`, which is a DIFFERENT mechanism
+from the `--git-common-dir` the script uses. Verifying `--git-common-dir` with
+`--git-common-dir` would have passed by agreeing with a bug.
+
+**#515 — `discovered()` reporting a build failure is worth more than `pwd -P`.**
+The symlink fix is one character; the reason it cost a bisect is that a broken
+build and an empty filter were the same observation. The sentinel is the part
+that will matter next time, and it applies to failures that have nothing to do
+with symlinks.
+
+**#513 — my own guard reproduced #505 while I was testing it.** The ownership
+assertion started on the already-ready branch, so a run against a foreign root
+got as far as `compose up`, created the bind source as an empty directory, and
+recreated postgres against it. Measured, on this machine, mid-round; the main
+cluster was untouched and the stack was restored. The check now runs before
+anything is created. A guard that runs after the damage is a report.
+
+**#513 — the compose default is gone, deliberately.** `${AUTONATE_MOUNTS_ROOT:-./mounts}`
+was the silent fallback every unconverted path could hit, including Rider's.
+Making the variable required costs a hand-run `docker compose` from `infra/` --
+which the in-repo file is not actually driven by, the released stack using named
+volumes -- and buys a loud message instead of a blank cluster. This reverses the
+"a hand-run docker compose still behaves as it always did" promise written in
+round 7; that promise turned out to be the hole.
+
+**#513 — the Rider config runs make now.** It was a `docker-deploy` config with
+an empty `<envs/>`, which in a Rider-only repo is the most likely way anyone
+would hit #505. Converted to a shell config running `make infra-up`, matching
+`infra: Ensure Up`, which was already correct.
+
+**#513 — three bind mounts are allowlisted rather than converted.**
+`./postgres/init`, `./scripts/bootstrap-jetstream.sh` and
+`./keycloak/realm-export.json` are tracked SOURCE files, and reading them from
+the running checkout is what you want from a branch. Listed by name with the
+reason so a fourth is a deliberate act. Residual hazard recorded in the test:
+`infra-reset` empties the shared cluster and the next start re-seeds it from
+whichever checkout runs it.
+
+**#512 — the decision moved into SQL.** Parsing an `aclitem[]` in C# was the
+defect, not the particular parse: the array is keyed by (grantee, grantor), so
+any "find the PUBLIC entry" reading is wrong by construction. `aclexplode` with
+`EXISTS` cannot be fooled by ordering, a second grantor, or a comma in a role
+name.
+
+**#512 — "explicit" is what fixes the writer lockout.**
+`has_database_privilege` counts privileges held through PUBLIC, so it answers
+"yes" precisely when PUBLIC is about to lose them. Nothing about the previous
+code was salvageable by reordering; the question was wrong.
+
+**#512 — the guard now creates its own database.** Asserting against the shared
+`autonate_datastores` certified the machine's accumulated catalog rather than
+the code, and my round-7 mutation evidence only went red because I had restored
+the bug by hand first. Recorded because the evidence was published as stronger
+than it was.
+
+**#514 — the two items taken are the ones whose absence changes a verdict.** A
+guard that cannot fail on GitHub and a login oracle that accepts failure are not
+guard-quality findings; they are tests that report the wrong answer. The
+remaining eight are carried with the series.
