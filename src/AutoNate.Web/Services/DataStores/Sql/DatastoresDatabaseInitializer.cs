@@ -78,6 +78,7 @@ public sealed class DatastoresDatabaseInitializer(
         };
 
         var quoted = QuoteIdentifier(targetDatabase);
+        var role = string.IsNullOrWhiteSpace(writerRole) ? string.Empty : writerRole;
 
         try
         {
@@ -87,102 +88,139 @@ public sealed class DatastoresDatabaseInitializer(
             // READ FIRST, and write only if something actually needs changing.
             //
             // REVOKE/GRANT on a database rewrites the `pg_database` tuple, and
-            // every application boot runs this. The test suite boots hundreds
-            // of hosts in parallel against one cluster, so an unconditional
-            // write made them all contend on a single catalog row: measured,
-            // 24 tests across unrelated areas failing with
-            // `XX000: tuple concurrently updated`. The sibling
-            // EnsureWriterRoleAsync documents the same hazard on `pg_authid`.
+            // every application boot runs this. The suite boots hundreds of
+            // hosts in parallel against one cluster, so an unconditional write
+            // made them all contend on a single catalog row: measured, 24 tests
+            // across unrelated areas failing with `XX000: tuple concurrently
+            // updated`. The sibling EnsureWriterRoleAsync documents the same
+            // hazard on `pg_authid`. Checking first makes this a no-op in the
+            // steady state -- every boot after the first -- so there is nothing
+            // to contend on.
             //
-            // Checking first makes this a no-op in the steady state — which is
-            // every boot after the first — so there is nothing to contend on.
+            // The decision is made by the SERVER, not by parsing the ACL text
+            // here (#512). An aclitem[] is keyed by (grantee, grantor), so
+            // PUBLIC can legitimately hold more than one entry, and a
+            // hand-rolled `FirstOrDefault(e => e.StartsWith('='))` read only the
+            // first: the ACL
+            //
+            //   =T/autonate,autonate=CTc/autonate,=c/autonate_datastore_writer
+            //
+            // parsed as "PUBLIC has no CONNECT" while PUBLIC plainly had it, so
+            // the startup check that exists to repair exactly that drift did
+            // nothing, silently. `aclexplode` enumerates every entry and grantee
+            // 0 is PUBLIC, so EXISTS over it cannot be fooled by ordering, by a
+            // second grantor, or by a role name containing a comma.
+            bool publicHasConnect, writerExists, writerHasExplicitConnect;
             await using (var probe = new NpgsqlCommand(
                 """
                 SELECT
-                    COALESCE(array_to_string(d.datacl, ','), '') AS acl,
-                    d.datacl IS NULL                             AS acl_is_default
+                    d.datacl IS NULL
+                        OR EXISTS (
+                            SELECT 1 FROM aclexplode(d.datacl) a
+                            WHERE a.grantee = 0 AND a.privilege_type = 'CONNECT'
+                        )                                               AS public_has_connect,
+                    @role <> '' AND EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = @role
+                    )                                                   AS writer_exists,
+                    EXISTS (
+                        SELECT 1 FROM aclexplode(d.datacl) a
+                        JOIN pg_roles r ON r.oid = a.grantee
+                        WHERE r.rolname = @role AND a.privilege_type = 'CONNECT'
+                    )                                                   AS writer_has_connect
                 FROM pg_database d
                 WHERE d.datname = @name
                 """, conn))
             {
                 probe.Parameters.AddWithValue("name", targetDatabase);
+                probe.Parameters.AddWithValue("role", role);
 
-                string acl;
-                bool aclIsDefault;
-                // Scoped so the reader is CLOSED before anything else runs on
-                // this connection: Npgsql allows one command at a time, and
-                // leaving it open threw NpgsqlOperationInProgressException.
-                await using (var reader = await probe.ExecuteReaderAsync(cancellationToken))
-                {
-                    if (!await reader.ReadAsync(cancellationToken)) return;
-                    acl = reader.GetString(0);
-                    aclIsDefault = reader.GetBoolean(1);
-                }
-
-                // A NULL datacl is the PostgreSQL default and the default
-                // includes CONNECT for PUBLIC, so "no ACL" is the failing
-                // state, not a neutral one. Otherwise PUBLIC's entry is the
-                // one with an empty grantee before `=`; `c` in it is CONNECT.
-                var publicEntry = acl.Split(',').FirstOrDefault(e => e.StartsWith('='));
-                var publicHasConnect = aclIsDefault
-                    || (publicEntry is not null
-                        && publicEntry.Split('/')[0].Contains('c', StringComparison.Ordinal));
-
-                var writerNeedsConnect = false;
-                if (!string.IsNullOrWhiteSpace(writerRole))
-                {
-                    await using var wcmd = new NpgsqlCommand(
-                        "SELECT has_database_privilege(@role, @db, 'CONNECT')", conn);
-                    wcmd.Parameters.AddWithValue("role", writerRole);
-                    wcmd.Parameters.AddWithValue("db", targetDatabase);
-                    // False when the role does not exist yet; the grant below
-                    // would then fail and is skipped by the same flag.
-                    writerNeedsConnect = await wcmd.ExecuteScalarAsync(cancellationToken) is false;
-                }
-
-                if (!publicHasConnect && !writerNeedsConnect) return;
-
-                // The owner keeps its own privileges — REVOKE ... FROM PUBLIC
-                // does not touch the `owner=CTc/owner` entry — so this does not
-                // lock out the connection string that just ran it.
-                var sql = publicHasConnect
-                    ? $"REVOKE CONNECT ON DATABASE {quoted} FROM PUBLIC;"
-                    : string.Empty;
-                if (writerNeedsConnect)
-                {
-                    // The writer role is a plain LOGIN role and reached CONNECT
-                    // only through PUBLIC. Granting it explicitly is what makes
-                    // the revoke safe rather than an outage for every SqlType
-                    // datastore.
-                    sql += $"\nGRANT CONNECT ON DATABASE {quoted} TO {QuoteIdentifier(writerRole!)};";
-                }
-
-                await using var write = new NpgsqlCommand(sql, conn);
-                await write.ExecuteNonQueryAsync(cancellationToken);
-                log.LogInformation(
-                    "Datastores DB '{Name}': CONNECT revoked from PUBLIC.", targetDatabase);
+                // Scoped so the reader is CLOSED before the write runs on this
+                // connection: Npgsql allows one command at a time, and leaving
+                // it open threw NpgsqlOperationInProgressException.
+                await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken)) return;
+                publicHasConnect = reader.GetBoolean(0);
+                writerExists = reader.GetBoolean(1);
+                writerHasExplicitConnect = reader.GetBoolean(2);
             }
+
+            // EXPLICIT is the load-bearing word. The previous version asked
+            // `has_database_privilege`, which counts privileges held THROUGH
+            // PUBLIC -- so on the one boot that matters, the boot that is about
+            // to revoke, it answered "the writer can already connect" and the
+            // GRANT was skipped. The revoke then locked the writer out of the
+            // database it exists to write to, until the next boot happened to
+            // repair it. Measured: a database with `datacl IS NULL` reports
+            // has_database_privilege(writer, db, 'CONNECT') = true with no
+            // explicit grant anywhere (#512).
+            var needsRevoke = publicHasConnect;
+            var needsGrant = writerExists && !writerHasExplicitConnect;
+
+            if (!needsRevoke && !needsGrant) return;
+
+            var statements = new List<string>();
+            if (needsRevoke)
+            {
+                // The owner keeps its own privileges -- REVOKE ... FROM PUBLIC
+                // does not touch the `owner=CTc/owner` entry -- so this does not
+                // lock out the connection string that just ran it.
+                statements.Add($"REVOKE CONNECT ON DATABASE {quoted} FROM PUBLIC;");
+            }
+            if (needsGrant)
+            {
+                statements.Add(
+                    $"GRANT CONNECT ON DATABASE {quoted} TO {QuoteIdentifier(role)};");
+            }
+
+            await using var write = new NpgsqlCommand(string.Join("\n", statements), conn);
+            await write.ExecuteNonQueryAsync(cancellationToken);
+
+            // Say what actually ran. The previous version logged "CONNECT
+            // revoked from PUBLIC" unconditionally, including on the boot where
+            // only the GRANT was issued.
+            log.LogInformation(
+                "Datastores DB '{Name}': {Actions}.",
+                targetDatabase,
+                string.Join(" and ", new[]
+                {
+                    needsRevoke ? "CONNECT revoked from PUBLIC" : null,
+                    needsGrant ? $"CONNECT granted to '{role}'" : null,
+                }.Where(action => action is not null)));
         }
-        catch (PostgresException ex) when (ex.SqlState is "XX000" or "40001" or "40P01")
+        catch (PostgresException ex) when (ex.SqlState is "XX000" or "40001" or "40P01" or "42704")
         {
             // Another instance won the race and is applying the identical
-            // change. Losing it is not a fault: the end state is the same, and
-            // the next boot's probe will confirm it.
-            log.LogDebug(
-                "Datastores DB '{Name}': isolation applied concurrently by another instance.",
-                targetDatabase);
+            // change, or the writer role was dropped between the probe and the
+            // grant (42704). Losing that race is not a fault: the end state is
+            // the same and the next boot's probe confirms it.
+            //
+            // Information, not Debug (#512). Debug is off in production, and
+            // these codes cannot distinguish a lost race from a persistently
+            // broken catalog -- at Debug, the second case leaves PUBLIC holding
+            // CONNECT forever with no operator-visible signal at all.
+            log.LogInformation(
+                "Datastores DB '{Name}': isolation not applied this time ({SqlState}: {Message}). "
+                + "Expected under concurrent startup; if it repeats on every boot, PUBLIC still "
+                + "holds CONNECT and the cause is not contention.",
+                targetDatabase, ex.SqlState, ex.MessageText);
         }
         catch (PostgresException ex) when (ex.SqlState == "42501")
         {
             // Not the owner. A deployment can legitimately run the app as a
             // role that may use the database but not re-grant on it, and
             // refusing to start would be a worse failure than the one this
-            // closes — so warn, by name, and carry on.
+            // closes -- so warn, by name, and carry on.
+            //
+            // Deliberately does not claim WHICH statement failed: it may have
+            // been the revoke or the writer grant, and those have opposite
+            // consequences.
             log.LogWarning(
-                "Could not revoke PUBLIC CONNECT on '{Name}': {Message}. The Flowable engine's "
-                + "role can reach this database (#506). Run it as the database owner, or revoke "
-                + "by hand: REVOKE CONNECT ON DATABASE {Name} FROM PUBLIC;",
-                targetDatabase, ex.MessageText, targetDatabase);
+                "Could not apply datastores isolation on '{Name}': {Message}. Either the Flowable "
+                + "engine's role can still reach this database, or the datastores writer role "
+                + "cannot (#506). Run as the database owner, or apply by hand: "
+                + "REVOKE CONNECT ON DATABASE {Name} FROM PUBLIC; "
+                + "GRANT CONNECT ON DATABASE {Name} TO <writer role>;",
+                targetDatabase, ex.MessageText, targetDatabase, targetDatabase);
         }
     }
 

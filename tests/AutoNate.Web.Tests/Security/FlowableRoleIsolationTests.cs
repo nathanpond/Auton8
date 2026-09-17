@@ -117,49 +117,100 @@ public sealed class FlowableRoleIsolationTests
     // the check that would have said so does not run where the database exists,
     // and does not exist where the check runs (#506).
     //
-    // So this asserts the property directly, on the database the application
-    // creates for itself, with no dependence on `flowable_app` being present.
-    // Booting the factory is what runs DatastoresDatabaseInitializer; the
-    // assertion then reads the catalog the initializer was supposed to change.
+    // So this asserts the property directly, on a database the initializer is
+    // pointed at for this test alone.
+    //
+    // A SCRATCH database, not the real `autonate_datastores` (#512). The
+    // assertion reads persistent catalog state and the initializer is by design
+    // a no-op once that state is right -- so against the shared database,
+    // deleting EnsureDatabaseIsolationAsync entirely left this test green on any
+    // machine where an earlier run had already revoked. It certified the
+    // cluster, not the code. Creating the database here means the boot under
+    // test is the only thing that could have changed it.
     [Fact]
-    public async Task The_datastores_database_does_not_leave_connect_with_public()
+    public async Task The_initializer_revokes_public_connect_and_grants_the_writer()
     {
-        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
-        // A request, so startup (and therefore the initializers) has certainly
-        // completed before the catalog is read.
-        (await factory.CreateClient().GetAsync("/api/health/live")).EnsureSuccessStatusCode();
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var db = $"probe_ds_{suffix}";
+        var writer = $"probe_writer_{suffix}";
 
         await using var admin = new NpgsqlConnection(AdminTo("postgres"));
         await admin.OpenAsync();
 
-        await using var command = admin.CreateCommand();
-        command.CommandText =
-            "SELECT COALESCE(array_to_string(datacl, ','), '') FROM pg_database "
-            + "WHERE datname = 'autonate_datastores'";
-        var acl = (string?)await command.ExecuteScalarAsync();
+        await Exec(admin, $"CREATE DATABASE \"{db}\"");
+        try
+        {
+            // The fresh-install state this is all about: PUBLIC holds CONNECT
+            // by default, and nothing has touched the ACL.
+            Assert.True(
+                await ScalarBool(admin, $"SELECT datacl IS NULL FROM pg_database WHERE datname = '{db}'"),
+                "a newly created database should start with the default ACL; "
+                + "this test's premise is broken if it does not.");
 
-        Assert.False(
-            acl is null,
-            "autonate_datastores does not exist, so this assertion proved nothing. "
-            + "It is created by DatastoresDatabaseInitializer at startup.");
+            await using (var factory = await AutoNateWebApplicationFactory.CreateAsync(
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Datastores"] = AdminTo(db),
+                    ["DataStores:Sql:WriterRole"] = writer,
+                    ["DataStores:Sql:WriterRolePassword"] = "probe_only_never_persisted",
+                }))
+            {
+                // A request, so startup — and therefore the initializers — has
+                // certainly completed before the catalog is read.
+                (await factory.CreateClient().GetAsync("/api/health/live")).EnsureSuccessStatusCode();
+            }
 
-        // An EMPTY datacl is the PostgreSQL default, and the default includes
-        // CONNECT for PUBLIC -- so "no ACL" is the failing state, not a neutral
-        // one. This is exactly the shape the bug shipped in.
-        Assert.False(
-            acl!.Length == 0,
-            "autonate_datastores has an empty datacl, which is the PostgreSQL default: "
-            + "PUBLIC -- and so the Flowable engine's role -- retains CONNECT (#506).");
+            // PUBLIC must not hold CONNECT. Asked of the server through
+            // aclexplode rather than by parsing the ACL text: an aclitem[] is
+            // keyed by (grantee, grantor), so PUBLIC can hold more than one
+            // entry and a "first entry that starts with =" reading misses the
+            // others — which is the very defect this test now covers.
+            var publicConnect = await ScalarBool(admin, $"""
+                SELECT d.datacl IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM aclexplode(d.datacl) a
+                        WHERE a.grantee = 0 AND a.privilege_type = 'CONNECT'
+                    )
+                FROM pg_database d WHERE d.datname = '{db}'
+                """);
+            Assert.False(
+                publicConnect,
+                $"PUBLIC still holds CONNECT on {db}. Every role on the cluster, including "
+                + "the Flowable engine's, can reach it (#506).");
 
-        // PUBLIC's entry is the one with an empty grantee before `=`. `c` in it
-        // is CONNECT. Checking the parsed entry rather than the whole string
-        // matters: the owner's own entry legitimately contains `c`.
-        var publicEntry = acl.Split(',')
-            .FirstOrDefault(entry => entry.StartsWith('='));
-        Assert.False(
-            publicEntry is not null && publicEntry.Split('/')[0].Contains('c', StringComparison.Ordinal),
-            $"PUBLIC still holds CONNECT on autonate_datastores (datacl: {acl}). "
-            + "Every role on the cluster, including Flowable's, can reach it (#506).");
+            // And the writer must hold it EXPLICITLY. It only ever reached
+            // CONNECT through PUBLIC, so the revoke above is an outage for
+            // every SqlType datastore unless the grant happened on the same
+            // boot. It did not: `has_database_privilege` counts privileges held
+            // through PUBLIC, so on the boot that revokes it reported the writer
+            // as already able to connect and the GRANT was skipped (#512).
+            var writerConnect = await ScalarBool(admin, $"""
+                SELECT EXISTS (
+                    SELECT 1 FROM aclexplode(
+                        (SELECT datacl FROM pg_database WHERE datname = '{db}')
+                    ) a
+                    JOIN pg_roles r ON r.oid = a.grantee
+                    WHERE r.rolname = '{writer}' AND a.privilege_type = 'CONNECT'
+                )
+                """);
+            Assert.True(
+                writerConnect,
+                $"the datastores writer role '{writer}' has no explicit CONNECT on {db}, and "
+                + "PUBLIC's has just been revoked — so it is locked out of the database it "
+                + "exists to write to (#512).");
+        }
+        finally
+        {
+            await Exec(admin, $"DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)");
+            await Exec(admin, $"DROP ROLE IF EXISTS \"{writer}\"");
+        }
+    }
+
+    private static async Task<bool> ScalarBool(NpgsqlConnection conn, string sql)
+    {
+        await using var command = conn.CreateCommand();
+        command.CommandText = sql;
+        return (bool)(await command.ExecuteScalarAsync())!;
     }
 
     // Positive control for the above: a role revoked out of everything would
