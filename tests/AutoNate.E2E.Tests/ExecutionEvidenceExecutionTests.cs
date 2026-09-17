@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(38, DeclaredEffects().Count);
+        Assert.Equal(40, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -1810,6 +1810,54 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // sub-process, which is the one shape an error end is publishable in
             // here -- Auton8 refuses an uncaught one, naming the cost, and the
             // `Error End` arm below documents the same constraint.
+            // THE THROW SITS ONE SCOPE DOWN FROM THE HANDLER (#530). BPMN
+            // propagates an escalation to the PARENT scope, so a throw at process
+            // level has no parent to be caught by. Thrown inside an embedded
+            // sub-process, caught by the event sub-process at process level.
+            //
+            // Non-interrupting, which for an escalation is the point of the
+            // element: `WorkflowBpmnXml`'s error refusal says so itself -- "catch
+            // an escalation instead if the work should carry on."
+            "Escalation Start Event" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Sub_1"><startEvent id="In_1"/>"""
+                + """<intermediateThrowEvent id="Thrown_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>"""
+                + """<endEvent id="In_2"/>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/>"""
+                + """<sequenceFlow id="i2" sourceRef="Thrown_1" targetRef="In_2"/></subProcess>"""
+                + """<endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Sub_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Sub_1" targetRef="End_1"/>"""
+                + """<subProcess id="Esp_1" triggeredByEvent="true">"""
+                + """<startEvent id="Ev_1" isInterrupting="false"><escalationEventDefinition escalationRef="Esc_1"/></startEvent>"""
+                + """<scriptTask id="W_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<endEvent id="Ee_1"/>"""
+                + """<sequenceFlow id="s1" sourceRef="Ev_1" targetRef="W_1"/>"""
+                + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
+
+            // `cancelActivity="true"` written out, and here it is a REAL choice
+            // rather than the only legal one (#530). An error boundary cannot be
+            // non-interrupting; an escalation boundary can, and that difference is
+            // why BPMN has both. So flipping this one attribute produces a valid
+            // diagram describing the opposite feature, which is the strongest
+            // form the #471 complement can take.
+            "Escalation Boundary" => Wrap(
+                """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+                """<startEvent id="Start_1"/>"""
+                + """<subProcess id="Host_1"><startEvent id="In_1"/>"""
+                + """<intermediateThrowEvent id="Thrown_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>"""
+                + """<userTask id="In_2" name="inner"/><endEvent id="In_3"/>"""
+                + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/>"""
+                + """<sequenceFlow id="i2" sourceRef="Thrown_1" targetRef="In_2"/>"""
+                + """<sequenceFlow id="i3" sourceRef="In_2" targetRef="In_3"/></subProcess>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true"><escalationEventDefinition escalationRef="Esc_1"/></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
             "Error Start Event" => Wrap(
                 """<error id="Err_1" errorCode="E1" name="e1"/>""",
                 """<startEvent id="Start_1"/>"""

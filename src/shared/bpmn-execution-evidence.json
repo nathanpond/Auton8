@@ -281,7 +281,7 @@
       "name": "Escalation Start Event",
       "localName": "startEvent",
       "eventDefinition": "escalation",
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "ErrorEscalationExecutionTests",
         "ErrorEscalationStudioTests",
@@ -459,7 +459,7 @@
       "name": "Escalation Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "escalation",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "ErrorEscalationExecutionTests",
         "ErrorEscalationStudioTests",
