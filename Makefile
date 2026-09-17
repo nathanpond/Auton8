@@ -188,6 +188,15 @@ app-dapr: infra-ensure
 # skips a redundant rebuild.
 e2e-install:
 	dotnet build tests/AutoNate.E2E.Tests
+	# The plugin-lifecycle spec uploads plugins/HelloPlugin/dist/HelloPlugin.zip,
+	# which that project's ZipPluginPackage target produces on build. Nothing
+	# else in the solution depends on it, so it has to be asked for explicitly.
+	# `plugins/*/dist/` is gitignored, so in a fresh worktree the file is simply
+	# absent and the spec died inside Playwright's file-upload helper with a
+	# DirectoryNotFoundException that named neither the plugin nor the build
+	# step (#515). ci.yml has built it for exactly this reason since the suite
+	# first ran on a clean runner; the local tiers had not learned it.
+	dotnet build plugins/HelloPlugin
 	# Idempotent: a no-op when the right Chromium build is already on disk.
 	dotnet exec \
 		--runtimeconfig tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.runtimeconfig.json \

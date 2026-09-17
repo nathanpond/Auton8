@@ -64,6 +64,39 @@ public sealed class MountsRootScriptTests
         return (process.ExitCode, output.Trim());
     }
 
+    /// <summary>
+    /// The main checkout, located by a DIFFERENT git mechanism than the one
+    /// under test.
+    /// </summary>
+    /// <remarks>
+    /// These tests previously built their expectation from
+    /// <c>RepoRoot.Path</c>, which is whatever checkout the test assembly is
+    /// running in — so in a worktree they compared the script's correct answer
+    /// against the worktree's own path and failed. `make test-full-local` was
+    /// therefore red from every worktree, on the guard rather than on the thing
+    /// guarded, and `/n8-verify` runs in worktrees (#515).
+    ///
+    /// `git worktree list --porcelain` reports the main worktree first, from
+    /// inside a linked worktree as well as from the main checkout. Using it
+    /// rather than <c>--git-common-dir</c> keeps the oracle independent of the
+    /// mechanism `mounts-root.sh` uses, so this cannot pass by agreeing with a
+    /// bug.
+    /// </remarks>
+    private static string MainCheckout()
+    {
+        var (code, output) = RunGit(RepoRoot.Path, "worktree", "list", "--porcelain");
+        Assert.True(code == 0, $"could not list worktrees: {output}");
+
+        var first = output.Split('\n')
+            .FirstOrDefault(line => line.StartsWith("worktree ", StringComparison.Ordinal));
+        Assert.True(first is not null, $"`git worktree list --porcelain` named no worktree:\n{output}");
+
+        return first!["worktree ".Length..].Trim();
+    }
+
+    private static string MainCheckoutMountsRoot() =>
+        Path.Combine(MainCheckout(), "infra", "mounts");
+
     private static (int ExitCode, string Output) RunGit(string workingDirectory, params string[] args)
     {
         var psi = new ProcessStartInfo("git")
@@ -86,7 +119,7 @@ public sealed class MountsRootScriptTests
     {
         if (!ShellAvailable) return;
 
-        var expected = Path.Combine(RepoRoot.Path, "infra", "mounts");
+        var expected = MainCheckoutMountsRoot();
 
         // A real linked worktree, because that is the failing configuration.
         // Asserting against a simulated one would prove nothing about how git
@@ -131,11 +164,12 @@ public sealed class MountsRootScriptTests
         // The complement of the above. A script hard-wired to "always return
         // some other directory" would satisfy the worktree case while breaking
         // every ordinary run, so the normal path is asserted rather than assumed.
-        var (code, output) = RunFrom(RepoRoot.Path);
+        var mainCheckout = MainCheckout();
+        var (code, output) = RunFrom(mainCheckout);
 
         Assert.True(code == 0, $"mounts-root.sh failed from the main checkout: {output}");
         Assert.Equal(
-            new DirectoryInfo(Path.Combine(RepoRoot.Path, "infra", "mounts")).FullName,
+            new DirectoryInfo(Path.Combine(mainCheckout, "infra", "mounts")).FullName,
             new DirectoryInfo(output).FullName);
     }
 
