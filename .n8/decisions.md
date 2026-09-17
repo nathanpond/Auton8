@@ -7607,3 +7607,66 @@ predates round 7 (bare `./mounts/postgres/data`, no variable). Switching
 between the two checkouts silently swapped which cluster the stack served.
 Note the old clone can still displace this one — it has none of this code — so
 the fix protects this checkout from taking over, not the reverse.
+
+## M4d planned (2026-09-17)
+
+**The milestone was analysed but never sliced.** Its description carried a Goal,
+a "the 19" table and two Outcomes, but no map and no stories for them — the five
+issues sitting in it were four carried bugs and the oracle instrument. `/n8-exec`
+stopped on the precondition rather than fixing four bugs and leaving Outcome 1
+undelivered.
+
+**Its prose was stale by three rows.** It said 29 proven / 3 reasoned / 19
+neither; measured, 32 / 3 / 16. The difference is exactly the three markers M4c's
+#471 delivered — which the description itself says are not M4d's. The table
+always listed the right 16. Corrected in the PATCH.
+
+**Owner decisions, round one:**
+- *Closure rule:* product defects block, tooling carries. Explicitly reverses
+  M4a–M4c, on the evidence that M4c's last four rounds found ~2 product defects
+  against ~9 tooling ones, several introduced by the preceding fix pass.
+- *Scope:* all 16 uncovered rows, plus Service Task (Behavior) upgraded from a
+  reason to a proof — "service task needs a real proof. It can be a known/seeded
+  behavior but must be proven to run."
+- *Manual Task, Task (Generic):* reasons stand. Both are `studio: withdrawn`;
+  proving them would mean publishing around validation that exists because a
+  person found the defect by hand.
+- *Trigger surface:* message/signal starts fire "by either an Auton8 API call or
+  via configurable messages received on a queue", node-configurable. This turned
+  M4d from a coverage milestone into one with two feature slices.
+
+**Owner decisions, round two:**
+- *Ratchet:* count rows with neither an effect nor a reason. The old ratchet
+  counted `declaredEffect is null` regardless of reason, so "a measured reason is
+  acceptable" and "the ratchet reads zero" were mutually exclusive — the milestone
+  would have shipped chasing an unreachable number, or someone would have deleted
+  legitimate reasons to reach it.
+- *Signal fan-out:* wake all waiters, matching the bus path. Refusing a multi-match
+  (the message endpoint's precedent) would make one signal behave two ways
+  depending on how it arrived.
+- *Message field:* editable everywhere, studio owns the `<bpmn:message>`
+  declaration. Wider than the planner recommended (start events only) and it
+  amends `MessageCorrelationStudioTests` and its stated reason — recorded as a
+  deliberate reversal in #524 so it does not later read as drift.
+- *Complex Gateway:* prove the author's gateway routed correctly. That Auton8
+  expands it at publish is an implementation detail, not a reason the element is
+  unproven.
+
+**Planner deviation, stated:** five of fourteen stories were simulated rather than
+all fourteen. The five cover the five distinct shapes; the six paired-coverage
+stories are structurally identical, so simulating each would have tested one thing
+six times.
+
+**What the checks bought.** The simulations found that the oracle cannot express a
+self-starting element, a cancelled host, or a "did not fire" control — which is
+why #522 exists and blocks seven stories. The coverage check found that #522's own
+"drive to zero" was not deliverable within it, that the `obliged` pin is the only
+thing stopping a story discharging its item with a reason instead of a proof, that
+three oracle capabilities were un-owned, and that the negative-control obligation
+the manifest states is enforced by nothing. It also found roughly two thirds of the
+behavioural work already exists, so the stories were rewritten to connect existing
+proofs rather than rebuild them.
+
+**Structural note:** epic #40 is at GitHub's 100 sub-issue cap. M4d's stories
+attach under #325 instead, giving #40 → #325 → stories. #325's AC5 *is* Outcome 1,
+so that nesting is meaningful rather than a workaround.
