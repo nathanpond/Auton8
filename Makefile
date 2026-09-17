@@ -125,6 +125,16 @@ infra-reset:
 	# doesn't get word-split into a much wider deletion target.
 	@test -n "$(MOUNT_ROOT)" || { echo "MOUNT_ROOT is empty; refusing to rm -rf"; exit 1; }
 	@test -n "$(POSTGRES_MOUNT)" || { echo "POSTGRES_MOUNT is empty; refusing to rm -rf"; exit 1; }
+	# Say WHICH directory, because it is no longer necessarily this one (#513).
+	# Every worktree resolves MOUNT_ROOT to the main checkout, so `infra-reset`
+	# run from a worktree deletes the shared cluster -- correct under
+	# one-stack-per-machine, and a bigger gun than the command reads like.
+	@echo ""
+	@echo "infra-reset will DELETE the data directories under:"
+	@echo "    $(MOUNT_ROOT)"
+	@test "$(MOUNT_ROOT)" = "$(CURDIR)/infra/mounts" \
+	  || echo "    ^ NOTE: that is NOT this checkout ($(CURDIR)); it is the shared stack."
+	@echo ""
 	rm -rf "$(POSTGRES_MOUNT)" "$(REDIS_MOUNT)" "$(NATS_MOUNT)" "$(SCHEDULER_MOUNT)" "$(DAPR_DASHBOARD_COMPONENTS)" "$(FLOWABLE_DAPR_COMPONENTS)"
 	$(MAKE) infra-prepare
 
@@ -188,6 +198,15 @@ app-dapr: infra-ensure
 # skips a redundant rebuild.
 e2e-install:
 	dotnet build tests/AutoNate.E2E.Tests
+	# The plugin-lifecycle spec uploads plugins/HelloPlugin/dist/HelloPlugin.zip,
+	# which that project's ZipPluginPackage target produces on build. Nothing
+	# else in the solution depends on it, so it has to be asked for explicitly.
+	# `plugins/*/dist/` is gitignored, so in a fresh worktree the file is simply
+	# absent and the spec died inside Playwright's file-upload helper with a
+	# DirectoryNotFoundException that named neither the plugin nor the build
+	# step (#515). ci.yml has built it for exactly this reason since the suite
+	# first ran on a clean runner; the local tiers had not learned it.
+	dotnet build plugins/HelloPlugin
 	# Idempotent: a no-op when the right Chromium build is already on disk.
 	dotnet exec \
 		--runtimeconfig tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.runtimeconfig.json \

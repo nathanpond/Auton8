@@ -37,7 +37,18 @@
 
 set -u
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# `pwd -P`, not `pwd` (#515). The logical form keeps symlinks in the path, and
+# on macOS /tmp IS a symlink to /private/tmp -- which is where this project's
+# scratch worktrees live. MSBuild then writes the reference assembly under the
+# physical path and looks for it under the logical one:
+#
+#   CSC : error CS0006: Metadata file
+#     '/tmp/<worktree>/src/AutoNate.Web/obj/Debug/net10.0/ref/AutoNate.Web.dll'
+#     could not be found
+#
+# The build fails, discovery prints nothing, and the count check reported
+# "discovered 0 tests" -- naming a filter problem for a broken build.
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TIERS="${AUTONATE_TIERS_FILE:-$ROOT/tests/tiers.env}"
 E2E="$ROOT/tests/AutoNate.E2E.Tests"
 
@@ -111,13 +122,27 @@ discovered() {
   # size half of this script only ever measured one of the two projects the tier
   # runs -- the skip half checked both logs, and the counts silently did not.
   project="$1"; filter="$2"
+  out="$(mktemp)"
   if [ -n "$filter" ]; then
-    dotnet test "$project" --nologo --list-tests --filter "$filter" 2>/dev/null \
-      | sed -n 's/^    [A-Za-z].*/x/p' | grep -c x
+    dotnet test "$project" --nologo --list-tests --filter "$filter" > "$out" 2>&1
   else
-    dotnet test "$project" --nologo --list-tests 2>/dev/null \
-      | sed -n 's/^    [A-Za-z].*/x/p' | grep -c x
+    dotnet test "$project" --nologo --list-tests > "$out" 2>&1
   fi
+  rc=$?
+
+  count="$(sed -n 's/^    [A-Za-z].*/x/p' "$out" | grep -c x)"
+
+  # A failed build discovers nothing, which is not the same fact as a filter
+  # matching nothing -- and this function used to send stderr to /dev/null, so
+  # the two were indistinguishable and the caller confidently reported the
+  # wrong one (#515). Report the build failure through a sentinel the caller
+  # can tell apart from a real zero.
+  if [ "$rc" -ne 0 ] && [ "$count" -eq 0 ]; then
+    printf 'BUILD_FAILED %s\n' "$out"
+    return 0
+  fi
+  rm -f "$out"
+  printf '%s\n' "$count"
 }
 
 check_count() {
@@ -128,6 +153,17 @@ check_count() {
     return
   fi
   actual="$(discovered "$project" "$filter")"
+  case "$actual" in
+    "BUILD_FAILED "*)
+      echo "FAIL $label could not be discovered: the project did not build."
+      note "This is a broken build, not a smaller tier. First error:"
+      grep -m1 -E ': error |error [A-Z]+[0-9]+' "${actual#BUILD_FAILED }" \
+        | sed 's/^/    /' | while IFS= read -r line; do note "$line"; done
+      note "Full output: ${actual#BUILD_FAILED }"
+      fail=1
+      return
+      ;;
+  esac
   if [ "$actual" -eq 0 ]; then
     echo "FAIL $label discovered 0 tests. A filter that matches nothing is not a passing tier."
     fail=1

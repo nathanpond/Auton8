@@ -1,4 +1,5 @@
 using System.Net;
+using AutoNate.Web.Tests.Infrastructure;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -12,6 +13,65 @@ namespace AutoNate.Web.Tests;
 [Trait("Category", "Integration")]
 public sealed class ApiNotFoundGuardTests
 {
+    /// <summary>
+    /// The guard is wired OUTSIDE the wwwroot conditional, structurally (#514).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The behavioural test below cannot catch this regression anywhere it
+    /// actually runs. `ci.yml` downloads the SPA bundle into
+    /// `src/AutoNate.Web/wwwroot` before the backend suite, and a developer's
+    /// main checkout has a built `wwwroot/` too — so with the directory present,
+    /// re-nesting the middleware inside
+    /// <c>if (Directory.Exists(app.Environment.WebRootPath))</c> leaves it green
+    /// on GitHub and locally alike. It only went red in a checkout that had
+    /// never built the SPA, which is how #388 was found and is not a state any
+    /// gate reproduces on purpose.
+    /// </para>
+    /// <para>
+    /// So this asserts the source ordering instead, which holds regardless of
+    /// whether wwwroot exists. The guard is a statement about API routing, not
+    /// about static files: an unknown /api path must answer a clean,
+    /// uncacheable 404 whether or not the SPA has been built.
+    /// </para>
+    /// <para>
+    /// What this does NOT cover: that the middleware still runs after routing.
+    /// Nothing calls UseRouting explicitly, so WebApplication inserts it ahead
+    /// of the first user middleware; the behavioural test below is what proves
+    /// <c>GetEndpoint()</c> is populated.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_api_404_guard_is_not_nested_inside_the_wwwroot_conditional()
+    {
+        var program = File.ReadAllLines(
+            Path.Combine(RepoRoot.Path, "src", "AutoNate.Web", "Program.cs"));
+
+        var guard = Array.FindIndex(program, line =>
+            line.Contains("http.Request.Path.StartsWithSegments(\"/api\")", StringComparison.Ordinal)
+            && line.Contains("GetEndpoint() is null", StringComparison.Ordinal));
+        Assert.True(guard >= 0, "the /api 404 guard is gone from Program.cs.");
+
+        var conditional = Array.FindIndex(program, line =>
+            line.StartsWith("if (Directory.Exists(app.Environment.WebRootPath))", StringComparison.Ordinal));
+        Assert.True(
+            conditional >= 0,
+            "the wwwroot conditional is gone from Program.cs; this guard's premise needs rechecking.");
+
+        Assert.True(
+            guard < conditional,
+            $"the /api 404 guard is at line {guard + 1}, inside or after the wwwroot conditional "
+            + $"at line {conditional + 1}. Nested there it disappears in any checkout without "
+            + "src/AutoNate.Spa/dist — every git worktree — and no suite that runs with a built "
+            + "wwwroot can tell (#388, #514).");
+
+        // And it must set no-store where it answers, not merely exist: the
+        // header is the half that made the original failure legible.
+        var body = string.Join("\n", program[guard..Math.Min(guard + 8, program.Length)]);
+        Assert.Contains("no-store", body, StringComparison.Ordinal);
+        Assert.Contains("Status404NotFound", body, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Unknown_api_path_returns_404_not_spa_index()
     {

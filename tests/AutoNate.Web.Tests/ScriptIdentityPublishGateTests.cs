@@ -95,10 +95,27 @@ public sealed class ScriptIdentityPublishGateTests
                 ["username"] = username,
                 ["password"] = "p@ssword123",
             }));
+        // A 302 alone does not mean the login worked: every failure path --
+        // local sign-in disabled, missing credentials, bad password, locked
+        // account -- also returns Results.Redirect, to /login?error=... So the
+        // assertion has to look at WHERE it redirects (#514).
+        //
+        // This matters more than it sounds here: the antiforgery GET above
+        // already minted a dev auto-login cookie for the bootstrap admin, who
+        // holds SuperAdmin. A failed login leaves that cookie in place, the
+        // auto-login middleware skips POSTs, and the requests that follow go out
+        // as super-admin -- so the specs would have passed while asserting
+        // nothing about the account they meant to use.
         Assert.True(
-            login.StatusCode is HttpStatusCode.Found or HttpStatusCode.Redirect,
+            login.StatusCode is HttpStatusCode.Found,
             $"login did not redirect: {(int)login.StatusCode} "
             + await login.Content.ReadAsStringAsync());
+
+        var location = login.Headers.Location?.ToString() ?? string.Empty;
+        Assert.False(
+            location.Contains("error=", StringComparison.Ordinal),
+            $"login failed: it redirected to {location}. Everything after this would have "
+            + "run as the auto-login bootstrap admin rather than the intended account.");
         return client;
     }
 

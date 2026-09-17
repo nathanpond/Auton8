@@ -64,6 +64,39 @@ public sealed class MountsRootScriptTests
         return (process.ExitCode, output.Trim());
     }
 
+    /// <summary>
+    /// The main checkout, located by a DIFFERENT git mechanism than the one
+    /// under test.
+    /// </summary>
+    /// <remarks>
+    /// These tests previously built their expectation from
+    /// <c>RepoRoot.Path</c>, which is whatever checkout the test assembly is
+    /// running in — so in a worktree they compared the script's correct answer
+    /// against the worktree's own path and failed. `make test-full-local` was
+    /// therefore red from every worktree, on the guard rather than on the thing
+    /// guarded, and `/n8-verify` runs in worktrees (#515).
+    ///
+    /// `git worktree list --porcelain` reports the main worktree first, from
+    /// inside a linked worktree as well as from the main checkout. Using it
+    /// rather than <c>--git-common-dir</c> keeps the oracle independent of the
+    /// mechanism `mounts-root.sh` uses, so this cannot pass by agreeing with a
+    /// bug.
+    /// </remarks>
+    private static string MainCheckout()
+    {
+        var (code, output) = RunGit(RepoRoot.Path, "worktree", "list", "--porcelain");
+        Assert.True(code == 0, $"could not list worktrees: {output}");
+
+        var first = output.Split('\n')
+            .FirstOrDefault(line => line.StartsWith("worktree ", StringComparison.Ordinal));
+        Assert.True(first is not null, $"`git worktree list --porcelain` named no worktree:\n{output}");
+
+        return first!["worktree ".Length..].Trim();
+    }
+
+    private static string MainCheckoutMountsRoot() =>
+        Path.Combine(MainCheckout(), "infra", "mounts");
+
     private static (int ExitCode, string Output) RunGit(string workingDirectory, params string[] args)
     {
         var psi = new ProcessStartInfo("git")
@@ -86,7 +119,7 @@ public sealed class MountsRootScriptTests
     {
         if (!ShellAvailable) return;
 
-        var expected = Path.Combine(RepoRoot.Path, "infra", "mounts");
+        var expected = MainCheckoutMountsRoot();
 
         // A real linked worktree, because that is the failing configuration.
         // Asserting against a simulated one would prove nothing about how git
@@ -131,11 +164,12 @@ public sealed class MountsRootScriptTests
         // The complement of the above. A script hard-wired to "always return
         // some other directory" would satisfy the worktree case while breaking
         // every ordinary run, so the normal path is asserted rather than assumed.
-        var (code, output) = RunFrom(RepoRoot.Path);
+        var mainCheckout = MainCheckout();
+        var (code, output) = RunFrom(mainCheckout);
 
         Assert.True(code == 0, $"mounts-root.sh failed from the main checkout: {output}");
         Assert.Equal(
-            new DirectoryInfo(Path.Combine(RepoRoot.Path, "infra", "mounts")).FullName,
+            new DirectoryInfo(Path.Combine(mainCheckout, "infra", "mounts")).FullName,
             new DirectoryInfo(output).FullName);
     }
 
@@ -165,16 +199,41 @@ public sealed class MountsRootScriptTests
         // service keeps using the shared root and nothing looks obviously wrong.
         var offenders = File.ReadAllLines(ComposePath)
             .Select((line, index) => (Line: line, Number: index + 1))
+            // Every checkout-relative bind mount, not only `./mounts/` (#513).
+            // The narrow form left `./postgres/init`, `./scripts/...` and
+            // `./keycloak/...` invisible -- and the init directory was observed
+            // mounted from a worktree while the ownership check called the
+            // stack ok, because that check reads the data mount alone. A
+            // reset would then re-initialise the shared cluster from a
+            // branch's SQL.
+            // `source:destination`, so a command argument that happens to be a
+            // relative path (`- ./daprd` in the sidecars' command arrays) is not
+            // mistaken for a mount.
             .Where(entry => System.Text.RegularExpressions.Regex.IsMatch(
-                entry.Line, @"^\s*-\s+\./mounts/"))
+                entry.Line, @"^\s*-\s+\./[^\s:]+:"))
+            // Tracked SOURCE files, deliberately read from the running
+            // checkout: you want this branch's init SQL and seed data, not the
+            // main checkout's. They are listed rather than pattern-matched so
+            // that adding a fourth is a deliberate act with a reason attached.
+            //
+            // The residual hazard is worth knowing: `infra-reset` empties the
+            // SHARED cluster, and the next start re-initialises it from
+            // whichever checkout runs it -- so a reset from a worktree seeds the
+            // shared stack from that branch's SQL. Both are :ro and only read on
+            // an empty data directory.
+            .Where(entry => !entry.Line.Contains("./postgres/init:", StringComparison.Ordinal)
+                && !entry.Line.Contains("./scripts/bootstrap-jetstream.sh:", StringComparison.Ordinal)
+                && !entry.Line.Contains("./keycloak/realm-export.json:", StringComparison.Ordinal))
             .Select(entry => $"docker-compose.yml:{entry.Number}: {entry.Line.Trim()}")
             .ToList();
 
         Assert.True(
             offenders.Count == 0,
             "These bind mounts resolve against the compose file's own directory, so in a "
-            + "git worktree they point at an empty path and the stack comes up on a blank "
-            + "cluster (#505). Use ${AUTONATE_MOUNTS_ROOT:-./mounts} instead.\n  "
+            + "git worktree they point into that worktree rather than at the shared stack "
+            + "(#505, #513). Route them through ${AUTONATE_MOUNTS_ROOT} — or, for a tracked "
+            + "source directory that is deliberately read from this checkout, add it to the "
+            + "allowlist in this test with the reason.\n  "
             + string.Join("\n  ", offenders));
     }
 
@@ -187,7 +246,13 @@ public sealed class MountsRootScriptTests
         // named volume nobody meant — shows up as a number that moved.
         var text = File.ReadAllText(ComposePath);
         var through = System.Text.RegularExpressions.Regex
-            .Matches(text, @"^\s*-\s+\$\{AUTONATE_MOUNTS_ROOT:-\./mounts\}/", System.Text.RegularExpressions.RegexOptions.Multiline)
+            // `:?`, not `:-`. The default was removed on purpose (#513): it was
+            // the silent fallback every unconverted entry point could hit, so
+            // compose now refuses to start without the variable rather than
+            // quietly resolving `./mounts` against its own directory. Pinning
+            // the `:?` form here means restoring a default is a failure, not a
+            // detail — which is the whole reason the default went.
+            .Matches(text, @"^\s*-\s+\$\{AUTONATE_MOUNTS_ROOT:\?[^}]*\}/", System.Text.RegularExpressions.RegexOptions.Multiline)
             .Count;
 
         Assert.True(
@@ -226,8 +291,22 @@ public sealed class MountsRootScriptTests
         // And it must actually read a container's mount, not merely be present:
         // a function that returns 0 unconditionally satisfies the ordering
         // check above while checking nothing.
-        var body = string.Join("\n", script);
-        Assert.Contains("docker inspect autonate-postgres", body, StringComparison.Ordinal);
+        //
+        // Scoped to the FUNCTION, not the file (#513/#514). The previous form
+        // searched the whole script including comments, so gutting the body to
+        // `return 0` and leaving `# was: docker inspect ... /var/lib/postgresql/data`
+        // anywhere in the file kept all six facts green -- the
+        // comment-satisfiable pattern this repo has now filed four times.
+        var functionStart = Array.FindIndex(script, line =>
+            line.StartsWith("check_stack_ownership()", StringComparison.Ordinal));
+        Assert.True(functionStart >= 0, "check_stack_ownership is no longer defined.");
+        var functionEnd = Array.FindIndex(script, functionStart, line => line == "}");
+        Assert.True(functionEnd > functionStart, "could not find the end of check_stack_ownership.");
+
+        var body = string.Join("\n", script[functionStart..(functionEnd + 1)]
+            .Where(line => !line.TrimStart().StartsWith('#')));
+
+        Assert.Contains("docker inspect", body, StringComparison.Ordinal);
         Assert.Contains("/var/lib/postgresql/data", body, StringComparison.Ordinal);
     }
 }

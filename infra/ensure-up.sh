@@ -201,6 +201,49 @@ record_executor_build_hash() {
   printf '%s\n' "$1" > "$EXECUTOR_BUILD_STAMP_FILE"
 }
 
+# Is the stack that is already running serving THIS checkout's data?
+#
+# "Required infrastructure is already running and ready" was true of the
+# containers and false of the data (#513): a stack started against a different
+# AUTONATE_MOUNTS_ROOT answers every health check and every port probe while
+# serving another directory entirely. Because `-p infra` pins the project name,
+# a second checkout does not get a second stack -- it silently inherits, or
+# replaces, the first one's.
+#
+# Only the postgres data mount is checked. It is the one that carries state
+# worth losing, and a stack cannot have it right while having the others wrong:
+# they all come from the same compose file and the same variable.
+assert_stack_serves_this_checkout() {
+  local container_id actual expected
+  container_id="$(compose_service_container_id postgres 2>/dev/null || true)"
+  [[ -n "$container_id" ]] || return 0
+
+  actual="$(docker inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' \
+    2>/dev/null || true)"
+  # An empty answer means the mount destination moved (a Postgres image bump
+  # relocates PGDATA) -- which is exactly when a silent pass would be worst, so
+  # it is a failure rather than a shrug.
+  [[ -n "$actual" ]] || fail "Could not read the running postgres container's data mount.
+  If the postgres image changed, the data directory inside the container moved and
+  this check needs updating alongside infra/docker-compose.yml."
+
+  expected="$MOUNTS_ROOT/postgres/data"
+  # Resolved, because /tmp is a symlink to /private/tmp on macOS and two names
+  # for one directory would otherwise read as a mismatch.
+  actual="$(cd "$actual" 2>/dev/null && pwd -P || printf '%s' "$actual")"
+  expected="$(cd "$expected" 2>/dev/null && pwd -P || printf '%s' "$expected")"
+
+  if [[ "$actual" != "$expected" ]]; then
+    fail "The running stack serves a different data directory.
+  stack mounts  : $actual
+  this checkout : $expected
+  Both cannot run at once: the compose project name is 'infra' either way, so
+  starting this one would replace the other. Stop that stack first, or run from
+  the checkout that owns it."
+  fi
+}
+
 compose_service_container_id() {
   "${COMPOSE[@]}" ps -a -q "$1"
 }
@@ -369,22 +412,38 @@ main() {
 
   docker info >/dev/null 2>&1 || fail "Docker is not available. Start Docker Desktop and try again."
 
-  mkdir -p \
-    "$REPO_ROOT/infra/mounts/postgres/data" \
-    "$REPO_ROOT/infra/mounts/redis/data" \
-    "$REPO_ROOT/infra/mounts/nats/data" \
-    "$REPO_ROOT/infra/mounts/dapr-scheduler/data" \
-    "$REPO_ROOT/infra/mounts/dapr-dashboard/components" \
-    "$REPO_ROOT/infra/mounts/flowable-dapr/components" \
-    "$REPO_ROOT/infra/mounts/flowable" \
-    "$REPO_ROOT/infra/mounts/hocuspocus" \
-    "$REPO_ROOT/infra/mounts/executor" \
-    "$REPO_ROOT/infra/mounts/dapr-placement"
+  # BEFORE anything is created or started, not only on the already-ready path.
+  # Measured while writing this: with the check downstream, a run against a
+  # foreign AUTONATE_MOUNTS_ROOT got as far as `compose up`, which created the
+  # bind source as an empty directory and recreated postgres against it -- the
+  # #505 failure reproducing inside its own fix. A guard that runs after the
+  # damage is a report, not a guard.
+  assert_stack_serves_this_checkout
 
-  cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$REPO_ROOT/infra/mounts/dapr-dashboard/components/"
-  cp "$REPO_ROOT"/infra/dapr/components/pubsub.yaml "$REPO_ROOT/infra/mounts/flowable-dapr/components/"
-  sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml"
-  rm -f "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml.bak"
+  # $MOUNTS_ROOT, not $REPO_ROOT (#513). These are the directories the
+  # CONTAINERS read, and compose resolves them through AUTONATE_MOUNTS_ROOT --
+  # so building the tree relative to this checkout wrote the Dapr components
+  # into a worktree while the sidecar kept loading the main checkout's copy.
+  # Observed: a pubsub.yaml written into the worktree at 20:04 against a
+  # container mounting the shared path, with nothing reporting the divergence.
+  mkdir -p \
+    "$MOUNTS_ROOT/postgres/data" \
+    "$MOUNTS_ROOT/redis/data" \
+    "$MOUNTS_ROOT/nats/data" \
+    "$MOUNTS_ROOT/dapr-scheduler/data" \
+    "$MOUNTS_ROOT/dapr-dashboard/components" \
+    "$MOUNTS_ROOT/flowable-dapr/components" \
+    "$MOUNTS_ROOT/flowable" \
+    "$MOUNTS_ROOT/hocuspocus" \
+    "$MOUNTS_ROOT/executor" \
+    "$MOUNTS_ROOT/dapr-placement"
+
+  # The SOURCE stays $REPO_ROOT: these are tracked files, and the point of
+  # running from a branch is to use that branch's components.
+  cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$MOUNTS_ROOT/dapr-dashboard/components/"
+  cp "$REPO_ROOT"/infra/dapr/components/pubsub.yaml "$MOUNTS_ROOT/flowable-dapr/components/"
+  sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' "$MOUNTS_ROOT/flowable-dapr/components/pubsub.yaml"
+  rm -f "$MOUNTS_ROOT/flowable-dapr/components/pubsub.yaml.bak"
 
   local desired_flowable_hash
   desired_flowable_hash="$(compute_flowable_build_hash)"
