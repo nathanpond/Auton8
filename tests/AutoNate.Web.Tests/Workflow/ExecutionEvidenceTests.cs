@@ -214,6 +214,7 @@ public sealed class ExecutionEvidenceTests
             ("Compensation Boundary", "variable-written"),
             ("Compensation Marker", "variable-written"),
             ("Compensation End", "instance-ends"),
+            ("Complex Gateway", "variable-written"),
             ("Conditional Boundary", "host-cancelled"),
             ("Conditional Start Event", "variable-written"),
             ("Data Object Reference", "value-carried"),
@@ -318,7 +319,7 @@ public sealed class ExecutionEvidenceTests
         // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
-        const int Ceiling = 5;
+        const int Ceiling = 4;
 
         var unaccounted = Elements()
             .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)

@@ -206,6 +206,28 @@ internal static class BpmnDiagram
     }
 
     /// <summary>
+    /// Does this element choose its branch with a routing script (#533)?
+    /// </summary>
+    /// <remarks>
+    /// The routing complement asks one question: did this diagram ask the element
+    /// to take ONE branch? For an exclusive or inclusive gateway that is
+    /// conditions on the outgoing flows (<see cref="ConditionalFlowsFrom"/>). A
+    /// complex gateway's authored flows carry no conditions — publish adds them —
+    /// so the author's instruction lives in the gateway's own
+    /// <c>&lt;bpmn:script&gt;</c> instead. Same question, read where this element
+    /// answers it.
+    /// </remarks>
+    internal static bool RoutesByScript(string xml, string id)
+    {
+        var element = XDocument.Parse(xml).Descendants()
+            .FirstOrDefault(e => (string?)e.Attribute("id") == id);
+
+        return element is not null
+               && element.Name.LocalName == "complexGateway"
+               && element.Elements().Any(child => child.Name.LocalName == "script");
+    }
+
+    /// <summary>
     /// An identity carried as an ATTRIBUTE rather than a child element (#532).
     /// </summary>
     /// <remarks>

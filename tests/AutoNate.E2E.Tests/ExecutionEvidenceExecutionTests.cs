@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(43, DeclaredEffects().Count);
+        Assert.Equal(44, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -187,6 +187,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // never runs. An observer that accepted "the handler is in the diagram"
         // rather than "the engine recorded it writing" is satisfied by this.
         { "variable-written", "variable-written:no-compensation-thrown", "nothing throws compensation, so the handler never runs", "not-entered" },
+
+        // THE SAME GATEWAY, ROUTING CORRECTLY, THE OTHER WAY (#533). Real,
+        // deployable and working: the script returns the flow to the branch that
+        // does NOT write `proof`. An observer satisfied by this is one that reads
+        // "the diagram contains a script that writes proof" rather than "the
+        // engine recorded this element routing to it".
+        { "variable-written", "variable-written:complex-routes-away", "the routing script picks the branch that writes nothing", "entered" },
 
         // A real, correctly wired reference whose declaration simply carries no
         // value (#534). Deployable, resolving, and the variable is not there.
@@ -374,6 +381,19 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + """<startEvent id="Start_1"/><userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
             + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Parked_1"/>"""
             + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+        // The same complex gateway, routing correctly to the other branch.
+        "variable-written:complex-routes-away" => WrapIn(key, "",
+            """<startEvent id="Start_1"/>"""
+            + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""
+            + """<script>return 'fb';</script></complexGateway>"""
+            + """<scriptTask id="S_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+            + """<userTask id="Other_1" name="other"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f0" sourceRef="Start_1" targetRef="Ev_1"/>"""
+            + """<sequenceFlow id="fa" sourceRef="Ev_1" targetRef="S_1"/>"""
+            + """<sequenceFlow id="fb" sourceRef="Ev_1" targetRef="Other_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="S_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f5" sourceRef="Other_1" targetRef="End_2"/>"""),
 
         // The compensation apparatus, complete and deployable, with an ORDINARY
         // end event where the compensate throw would be (#531). Ev_1 is the
@@ -1345,6 +1365,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // this row the second half is an ATTRIBUTE -- which the keying already
         // supports, because it is a pair of strings rather than a pair of shapes.
         [("subProcess", "triggeredByEvent")] = "eventSubProcess",
+
+        // #533, and NOT the value the story predicted -- which is exactly why its
+        // AC asked for this to be measured against the EXPANDED deployment rather
+        // than recalled. Flowable 8.0.0 has no ComplexGatewayActivityBehavior, so
+        // publish expands the element, and MEASURED the engine records the
+        // author's `Ev_1` as a scriptTask: the cell failed with "ran, but as a
+        // 'scriptTask' rather than a 'exclusiveGateway'" and passes with this.
+        //
+        // `ComplexGatewayExecutionTests`' "recorded as activityType
+        // exclusiveGateway" is a true statement about an IMPORTED complexGateway
+        // that Auton8 never expanded. That is the finding which motivated the
+        // expansion, not a description of what the expansion produces -- and
+        // taking it for the latter is what predicted the wrong value here.
+        [("complexGateway", null)] = "scriptTask",
     };
 
 
@@ -1629,7 +1663,25 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 // does not, and scoping by tag left the inclusive row defeated by
                 // the same listener attack the exclusive row now catches.
                 var targets = FlowTargetsOf(xml, "Ev_1");
-                if (targets.Count > 1 && ConditionalFlowsFrom(xml, "Ev_1"))
+                // OR A ROUTING SCRIPT (#533). The gate asks whether this diagram
+                // asked the element to take ONE branch. A complex gateway's
+                // authored flows carry no conditions -- publish adds them -- so
+                // the author's instruction is the gateway's own <script>.
+                //
+                // WHAT IT GUARDS HERE IS FORKING, and that is narrower than the
+                // listener attack it guards on the other three gateways. Measured
+                // while checking: publish gives the generated routing task its own
+                // id (`Ev_1__autonateRoute`), so a write from inside the routing
+                // script is already rejected by the ATTRIBUTION check above, one
+                // step earlier -- with or without this clause. What is left for
+                // the complement is a complex gateway that takes BOTH branches
+                // rather than choosing, which is a real failure mode for this
+                // element (an unexpanded complexGateway silently picks a branch;
+                // a broken expansion could fork) but is not reachable by mutating
+                // the diagram, only by breaking publish. So it is kept and
+                // disclosed rather than claimed as exercised.
+                if (targets.Count > 1
+                    && (ConditionalFlowsFrom(xml, "Ev_1") || RoutesByScript(xml, "Ev_1")))
                 {
                     var entered = await EntryOrderAsync(api, instance);
                     var alsoRan = targets.Where(t => t != wrote && entered.ContainsKey(t)).ToList();
@@ -1968,6 +2020,24 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // is observed. `task-appears` is already container-aware -- it falls
             // back to the ids nested inside Ev_1 -- so the handler's own user task
             // is exactly the shape it looks for (#532).
+            // `GatewayDiagram` cannot be reused: publish EXPANDS this element --
+            // a script task in front, conditions synthesised onto its own
+            // outgoing flows -- so the author writes a routing script returning a
+            // FLOW ID, not conditions. The script sits on one branch and a user
+            // task on the other, so `proof` can only be written if the gateway
+            // routed (#533).
+            "Complex Gateway" => Wrap("",
+                """<startEvent id="Start_1"/>"""
+                + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""
+                + """<script>return 'fa';</script></complexGateway>"""
+                + """<scriptTask id="S_1" name="proof" scriptFormat="javascript" autonate:runAs="workflowAuthor"><script>variables.set('proof', 'ran');</script></scriptTask>"""
+                + """<userTask id="Other_1" name="other"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f0" sourceRef="Start_1" targetRef="Ev_1"/>"""
+                + """<sequenceFlow id="fa" sourceRef="Ev_1" targetRef="S_1"/>"""
+                + """<sequenceFlow id="fb" sourceRef="Ev_1" targetRef="Other_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="S_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f5" sourceRef="Other_1" targetRef="End_2"/>"""),
+
             "Event Sub-Process" => Wrap("",
                 """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
                 + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""

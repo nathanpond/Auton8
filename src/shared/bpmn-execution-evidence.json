@@ -633,7 +633,7 @@
       "name": "Complex Gateway",
       "localName": "complexGateway",
       "eventDefinition": null,
-      "declaredEffect": null,
+      "declaredEffect": "variable-written",
       "liveEngineTestsMentioningIt": [
         "ComplexGatewayExecutionTests",
         "ComplexGatewayStudioRoundTripTests",
