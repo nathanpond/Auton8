@@ -576,6 +576,8 @@ combined with AND on every path.
 
 ## Ad-hoc — 2026-09-03 — Wildcard inversion found; advised, not fixed (#72, GHSA-vrw7-qxhw-m9q8)
 
+_— reconciled by /n8-replan 2026-09-18: the owner chose "has any value"; the fix is #574, and the three sibling divergences it did not cover are #575, #576 and #577._
+
 _— reconciled by /n8-replan 2026-09-05: #108 and #104 now carry the constraint; M3 description updated._
 
 The agreement property's first run reported 69 leaks and 539 lockouts, all on
@@ -8176,3 +8178,65 @@ so that nesting is meaningful rather than a workaround.
   **#570** and paired with #481 — two independent timeouts under CI load look
   more like a resource ceiling than two bugs, and a merge gate that reddens on
   unrelated work teaches people to re-run rather than read.
+
+## Ad-hoc — 2026-09-18 — M5 replanned: six stories asserted things the code contradicts
+
+- **Change:** `/n8-replan M5` rewrote #78, #104, #108, #169, #231 and #79, closed #233
+  and #237, filed #573–#579, created `M9: v1.0 completeness`, and renumbered the audit
+  milestone to **M10**.
+  **Why:** M5 was planned 2026-09-05 and M4b, M4c and M4d landed underneath it. Three
+  independent executor simulations, each verified against source before acting, found
+  premises that the code contradicts rather than details that had moved:
+  - **#78's central premise was false.** It called stable node targeting "the whole
+    blocker"; `data-element-id` is stock diagram-js, eight spec files already use it,
+    and `workflow.js:93` depends on it. Its M3 sequencing note was discharged *and*
+    wrong about what M3 shipped (the Node/`isolated-vm` pivot, not GraalVM).
+  - **#108 had two false premises.** "Fetch every execution from Flowable" — capped at
+    200, so the list silently truncates; and a cited code line that does not exist. Its
+    "same executions, same order, as before" AC was unsatisfiable either way.
+  - **#104 named endpoints that do not exist** (single-execution read, variables read)
+    and named `IFlowableReadThrough` as its mechanism when that interface's own doc
+    excludes list endpoints.
+  - **#169 aimed at publish; the defect is at save** — `ApplyProcessMetadata` renames
+    one process and nothing rewrites `participant/@processRef`.
+  - **#231 had no acceptance criteria at all**, and #237 had been folded into it
+    without its body saying so.
+  **Affects:** M5 only. M6–M8 have zero references; M10's audit emphases reference M5
+  *outcomes*, which did not change, so that description is untouched.
+
+- **Owner decisions taken during the replan, 2026-09-18:**
+  - **The wildcard fix goes in the direction of "has any value"**, accepting that
+    existing `tag=*` grants widen. Noted during planning and worth recording: the
+    widening runs both ways — a `tag=*` **deny** stops denying unset-tag rows and
+    starts denying set-tag ones, which the "grants widen" framing did not cover.
+  - **All four evaluator divergences close**, not just the wildcard, and an
+    uncompilable **deny fails the request closed** rather than being skipped. A skipped
+    allow locks out; a skipped deny leaks.
+  - **The executions list shows everything.** The 200-row truncation is the bug.
+  - **Loop markers keep being refused** (#233 closed with that reason, which epic #40's
+    AC explicitly permits as a correct outcome).
+  - **#231's join has no timeout** — documented as the author's responsibility. The
+    alternative was not a peer option: BPMN attaches boundary events to activities
+    only and no gateway here has a timer affordance, so "author sets a timeout" would
+    first require expanding the gateway into an activity.
+  - **A new `M9: v1.0 completeness` was inserted** and the audit milestone renumbered
+    to M10, so the audit runs last against a complete surface.
+
+- **Decision:** the three closed issues mentioning "M9" were left alone; only the two
+  open ones (#75, #84) were updated.
+  **Why:** the skill's rule is that closed issues are history. #148 in particular
+  *records a previous renumber* ("M4–M7 renumbered to M6–M9"); editing it would
+  falsify the record it exists to keep. The five ledger lines above line 1517 that say
+  "M9" meaning the audit milestone are likewise left as written — this entry is where a
+  reader finds the correction.
+
+- **Constraint discovered, worth knowing before the next epic grows:** epic #40 is at
+  GitHub's **100 sub-issue cap**, so #573, #578 and #579 could not be attached to it.
+  They are parentless, which matches the precedent every verification-filed bug in M4d
+  already set (#544, #552, #561 are all parentless, with their records on the milestone
+  PR). Any further child of #40 will hit the same wall.
+
+- **Corrected in passing:** `CLAUDE.md:131` cited `ExecutionOracleSizeTests`' **29**;
+  the pin is **49** (`ExecutionOracleSizeTests.cs:40`). Found while replanning #231,
+  and worth fixing on its own — it sat in the paragraph explaining why pins are exact
+  rather than floors, in the file loaded into every session in this repo.
