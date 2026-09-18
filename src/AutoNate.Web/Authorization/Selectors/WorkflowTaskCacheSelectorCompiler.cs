@@ -18,6 +18,30 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
         ArgumentNullException.ThrowIfNull(context);
 
         var predicate = ExpressionUtilities.AlwaysTrue<WorkflowTaskCache>();
+
+        // PATH IDS ARE HONOURED (#575).
+        //
+        // They were not, and the reason is worth recording: SelectorCompilerBase
+        // does this filter for every kind that derives from it, but its
+        // IdSelector is typed `Expression<Func<T, Guid>>` and this table keys on
+        // a string. So these two compilers implement ISelectorCompiler<T>
+        // directly, and inherited nothing -- including the path filter nobody
+        // noticed was missing.
+        //
+        // Until now `/workflowtask/tid-1[...]` matched exactly one row in memory
+        // and EVERY row in SQL. Not a narrower answer: an unrelated one.
+        //
+        // Ordinal by construction -- `Contains` lowers to `IN (...)`, and text
+        // equality in Postgres is byte comparison -- which is what
+        // InMemorySelectorEvaluator's `StringComparer.Ordinal` asks for.
+        if (ast.Path.Ids is { } ids && !ast.Path.IdsAreWildcard)
+        {
+            var idList = ids.ToList();
+            predicate = ExpressionUtilities.AndAlso(
+                predicate,
+                t => idList.Contains(t.FlowableTaskId));
+        }
+
         if (ast.Predicate is { } pred)
         {
             foreach (var expr in pred.Expressions)
@@ -54,6 +78,22 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
         CompilationContext context,
         Expression<Func<WorkflowTaskCache, string?>> accessor)
     {
+        // NESTED PREDICATES RESOLVE THROUGH THE EDGE GRAPH (#575).
+        //
+        // Checked FIRST, before the wildcard, because that is the order
+        // InMemorySelectorEvaluator.EvalTag uses: a tag carrying a nested
+        // predicate never reaches the leaf-value branch there, so it must not
+        // reach it here either.
+        //
+        // `tag.Nested` used to be dropped on the floor, which meant
+        // `[assignee=user[supervisor=user]]` compiled to plain
+        // `assignee = <actor>` -- a different set, leaking one way and locking
+        // out the other.
+        if (tag.Nested is not null)
+        {
+            return CompileNestedUserPredicate(tag, context, accessor);
+        }
+
         var p = accessor.Parameters[0];
 
         // THE WILDCARD HAS ITS OWN FORM, BRANCHED BEFORE THE VALUE IS RESOLVED (#574).
@@ -85,6 +125,25 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
         CompilationContext context,
         Expression<Func<WorkflowTaskCache, string[]>> accessor)
     {
+        // An array tag carrying a nested predicate compiles to false, because
+        // that is what the in-memory evaluator answers (#575).
+        //
+        // The reason is worth stating exactly, because it is not "arrays cannot
+        // nest": FlowableInstanceAuthorizers.BuildFacts supplies only assignee,
+        // processkey and definitionkey, so `candidateuser` is never a fact at
+        // all. The evaluator's nested branch then hits `actual is null` and
+        // returns false before the edge walk.
+        //
+        // Which means these two tags are advertised in CoreEntityTypes
+        // (WorkflowTask.tags) and compile in SQL while being permanently
+        // invisible in memory -- the same defect #576 names for status and
+        // tenant, on a second pair of tags. Filed separately; agreeing with the
+        // evaluator as it stands is this story's job.
+        if (tag.Nested is not null)
+        {
+            return ExpressionUtilities.AlwaysFalse<WorkflowTaskCache>();
+        }
+
         var p0 = accessor.Parameters[0];
 
         // AN ARRAY TAG'S WILDCARD MEANS "NON-EMPTY" (#574).
@@ -117,6 +176,53 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
             accessor.Body,
             Expression.Constant(value, typeof(string)));
         return Expression.Lambda<Func<WorkflowTaskCache, bool>>(containsCall, p);
+    }
+
+    // Mirrors InMemorySelectorEvaluator's nested branch EXACTLY, including the
+    // shapes it answers `false` to (#575).
+    //
+    // Those shapes return AlwaysFalse rather than throwing, and that is the
+    // deliberate part. Throwing would raise SelectorCompilationException, which
+    // Authorizer catches and turns into "skip this grant" -- and a skipped DENY
+    // stops denying (#577). AlwaysFalse is also what the in-memory evaluator
+    // answers for the same input, so the two paths agree, which is the whole
+    // point of the milestone this lands in.
+    //
+    // NOTE the inner PinnedId: the in-memory evaluator ignores it and always
+    // walks the ACTOR's outbound edges, while RecordSelectorCompiler honours
+    // `PinnedId ?? actor`. Mirrored here on the in-memory side on purpose --
+    // agreeing with the evaluator is this story's job, and the record pair's
+    // disagreement is its own defect, filed separately rather than fixed here
+    // by widening this story's blast radius.
+    private static Expression<Func<WorkflowTaskCache, bool>> CompileNestedUserPredicate(
+        TagExpr tag,
+        CompilationContext context,
+        Expression<Func<WorkflowTaskCache, string?>> accessor)
+    {
+        if (tag.Value is not CurrentUserValue
+            || tag.Nested!.Expressions.Count != 1
+            || tag.Nested.Expressions[0] is not TagExpr inner
+            || inner.Nested is not null
+            || inner.Value is not CurrentUserValue)
+        {
+            return ExpressionUtilities.AlwaysFalse<WorkflowTaskCache>();
+        }
+
+        var innerEdgeKind = inner.Tag.ToLowerInvariant();
+        var actorId = context.ActorUserIdString;
+        var db = context.Db;
+
+        // "the actor has an outbound <innerEdgeKind> edge to the user this
+        // row's tag names" -- the outer value identifies some user U, and the
+        // nested predicate constrains U, exactly as the evaluator reads it.
+        return ExpressionUtilities.Compose<WorkflowTaskCache, string?>(
+            accessor,
+            actual => actual != null && db.EntityEdges.Any(e =>
+                e.EdgeKind == innerEdgeKind
+                && e.FromKind == EntityKinds.User
+                && e.FromId == actorId
+                && e.ToKind == EntityKinds.User
+                && e.ToId == actual));
     }
 
     // Returns the VALUE a tag was given. The wildcard is not a value and is

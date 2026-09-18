@@ -8289,3 +8289,58 @@ so that nesting is meaningful rather than a workaround.
   check caught it before `--no-build` could re-run a stale assembly and report a
   false green. That is the round-three lesson holding.
   **Issue:** #574
+
+## M5 execution — #575 (path ids and nested predicates on the SQL path)
+
+- **Decision:** both are **honoured**, not refused.
+  **Why:** the AC allowed either, but refusal is the weaker option here. Path
+  ids are trivially expressible (`IN (...)`), and the nested form already has a
+  working shape in `RecordSelectorCompiler` to copy. Refusing would also have
+  meant a `SelectorCompilationException`, which `Authorizer` turns into "skip
+  this grant" — and a skipped deny fails open (#577).
+  **Issue:** #575
+
+- **Decision:** shapes the in-memory evaluator answers `false` to — outer value
+  not `=user`, inner not `=user`, nesting deeper than two hops — compile to
+  `AlwaysFalse` rather than throwing.
+  **Why:** it reads like the defect this story is about, so it is worth being
+  explicit. It is the opposite. Today those shapes compile to
+  `assignee = <actor>` — *a different predicate*, which is the silent wrongness
+  AC3 names. `AlwaysFalse` is the evaluator's own answer for the same input, so
+  the two paths agree, which is what AC1 and AC2 ask for.
+  **Cost if wrong:** an unrepresentable deny denies nothing rather than failing
+  closed. Flagged on the issue before implementing, and noted for #577.
+  **Issue:** #575
+
+- **Decision:** the inner `PinnedId` is **ignored**, mirroring
+  `InMemorySelectorEvaluator`, which always walks the actor's outbound edges.
+  **Why:** `RecordSelectorCompiler` and `RecordSelectorSqlCompiler` honour
+  `PinnedId ?? actor` here, so the evaluator and the record pair already
+  disagree on this. Honouring it in the cache compilers would have made them
+  agree with the record pair and disagree with the evaluator — creating a new
+  divergence inside a milestone named for closing them. Mirroring the evaluator
+  is this story's job; the record pair's disagreement is its own defect.
+  **Cost if wrong:** a pinned inner id is ignored on the cache path.
+  **Issue:** #575
+
+- **Decision:** `ExpressionUtilities.Compose` inlines the accessor instead of
+  using `Expression.Invoke`.
+  **Why:** an invocation node survives into the query tree and EF Core
+  translates it only where it has been taught to. A replaced parameter leaves a
+  tree indistinguishable from a hand-written one, which needs no such luck.
+  **Issue:** #575
+
+- **Decision:** the agreement property's edge fixture is declared once, in
+  `SelectorGenerators.ActorOutboundEdges`, and read by both the in-memory
+  evaluator's map and the `entity_edges` rows the SQL subquery reads.
+  **Why:** two hand-kept copies of a fixture is how an agreement property starts
+  comparing two different worlds and calling the result agreement.
+  **Issue:** #575
+
+- **Discovered work, filed not fixed:** `candidateuser` / `candidategroup` are
+  advertised and compile in SQL but are never supplied as in-memory facts — the
+  #576 defect class on a second tag pair, already pinned by
+  `The_known_candidate_tag_divergence_still_holds` but with no issue to end it.
+  Filed as **#581** rather than folded into #576, whose AC name only its own two
+  tags.
+  **Issue:** #575 → #581
