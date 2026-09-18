@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(47, DeclaredEffects().Count);
+        Assert.Equal(49, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -532,6 +532,36 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         {
             await PublishAsync(api, key, xml);
             instance = await StartAsync(api, key);
+
+            // A TRIGGER THAT FIRES INTO A RUNNING INSTANCE (#528). A message
+            // boundary waits on its host, so the message has to arrive after the
+            // instance exists and the host is parked -- the mirror of the
+            // self-start hook, which fires before there is an instance at all.
+            // Firing either at the other's moment reaches nothing.
+            if (AfterStartTriggerMessage(name, key) is { } afterStart)
+            {
+                var host = AttachedHostOf(xml, "Ev_1");
+                if (host is not null)
+                {
+                    // Parked first, or the message arrives before anything is
+                    // waiting for it and the correlator answers no-match. Not a
+                    // fixed sleep: a loaded machine makes this slower rather than
+                    // flaky.
+                    var parked = false;
+                    for (var attempt = 0; attempt < 40 && !parked; attempt++)
+                    {
+                        parked = (await EntryOrderAsync(api, instance)).ContainsKey(host);
+                        if (!parked) await Task.Delay(250);
+                    }
+
+                    Assert.True(
+                        parked,
+                        $"{name}: the host '{host}' never started, so there was nothing for "
+                        + "the message to interrupt (#528).");
+                }
+
+                await DeliverMessageAsync(api, key, afterStart, name);
+            }
         }
 
         // ENTRY, AND OF THE RIGHT KIND (#412).
@@ -977,6 +1007,54 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         _ => null
     };
 
+    /// <summary>
+    /// The message a self-starting row needs delivered after publish (#528).
+    /// </summary>
+    /// <remarks>
+    /// The message counterpart of <see cref="SelfStartTriggerSignal"/>, and it
+    /// goes through <c>POST /api/workflow-messages</c> rather than the bus.
+    /// #524's queue path works and has its own end-to-end proof; routing the
+    /// oracle through Dapr as well would make a question about a BPMN element
+    /// depend on a sidecar, and these cells stay Flowable-only like the other
+    /// forty-five. The story says explicitly that either trigger path will do.
+    /// </remarks>
+    private static string? SelfStartTriggerMessage(string name, string key) => name switch
+    {
+        "Message Start Event" => $"ms{key}",
+        _ => null
+    };
+
+    /// <summary>
+    /// The message a row needs delivered once its instance is running (#528).
+    /// </summary>
+    /// <remarks>
+    /// The mirror of the two above, and the reason they are separate hooks rather
+    /// than one: a start trigger fires BEFORE there is an instance, and a boundary
+    /// trigger has to fire AFTER one exists and its host is parked. Firing either
+    /// at the other's moment reaches nothing.
+    /// </remarks>
+    private static string? AfterStartTriggerMessage(string name, string key) => name switch
+    {
+        "Message Boundary" => $"mb{key}",
+        _ => null
+    };
+
+    /// <summary>Deliver a message to a published workflow through Auton8's API.</summary>
+    private static async Task DeliverMessageAsync(
+        IAPIRequestContext api, string key, string messageName, string name)
+    {
+        var delivered = await api.PostAsync("/api/workflow-messages/", new APIRequestContextOptions
+        {
+            DataObject = new { processKey = key, messageName }
+        });
+
+        Assert.True(
+            delivered.Ok,
+            $"{name}: delivering '{messageName}' to '{key}' failed with {delivered.Status} "
+            + $"{await delivered.TextAsync()}. The element cannot be triggered from inside its "
+            + "own diagram, so this cell proves nothing without it (#528).");
+    }
+
     private static async Task<string> SelfStartAsync(
         IAPIRequestContext api, string key, string xml, string name)
     {
@@ -988,9 +1066,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
         await PublishAsync(api, key, xml);
 
-        var trigger = SelfStartTriggerSignal(name, key);
+        var trigger = SelfStartTriggerSignal(name, key) ?? SelfStartTriggerMessage(name, key);
 
-        if (trigger is { } signal)
+        if (trigger is not null)
         {
             // PUBLISHING IS NOT TRIGGERING. Checked here rather than only before
             // publish, so the window in which the instance may appear starts
@@ -1004,16 +1082,23 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + "anything fired the trigger, so whatever appears next is not the trigger's "
                 + "doing (#529).");
 
-            var fired = await api.PostAsync("/api/workflow-signals/", new APIRequestContextOptions
+            if (SelfStartTriggerSignal(name, key) is { } signal)
             {
-                DataObject = new { signalName = signal }
-            });
+                var fired = await api.PostAsync("/api/workflow-signals/", new APIRequestContextOptions
+                {
+                    DataObject = new { signalName = signal }
+                });
 
-            Assert.True(
-                fired.Ok,
-                $"{name}: firing '{signal}' failed with {fired.Status} {await fired.TextAsync()}. "
-                + "The element cannot be triggered from inside its own diagram, so this cell "
-                + "proves nothing without it (#529).");
+                Assert.True(
+                    fired.Ok,
+                    $"{name}: firing '{signal}' failed with {fired.Status} {await fired.TextAsync()}. "
+                    + "The element cannot be triggered from inside its own diagram, so this cell "
+                    + "proves nothing without it (#529).");
+            }
+            else
+            {
+                await DeliverMessageAsync(api, key, trigger, name);
+            }
         }
 
         var found = await SelfStartedInstanceAsync(key);
@@ -2451,6 +2536,39 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // subscriptions per name across the engine, and a fixed name would
             // make every run after the first ambiguous -- the same hazard the
             // three message rows already hit (#454).
+            // TRIGGERED FROM OUTSIDE, like the signal start one, and for the
+            // same reason: there is no instance until the message arrives (#528).
+            // Delivered through `POST /api/workflow-messages`, which
+            // `MessageCorrelationExecutionTests` already proves starts an
+            // instance -- that test owns the CORRELATION feature; this cell owns
+            // whether the element deployed as the manifest says, survived publish
+            // unrewritten, and had the declared effect. The trigger is the
+            // overlap, not the assertion.
+            //
+            // The message name carries the run's key, because Flowable keeps
+            // message START subscriptions unique per name across the engine and a
+            // fixed one would make the second run ambiguous (#454).
+            "Message Start Event" => Wrap(
+                $"""<message id="Msg_1" name="ms{key}"/>""",
+                """<startEvent id="Ev_1"><messageEventDefinition messageRef="Msg_1"/></startEvent>"""
+                + """<userTask id="Parked_1" name="parked"/><endEvent id="End_1"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Ev_1" targetRef="Parked_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Parked_1" targetRef="End_1"/>"""),
+
+            // The message arrives AFTER the host is parked -- see the after-start
+            // trigger in the shared theory. `cancelActivity="true"` written out,
+            // because the negative control's whole difference is that attribute.
+            "Message Boundary" => Wrap(
+                $"""<message id="Msg_1" name="mb{key}"/>""",
+                """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+                + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="true">"""
+                + """<messageEventDefinition messageRef="Msg_1"/></boundaryEvent>"""
+                + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+                + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+                + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+                + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+                + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
             "Signal Start Event" => Wrap(
                 $"""<signal id="Sig_1" name="st{key}"/>""",
                 """<startEvent id="Ev_1"><signalEventDefinition signalRef="Sig_1"/></startEvent>"""

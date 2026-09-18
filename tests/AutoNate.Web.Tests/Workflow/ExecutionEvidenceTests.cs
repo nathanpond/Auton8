@@ -239,7 +239,9 @@ public sealed class ExecutionEvidenceTests
             ("Intermediate Throw (Message)", "instance-ends"),
             ("Intermediate Throw (None)", "instance-ends"),
             ("Intermediate Throw (Signal)", "instance-ends"),
+            ("Message Boundary", "host-cancelled"),
             ("Message End", "instance-ends"),
+            ("Message Start Event", "instance-starts"),
             ("Multi-Instance (Parallel)", "tasks-appear-together"),
             ("Multi-Instance (Sequential)", "tasks-appear-in-turn"),
             ("Parallel Gateway (AND)", "variable-written"),
@@ -322,7 +324,7 @@ public sealed class ExecutionEvidenceTests
         // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
-        const int Ceiling = 2;
+        const int Ceiling = 0;
 
         var unaccounted = Elements()
             .Where(e => e!["declaredEffect"] is null && e["undeclaredReason"] is null)
