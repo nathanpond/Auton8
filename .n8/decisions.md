@@ -7839,3 +7839,36 @@ so that nesting is meaningful rather than a workaround.
   will not run" — and it arrived as a comment asserting something the code did not
   do, which this repo has paid for before.
   **Issue:** #524
+
+- **Decision (Rule 1, widened):** #482 reported ONE hard-coded `bpmn:` QName; six
+  existed and all six are fixed.
+  **Why:** the issue named the instance #471's minimal diagrams happened to hit.
+  Fixing only that one would have left five live, and this was not theoretical —
+  switching the oracle's diagrams to the default namespace failed the Complex
+  Gateway cell the same way the Multi-Instance ones had. The defect is the
+  pattern, so the pattern got a helper and every site uses it.
+  **Issue:** #482
+
+- **Decision:** the fix resolves the author's prefix rather than dropping
+  `xsi:type`, which was #482's other suggestion.
+  **Why:** dropping it gives up the type declaration for every document to fix
+  one spelling. Resolving keeps it in all three — unprefixed, `bpmn:`, and an
+  author's own prefix, which a conditional swap would still get wrong. The third
+  case has its own test for that reason.
+  **Cost if wrong:** one more line than the alternative.
+  **Issue:** #482
+
+- **Near miss worth recording:** the first pass resolved the prefix from the
+  condition element itself at one site, where it may have just been constructed
+  and not yet added. A detached element has no namespace scope, so it answers
+  "unprefixed" for EVERY document — which would have turned #482 into a wider
+  version of itself, breaking the prefixed diagrams the studio produces. Caught
+  by reading the call site rather than by a test; the prefixed-diagram test now
+  covers it.
+  **Issue:** #482
+
+- **Discovered, not fixed inline:** an unrecognised engine refusal answers "the
+  reason is in the server log", which the author cannot reach — and #482 records
+  that the maintainer could not either without a direct deploy to Flowable.
+  Filed as #541 rather than widened into this story.
+  **Issue:** #541

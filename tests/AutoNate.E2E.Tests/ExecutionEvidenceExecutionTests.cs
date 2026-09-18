@@ -313,18 +313,30 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     // same way the real cells do (#463). A control assembled differently from
     // the thing it guards is a second construction to get wrong.
     //
-    // `xmlns:bpmn` is bound to the SAME uri as the default namespace, which looks
-    // redundant and is not (#471). `ExpandMultiInstanceCardinality` writes
+    // `xmlns:bpmn` IS GONE, AND ITS ABSENCE IS THE REGRESSION TEST (#482).
+    //
+    // It used to be bound to the SAME uri as the default namespace, which looked
+    // redundant and was not: `ExpandMultiInstanceCardinality` wrote
     // `xsi:type="bpmn:tFormalExpression"` on the loopCardinality child it
-    // synthesises, and that value is a QName: without the prefix bound, Flowable
-    // refuses the deployment. Measured -- removing this one line fails exactly
-    // the two Multi-Instance cells and nothing else. (`xmlns:xsi` is NOT needed;
-    // XDocument declares it when it serialises the attribute. Measured the same
-    // way: removing it leaves 32/32.)
+    // synthesises, that value is a QName, and without the prefix bound Flowable
+    // refused the whole deployment. Measured then -- removing the line failed
+    // exactly the two Multi-Instance cells and nothing else -- and filed as #482,
+    // because a diagram may legally bind BPMN as its DEFAULT namespace and a
+    // hand-written or API-posted one often does. bpmn-js emits prefixed
+    // documents, so everything from the studio hid it.
+    //
+    // #482 resolves the prefix instead of assuming it, so the binding comes out.
+    // Every diagram in this class is now a default-namespace document, which is
+    // the "publish a default-namespace diagram carrying a fixed cardinality"
+    // that issue asked for -- and it covers every other element as well, for
+    // free. The two Multi-Instance cells are the ones that fail if the fix is
+    // reverted.
+    //
+    // (`xmlns:xsi` was never needed; XDocument declares it when it serialises the
+    // attribute. Measured the same way.)
     private static string WrapIn(string key, string roots, string body) => $"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                             xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                              xmlns:flowable="http://flowable.org/bpmn"
                              xmlns:autonate="http://autonate.dev/workflows"
                              targetNamespace="http://autonate.dev/workflows">
