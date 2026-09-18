@@ -89,11 +89,26 @@ public sealed class FormalExpressionPrefixTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// #482 fixed seven sites; the three tests above reach only the three that
-    /// <c>ExpandForDeployment</c> runs. The other four — sequence-flow
-    /// conditions, conditional-event conditions, generated gateway conditions
-    /// and timer boundaries — are reached by <c>ApplyElementSnapshots</c>, which
-    /// nothing exercised for this attribute. Reverting any of them was invisible.
+    /// #482 fixed <b>seven</b> sites and this file now reaches all seven — which
+    /// took two goes, because both #549 and its fix miscounted in the same
+    /// direction (#554). The three <c>loopCardinality</c> facts above reach
+    /// <b>one</b> expansion site, not three: the other two need an
+    /// <c>autonate:completionCondition</c> and a <c>complexGateway</c>, and no
+    /// fixture had either, so that code never ran. The site map, so the next
+    /// reader can check the claim rather than trust it:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>ExpandMultiInstanceCardinality</c> — the three facts above</item>
+    ///   <item><c>ExpandCompletionConditions</c> — <c>A_completion_condition_…</c></item>
+    ///   <item><c>ExpandComplexGateways</c> — <c>A_complex_gateways_generated_condition_…</c></item>
+    ///   <item><c>ApplyAutoNateGatewayConditions</c> — <c>A_gateway_choice_condition_…</c></item>
+    ///   <item><c>ApplySequenceFlowSnapshot</c> — the two snapshot tests below</item>
+    ///   <item><c>ApplyConditionalEventSnapshot</c> — <c>A_conditional_events_condition_…</c></item>
+    ///   <item><c>ApplyTimerBoundaryEventSnapshot</c> — <c>A_timer_boundary_…</c></item>
+    /// </list>
+    /// <para>
+    /// Every one runs both spellings, so a re-hard-coded <c>bpmn:</c> and an
+    /// always-unprefixed answer each fail one row of the same theory.
     /// </para>
     /// <para>
     /// This drives the snapshot path directly, on both spellings, because the
@@ -146,6 +161,181 @@ public sealed class FormalExpressionPrefixTests
             .Single(c => c.Parent!.Attribute("id")!.Value == "f1");
 
         Assert.Equal("bpmn:tFormalExpression", (string?)condition.Attribute(Xsi + "type"));
+    }
+
+    /// <summary>
+    /// The other two expansion sites, which no fixture reached (#554).
+    /// </summary>
+    /// <remarks>
+    /// <c>ExpandCompletionConditions</c> needs an
+    /// <c>autonate:completionCondition</c> and <c>ExpandComplexGateways</c> needs
+    /// a <c>&lt;complexGateway&gt;</c>. The <c>loopCardinality</c> fixtures carry
+    /// neither, so both sites were dead code under test while the comment above
+    /// counted them as covered.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_completion_condition_uses_the_documents_prefix(bool prefixed, string expected)
+    {
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(Doc(prefixed, """
+              <:startEvent id="s" />
+              <:userTask id="t" name="approve">
+                <:multiInstanceLoopCharacteristics isSequential="false"
+                     autonate:loopCardinality="3" autonate:completionCondition="${done}" />
+              </:userTask>
+              <:endEvent id="e" />
+              <:sequenceFlow id="f1" sourceRef="s" targetRef="t" />
+              <:sequenceFlow id="f2" sourceRef="t" targetRef="e" />
+            """)));
+
+        var completion = expanded.Descendants(Bpmn + "completionCondition").Single();
+        Assert.Equal(expected, (string?)completion.Attribute(Xsi + "type"));
+    }
+
+    /// <inheritdoc cref="A_completion_condition_uses_the_documents_prefix"/>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_complex_gateways_generated_condition_uses_the_documents_prefix(
+        bool prefixed, string expected)
+    {
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(Doc(prefixed, """
+              <:startEvent id="s" />
+              <:complexGateway id="g" autonate:routeScript="return 'f2';" autonate:scriptFormat="javascript" />
+              <:endEvent id="e1" />
+              <:endEvent id="e2" />
+              <:sequenceFlow id="f1" sourceRef="s" targetRef="g" />
+              <:sequenceFlow id="f2" sourceRef="g" targetRef="e1" />
+              <:sequenceFlow id="f3" sourceRef="g" targetRef="e2" />
+            """)));
+
+        var conditions = expanded.Descendants(Bpmn + "conditionExpression").ToList();
+        Assert.NotEmpty(conditions);
+        Assert.All(conditions, c => Assert.Equal(expected, (string?)c.Attribute(Xsi + "type")));
+    }
+
+    /// <summary>
+    /// The synthetic gateway-choice condition (#554).
+    /// </summary>
+    /// <remarks>
+    /// <c>ApplyAutoNateGatewayConditions</c> writes <c>${__autonateChosenFlow ==
+    /// 'f'}</c> onto each unconditioned outflow of an exclusive gateway a user
+    /// task feeds. Reached by <c>ApplyProcessMetadata</c>, not by
+    /// <c>ExpandForDeployment</c>, and previously unguarded for this attribute.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_gateway_choice_condition_uses_the_documents_prefix(bool prefixed, string expected)
+    {
+        var applied = XDocument.Parse(WorkflowBpmnXml.ApplyProcessMetadata(
+            Doc(prefixed, """
+              <:startEvent id="s" />
+              <:userTask id="t" name="approve" />
+              <:exclusiveGateway id="g" />
+              <:endEvent id="e1" />
+              <:endEvent id="e2" />
+              <:sequenceFlow id="f1" sourceRef="s" targetRef="t" />
+              <:sequenceFlow id="f2" sourceRef="t" targetRef="g" />
+              <:sequenceFlow id="f3" sourceRef="g" targetRef="e1" />
+              <:sequenceFlow id="f4" sourceRef="g" targetRef="e2" />
+            """),
+            "p",
+            "Flow"));
+
+        var conditions = applied.Descendants(Bpmn + "conditionExpression").ToList();
+        Assert.NotEmpty(conditions);
+        Assert.All(conditions, c => Assert.Equal(expected, (string?)c.Attribute(Xsi + "type")));
+    }
+
+    /// <summary>The other two snapshot sites (#554).</summary>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_conditional_events_condition_from_a_snapshot_uses_the_documents_prefix(
+        bool prefixed, string expected)
+    {
+        var applied = XDocument.Parse(WorkflowBpmnXml.ApplyProcessMetadata(
+            Doc(prefixed, """
+              <:startEvent id="s" />
+              <:intermediateCatchEvent id="c">
+                <:conditionalEventDefinition />
+              </:intermediateCatchEvent>
+              <:endEvent id="e" />
+              <:sequenceFlow id="f1" sourceRef="s" targetRef="c" />
+              <:sequenceFlow id="f2" sourceRef="c" targetRef="e" />
+            """),
+            "p",
+            "Flow",
+            [new WorkflowElementSnapshot(
+                Id: "c", Type: "bpmn:IntermediateCatchEvent", Name: null,
+                ConditionExpression: "${ready == true}")]));
+
+        var condition = applied.Descendants(Bpmn + "condition").Single();
+        Assert.Equal("${ready == true}", condition.Value);
+        Assert.Equal(expected, (string?)condition.Attribute(Xsi + "type"));
+    }
+
+    /// <inheritdoc cref="A_conditional_events_condition_from_a_snapshot_uses_the_documents_prefix"/>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_timer_boundary_from_a_snapshot_uses_the_documents_prefix(
+        bool prefixed, string expected)
+    {
+        var applied = XDocument.Parse(WorkflowBpmnXml.ApplyProcessMetadata(
+            Doc(prefixed, """
+              <:startEvent id="s" />
+              <:userTask id="t" name="approve" />
+              <:boundaryEvent id="b" attachedToRef="t">
+                <:timerEventDefinition />
+              </:boundaryEvent>
+              <:endEvent id="e1" />
+              <:endEvent id="e2" />
+              <:sequenceFlow id="f1" sourceRef="s" targetRef="t" />
+              <:sequenceFlow id="f2" sourceRef="t" targetRef="e1" />
+              <:sequenceFlow id="f3" sourceRef="b" targetRef="e2" />
+            """),
+            "p",
+            "Flow",
+            [new WorkflowElementSnapshot(
+                Id: "b", Type: "bpmn:BoundaryEvent", Name: null,
+                BoundaryTimerDuration: "PT5M")]));
+
+        var duration = applied.Descendants(Bpmn + "timeDuration").Single();
+        Assert.Equal("PT5M", duration.Value);
+        Assert.Equal(expected, (string?)duration.Attribute(Xsi + "type"));
+    }
+
+    /// <summary>
+    /// One fixture shape, both spellings (#554).
+    /// </summary>
+    /// <remarks>
+    /// <c>&lt;:tag&gt;</c> marks a BPMN-namespaced element, so each body is
+    /// written once and rendered either default-namespaced or <c>bpmn:</c>-
+    /// prefixed. Two hand-maintained copies of five diagrams is how one of them
+    /// quietly stops matching the other.
+    /// </remarks>
+    private static string Doc(bool prefixed, string body)
+    {
+        var tag = prefixed ? "bpmn:" : string.Empty;
+        var declaration = prefixed
+            ? "xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\""
+            : "xmlns=\"http://www.omg.org/spec/BPMN/20100524/MODEL\"";
+
+        return $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <{tag}definitions {declaration}
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xmlns:flowable="http://flowable.org/bpmn"
+                 xmlns:autonate="http://autonate.dev/workflows"
+                 targetNamespace="http://autonate.dev/workflows">
+              <{tag}process id="p" isExecutable="true">
+            {body.Replace("</:", $"</{tag}").Replace("<:", $"<{tag}")}
+              </{tag}process>
+            </{tag}definitions>
+            """;
     }
 
     private const string DefaultNamespace = """

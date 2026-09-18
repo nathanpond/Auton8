@@ -162,30 +162,41 @@ public sealed class WorkflowSignalBroadcasterTests
     }
 
     /// <summary>
-    /// A published workflow still declares what it PUBLISHED (#544).
+    /// A published workflow declares what the store hands over (#544, #552).
     /// </summary>
     /// <remarks>
-    /// The other direction, and the one that made a real instance unwakeable:
-    /// publish a workflow catching a name, leave instances parked on it, then
-    /// edit the draft to drop the name. Reading `model.BpmnXml` — the working
-    /// copy — answered 404 for a signal those instances are genuinely waiting
-    /// on. `ListPublishedAsync` reads the published version's xml, so the draft
-    /// edit is invisible here, which is correct: the engine is running what was
-    /// published.
+    /// <para>
+    /// This used to be named <c>A_draft_edit_that_drops_the_name_does_not_undeclare_it</c>
+    /// and it could not possibly have tested that. The broadcaster sees only
+    /// <c>ListPublishedAsync</c>'s output, so a draft edit is invisible from
+    /// here by construction -- there is no second xml for it to diverge from.
+    /// As written it was the positive path at the top of this file minus that
+    /// test's flowable assertion, i.e. strictly weaker than the test it was
+    /// copied from, wearing a name that promised the opposite (#552).
+    /// </para>
+    /// <para>
+    /// The real guard for the published-versus-draft xml is
+    /// <c>EfCoreWorkflowModelStoreTests.ListPublishedAsync_ReturnsThePublishedXmlNotTheDraftEdit</c>,
+    /// where the query is. What is left worth asserting here is the layer this
+    /// class does own: whatever the store calls published, the broadcaster
+    /// declares and actually fires.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_draft_edit_that_drops_the_name_does_not_undeclare_it()
+    public async Task What_the_store_calls_published_is_what_gets_declared_and_fired()
     {
         var flowable = new StubFlowableClient();
-
-        // What the store returns for a published workflow is the PUBLISHED xml,
-        // which still catches the name even though the draft no longer would.
         var broadcaster = Broadcaster(flowable, ("orders", StartCatching(Caught)));
 
         var result = await broadcaster.BroadcastAsync(Caught, null);
 
         Assert.Equal(WorkflowSignalBroadcaster.Outcome.Broadcast, result.Outcome);
         Assert.Equal(["orders"], result.Declaring);
+
+        // Restored (#552). Dropping this is what made the test weaker than the
+        // one it was copied from: without it, a broadcaster that decided
+        // correctly and then called nothing passes.
+        Assert.Equal([(Caught, (IReadOnlyDictionary<string, object?>?)null)], flowable.BroadcastedSignals);
     }
 
     // ---- diagrams ------------------------------------------------------------
@@ -247,6 +258,9 @@ public sealed class WorkflowSignalBroadcasterTests
                 + "filter came off again (#544).");
 
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<WorkflowModel?> GetAsync(Guid workflowModelId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

@@ -128,9 +128,6 @@ internal static class FlowableDeploymentSweep
     /// </remarks>
     internal sealed record Sweep(int Seen, int Matched, int Deleted, int Pages, bool Incomplete)
     {
-        /// <summary>No engine, or an engine that answered something unexpected.</summary>
-        internal static readonly Sweep Unreachable = new(0, 0, 0, 0, Incomplete: true);
-
         public override string ToString() =>
             $"read {Seen} deployment(s) over {Pages} page(s), {Matched} matched the suite "
             + $"prefix and the age cut-off, {Deleted} deleted"
@@ -152,39 +149,48 @@ internal static class FlowableDeploymentSweep
     internal static async Task<Sweep> SweepAsync(
         HttpClient client, DateTimeOffset createdBefore, string? onlyNamed = null)
     {
-        List<(string Id, string Name)> deployments;
         var seen = 0;
         var pages = 0;
         var incomplete = false;
-        try
-        {
-            // EVERY PAGE, NOT ONE (#537).
-            //
-            // Oldest first, so a backlog larger than a page is drained from the
-            // end that matters -- but the sort alone was not enough and the
-            // previous round only fixed the sort. `size=1000` is a CAP: once the
-            // engine held 1101 deployments, everything newer than the thousandth
-            // oldest was off the page, which includes every deployment the
-            // current run just made. The sweep then answered 0, and 0 reads as
-            // "nothing to do" rather than "I could not see it" -- a query
-            // returning nothing reading like a verdict, for the nth time here.
-            //
-            // It was also self-sustaining: a sweep that cannot see the newest
-            // deployments cannot bring the backlog back under the page size, so
-            // once crossed the condition never clears on its own.
-            var raw = new List<(string Id, string Name, DateTimeOffset? CreatedAt)>();
+        var raw = new List<(string Id, string Name, DateTimeOffset? CreatedAt)>();
 
-            for (var start = 0; ; start += PageSize)
+        // EVERY PAGE, NOT ONE (#537).
+        //
+        // Oldest first, so a backlog larger than a page is drained from the
+        // end that matters -- but the sort alone was not enough and the
+        // previous round only fixed the sort. `size=1000` is a CAP: once the
+        // engine held 1101 deployments, everything newer than the thousandth
+        // oldest was off the page, which includes every deployment the
+        // current run just made. The sweep then answered 0, and 0 reads as
+        // "nothing to do" rather than "I could not see it" -- a query
+        // returning nothing reading like a verdict, for the nth time here.
+        //
+        // It was also self-sustaining: a sweep that cannot see the newest
+        // deployments cannot bring the backlog back under the page size, so
+        // once crossed the condition never clears on its own.
+        for (var start = 0; ; start += PageSize)
+        {
+            List<(string Id, string Name, DateTimeOffset? CreatedAt)> rows;
+
+            // THE TRY IS PER PAGE, NOT AROUND THE WHOLE READ (#555).
+            //
+            // #548 fixed the non-2xx branch to keep the pages already read, and
+            // left the EXCEPTION branch discarding them: a dropped connection on
+            // page three threw away two pages and reported "read 0 deployment(s)
+            // over 0 page(s)" when 1000 rows over 2 pages had in fact been read.
+            // That was the last place a `Sweep` field was factually false, and
+            // it is the same shape #537 and #548 were both filed about.
+            //
+            // `KeyNotFoundException` and `InvalidOperationException` join the
+            // list because an answer with no `data` array is the same situation
+            // as a malformed one, and neither was caught before.
+            try
             {
                 using var response = await client.GetAsync(
                     "service/repository/deployments"
                     + $"?size={PageSize}&start={start}&sort=deployTime&order=asc");
+
                 // A FAILED PAGE STOPS THE READ; IT DOES NOT DISCARD IT (#548).
-                //
-                // This was `return 0` inside the loop, so a 500 on page three
-                // threw away the two pages already read and reported "swept
-                // nothing" -- the same "a query returning nothing reads like a
-                // verdict" shape #537 was filed about, moved rather than removed.
                 // Sweeping what was actually seen is strictly better: the
                 // deletion is filtered by prefix AND age either way, so a partial
                 // pass is safe and idempotent, and the next run takes the rest.
@@ -195,44 +201,52 @@ internal static class FlowableDeploymentSweep
                 }
 
                 using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-                var rows = page.RootElement.GetProperty("data").EnumerateArray().ToList();
-                pages++;
-                seen += rows.Count;
-                if (rows.Count == 0) break;
 
-                raw.AddRange(rows.Select(Read));
-
-                // A short page is the last page. Asking again would be a round
-                // trip to learn what this already says.
-                if (rows.Count < PageSize) break;
+                // Materialised inside the `using`, because a JsonElement is only
+                // valid while its document lives.
+                rows = page.RootElement.GetProperty("data").EnumerateArray().Select(Read).ToList();
+            }
+            catch (Exception exception) when (exception
+                is HttpRequestException or JsonException or TaskCanceledException
+                or KeyNotFoundException or InvalidOperationException)
+            {
+                // No engine, or an engine that answered something unexpected.
+                // Cleanup never fails a run -- but it says it could not finish
+                // looking, rather than answering 0 the way a drained engine
+                // would, and it keeps whatever it did read.
+                incomplete = true;
+                break;
             }
 
-            deployments = raw
-                // Only what the suite deployed. A deployment this rule does not
-                // match is somebody's work, at any age.
-                .Where(deployment =>
-                    deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
-                // #297/#304. And only what is old enough that no live run can own
-                // it. A deployment younger than this may be a CONCURRENT run's, and
-                // deleting it cascades away its live instances, jobs and history.
-                //
-                // A deployment with no readable time is left alone rather than
-                // swept: the whole point is that we could not tell whose it is.
-                .Where(deployment => deployment.CreatedAt is { } createdAt
-                                     && createdAt < createdBefore)
-                // #308. A test's own plants, when it says so.
-                .Where(deployment => onlyNamed is null
-                                     || deployment.Name.Contains(onlyNamed, StringComparison.Ordinal))
-                .Select(deployment => (deployment.Id, deployment.Name))
-                .ToList();
+            pages++;
+            seen += rows.Count;
+            if (rows.Count == 0) break;
+
+            raw.AddRange(rows);
+
+            // A short page is the last page. Asking again would be a round
+            // trip to learn what this already says.
+            if (rows.Count < PageSize) break;
         }
-        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException)
-        {
-            // No engine, or an engine that answered something unexpected. Cleanup
-            // never fails a run -- but it says it could not look, rather than
-            // answering 0 the way a drained engine would (#548).
-            return Sweep.Unreachable;
-        }
+
+        var deployments = raw
+            // Only what the suite deployed. A deployment this rule does not
+            // match is somebody's work, at any age.
+            .Where(deployment =>
+                deployment.Name.StartsWith(SuitePrefix, StringComparison.Ordinal))
+            // #297/#304. And only what is old enough that no live run can own
+            // it. A deployment younger than this may be a CONCURRENT run's, and
+            // deleting it cascades away its live instances, jobs and history.
+            //
+            // A deployment with no readable time is left alone rather than
+            // swept: the whole point is that we could not tell whose it is.
+            .Where(deployment => deployment.CreatedAt is { } createdAt
+                                 && createdAt < createdBefore)
+            // #308. A test's own plants, when it says so.
+            .Where(deployment => onlyNamed is null
+                                 || deployment.Name.Contains(onlyNamed, StringComparison.Ordinal))
+            .Select(deployment => (deployment.Id, deployment.Name))
+            .ToList();
 
         var deleted = 0;
         foreach (var (id, _) in deployments)

@@ -48,12 +48,28 @@ public sealed class EfCoreWorkflowSignalRegistry(
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            // Only published versions matter at runtime: drafts aren't deployed
-            // to Flowable and can't trigger signal start events.
+            // THE PUBLISHED VERSION'S XML, NOT THE MODEL'S (#553).
+            //
+            // Filtering on `PublishedVersionNumber` and then selecting
+            // `model.BpmnXml` reads the WORKING copy -- so for a published
+            // workflow, whatever the author last typed into the draft decided
+            // which names this registry subscribes to, while Flowable went on
+            // running what was published. A draft edit could therefore drop a
+            // subscription out from under parked instances, or add one nothing
+            // deployed catches.
+            //
+            // #544 fixed exactly this in the signal broadcast endpoint and
+            // named these two registries as the precedent that got it right.
+            // They got the FILTER right and the xml wrong, which is the half
+            // that bit.
             var publishedModels = await dbContext.WorkflowModels
                 .AsNoTracking()
                 .Where(model => model.PublishedVersionNumber != null)
-                .Select(model => new { model.Id, model.BpmnXml })
+                .Join(
+                    dbContext.WorkflowModelVersions.AsNoTracking(),
+                    model => new { model.Id, Version = model.PublishedVersionNumber!.Value },
+                    version => new { Id = version.WorkflowModelId, Version = version.VersionNumber },
+                    (model, version) => new { model.Id, version.BpmnXml })
                 .ToListAsync(cancellationToken);
 
             // Build both the names-by-topic and registrations-by-topic indexes

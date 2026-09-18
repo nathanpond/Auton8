@@ -292,7 +292,14 @@ public sealed class WorkflowMessageCorrelatorTests
 
     private sealed class StubModelStore(WorkflowModel? model) : IWorkflowModelStore
     {
+        // The draft-returning lookup is a TRIPWIRE now (#553). Anything
+        // reasoning about a running instance must ask for the published
+        // definition; reaching this means the filter came off again.
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException(
+                "This caller must ask GetPublishedByProcessKeyAsync (#553).");
+
+        public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             Task.FromResult(model);
 
         public Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default) =>

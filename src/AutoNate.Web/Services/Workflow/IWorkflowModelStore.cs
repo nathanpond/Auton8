@@ -32,6 +32,26 @@ public interface IWorkflowModelStore
 
     Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The PUBLISHED definition for a process key, or null (#553).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="GetByProcessKeyAsync"/> filters nothing and returns the
+    /// working copy, which is right for the studio and wrong for anything
+    /// reasoning about a RUNNING instance: Flowable is executing what was
+    /// published, so a caller that reads the draft is answering questions about
+    /// a diagram the engine has never seen.
+    /// </para>
+    /// <para>
+    /// Same shape and same reason as <see cref="ListPublishedAsync"/>. A caller
+    /// cannot get this by filtering the other method's result — by then the row
+    /// already carries the draft's xml.
+    /// </para>
+    /// </remarks>
+    Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
+        string processKey, CancellationToken cancellationToken = default);
+
     Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default);
 
     Task<WorkflowModel> PublishAsync(

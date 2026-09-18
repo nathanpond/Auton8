@@ -7941,3 +7941,62 @@ so that nesting is meaningful rather than a workaround.
   a coverage gap in the studio's own tests, not a defect in shipped behaviour, and
   closing it is a milestone of UI work rather than a fix.
   **Issue:** #545
+
+## M4d fix pass, round two (verification findings #552-#555)
+
+- **Decision:** the guard for #544's published-version join goes in
+  `EfCoreWorkflowModelStoreTests`, and the broadcaster test that carried the
+  defect's name is renamed rather than repaired.
+  **Why:** the broadcaster consumes `ListPublishedAsync`'s output, so
+  draft-versus-published is invisible one layer up — no broadcaster-level test
+  can distinguish the join from a filter, which is exactly why the one that
+  claimed to was a renamed copy of the positive path. The guard has to sit where
+  the query is. The renamed test also gets back the `BroadcastedSignals`
+  assertion it had dropped, so it stops being weaker than its own source.
+  **Cost if wrong:** one Postgres-backed fact instead of an in-memory one.
+  **Issue:** #552
+
+- **Decision (Rule 1, widening):** `SendMessageBehavior` is fixed alongside the
+  two registries and the correlator, though #553 does not name it.
+  **Why:** it is the same `GetByProcessKeyAsync` call with the same consequence
+  — a service task inside a RUNNING instance looking up its own send in the
+  draft. Filing a fourth issue for one identical line would have split one
+  defect across two milestones. The three `WorkflowEndpoints` call sites are
+  deliberately NOT changed: `/declarations` is studio-time and says so, and the
+  other two read `DefaultVariables` and `Name` rather than xml.
+  **Cost if wrong:** one more call site moved to the published lookup than the
+  issue asked for, in a direction the issue argues is correct.
+  **Issue:** #553
+
+- **Decision:** a new `EfCoreWorkflowMessageRegistryTests` file rather than
+  guarding only the signal registry named first in the issue.
+  **Why:** the message registry had no test file at all and carried the
+  identical defect. Guarding one sibling and trusting the other is precisely the
+  reasoning that produced this bug — #544 cited both registries as the correct
+  precedent without checking either.
+  **Cost if wrong:** one more Postgres-backed test class.
+  **Issue:** #553
+
+- **Decision:** the two stubs whose callers moved now THROW on
+  `GetByProcessKeyAsync` instead of answering it.
+  **Why:** same tripwire #544 introduced for `ListAsync`. A stub that answers
+  both lookups lets the caller silently regress to the draft one and stay green.
+  **Cost if wrong:** a fixture that must be edited when a caller legitimately
+  needs the draft — which is the point.
+  **Issue:** #553
+
+- **Decision:** `Sweep.Unreachable` is deleted rather than kept.
+  **Why:** once the exception path keeps what it read, a constant asserting
+  `(0, 0, 0, 0)` is a value that can only be wrong. The natural
+  `new Sweep(seen, matched, deleted, pages, incomplete)` covers every exit.
+  **Cost if wrong:** one fewer named constant.
+  **Issue:** #555
+
+- **Recorded, not fixed:** #546's "the product refuses a non-interrupting error
+  boundary" was false at both sites, and the fix pass re-published it in new
+  code. The conclusion it supports still holds — BPMN makes an error boundary
+  always interrupting and Flowable interrupts regardless — so the comment is
+  corrected rather than the control rebuilt. A `<boundaryEvent
+  cancelActivity="false"><errorEventDefinition/>` publishes cleanly today; that
+  is now stated in-code rather than denied.
+  **Issue:** #555
