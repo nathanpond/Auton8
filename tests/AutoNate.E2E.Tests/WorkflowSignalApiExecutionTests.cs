@@ -206,8 +206,10 @@ public sealed class WorkflowSignalApiExecutionTests : E2ETestBase
     /// </para>
     /// <para>
     /// Created and NOT published on purpose. The unit tests model the store's
-    /// contract; only this one exercises `ListPublishedAsync` against a real
-    /// database, which is where the missing filter actually lived.
+    /// contract; this one exercises `ListPublishedAsync` end to end against a
+    /// real database and a real engine, which is where the missing filter
+    /// actually lived. It stopped being the ONLY such test at #552, which put a
+    /// direct guard on the store, and saying otherwise outlived that (#559).
     /// </para>
     /// </remarks>
     [Fact]

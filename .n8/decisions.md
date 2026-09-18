@@ -8000,3 +8000,66 @@ so that nesting is meaningful rather than a workaround.
   cancelActivity="false"><errorEventDefinition/>` publishes cleanly today; that
   is now stated in-code rather than denied.
   **Issue:** #555
+
+## M4d fix pass, round three (verification findings #557-#559)
+
+- **Decision:** the registry fixtures gain a SUPERSEDED published version and a
+  second model, rather than just a second model.
+  **Why:** the first attempt added a second model and the id-only join mutation
+  still passed — measured, not assumed. With one version row per model, a join
+  on model id alone returns the same single row a composite join does. Only a
+  model published twice makes the superseded version visible to an id-only join,
+  and only a second model on the same topic makes a version-only join cross.
+  Three mutations per registry now fail; all six were run.
+  **Cost if wrong:** two more publishes per fixture.
+  **Issue:** #557
+
+- **Decision:** `SendMessageBehavior`'s test discriminates on two failure CODES
+  rather than success versus failure.
+  **Why:** succeeding would need the correlator and a live engine, which would
+  put the guard in the tier a merge cannot see. Both codes here are decided from
+  the diagram alone: the published xml carries a send with no target
+  (`noTargetProcess`), the draft carries no send at that id (`notASend`). The
+  mutation flips both tests to the other code, so the discrimination is real.
+  **Cost if wrong:** the success path stays covered only by the live oracle,
+  which is where it was already.
+  **Issue:** #557
+
+- **Decision:** one `LegacyScriptInventory.ScanStoreAsync` serves both the
+  startup warning and the endpoint, rather than fixing each in place.
+  **Why:** the two carried the identical defect written twice, which is how one
+  of them would have been fixed and the other not — the exact failure #553 was
+  filed about, where `WorkflowMessageCorrelator` was left behind.
+  **Cost if wrong:** one shared method to change instead of two call sites.
+  **Issue:** #558
+
+- **Recorded consequence, not hidden:** a published model whose published xml is
+  clean but whose draft carries a legacy script no longer appears in the
+  inventory. That is the correct division of labour rather than a loss — #151
+  refuses exactly that at publish with a message naming the script, and this
+  surface exists for the case #151 cannot help with, a diagram deployed before
+  the rule existed. Stated in the method's own remarks so a reader does not have
+  to rediscover it.
+  **Issue:** #558
+
+- **Decision:** `GetPublishedByProcessKeyAsync` now returns the version row's
+  `ProcessKey` and `Name` alongside its `BpmnXml`, and matches the argument
+  against the version's key.
+  **Why:** the method returned published xml under a draft-matched key, so a
+  draft rename of a published workflow made the running definition unfindable.
+  Returning the version's key as well keeps the record internally consistent —
+  a caller cannot get a row whose key says one thing and whose xml came from
+  another. The interface doc now lists exactly which fields are the published
+  ones rather than implying all of them are.
+  **Cost if wrong:** two more columns read from a row already being read.
+  **Issue:** #558
+
+- **Decision:** the duplicate broadcaster test is given a distinguishing setup
+  rather than deleted.
+  **Why:** deleting it would drop the pin by one and lose the only place the
+  broadcaster's own filtering is asserted. Two published workflows, one catching
+  the name, now proves what that class genuinely owns — the answer follows the
+  store's list. Measured: mutating the broadcaster to declare every published
+  workflow fails it, which the exact-duplicate version could not detect.
+  **Cost if wrong:** one test with a slightly larger fixture.
+  **Issue:** #559

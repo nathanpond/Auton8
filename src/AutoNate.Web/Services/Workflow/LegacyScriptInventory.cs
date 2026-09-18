@@ -27,6 +27,58 @@ public static class LegacyScriptInventory
         IReadOnlyList<Finding> Findings);
 
     /// <summary>
+    /// Every affected model in the store, scanned against the xml that is
+    /// actually deployed (#558).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both callers used to read <see cref="IWorkflowModelStore.ListAsync"/>,
+    /// which returns each row's WORKING copy, and report publication as
+    /// <c>!IsDraft</c>. Two wrong answers followed from that. A workflow
+    /// published with a removed-API script and since draft-edited scanned clean
+    /// while its deployed definition still failed on its next run. And
+    /// <c>IsDraft</c> is set by <c>NormalizeDraftState</c> on any definition
+    /// change, so the row silently left the "already published, so they fail on
+    /// their next run" tally the moment anybody touched the draft.
+    /// </para>
+    /// <para>
+    /// So: published models are scanned against their published version's xml
+    /// and reported as published; a model with no published version is scanned
+    /// against its draft and reported as not published.
+    /// </para>
+    /// <para>
+    /// <b>One consequence, stated rather than hidden.</b> A published model
+    /// whose published xml is clean but whose draft carries a legacy script no
+    /// longer appears here. That is the correct division of labour rather than a
+    /// loss: #151 refuses exactly that at publish, with a message about the
+    /// specific script, and this surface exists for the case #151 cannot help
+    /// with — a diagram deployed before the rule existed.
+    /// </para>
+    /// </remarks>
+    public static async Task<IReadOnlyList<ModelFindings>> ScanStoreAsync(
+        IWorkflowModelStore store, CancellationToken cancellationToken = default)
+    {
+        var drafts = await store.ListAsync(cancellationToken);
+        var published = await store.ListPublishedAsync(cancellationToken);
+
+        var publishedById = published.ToDictionary(model => model.Id);
+
+        return drafts
+            .Select(model =>
+            {
+                var isPublished = publishedById.TryGetValue(model.Id, out var publishedModel);
+                var xml = isPublished ? publishedModel!.BpmnXml : model.BpmnXml;
+
+                return new ModelFindings(
+                    model.Id, model.Name, model.ProcessKey, isPublished, Scan(xml));
+            })
+            .Where(result => result.Findings.Count > 0)
+            .OrderByDescending(result => result.IsPublished)
+            .ThenBy(result => result.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Every rejected shape in one model's BPMN, keyed by script task.
     /// </summary>
     /// <remarks>

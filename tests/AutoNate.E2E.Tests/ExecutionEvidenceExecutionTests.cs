@@ -1043,31 +1043,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     private const string SelfStarting = "instance-starts";
 
     /// <summary>
-    /// Publish, trigger nothing, and return the instance the engine made itself (#522).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The two preconditions are not the same check twice. The first -- nothing
-    /// exists before publish -- catches a reused key, so the cell cannot certify
-    /// somebody else's run. The second is the one the acceptance criterion is
-    /// actually about: nobody called start. "An instance exists" is otherwise
-    /// satisfiable by the harness itself, and a cell that called
-    /// <c>POST /start</c> and then found an instance would report a perfect
-    /// green while proving only that starting a workflow starts a workflow.
-    /// </para>
-    /// <para>
-    /// <b>How that second check is made depends on the row, and this comment
-    /// used to claim only one of the two (#555).</b> For an UNTRIGGERED row --
-    /// timer -- it is the engine's own <c>startUserId</c>, which is empty
-    /// because nothing authenticated began it. For a TRIGGERED row -- signal,
-    /// message -- <c>startUserId</c> is the wrong instrument: Auton8's trigger
-    /// routes are authenticated, so Flowable records the REST user as the start
-    /// user of an instance a broadcast created. There the check is the pair of
-    /// emptiness assertions either side of publish, plus the fact that the
-    /// theory never reaches <c>POST /start</c> on this branch at all.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// The signal a self-starting row needs fired after publish (#529).
     /// </summary>
     /// <remarks>
@@ -1147,6 +1122,37 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             + "own diagram, so this cell proves nothing without it (#528).");
     }
 
+    /// <summary>
+    /// Publish, trigger nothing, and return the instance the engine made itself (#522).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two preconditions are not the same check twice. The first -- nothing
+    /// exists before publish -- catches a reused key, so the cell cannot certify
+    /// somebody else's run. The second is the one the acceptance criterion is
+    /// actually about: nobody called start. "An instance exists" is otherwise
+    /// satisfiable by the harness itself, and a cell that called
+    /// <c>POST /start</c> and then found an instance would report a perfect
+    /// green while proving only that starting a workflow starts a workflow.
+    /// </para>
+    /// <para>
+    /// <b>How that second check is made depends on the row, and this comment
+    /// used to claim only one of the two (#555).</b> For an UNTRIGGERED row --
+    /// timer -- it is the engine's own <c>startUserId</c>, which is empty
+    /// because nothing authenticated began it. For a TRIGGERED row -- signal,
+    /// message -- <c>startUserId</c> is the wrong instrument: Auton8's trigger
+    /// routes are authenticated, so Flowable records the REST user as the start
+    /// user of an instance a broadcast created. There the check is the pair of
+    /// emptiness assertions either side of publish, plus the fact that the
+    /// theory never reaches <c>POST /start</c> on this branch at all.
+    /// </para>
+    /// <para>
+    /// <b>This block sat above <c>SelfStartTriggerSignal</c> for three rounds</b>,
+    /// leaving the method it describes undocumented. #555 corrected its wording
+    /// and left it where it was; it is finally attached to
+    /// <c>SelfStartAsync</c> here (#559).
+    /// </para>
+    /// </remarks>
     private static async Task<string> SelfStartAsync(
         IAPIRequestContext api, string key, string xml, string name)
     {
@@ -2525,8 +2531,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // Non-interrupting, which for an escalation is the point of the
             // element: `WorkflowBpmnXml`'s error refusal says so itself -- "catch
             // an escalation instead if the work should carry on."
-            // CONTROL: per-EFFECT, not per-row (#555). Like the two start rows
-            // above, this rides `variable-written`'s generic control -- a linear
+            // CONTROL: per-EFFECT, not per-row (#555). Like the Error Start and
+            // Conditional Start rows further DOWN this switch, it rides
+            // `variable-written`'s generic control -- a linear
             // diagram whose script writes something that is not `proof`. The
             // row-level shape would be an escalation start inside an event
             // sub-process whose escalation is never thrown; it is not built.
@@ -2572,8 +2579,8 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
-            // CONTROL: per-EFFECT, not per-row (#546), same as the conditional
-            // start above. An error start whose error is never thrown would be
+            // CONTROL: per-EFFECT, not per-row (#546), same as the Conditional
+            // Start Event row further DOWN this switch. An error start whose error is never thrown would be
             // the row-level shape and is not built.
             "Error Start Event" => Wrap(
                 """<error id="Err_1" errorCode="E1" name="e1"/>""",

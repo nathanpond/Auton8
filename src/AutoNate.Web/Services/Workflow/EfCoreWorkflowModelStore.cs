@@ -68,17 +68,33 @@ public sealed class EfCoreWorkflowModelStore(
         // ListPublishedAsync above: filtering `GetByProcessKeyAsync` cannot
         // recover the published xml, because the row it returns is already
         // carrying the draft's.
+        // MATCHED ON THE VERSION'S KEY, NOT THE MODEL'S (#558).
+        //
+        // `workflow_models.process_key` is the working copy's, and `SaveAsync`
+        // re-applies it from the request on every save -- so a draft save can
+        // rename a published workflow's key while it is running. Matching on the
+        // model row then failed to find the definition Flowable is executing,
+        // for a caller reasoning about an instance of exactly that definition:
+        // the same "a draft edit changes what a running instance does" shape
+        // this method was written to end, surviving inside it.
         var row = await dbContext.WorkflowModels
             .AsNoTracking()
-            .Where(model => model.ProcessKey == processKey && model.PublishedVersionNumber != null)
+            .Where(model => model.PublishedVersionNumber != null)
             .Join(
                 dbContext.WorkflowModelVersions.AsNoTracking(),
                 model => new { model.Id, Version = model.PublishedVersionNumber!.Value },
                 version => new { Id = version.WorkflowModelId, Version = version.VersionNumber },
-                (model, version) => new { model, version.BpmnXml })
-            .FirstOrDefaultAsync(cancellationToken);
+                (model, version) => new { model, version.BpmnXml, version.ProcessKey, version.Name })
+            .FirstOrDefaultAsync(row => row.ProcessKey == processKey, cancellationToken);
 
-        return row is null ? null : row.model.ToModel() with { BpmnXml = row.BpmnXml };
+        return row is null
+            ? null
+            : row.model.ToModel() with
+            {
+                BpmnXml = row.BpmnXml,
+                ProcessKey = row.ProcessKey,
+                Name = row.Name
+            };
     }
 
     public async Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default)
