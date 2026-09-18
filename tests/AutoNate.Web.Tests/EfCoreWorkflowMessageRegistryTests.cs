@@ -35,16 +35,7 @@ public sealed class EfCoreWorkflowMessageRegistryTests
         </definitions>
         """;
 
-    /// <summary>
-    /// A second published model, so a WRONG JOIN KEY cannot pass (#557).
-    /// </summary>
-    /// <remarks>
-    /// With one model holding one version, a join on model id alone — or on
-    /// version number alone — still returns the right row, so the fixture could
-    /// not tell a correct composite key from either broken one. Two models, each
-    /// with its own published version, make id-only and version-only joins
-    /// produce the wrong xml or duplicate rows.
-    /// </remarks>
+    /// <summary>Deployment metadata for one publish.</summary>
     private static WorkflowDeploymentInfo Deployment(string processKey, int version) => new()
     {
         DeploymentId = $"deployment-{processKey}-{version}",
