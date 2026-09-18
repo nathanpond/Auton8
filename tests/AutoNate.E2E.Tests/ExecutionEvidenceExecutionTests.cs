@@ -231,8 +231,8 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
         // ROW-LEVEL, WHERE THE ELEMENT ALLOWS IT (#546). The timer control above
         // is per-EFFECT, and for Error Boundary that is the only control possible
-        // -- BPMN forbids a non-interrupting error boundary and the product
-        // refuses it. For escalation and conditional it is NOT the only one
+        // -- BPMN makes an error boundary always
+        // interrupting and Flowable interrupts regardless. For escalation and conditional it is NOT the only one
         // possible, and #530's commit claimed it had added a row-level control
         // when it had added none. These are the controls that claim was about:
         // the same element, legal, genuinely firing, carrying the other
@@ -1050,18 +1050,21 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// The two preconditions are not the same check twice. The first -- nothing
     /// exists before publish -- catches a reused key, so the cell cannot certify
     /// somebody else's run. The second is the one the acceptance criterion is
-    /// actually about: the instance must carry NO START USER. "An instance
-    /// exists" is otherwise satisfiable by the harness itself, and a cell that
-    /// called <c>POST /start</c> and then found an instance would report a
-    /// perfect green while proving only that starting a workflow starts a
-    /// workflow.
+    /// actually about: nobody called start. "An instance exists" is otherwise
+    /// satisfiable by the harness itself, and a cell that called
+    /// <c>POST /start</c> and then found an instance would report a perfect
+    /// green while proving only that starting a workflow starts a workflow.
     /// </para>
     /// <para>
-    /// Flowable records the start user on every instance begun through Auton8's
-    /// route, because that route is authenticated and passes the caller through;
-    /// an instance a timer, message or signal created has none. So the assertion
-    /// is checkable from the engine's own record rather than from this class
-    /// promising it did not call start.
+    /// <b>How that second check is made depends on the row, and this comment
+    /// used to claim only one of the two (#555).</b> For an UNTRIGGERED row --
+    /// timer -- it is the engine's own <c>startUserId</c>, which is empty
+    /// because nothing authenticated began it. For a TRIGGERED row -- signal,
+    /// message -- <c>startUserId</c> is the wrong instrument: Auton8's trigger
+    /// routes are authenticated, so Flowable records the REST user as the start
+    /// user of an instance a broadcast created. There the check is the pair of
+    /// emptiness assertions either side of publish, plus the fact that the
+    /// theory never reaches <c>POST /start</c> on this branch at all.
     /// </para>
     /// </remarks>
     /// <summary>
@@ -1076,11 +1079,18 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     /// </para>
     /// <para>
     /// Narrow on purpose. This is not "a row may run arbitrary setup". Everything
-    /// else about the self-start path is unchanged -- no <c>POST /start</c>, an
-    /// assertion that no instance existed before, and an assertion that the
-    /// instance found carries NO START USER. That last one is what keeps this
-    /// honest: firing a signal is not starting an instance, and the check that
-    /// nobody started it still has to hold afterwards.
+    /// else about the self-start path is unchanged -- no <c>POST /start</c>, and
+    /// an assertion that no instance existed before.
+    /// </para>
+    /// <para>
+    /// What keeps it honest is NOT a start-user assertion, and saying so was
+    /// wrong (#555). This route is authenticated, so Flowable records the REST
+    /// user as the start user of the instance the broadcast created -- which is
+    /// why <c>SelfStartAsync</c> skips that check for a triggered row. The
+    /// honesty comes from the emptiness assertions either side of publish:
+    /// nothing existed before publish, nothing existed after publish and before
+    /// the signal, and one instance existed afterwards. Firing a signal is not
+    /// starting an instance, and that sequence is what proves it.
     /// </para>
     /// </remarks>
     private static string? SelfStartTriggerSignal(string name, string key) => name switch
@@ -2515,6 +2525,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // Non-interrupting, which for an escalation is the point of the
             // element: `WorkflowBpmnXml`'s error refusal says so itself -- "catch
             // an escalation instead if the work should carry on."
+            // CONTROL: per-EFFECT, not per-row (#555). Like the two start rows
+            // above, this rides `variable-written`'s generic control -- a linear
+            // diagram whose script writes something that is not `proof`. The
+            // row-level shape would be an escalation start inside an event
+            // sub-process whose escalation is never thrown; it is not built.
+            // #546 disclosed the four rows it was filed about and this fifth was
+            // in the same state, unmentioned.
             "Escalation Start Event" => Wrap(
                 """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
                 """<startEvent id="Start_1"/>"""
@@ -2575,12 +2592,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="s2" sourceRef="W_1" targetRef="Ee_1"/></subProcess>"""),
 
             // NO `cancelActivity` HERE, and that is not an omission (#527). An
-            // error boundary cannot be non-interrupting: BPMN forbids it and
-            // `WorkflowBpmnXml` refuses it in as many words, saying the engine
-            // interrupts regardless so the diagram would promise something it
-            // does not do. There is therefore no same-element control carrying
-            // the other configuration for this row; the `host-cancelled` control
-            // is per-EFFECT and is #522's non-interrupting timer boundary.
+            // error boundary cannot be non-interrupting: BPMN makes it always
+            // interrupting and Flowable interrupts regardless, so the attribute
+            // would promise something the engine does not do. There is therefore
+            // no same-element control carrying the other configuration for this
+            // row; the `host-cancelled` control is per-EFFECT and is #522's
+            // non-interrupting timer boundary.
+            //
+            // THE PRODUCT DOES NOT REFUSE IT, and this comment used to say it
+            // did (#555). `WorkflowBpmnXml`'s only non-interrupting-error rule
+            // is scoped to an event sub-process error START (#162); a
+            // `<boundaryEvent cancelActivity="false"><errorEventDefinition/>`
+            // publishes cleanly today. The conclusion above is unaffected --
+            // BPMN and the engine settle it -- but a guard that was cited twice
+            // and never existed is exactly what this oracle is against.
             "Error Boundary" => Wrap(
                 """<error id="Err_1" errorCode="E1" name="e1"/>""",
                 """<startEvent id="Start_1"/>"""
@@ -2646,6 +2671,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             // The message arrives AFTER the host is parked -- see the after-start
             // trigger in the shared theory. `cancelActivity="true"` written out,
             // because the negative control's whole difference is that attribute.
+            // CONTROL: per-EFFECT, not per-row (#555). Rides the shared
+            // `host-cancelled` control, #522's non-interrupting TIMER boundary.
+            // Unlike the error boundary, a non-interrupting MESSAGE boundary is
+            // perfectly legal, so the row-level control is available here and
+            // simply unbuilt -- a gap, not an impossibility.
             "Message Boundary" => Wrap(
                 $"""<message id="Msg_1" name="mb{key}"/>""",
                 """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
@@ -2688,6 +2718,10 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             //
             // A parallel gateway forks: one branch parks on the host, the other
             // throws the signal.
+            // CONTROL: per-EFFECT, not per-row (#555). Same as Message
+            // Boundary above: rides the timer control, and a non-interrupting
+            // signal boundary is legal, so this one is unbuilt rather than
+            // impossible.
             "Signal Boundary" => Wrap(
                 $"""<signal id="Sig_1" name="sb{key}"/>""",
                 """<startEvent id="Start_1"/><parallelGateway id="Fork_1"/>"""

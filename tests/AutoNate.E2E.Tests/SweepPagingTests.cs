@@ -78,11 +78,44 @@ public sealed class SweepPagingTests
         Assert.True(sweep.Incomplete);
     }
 
+    /// <summary>
+    /// A page that THROWS keeps what was already read too (#555).
+    /// </summary>
+    /// <remarks>
+    /// #548 fixed the non-2xx branch and left this one: a dropped connection on
+    /// a later page discarded every page already read and reported "read 0
+    /// deployment(s) over 0 page(s)". The status-code path and the exception
+    /// path are two ways to reach the same situation, and only one of them was
+    /// honest about it.
+    /// </remarks>
+    [Fact]
+    public async Task A_page_that_throws_keeps_what_was_already_read()
+    {
+        var size = FlowableDeploymentSweep.PageSize;
+
+        var handler = new PagingHandler(totalMatching: size * 3, pageSize: size)
+        {
+            ThrowFromOffset = size
+        };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://sweep.test/") };
+
+        var sweep = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
+
+        // The first page was read and swept, and the record says so rather than
+        // reporting a drained engine.
+        Assert.Equal(size, sweep.Deleted);
+        Assert.Equal(size, sweep.Seen);
+        Assert.Equal(1, sweep.Pages);
+        Assert.True(sweep.Incomplete);
+    }
+
     private sealed class PagingHandler(int totalMatching, int pageSize) : HttpMessageHandler
     {
         public List<int> RequestedOffsets { get; } = [];
 
         public int? FailFromOffset { get; init; }
+
+        public int? ThrowFromOffset { get; init; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -98,6 +131,11 @@ public sealed class SweepPagingTests
                 ? int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)
                 : 0;
             RequestedOffsets.Add(start);
+
+            if (ThrowFromOffset is { } boom && start >= boom)
+            {
+                throw new HttpRequestException("the connection went away mid-paging");
+            }
 
             if (FailFromOffset is { } fail && start >= fail)
             {
