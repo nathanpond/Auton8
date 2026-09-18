@@ -53,7 +53,11 @@ public sealed class WorkflowMessageCorrelator(
         IReadOnlyDictionary<string, object?>? variables,
         CancellationToken cancellationToken = default)
     {
-        var model = await models.GetByProcessKeyAsync(processKey, cancellationToken);
+        // PUBLISHED, not the draft (#553). Correlating a message targets a
+        // RUNNING instance, so the diagram that decides which messages are
+        // addressable has to be the one the engine deployed -- not whatever
+        // the author has since typed into the draft.
+        var model = await models.GetPublishedByProcessKeyAsync(processKey, cancellationToken);
         if (model is null || string.IsNullOrWhiteSpace(model.BpmnXml))
         {
             return new Result(Outcome.UnknownProcess);

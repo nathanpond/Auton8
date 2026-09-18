@@ -59,6 +59,28 @@ public sealed class EfCoreWorkflowModelStore(
         return entity?.ToModel();
     }
 
+    public async Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
+        string processKey, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        // The join again (#553), for one key rather than all of them. See
+        // ListPublishedAsync above: filtering `GetByProcessKeyAsync` cannot
+        // recover the published xml, because the row it returns is already
+        // carrying the draft's.
+        var row = await dbContext.WorkflowModels
+            .AsNoTracking()
+            .Where(model => model.ProcessKey == processKey && model.PublishedVersionNumber != null)
+            .Join(
+                dbContext.WorkflowModelVersions.AsNoTracking(),
+                model => new { model.Id, Version = model.PublishedVersionNumber!.Value },
+                version => new { Id = version.WorkflowModelId, Version = version.VersionNumber },
+                (model, version) => new { model, version.BpmnXml })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return row is null ? null : row.model.ToModel() with { BpmnXml = row.BpmnXml };
+    }
+
     public async Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;

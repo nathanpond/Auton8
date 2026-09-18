@@ -43,7 +43,12 @@ public sealed class SendMessageBehavior : IWorkflowBehavior
         await using var scope = _scopeFactory.CreateAsyncScope();
         var models = scope.ServiceProvider.GetRequiredService<IWorkflowModelStore>();
 
-        var model = await models.GetByProcessKeyAsync(context.ProcessDefinitionKey, cancellationToken);
+        // PUBLISHED, not the draft (#553). This runs INSIDE an executing
+        // instance, so the send it is looking up must come from the deployed
+        // definition; a draft edit must not change what a running instance
+        // sends, or fail it with "does not send a message".
+        var model = await models.GetPublishedByProcessKeyAsync(
+            context.ProcessDefinitionKey, cancellationToken);
         if (model is null || string.IsNullOrWhiteSpace(model.BpmnXml))
         {
             return Fail("senderNotFound",
