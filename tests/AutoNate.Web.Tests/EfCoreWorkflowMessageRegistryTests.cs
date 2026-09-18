@@ -131,9 +131,13 @@ public sealed class EfCoreWorkflowMessageRegistryTests
         var names = registry.GetMessageNamesForTopic(Topic);
 
         // EXACTLY these two. Set equality rather than three separate assertions,
-        // because each broken join fails it in its own way: reading the draft
-        // adds `order.renamed`, an id-only join adds `order.v1`, and a
-        // version-only join crosses the two models.
+        // because all three broken forms fail it: reading the draft adds
+        // `order.renamed`, and both broken joins add `order.v1`.
+        //
+        // What they do not do is fail DIFFERENTLY, and the first version of this
+        // comment claimed they would (#563). An id-only join and a version-only
+        // join both yield {order.placed, order.v1, shipment.booked} -- identical
+        // sets, identical message. The kill is real; the diagnosis is not.
         Assert.Equal<IEnumerable<string>>(
             new[] { "order.placed", "shipment.booked" },
             names.OrderBy(n => n, StringComparer.Ordinal).ToArray());

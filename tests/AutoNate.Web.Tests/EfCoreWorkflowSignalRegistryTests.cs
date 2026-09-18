@@ -137,9 +137,14 @@ public sealed class EfCoreWorkflowSignalRegistryTests
 
         var names = registry.GetSignalNamesForTopic(Topic);
 
-        // EXACTLY these two. Each broken join fails it differently: reading the
-        // draft adds `record.renamed`, an id-only join adds `record.v1`, and a
-        // version-only join crosses the two models.
+        // EXACTLY these two. All three broken forms fail it -- reading the draft
+        // adds `record.renamed`, and both broken joins add `record.v1`.
+        //
+        // They do NOT produce distinguishable messages, and the first version of
+        // this comment said they did (#563): an id-only join and a version-only
+        // join both yield {record.created, record.v1, shipment.booked}, so the
+        // xUnit output is identical. The kill is real; the diagnosis is not, and
+        // a reader debugging a red here has to check both.
         Assert.Equal<IEnumerable<string>>(
             new[] { "record.created", "shipment.booked" },
             names.OrderBy(n => n, StringComparer.Ordinal).ToArray());
