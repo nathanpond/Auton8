@@ -97,7 +97,19 @@ public sealed class NatsStreamProvisioner(
             // "nats: no response from stream" and HTTP 500 -- measured, when the
             // queue-start E2E first ran -- which is the same failure mode the
             // content and dashboards entries above were added for.
-            WorkflowBpmnXml.DefaultMessageTopic
+            WorkflowBpmnXml.DefaultMessageTopic,
+            // #540. The default topic a SIGNAL start event listens on, missing
+            // for as long as signals have had one. A signal start whose author
+            // set no topic gets this -- and the studio writes it, so it is the
+            // ordinary case, not an edge -- and anything published to it failed
+            // at the sidecar with "nats: no response from stream".
+            //
+            // It survived because no test crossed that hop: every signal test
+            // reached the engine or the dispatcher directly. The bus-crossing
+            // test added alongside this is what makes the subject list something
+            // a run can disagree with rather than something a reader has to
+            // notice.
+            WorkflowBpmnXml.DefaultSignalTopic
         })
         {
             MaxAge = StreamMaxAge

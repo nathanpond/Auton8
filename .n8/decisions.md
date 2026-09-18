@@ -7872,3 +7872,15 @@ so that nesting is meaningful rather than a workaround.
   that the maintainer could not either without a direct deploy to Flowable.
   Filed as #541 rather than widened into this story.
   **Issue:** #541
+
+- **Decision:** the bus-crossing signal test got its own class with both service
+  traits at CLASS level, rather than a method-level Dapr trait on
+  `WorkflowSignalApiExecutionTests`.
+  **Why:** `The_multi_service_pin_matches_the_classes_that_carry_two_traits`
+  counts per class and multiplies by the tests in the file. A method-level trait
+  would have made that class carry two services while only one of its five tests
+  did, and the guard would have counted 5 where the truth is 1. Bending a guard
+  that was written hours earlier to accommodate one test costs more than a second
+  file — and the split reads better anyway: the API route and the queue hop are
+  different concerns.
+  **Issue:** #540
