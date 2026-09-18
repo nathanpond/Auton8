@@ -451,6 +451,81 @@ public sealed class BpmnDiagramHelperTests
     /// observer asks this about Ev_1 specifically, and an answer borrowed from a
     /// neighbour would have it assert a cancellation somebody else caused (#522).
     /// </summary>
+    // ---- RoutesByScript ------------------------------------------------------
+
+    [Fact]
+    public void RoutesByScript_sees_a_complex_gateways_routing_script()
+    {
+        var xml = Diagram("""
+                <complexGateway id="Ev_1" name="Choose"><script>return 'fa';</script></complexGateway>
+            """);
+
+        Assert.True(BpmnDiagram.RoutesByScript(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// The complement that makes the routing complement apply at all (#549).
+    /// </summary>
+    /// <remarks>
+    /// This reader is the gate on `variable-written`'s routing complement for the
+    /// Complex Gateway row. It was the one reader in `BpmnDiagram` with no test:
+    /// setting it to <c>return false</c> failed nothing, while the complement
+    /// silently stopped applying and the cell reverted to the "gateway cell that
+    /// says nothing about routing" #452 removed.
+    /// </remarks>
+    [Fact]
+    public void RoutesByScript_is_false_for_a_complex_gateway_with_no_script()
+    {
+        var xml = Diagram("""    <complexGateway id="Ev_1" name="Choose" />""");
+
+        Assert.False(BpmnDiagram.RoutesByScript(xml, "Ev_1"));
+    }
+
+    /// <summary>
+    /// And false for the gateways that route by CONDITIONS instead (#549).
+    /// </summary>
+    /// <remarks>
+    /// An exclusive or inclusive gateway states its routing on the outgoing
+    /// flows, which `ConditionalFlowsFrom` reads. If this answered true for them
+    /// the two readers would overlap and the gate would stop saying which kind of
+    /// routing a diagram actually asked for.
+    /// </remarks>
+    [Fact]
+    public void RoutesByScript_is_false_for_an_exclusive_gateway()
+    {
+        var xml = Diagram("""    <exclusiveGateway id="Ev_1" />""");
+
+        Assert.False(BpmnDiagram.RoutesByScript(xml, "Ev_1"));
+    }
+
+    /// <summary>A script on somebody else's gateway is not this one's (#549).</summary>
+    [Fact]
+    public void RoutesByScript_ignores_a_script_on_another_element()
+    {
+        var xml = Diagram("""
+                <complexGateway id="Ev_1" name="Choose" />
+                <complexGateway id="Other_1" name="Other"><script>return 'fb';</script></complexGateway>
+            """);
+
+        Assert.False(BpmnDiagram.RoutesByScript(xml, "Ev_1"));
+    }
+
+    [Fact]
+    public void RoutesByScript_sees_through_a_namespace_prefix()
+    {
+        var xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="P_1" isExecutable="true">
+                <bpmn:complexGateway id="Ev_1"><bpmn:script>return 'fa';</bpmn:script></bpmn:complexGateway>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        Assert.True(BpmnDiagram.RoutesByScript(xml, "Ev_1"));
+    }
+
     // ---- AttributeIdentityIn -------------------------------------------------
 
     [Fact]

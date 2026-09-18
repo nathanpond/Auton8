@@ -84,6 +84,70 @@ public sealed class FormalExpressionPrefixTests
         Assert.Equal("b:tFormalExpression", (string?)cardinality.Attribute(Xsi + "type"));
     }
 
+    /// <summary>
+    /// The SNAPSHOT paths emit the document's own prefix too (#549).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #482 fixed seven sites; the three tests above reach only the three that
+    /// <c>ExpandForDeployment</c> runs. The other four — sequence-flow
+    /// conditions, conditional-event conditions, generated gateway conditions
+    /// and timer boundaries — are reached by <c>ApplyElementSnapshots</c>, which
+    /// nothing exercised for this attribute. Reverting any of them was invisible.
+    /// </para>
+    /// <para>
+    /// This drives the snapshot path directly, on both spellings, because the
+    /// near miss #482 caught in review was in exactly this half: one of these
+    /// sites resolved the prefix from an element that may not yet be in the tree,
+    /// and a detached element answers "unprefixed" for EVERY document.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(false, "tFormalExpression")]
+    [InlineData(true, "bpmn:tFormalExpression")]
+    public void A_sequence_flow_condition_from_a_snapshot_uses_the_documents_prefix(
+        bool prefixed, string expected)
+    {
+        var applied = XDocument.Parse(WorkflowBpmnXml.ApplyProcessMetadata(
+            prefixed ? Prefixed : DefaultNamespace,
+            "p",
+            "Flow",
+            [new WorkflowElementSnapshot(
+                Id: "f2", Type: "bpmn:SequenceFlow", Name: null,
+                ConditionExpression: "${ok == true}")]));
+
+        var condition = applied.Descendants(Bpmn + "conditionExpression").Single();
+
+        Assert.Equal("${ok == true}", condition.Value);
+        Assert.Equal(expected, (string?)condition.Attribute(Xsi + "type"));
+    }
+
+    /// <summary>
+    /// And the one whose element may still be detached when it is written (#549).
+    /// </summary>
+    /// <remarks>
+    /// A flow with no existing <c>conditionExpression</c> takes the branch that
+    /// CONSTRUCTS one and adds it afterwards. Resolving the prefix from that
+    /// element rather than from the flow would answer "unprefixed" for every
+    /// document — turning #482 into a wider version of itself, silently.
+    /// </remarks>
+    [Fact]
+    public void A_condition_added_to_a_flow_that_had_none_still_uses_the_prefix()
+    {
+        var applied = XDocument.Parse(WorkflowBpmnXml.ApplyProcessMetadata(
+            Prefixed,
+            "p",
+            "Flow",
+            [new WorkflowElementSnapshot(
+                Id: "f1", Type: "bpmn:SequenceFlow", Name: null,
+                ConditionExpression: "${ok == true}")]));
+
+        var condition = applied.Descendants(Bpmn + "conditionExpression")
+            .Single(c => c.Parent!.Attribute("id")!.Value == "f1");
+
+        Assert.Equal("bpmn:tFormalExpression", (string?)condition.Attribute(Xsi + "type"));
+    }
+
     private const string DefaultNamespace = """
         <?xml version="1.0" encoding="UTF-8"?>
         <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
