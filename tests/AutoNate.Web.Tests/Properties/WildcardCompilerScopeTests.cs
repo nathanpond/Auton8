@@ -16,6 +16,14 @@ namespace AutoNate.Web.Tests.Properties;
 /// — which is the only day it matters.
 /// </para>
 /// <para>
+/// <b>The number, since the AC asked for it: nine.</b> Nine concrete types
+/// implement <c>ISelectorCompiler&lt;&gt;</c> — Form, Group, PathOnly, Record,
+/// RecordType, Role, WorkflowModel, and the two workflow cache compilers. Two
+/// handle the wildcard, so <b>seven</b> carry no branch, not the eight the
+/// acceptance criterion guessed. The AC's figure was written before anyone
+/// counted; this is the count.
+/// </para>
+/// <para>
 /// The two that do handle it — the workflow task and execution cache compilers —
 /// each branch on the wildcard <b>before</b> resolving a value. A third compiler
 /// appearing in this list is not automatically wrong; it means somebody wrote

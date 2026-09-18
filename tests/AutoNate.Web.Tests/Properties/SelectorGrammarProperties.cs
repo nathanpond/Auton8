@@ -272,10 +272,15 @@ public sealed class SelectorEvaluatorAgreementProperties
 
         var assigned = NewRow("task-assigned", assignee: "alice");
         var unassigned = NewRow("task-unassigned", assignee: null);
+        // A third row with a DIFFERENT value. Without it the wildcard and the
+        // literal `assignee=alice` would return the same single row, and the
+        // "they compile to different predicates" claim below would be true by
+        // coincidence rather than by meaning.
+        var other = NewRow("task-other", assignee: "bob");
 
         await using (var seed = await factory.CreateDbContextAsync())
         {
-            seed.WorkflowTaskCache.AddRange(assigned, unassigned);
+            seed.WorkflowTaskCache.AddRange(assigned, unassigned, other);
             await seed.SaveChangesAsync();
         }
 
@@ -285,24 +290,44 @@ public sealed class SelectorEvaluatorAgreementProperties
         var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
         var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
 
+        // Ordered explicitly: Postgres makes no ordering promise without an
+        // ORDER BY, and the two sides are compared to each other below.
         var fromSql = await db.WorkflowTaskCache.Where(predicate)
-            .Select(t => t.FlowableTaskId).ToListAsync();
+            .Select(t => t.FlowableTaskId)
+            .OrderBy(id => id)
+            .ToListAsync();
 
         var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
-        var fromMemory = new[] { assigned, unassigned }
+        var fromMemory = new[] { assigned, unassigned, other }
             .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
             .Select(r => r.FlowableTaskId)
+            .OrderBy(id => id, StringComparer.Ordinal)
             .ToList();
 
-        // The row with a value matches, on BOTH paths. Before #574 the SQL path
-        // returned exactly the other one.
-        Assert.Equal(["task-assigned"], fromSql);
-        Assert.Equal(["task-assigned"], fromMemory);
+        // Both rows that HAVE a value match, on both paths; the unset one does
+        // not. Before #574 the SQL path returned exactly the complement of this.
+        Assert.Equal(["task-assigned", "task-other"], fromSql);
+        Assert.Equal(["task-assigned", "task-other"], fromMemory);
 
         // And they agree with each other, which is the property the whole
         // thread exists to restore. Asserting each against a literal would pass
         // if both changed together in some third, wrong direction.
         Assert.Equal(fromMemory, fromSql);
+
+        // #574 AC: the wildcard and a literal compile to DIFFERENT predicates,
+        // asserted as different row sets rather than by comparing expression
+        // trees. `assignee=alice` selects one of the two rows the wildcard
+        // selects — so the wildcard is not silently compiling to an equality
+        // against the actor, or to "match everything".
+        var literal = SelectorParser.Parse("/workflowtask[assignee=alice]");
+        var literalPredicate = new WorkflowTaskCacheSelectorCompiler().Compile(literal, context);
+        var fromLiteral = await db.WorkflowTaskCache.Where(literalPredicate)
+            .Select(t => t.FlowableTaskId)
+            .OrderBy(id => id)
+            .ToListAsync();
+
+        Assert.Equal(["task-assigned"], fromLiteral);
+        Assert.NotEqual(fromSql, fromLiteral);
     }
 
     /// <summary>
