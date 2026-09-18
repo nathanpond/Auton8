@@ -321,7 +321,9 @@ public sealed class ExecutionEvidenceTests
         // Measured, and LOWERED as elements gain declarations -- 38 when this
         // ratchet was written, 22 once #325's AC5 tranche was proven, 16 under
         // #522's counting rule (19 rows declare nothing; 3 of them say why), 14
-        // once #525 proved the two timer rows. Never raise it. It is a `<=`, so
+        // once #525 proved the two timer rows, and 0 once M4d's coverage stories
+        // left every row accounted for. That last step went unwritten while the
+        // constant below already said 0 (#550). Never raise it. It is a `<=`, so
         // leaving it high after a row is proven costs nothing today and hides the
         // next row that goes missing -- which is the whole failure this guards.
         const int Ceiling = 0;

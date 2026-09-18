@@ -192,6 +192,60 @@ public sealed class WorkflowSignalApiExecutionTests : E2ETestBase
         Assert.Contains("Waiting", names);
     }
 
+    /// <summary>
+    /// A never-published draft is not a declaration (#544).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reported defect, end to end and against the real store. The
+    /// broadcaster used to scan every model row and read each one's WORKING xml,
+    /// so a draft nobody had published counted as a declaration: the endpoint
+    /// answered 200 and fired into Flowable for a name nothing subscribes to —
+    /// "report success for a signal that reached nobody", which is exactly what
+    /// the refusal exists to prevent.
+    /// </para>
+    /// <para>
+    /// Created and NOT published on purpose. The unit tests model the store's
+    /// contract; only this one exercises `ListPublishedAsync` against a real
+    /// database, which is where the missing filter actually lived.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_signal_declared_only_by_an_unpublished_draft_is_refused()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"dr{Guid.NewGuid():N}"[..20];
+        var signal = $"d{Guid.NewGuid():N}"[..18];
+
+        // CREATE ONLY -- no publish. This is the whole point of the test.
+        var created = await api.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id = Guid.NewGuid(),
+                name = TestNames.Prefixed(key),
+                processKey = key,
+                bpmnXml = StartedBySignal(key, signal)
+            }
+        });
+        Assert.True(created.Ok, $"Creating the draft failed: {created.Status} {await created.TextAsync()}");
+
+        var response = await api.PostAsync("/api/workflow-signals/", new APIRequestContextOptions
+        {
+            DataObject = new { signalName = signal }
+        });
+
+        Assert.Equal(404, response.Status);
+        Assert.Contains(signal, await response.TextAsync(), StringComparison.Ordinal);
+
+        // AND NOTHING WAS FIRED. A refusal that still broadcast would be a
+        // refusal in the response body only.
+        await Task.Delay(3_000);
+        Assert.Equal(0, await InstanceCountAsync(key));
+    }
+
     // ---- diagrams ------------------------------------------------------------
 
     private static string StartedBySignal(string key, string signalName) => Wrap(key, signalName,

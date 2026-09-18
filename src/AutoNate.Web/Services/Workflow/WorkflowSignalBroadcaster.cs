@@ -49,7 +49,18 @@ public sealed class WorkflowSignalBroadcaster(
         IReadOnlyDictionary<string, object?>? variables,
         CancellationToken cancellationToken = default)
     {
-        var published = await models.ListAsync(cancellationToken);
+        // PUBLISHED, AND THE PUBLISHED XML (#544). This was `ListAsync`, which
+        // filters nothing and hands back each model's DRAFT xml -- so a
+        // never-published draft counted as a declaration and the endpoint
+        // answered 200 for a name nothing in the engine subscribes to, which is
+        // precisely what the refusal below exists to prevent. The variable was
+        // even called `published`.
+        //
+        // And a published workflow whose draft has since dropped the name was
+        // answered 404 while instances sat parked on it. Both of this endpoint's
+        // own words -- "No published workflow catches…" -- were false in one
+        // direction each.
+        var published = await models.ListPublishedAsync(cancellationToken);
 
         var declaring = new List<string>();
         var available = new SortedSet<string>(StringComparer.Ordinal);

@@ -41,10 +41,10 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
             // of "now" cascade-deletes every pre-existing e2e-* deployment on the
             // shared engine -- a concurrent run's live instances and jobs included,
             // which is the destruction #297 exists to stop.
-            var deleted = await FlowableDeploymentSweep.SweepAsync(
+            var sweep = await FlowableDeploymentSweep.SweepAsync(
                 client, DateTimeOffset.UtcNow, onlyNamed: probeTag);
 
-            Assert.True(deleted > 0, "The sweep reported deleting nothing.");
+            Assert.True(sweep.Deleted > 0, $"The sweep reported deleting nothing: {sweep}.");
             Assert.False(await ExistsAsync(client, mine), "A suite deployment survived the sweep.");
             // The half that makes this safe to run on a shared engine.
             Assert.True(await ExistsAsync(client, theirs),
@@ -168,9 +168,9 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
         // the way rather than raced -- the cut-off's own behaviour has its own
         // test below.
         // #308. Scoped to this key, so the engine's other deployments are untouched.
-        var deleted = await FlowableDeploymentSweep.SweepAsync(
+        var sweep = await FlowableDeploymentSweep.SweepAsync(
             client, DateTimeOffset.UtcNow, onlyNamed: key);
-        Assert.True(deleted > 0, "The sweep reported deleting nothing.");
+        Assert.True(sweep.Deleted > 0, $"The sweep reported deleting nothing: {sweep}.");
         Assert.False(await ExistsAsync(client, deployedAs),
             "The sweep did not remove a deployment the app itself published.");
     }
@@ -211,11 +211,11 @@ public sealed class FlowableDeploymentSweepTests : E2ETestBase
                 "the fixture did not deploy, so the assertion below would be vacuous");
 
             // THE DEFAULT OVERLOAD. This is the whole point of the test.
-            var deleted = await FlowableDeploymentSweep.SweepAsync(client);
+            var sweep = await FlowableDeploymentSweep.SweepAsync(client);
 
             Assert.True(await ExistsAsync(client, key),
-                $"The default sweep removed a deployment made moments ago — it deleted " +
-                $"{deleted}. On a shared engine that is a CONCURRENT run's live work, and " +
+                $"The default sweep removed a deployment made moments ago — it " +
+                $"{sweep}. On a shared engine that is a CONCURRENT run's live work, and " +
                 "cascade takes its instances and jobs with it.");
         }
         finally
