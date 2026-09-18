@@ -8118,3 +8118,24 @@ so that nesting is meaningful rather than a workaround.
   asserts the build before testing. A mutation report from a stale binary is
   worse than no mutation report, because it reads as evidence.
   **Issue:** #562
+
+## Ad-hoc
+
+- **Change:** #325's AC5 amended to admit a third disposition — an element may
+  stay `engine: executes` with a measured `undeclaredReason` where the product
+  withdraws it at publish, alongside "gains evidence" and "moves to
+  `cannot-execute`".
+  **Why:** two rows (Manual Task, Task (Generic)) took that third path, and
+  verification flagged the mismatch for five consecutive rounds. The substance
+  was decided by the owner during M4d planning — *"Other two are fine as
+  reasons"* — and recorded on the milestone's `SETTLED:` line, but the AC text
+  was never brought into line, so the epic could not close without asserting a
+  criterion its own shipped manifest contradicted.
+  The alternative — moving the two rows to `cannot-execute` — was rejected on
+  the merits, not for convenience: `engine` describes **Flowable**, which does
+  execute both elements. It is Auton8 that refuses them at publish, which
+  `studio: withdrawn` already records. Amending the data to satisfy the sentence
+  would have made the support manifest lie about the engine.
+  **Owner decision:** confirmed 2026-09-18, "Amend AC5, then close".
+  **Milestones/issues affected:** #325 (epic, now closable), M4d. No future
+  milestone plans depend on AC5's wording; nothing else to reconcile.
