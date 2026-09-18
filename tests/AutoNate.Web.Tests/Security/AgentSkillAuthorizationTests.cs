@@ -434,6 +434,7 @@ public sealed class AgentSkillAuthorizationTests
             new InvalidOperationException("A denied caller must not reach IWorkflowModelStore.");
 
         public virtual Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default) => throw Boom();
+        public Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default) => throw Boom();
         public virtual Task<WorkflowModel?> GetAsync(Guid id, CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) => throw Boom();

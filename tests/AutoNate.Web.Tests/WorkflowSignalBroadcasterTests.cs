@@ -134,6 +134,60 @@ public sealed class WorkflowSignalBroadcasterTests
         Assert.Equal(variables, flowable.BroadcastedSignals[0].Variables);
     }
 
+    /// <summary>
+    /// A never-published draft is not a declaration (#544).
+    /// </summary>
+    /// <remarks>
+    /// The reported defect. The broadcaster scanned every model row and read each
+    /// one's WORKING xml, so a draft nobody had published counted as a
+    /// declaration and the endpoint answered 200 for a name nothing in the engine
+    /// subscribes to — "report success for a signal that reached nobody", which
+    /// is the exact failure the refusal exists to prevent, arriving by the one
+    /// door the refusal did not cover.
+    /// </remarks>
+    [Fact]
+    public async Task A_never_published_draft_does_not_declare_anything()
+    {
+        var flowable = new StubFlowableClient();
+
+        // The store answers what the STORE would answer: a draft is not in the
+        // published list at all.
+        var broadcaster = new WorkflowSignalBroadcaster(
+            new ListingModelStore([]), flowable);
+
+        var result = await broadcaster.BroadcastAsync(Caught, null);
+
+        Assert.Equal(WorkflowSignalBroadcaster.Outcome.UnknownSignal, result.Outcome);
+        Assert.Empty(flowable.BroadcastedSignals);
+    }
+
+    /// <summary>
+    /// A published workflow still declares what it PUBLISHED (#544).
+    /// </summary>
+    /// <remarks>
+    /// The other direction, and the one that made a real instance unwakeable:
+    /// publish a workflow catching a name, leave instances parked on it, then
+    /// edit the draft to drop the name. Reading `model.BpmnXml` — the working
+    /// copy — answered 404 for a signal those instances are genuinely waiting
+    /// on. `ListPublishedAsync` reads the published version's xml, so the draft
+    /// edit is invisible here, which is correct: the engine is running what was
+    /// published.
+    /// </remarks>
+    [Fact]
+    public async Task A_draft_edit_that_drops_the_name_does_not_undeclare_it()
+    {
+        var flowable = new StubFlowableClient();
+
+        // What the store returns for a published workflow is the PUBLISHED xml,
+        // which still catches the name even though the draft no longer would.
+        var broadcaster = Broadcaster(flowable, ("orders", StartCatching(Caught)));
+
+        var result = await broadcaster.BroadcastAsync(Caught, null);
+
+        Assert.Equal(WorkflowSignalBroadcaster.Outcome.Broadcast, result.Outcome);
+        Assert.Equal(["orders"], result.Declaring);
+    }
+
     // ---- diagrams ------------------------------------------------------------
 
     private static string StartCatching(string signalName) => Wrap(signalName,
@@ -176,10 +230,21 @@ public sealed class WorkflowSignalBroadcasterTests
             })
             .ToList()), flowable);
 
+    // Answers `ListPublishedAsync`, not `ListAsync` (#544). The old fixture
+    // handed everything to a broadcaster that filtered nothing, so every "is
+    // broadcast" assertion in this file was made against an unpublished draft --
+    // the bug was not merely untested, it was baked into the harness. Now the
+    // store models the real contract: only published rows, carrying the
+    // PUBLISHED xml.
     private sealed class ListingModelStore(IReadOnlyList<WorkflowModel> models) : IWorkflowModelStore
     {
-        public Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(models);
+
+        public Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException(
+                "The broadcaster must ask for PUBLISHED workflows. Reaching ListAsync means the "
+                + "filter came off again (#544).");
 
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

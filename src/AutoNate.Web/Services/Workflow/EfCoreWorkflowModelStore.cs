@@ -176,6 +176,30 @@ public sealed class EfCoreWorkflowModelStore(
         return entity.ToModel();
     }
 
+    public async Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        // The join is the point (#544). Filtering `ListAsync` would still hand
+        // back each model's DRAFT xml, so a published workflow whose draft has
+        // since dropped a declaration would read as no longer declaring it --
+        // while instances sit parked on exactly that element in the engine.
+        var published = await dbContext.WorkflowModels
+            .AsNoTracking()
+            .Where(model => model.PublishedVersionNumber != null)
+            .Join(
+                dbContext.WorkflowModelVersions.AsNoTracking(),
+                model => new { Id = model.Id, Version = model.PublishedVersionNumber!.Value },
+                version => new { Id = version.WorkflowModelId, Version = version.VersionNumber },
+                (model, version) => new { model, version.BpmnXml })
+            .ToListAsync(cancellationToken);
+
+        return published
+            .Select(row => row.model.ToModel() with { BpmnXml = row.BpmnXml })
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<WorkflowModelVersion>> ListVersionsAsync(
         Guid workflowModelId,
         CancellationToken cancellationToken = default)

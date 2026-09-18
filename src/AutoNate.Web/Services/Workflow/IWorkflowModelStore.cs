@@ -6,6 +6,26 @@ public interface IWorkflowModelStore
 {
     Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Published workflows, each carrying the XML that was actually PUBLISHED (#544).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not <see cref="ListAsync"/> plus a filter, and the difference is the half
+    /// that bit. <c>ListAsync</c> returns every row including never-published
+    /// drafts, and each row's <c>BpmnXml</c> is the WORKING copy — which diverges
+    /// from what the engine deployed the moment somebody edits the draft of a
+    /// published workflow.
+    /// </para>
+    /// <para>
+    /// A caller asking "what do published workflows declare" wants neither of
+    /// those. `workflow_model_versions` already holds the per-version XML and
+    /// `PublishedVersionNumber` points at the right row, so this reads what was
+    /// published rather than what is being drafted.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default);
+
     Task<WorkflowModel?> GetAsync(Guid workflowModelId, CancellationToken cancellationToken = default);
 
     Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default);
