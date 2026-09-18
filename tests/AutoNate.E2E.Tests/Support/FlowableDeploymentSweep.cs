@@ -111,7 +111,35 @@ internal static class FlowableDeploymentSweep
             ? parsed
             : (DateTimeOffset?)null);
 
-    internal static async Task<int> SweepAsync(HttpClient client) =>
+    /// <summary>What one sweep actually did (#548).</summary>
+    /// <remarks>
+    /// <para>
+    /// A bare <c>int deleted</c> cannot tell three different situations apart,
+    /// and all three answer <c>0</c>: a drained engine with nothing to take, a
+    /// full page every row of which the prefix and age filters excluded, and a
+    /// read that stopped early because a page did not answer. #537 was filed
+    /// precisely because the last of those read as the first.
+    /// </para>
+    /// <para>
+    /// Modelled on <c>TestResourceSweep.Counts</c>, the sibling sweep, which
+    /// splits its total per category for the same reason — "cleaned up 400
+    /// things" cannot hide one category doing nothing.
+    /// </para>
+    /// </remarks>
+    internal sealed record Sweep(int Seen, int Matched, int Deleted, int Pages, bool Incomplete)
+    {
+        /// <summary>No engine, or an engine that answered something unexpected.</summary>
+        internal static readonly Sweep Unreachable = new(0, 0, 0, 0, Incomplete: true);
+
+        public override string ToString() =>
+            $"read {Seen} deployment(s) over {Pages} page(s), {Matched} matched the suite "
+            + $"prefix and the age cut-off, {Deleted} deleted"
+            + (Incomplete
+                ? " -- INCOMPLETE: a page did not answer, so the rest was never read"
+                : string.Empty);
+    }
+
+    internal static async Task<Sweep> SweepAsync(HttpClient client) =>
         await SweepAsync(client, DateTimeOffset.UtcNow - MinimumAge);
 
     /// <param name="onlyNamed">
@@ -121,10 +149,13 @@ internal static class FlowableDeploymentSweep
     /// every <c>e2e-*</c> deployment on a shared engine — which is the destruction
     /// #297 was filed about, committed by the file that guards the rule.
     /// </param>
-    internal static async Task<int> SweepAsync(
+    internal static async Task<Sweep> SweepAsync(
         HttpClient client, DateTimeOffset createdBefore, string? onlyNamed = null)
     {
         List<(string Id, string Name)> deployments;
+        var seen = 0;
+        var pages = 0;
+        var incomplete = false;
         try
         {
             // EVERY PAGE, NOT ONE (#537).
@@ -157,10 +188,16 @@ internal static class FlowableDeploymentSweep
                 // Sweeping what was actually seen is strictly better: the
                 // deletion is filtered by prefix AND age either way, so a partial
                 // pass is safe and idempotent, and the next run takes the rest.
-                if (!response.IsSuccessStatusCode) break;
+                if (!response.IsSuccessStatusCode)
+                {
+                    incomplete = true;
+                    break;
+                }
 
                 using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
                 var rows = page.RootElement.GetProperty("data").EnumerateArray().ToList();
+                pages++;
+                seen += rows.Count;
                 if (rows.Count == 0) break;
 
                 raw.AddRange(rows.Select(Read));
@@ -192,8 +229,9 @@ internal static class FlowableDeploymentSweep
         catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException)
         {
             // No engine, or an engine that answered something unexpected. Cleanup
-            // never fails a run.
-            return 0;
+            // never fails a run -- but it says it could not look, rather than
+            // answering 0 the way a drained engine would (#548).
+            return Sweep.Unreachable;
         }
 
         var deleted = 0;
@@ -213,7 +251,7 @@ internal static class FlowableDeploymentSweep
             }
         }
 
-        return deleted;
+        return new Sweep(seen, deployments.Count, deleted, pages, incomplete);
     }
 
     internal static HttpClient CreateClient(string baseUrl, string user, string password)

@@ -90,11 +90,12 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
                 Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
                 Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
 
-            var deleted = await Support.FlowableDeploymentSweep.SweepAsync(client);
-            if (deleted > 0)
-            {
-                Console.WriteLine($"[e2e-flowable-sweep] Removed {deleted} deployment(s) from earlier runs.");
-            }
+            // ALWAYS PRINTED, not only when something was deleted (#548). "Removed
+            // 0" and "could not read past page 3" and "the engine is drained" were
+            // one silent condition; the record tells them apart, so the run's log
+            // now carries which one it was.
+            var sweep = await Support.FlowableDeploymentSweep.SweepAsync(client);
+            Console.WriteLine($"[e2e-flowable-sweep] {sweep}.");
         }
         catch (Exception exception)
         {

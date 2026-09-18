@@ -35,9 +35,11 @@ public sealed class SweepPagingTests
         var handler = new PagingHandler(totalMatching: (size * 2) + 7, pageSize: size);
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://sweep.test/") };
 
-        var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
+        var sweep = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
 
-        Assert.Equal((size * 2) + 7, deleted);
+        Assert.Equal((size * 2) + 7, sweep.Deleted);
+        Assert.Equal(3, sweep.Pages);
+        Assert.False(sweep.Incomplete);
 
         // AND IT ASKED FOR MORE THAN ONE PAGE. Asserting only the count would
         // pass against a single request that happened to return everything --
@@ -66,9 +68,14 @@ public sealed class SweepPagingTests
         };
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://sweep.test/") };
 
-        var deleted = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
+        var sweep = await FlowableDeploymentSweep.SweepAsync(client, DateTimeOffset.UtcNow);
 
-        Assert.Equal(size, deleted);
+        Assert.Equal(size, sweep.Deleted);
+
+        // AND IT SAYS THE READ WAS PARTIAL (#548). Without this the test passes
+        // against a sweep that stopped early and reported a clean pass -- which
+        // is the distinction the issue asked for and `int` could not make.
+        Assert.True(sweep.Incomplete);
     }
 
     private sealed class PagingHandler(int totalMatching, int pageSize) : HttpMessageHandler
