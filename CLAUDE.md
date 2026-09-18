@@ -128,7 +128,7 @@ did anything *skip*, and does each filter still discover the exact number pinned
 in `tests/tiers.env`?
 
 The pins are **exact, not floors** — house style, alongside
-`ExecutionOracleSizeTests`' 29 and the coverage ratchet. Growth has to be as
+`ExecutionOracleSizeTests`' 49 and the coverage ratchet. Growth has to be as
 visible as loss, or the number drifts upward and stops meaning anything. Add
 tests, move the pin in the same commit; that visibility is the point, not
 friction to route around.
