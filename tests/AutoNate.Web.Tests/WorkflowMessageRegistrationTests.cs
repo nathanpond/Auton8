@@ -154,6 +154,25 @@ public sealed class WorkflowMessageRegistrationTests
             StringComparison.Ordinal);
     }
 
+    /// <summary>The E2E copy of the default SIGNAL topic matches too (#540).</summary>
+    /// <remarks>
+    /// Same reason as the message one above, and the same class of defect #540
+    /// was: a topic nothing listens on produces a timeout that reads like a
+    /// product bug.
+    /// </remarks>
+    [Fact]
+    public void The_E2E_copy_of_the_default_signal_topic_matches_the_product()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            Infrastructure.RepoRoot.Path, "tests", "AutoNate.E2E.Tests",
+            "WorkflowSignalBusExecutionTests.cs"));
+
+        Assert.Contains(
+            $"private const string DefaultSignalTopic = \"{WorkflowBpmnXml.DefaultSignalTopic}\";",
+            source,
+            StringComparison.Ordinal);
+    }
+
     private static string Diagram(string body, string? topic = null) => $"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
