@@ -8139,3 +8139,40 @@ so that nesting is meaningful rather than a workaround.
   **Owner decision:** confirmed 2026-09-18, "Amend AC5, then close".
   **Milestones/issues affected:** #325 (epic, now closable), M4d. No future
   milestone plans depend on AC5's wording; nothing else to reconcile.
+
+## Release v0.3.0
+
+- **Released:** v0.3.0 at `9103d89`, 2026-09-18.
+  **Covers:** M4b (a verifiable studio axis), M4c (test tiers), M4d (the
+  execution oracle's coverage) — 74 merged PRs since v0.2.0.
+  **Triggered:** `release.yml` published four multi-arch images to GHCR with
+  SLSA provenance — `autonate-web@sha256:4a7fc281eb22`,
+  `executor@sha256:b4230d43e490`, `flowable@sha256:4212b9d43cc4`,
+  `hocuspocus@sha256:f389e05ce29d` — and attached a digest-pinned `compose.yml`,
+  `env.template` and `QUICKSTART.md` to the release. No deployment: v1.0 ships an
+  artefact others run, per `.n8/config.yml`.
+  **Gate:** full-local green (backend 2794, E2E 463, nothing skipped, every pin
+  exact) plus CI slim green on the tagged SHA, with the ten shards summing to
+  2794 and E2E to 224 — read from the job log rather than the run's own
+  conclusion.
+
+- **Decision:** the release skill's precondition "no open `confirmed` bugs
+  against the released milestones" was read as meaning blocking severities.
+  **Why:** 33 are open across M4b/M4c/M4d and every one is `sev:medium` or
+  `sev:low`, carried deliberately by `/n8-verify` under its rule that those may
+  be carried. Read literally the two skills contradict each other — no milestone
+  closed under the carry rule could ever be released. The owner chose the
+  blocking-severity reading, and the release notes name the two that a person
+  running this would want to know about (#545, #541) rather than leaving the
+  count implicit.
+  **Alternative rejected:** moving the 33 to a later milestone to make the
+  released ones clean. `/n8-verify` deliberately keeps carried bugs in their own
+  milestone so a re-run still finds them.
+
+- **Observed during the release:** `E2E (Playwright)` went red on the
+  version-bump PR (#569), whose entire diff is three version strings. It was
+  `NotesExplorer_PageRow_OpensWithTheKeyboard` timing out for 30s waiting for a
+  navigation; re-running the job alone turned it green, same commit. Filed as
+  **#570** and paired with #481 — two independent timeouts under CI load look
+  more like a resource ceiling than two bugs, and a merge gate that reddens on
+  unrelated work teaches people to re-run rather than read.
