@@ -777,10 +777,14 @@ export default function WorkflowStudio() {
         correlationKey: selection.messageCorrelationKey ?? "",
         targetProcessKey: selection.messageTargetProcessKey ?? "",
         messageName: selection.messageName ?? "",
-        // Only a send task names its own message; everywhere else the name comes
-        // from the <bpmn:message> the diagram declares, and editing it here would
-        // silently diverge from it.
-        editableMessageName: selection.type === "bpmn:SendTask"
+        // #524. Editable everywhere now, because the studio writes the
+        // <bpmn:message> declaration as well as the reference. The old rule --
+        // only a send task names its own message -- was right that a typed name
+        // could diverge from what the engine subscribes to, but only while typing
+        // it wrote the event alone. A receive task is still the exception: it
+        // carries no message subscription at all and is addressed by its own
+        // element id, so there is nothing for a name to point at.
+        editableMessageName: selection.type !== "bpmn:ReceiveTask"
       });
       return;
     }
@@ -4062,9 +4066,9 @@ function MessageElementModal({
           />
           <p className="workflow-modal-note">
             {editor.editableMessageName
-              ? "The name a sender uses to address this."
-              : "Comes from the message declared on the diagram, so it always matches what the " +
-                "engine subscribes to."}
+              ? "The name a sender uses to address this. Saving writes the message onto the " +
+                "diagram too, so this and what the engine subscribes to cannot drift apart."
+              : "A receive task has no message subscription — it is addressed by its own id."}
           </p>
         </label>
 

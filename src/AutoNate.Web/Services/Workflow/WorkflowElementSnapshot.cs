@@ -44,7 +44,20 @@ public sealed record class WorkflowElementSnapshot(
     // Nullable rather than bool so "the studio did not send this" and "the
     // author turned it off" stay distinguishable: a snapshot from an older SPA
     // build must not silently clear a retry point someone set.
-    bool? RetryPoint = null);
+    bool? RetryPoint = null,
+    // #524. Appended, never inserted — positional record.
+    //
+    // The name a message event listens for. Until now only a send task named its
+    // own message (`flowable:autonateMessageName`); everywhere else the name came
+    // from whatever <bpmn:message> the diagram happened to declare, and the
+    // studio's field was disabled with that as its stated reason.
+    //
+    // The owner's decision reverses that: editable everywhere, with the STUDIO
+    // owning the declaration, so the typed name and the engine's subscription
+    // cannot diverge by construction rather than by scope. `prepare` writes the
+    // <bpmn:message> root and the messageRef, the same way
+    // ApplySignalStartEventSnapshot has always done for signals.
+    string? MessageName = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

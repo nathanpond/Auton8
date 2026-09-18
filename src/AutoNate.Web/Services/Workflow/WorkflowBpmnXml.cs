@@ -1984,6 +1984,18 @@ public static partial class WorkflowBpmnXml
                 ApplySignalStartEventSnapshot(document, element, snapshot);
             }
 
+            // #524. EVERY message event, not just start events: the owner's
+            // decision is "editable everywhere", and a boundary or intermediate
+            // catch is exactly where a running instance waits for a name someone
+            // outside has to know. Routed on the event definition rather than the
+            // tag, so one branch covers startEvent, intermediateCatchEvent,
+            // boundaryEvent and the throwing forms without four near-identical
+            // conditions to keep in step.
+            if (element.Element(BpmnNamespace + "messageEventDefinition") is not null)
+            {
+                ApplyMessageEventSnapshot(document, element, snapshot);
+            }
+
             if (string.Equals(element.Name.LocalName, "startEvent", StringComparison.Ordinal) &&
                 element.Element(BpmnNamespace + "timerEventDefinition") is not null)
             {
@@ -2305,6 +2317,101 @@ public static partial class WorkflowBpmnXml
                 FlowableNamespace + "recordTypeShortCodes",
                 string.IsNullOrEmpty(normalized) ? null : normalized);
         }
+    }
+
+    /// <summary>
+    /// The studio names a message event's message, and owns the declaration (#524).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This reverses a deliberate decision, and the reason it reverses cleanly is
+    /// the mechanism. The field was disabled because the name "comes from the
+    /// <c>&lt;bpmn:message&gt;</c> the diagram declares, so letting it be typed
+    /// would let it diverge from what the engine subscribes to." True — as long
+    /// as typing it wrote only the event. Writing the ROOT as well removes the
+    /// divergence by construction rather than by scope, which is the owner's call.
+    /// </para>
+    /// <para>
+    /// Done in <c>prepare</c> rather than in the studio's own JavaScript for the
+    /// same reason the complex gateway's routing script lives in an
+    /// <c>autonate:</c> attribute: bpmn-js is vendored with no Flowable moddle
+    /// extension, and a root element the studio synthesised would meet the same
+    /// serialiser that drops what its moddle does not know.
+    /// </para>
+    /// <para>
+    /// A blank name clears <c>messageRef</c> rather than guessing, matching the
+    /// signal path exactly: the XML stays parseable and validation surfaces the
+    /// missing name, instead of the event silently keeping a stale subscription.
+    /// </para>
+    /// </remarks>
+    private static void ApplyMessageEventSnapshot(
+        XDocument document, XElement element, WorkflowElementSnapshot snapshot)
+    {
+        var messageEventDefinition = element.Element(BpmnNamespace + "messageEventDefinition");
+        if (messageEventDefinition is null)
+        {
+            return;
+        }
+
+        // Absent means "an older SPA build did not send this", which must not
+        // clear a name somebody set. Empty means the author cleared it.
+        if (snapshot.MessageName is null)
+        {
+            return;
+        }
+
+        var trimmed = snapshot.MessageName.Trim();
+        if (trimmed.Length == 0)
+        {
+            messageEventDefinition.SetAttributeValue("messageRef", null);
+            return;
+        }
+
+        var message = ResolveOrCreateMessageRoot(document.Root!, trimmed);
+        message.SetAttributeValue("name", trimmed);
+        messageEventDefinition.SetAttributeValue("messageRef", message.Attribute("id")!.Value);
+    }
+
+    /// <summary>The &lt;bpmn:message&gt; root for a name, created if absent (#524).</summary>
+    /// <remarks>
+    /// Deliberately the same shape as <see cref="ResolveOrCreateSignalRoot"/>,
+    /// including the collision counter and the schema-ordering insert: messages,
+    /// like signals, must precede <c>&lt;process&gt;</c>, and appending one would
+    /// produce XML the engine refuses.
+    /// </remarks>
+    private static XElement ResolveOrCreateMessageRoot(XElement definitionsElement, string messageName)
+    {
+        var existing = definitionsElement
+            .Elements(BpmnNamespace + "message")
+            .FirstOrDefault(element =>
+                string.Equals(element.Attribute("name")?.Value, messageName, StringComparison.Ordinal));
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var id = $"Message_{Math.Abs(messageName.GetHashCode(StringComparison.Ordinal)):X}";
+        var counter = 1;
+        var finalId = id;
+        while (definitionsElement.Elements(BpmnNamespace + "message")
+                   .Any(m => string.Equals(m.Attribute("id")?.Value, finalId, StringComparison.Ordinal)))
+        {
+            finalId = $"{id}_{counter++}";
+        }
+
+        var message = new XElement(BpmnNamespace + "message", new XAttribute("id", finalId));
+        var firstProcess = definitionsElement.Elements(BpmnNamespace + "process").FirstOrDefault();
+        if (firstProcess is not null)
+        {
+            firstProcess.AddBeforeSelf(message);
+        }
+        else
+        {
+            definitionsElement.Add(message);
+        }
+
+        return message;
     }
 
     private static XElement ResolveOrCreateSignalRoot(XElement definitionsElement, string signalName)
