@@ -336,6 +336,61 @@ public sealed class EfCoreWorkflowModelStoreTests
         Assert.Null(await store.GetPublishedByProcessKeyAsync("never_published"));
     }
 
+    /// <summary>
+    /// A draft rename does not orphan the published definition (#558).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The lookup matched <c>workflow_models.process_key</c> — the working
+    /// copy's — while returning the published version's xml.
+    /// <c>SaveAsync</c> re-applies the key from the request on every save, so a
+    /// draft rename of a published workflow made the running definition
+    /// unfindable: <c>WorkflowMessageCorrelator</c> answered
+    /// <c>UnknownProcess</c> and <c>SendMessageBehavior</c> failed
+    /// <c>senderNotFound</c>, for an instance running perfectly well.
+    /// </para>
+    /// <para>
+    /// The same "a draft edit changes what a running instance does" shape #553
+    /// was filed about, surviving inside the method written to end it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByProcessKeyAsync_FindsThePublishedKeyAfterADraftRename()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Orders",
+            ProcessKey = "orders_v1",
+            BpmnXml = "<xml published=\"yes\" />"
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "orders_v1",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        // Renamed in the draft, NOT published. Flowable is still running
+        // `orders_v1` and instances of it are still addressable by that key.
+        await store.SaveAsync(published with { ProcessKey = "orders_v2" });
+
+        var found = await store.GetPublishedByProcessKeyAsync("orders_v1");
+
+        Assert.NotNull(found);
+        Assert.Equal("orders_v1", found.ProcessKey);
+
+        // AND THE DRAFT'S NEW KEY FINDS NOTHING, because nothing is deployed
+        // under it. Asserting only the first would pass against a lookup that
+        // matched either key.
+        Assert.Null(await store.GetPublishedByProcessKeyAsync("orders_v2"));
+    }
+
     [Fact]
     public async Task PublishAsync_FromDraftPromotesDraftVersionAndRetainsHistory()
     {

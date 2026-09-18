@@ -48,6 +48,15 @@ public interface IWorkflowModelStore
     /// cannot get this by filtering the other method's result — by then the row
     /// already carries the draft's xml.
     /// </para>
+    /// <para>
+    /// <b>Exactly which fields are the published ones</b>, because the name
+    /// promises more than a record can deliver (#558): <c>BpmnXml</c>,
+    /// <c>ProcessKey</c> and <c>Name</c> come from the published version row,
+    /// and the <c>processKey</c> argument is matched against that row's key so a
+    /// post-publish rename cannot orphan a running instance. Everything else —
+    /// <c>DefaultVariables</c>, <c>IsDraft</c>, <c>ActiveProcessInstanceId</c> —
+    /// is the model row's, because versions do not carry it.
+    /// </para>
     /// </remarks>
     Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
         string processKey, CancellationToken cancellationToken = default);

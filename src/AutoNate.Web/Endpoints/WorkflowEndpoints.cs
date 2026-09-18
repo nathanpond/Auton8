@@ -226,20 +226,15 @@ public static class WorkflowEndpoints
             IWorkflowModelStore store,
             CancellationToken cancellationToken) =>
         {
-            var models = await store.ListAsync(cancellationToken);
-            var affected = models
-                .Select(m => new LegacyScriptInventory.ModelFindings(
-                    m.Id, m.Name, m.ProcessKey, !m.IsDraft,
-                    LegacyScriptInventory.Scan(m.BpmnXml)))
-                .Where(r => r.Findings.Count > 0)
-                .OrderByDescending(r => r.IsPublished)
-                .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            // Published models are scanned against their PUBLISHED xml, not the
+            // draft's (#558). See LegacyScriptInventory.ScanStoreAsync.
+            var scanned = await store.ListAsync(cancellationToken);
+            var affected = await LegacyScriptInventory.ScanStoreAsync(store, cancellationToken);
 
             return Results.Ok(new
             {
-                scanned = models.Count,
-                affected = affected.Length,
+                scanned = scanned.Count,
+                affected = affected.Count,
                 // Published models are the urgent ones: they are deployed and
                 // will fail on their next run. A draft fails only when someone
                 // tries to publish it, where #151 explains why.

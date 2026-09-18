@@ -24,24 +24,31 @@ public sealed class LegacyScriptStartupWarning(
         {
             using var scope = services.CreateScope();
             var store = scope.ServiceProvider.GetRequiredService<IWorkflowModelStore>();
-            var models = await store.ListAsync(cancellationToken);
+            // THE PUBLISHED XML FOR PUBLISHED MODELS (#558).
+            //
+            // This read `ListAsync`, which returns every row carrying
+            // `workflow_models.bpmn_xml` -- the WORKING copy. So the scan that
+            // exists to warn about DEPLOYED diagrams was reading whatever the
+            // author last typed into the draft. A workflow published with a
+            // removed-API script and since draft-edited reported clean, while
+            // the deployed definition still failed on its next run.
+            //
+            // And `!m.IsDraft` was worse than a stale read: `NormalizeDraftState`
+            // sets `IsDraft` on ANY definition change, so the row dropped out of
+            // the "already published" tally the moment anyone touched the draft
+            // -- exactly when the operator most needs to see it.
+            var affected = await LegacyScriptInventory.ScanStoreAsync(store, cancellationToken);
 
-            var affected = models
-                .Select(m => (m.Name, m.ProcessKey, Published: !m.IsDraft,
-                              Findings: LegacyScriptInventory.Scan(m.BpmnXml)))
-                .Where(r => r.Findings.Count > 0)
-                .ToArray();
+            if (affected.Count == 0) return;
 
-            if (affected.Length == 0) return;
-
-            var published = affected.Count(a => a.Published);
+            var published = affected.Count(a => a.IsPublished);
             logger.LogWarning(
                 "{Affected} saved workflow model(s) contain script tasks written against the " +
                 "removed `execution` API ({Published} already published, so they fail on their " +
                 "next run). Affected: {Names}. Each must be edited to use `variables.get` / " +
                 "`variables.set`; GET /api/workflows/legacy-scripts lists them with the specific " +
                 "replacement. See docs/DEPLOYMENT.md and #194.",
-                affected.Length,
+                affected.Count,
                 published,
                 string.Join(", ", affected.Select(a => a.ProcessKey)));
         }
