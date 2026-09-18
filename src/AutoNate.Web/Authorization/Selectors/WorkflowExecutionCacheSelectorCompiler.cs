@@ -10,8 +10,13 @@ namespace AutoNate.Web.Authorization.Selectors;
 //
 // Path filters (e.g. `/workflowexecution/<id>`) aren't supported here —
 // IDs are Flowable strings, not Guids, so SelectorCompilerBase's Guid
-// IdSelector contract doesn't apply. Tag-only is the working subset for
-// every grant we issue against this kind today.
+// IdSelector contract doesn't apply.
+//
+// THAT IS A DIVERGENCE, NOT A SUBSET (#575). `InMemorySelectorEvaluator`
+// DOES honour `ast.Path`, so a path-id selector matches one row in memory
+// and EVERY row here. "Tag-only is the working subset for every grant we
+// issue today" was the old wording, and it reads as a scope decision when
+// it is an unclosed gap. #575 owns it.
 public sealed class WorkflowExecutionCacheSelectorCompiler : ISelectorCompiler<WorkflowExecutionCache>
 {
     public string Kind => EntityKinds.WorkflowExecution;
@@ -59,26 +64,43 @@ public sealed class WorkflowExecutionCacheSelectorCompiler : ISelectorCompiler<W
         CompilationContext context,
         Expression<Func<WorkflowExecutionCache, string?>> columnAccessor)
     {
-        var value = ResolveTagValue(tag, context);
-        if (value is null)
+        var p = columnAccessor.Parameters[0];
+
+        // THE WILDCARD HAS ITS OWN FORM, BRANCHED BEFORE THE VALUE IS RESOLVED (#574).
+        //
+        // The branch that used to stand here read `tag=null matches rows whose
+        // column is also null. Useful for selectors like tenant=null` -- but the
+        // grammar has NO null literal (`SelectorParser.ParseValue` produces only
+        // wildcard, literal, current-user and qualified values, and
+        // `ActorUserIdString` is never null), so the only thing that ever
+        // reached it was the WILDCARD. `tenant=null` parses as the literal
+        // string "null" and compiles to `= 'null'`.
+        //
+        // So the comment described a feature that does not exist while the code
+        // silently inverted one that does: `tag=*` compiled to `IS NULL` where
+        // `InMemorySelectorEvaluator` reads `actual is not null`
+        // (GHSA-vrw7-qxhw-m9q8).
+        if (tag.Value is WildcardValue)
         {
-            // `tag=null` matches rows whose column is also null. Useful for
-            // selectors like `tenant=null`.
-            var parameter = columnAccessor.Parameters[0];
-            var isNull = Expression.Equal(columnAccessor.Body, Expression.Constant(null, typeof(string)));
-            return Expression.Lambda<Func<WorkflowExecutionCache, bool>>(isNull, parameter);
+            var hasAnyValue = Expression.NotEqual(
+                columnAccessor.Body, Expression.Constant(null, typeof(string)));
+            return Expression.Lambda<Func<WorkflowExecutionCache, bool>>(hasAnyValue, p);
         }
 
-        var p = columnAccessor.Parameters[0];
+        var value = ResolveTagValue(tag, context);
         var eq = Expression.Equal(columnAccessor.Body, Expression.Constant(value, typeof(string)));
         return Expression.Lambda<Func<WorkflowExecutionCache, bool>>(eq, p);
     }
 
-    private static string? ResolveTagValue(TagExpr tag, CompilationContext context) => tag.Value switch
+    // Returns the VALUE a tag was given. The wildcard is not a value and is
+    // handled by its caller before it gets here (#574) -- mapping it to null is
+    // what made `tag=*` compile to `IS NULL`.
+    private static string ResolveTagValue(TagExpr tag, CompilationContext context) => tag.Value switch
     {
         LiteralValue lit => lit.Text,
         CurrentUserValue cu => cu.PinnedId ?? context.ActorUserIdString,
-        WildcardValue => null,
+        WildcardValue => throw new SelectorCompilationException(
+            $"Tag '{tag.Tag}': the wildcard has no value and must be compiled before this point."),
         _ => throw new SelectorCompilationException(
             $"Tag '{tag.Tag}' value type {tag.Value.GetType().Name} is not supported.")
     };

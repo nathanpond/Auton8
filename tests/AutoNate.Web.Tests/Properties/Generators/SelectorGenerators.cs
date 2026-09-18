@@ -46,15 +46,22 @@ internal static class SelectorGenerators
             // The actor-relative form, which resolves to the actor's id on both
             // paths and is the construct most likely to diverge.
             (2, Gen.Constant((ValueNode)new CurrentUserValue())),
-            (1, Gen.Constant((ValueNode)new CurrentUserValue { PinnedId = ActorUserId.ToString() }))),
-            // WildcardValue is deliberately absent. The two paths read it as
-            // exact complements — IS NOT NULL in memory, IS NULL in SQL — which
-            // is a real defect, filed as draft advisory GHSA-vrw7-qxhw-m9q8 and
-            // pinned by
-            // SelectorEvaluatorAgreementProperties.The_wildcard_divergence_still_holds.
-            // Leaving it in the shared generator would bury every future
-            // divergence under hundreds of known ones: the first run reported
-            // 69 leaks and 539 lockouts, all of them this.
+            (1, Gen.Constant((ValueNode)new CurrentUserValue { PinnedId = ActorUserId.ToString() })),
+            // WildcardValue is BACK IN, as of #574. It was excluded while the
+            // two paths read it as exact complements — `IS NOT NULL` in memory,
+            // `IS NULL` in SQL (GHSA-vrw7-qxhw-m9q8) — because leaving it in
+            // buried every future divergence under the known one: the first run
+            // reported 69 leaks and 539 lockouts, all of them this.
+            //
+            // The exclusion was always meant to be temporary, and the test that
+            // pinned the defect said so in as many words: "if it is fixed,
+            // remove the exclusion in SelectorGenerators.ValueFor so the
+            // agreement property covers it." That is what this is.
+            //
+            // Weighted at 1 rather than 4: it is one construct among several and
+            // over-sampling it would crowd out the literal and actor-relative
+            // forms the property is also there to exercise.
+            (1, Gen.Constant((ValueNode)new WildcardValue()))),
     };
 
     private static Gen<PredicateExpr> SharedTagExpr() =>

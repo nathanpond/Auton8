@@ -8240,3 +8240,52 @@ so that nesting is meaningful rather than a workaround.
   the pin is **49** (`ExecutionOracleSizeTests.cs:40`). Found while replanning #231,
   and worth fixing on its own — it sat in the paragraph explaining why pins are exact
   rather than floors, in the file loaded into every session in this repo.
+
+## M5 execution — #574 (the wildcard's own compiled form)
+
+- **Decision:** the wildcard is branched **before** `ResolveTagValue`, and that
+  resolver now throws if a wildcard reaches it.
+  **Why:** the defect was not the `IS NULL` expression, it was giving the wildcard
+  a *value* at all. `WildcardValue => null` fed a branch meant for a null literal.
+  Making the resolver's contract "returns the value a tag was given" and throwing
+  for the one construct that has no value means the same mistake cannot be made
+  again by a future caller who reaches for the resolver first.
+  **Cost if wrong:** a throw on a path that should be unreachable.
+  **Issue:** #574
+
+- **Decision:** `The_wildcard_divergence_still_holds` was **inverted, not deleted**.
+  **Why:** it was the only direct assertion on wildcard semantics, and the old
+  test's own comment prescribed exactly this ("if it is fixed, remove the exclusion
+  in SelectorGenerators.ValueFor so the agreement property covers it"). Deleting it
+  would have left the change visible nowhere and dropped the pin by one.
+  **Issue:** #574
+
+- **Decision:** the `Assert.DoesNotContain(WildcardValue)` coverage guard was
+  inverted into `Assert.Contains` rather than removed.
+  **Why:** removing it would leave the agreement property silently not exercising
+  the construct this whole thread was about, with nothing to say so. A positive
+  requirement keeps the coverage instrument accountable.
+  **Issue:** #574
+
+- **Decision (Rule 1, in scope):** `candidateuser=*` / `candidategroup=*` used to
+  **throw** at compile time, so the grant was skipped with a warning.
+  **Why it mattered here:** a skipped deny fails open, which is #577's subject —
+  so leaving the array tags to throw would have left a live instance of the defect
+  #577 exists to close. Both array columns are `NOT NULL DEFAULT ARRAY[]`, so "has
+  any value" is decidable as non-empty.
+  **Issue:** #574
+
+- **Decision:** the "eight other compilers have no wildcard branch" AC is delivered
+  as an executable guard (`WildcardCompilerScopeTests`) rather than prose.
+  **Why:** prose confirms a count on the day it is written; a test confirms it on
+  the day a ninth compiler is added, which is the only day it matters. It carries
+  its own vacuity check — if reflection finds fewer than eight compilers the guard
+  is looking in the wrong place and says so rather than passing.
+  **Cost if wrong:** a reflection walk over IL, which is cruder than parsing source
+  and survives a rename.
+  **Issue:** #574
+
+- **Method note:** the first mutation of that guard did not compile, and the build
+  check caught it before `--no-build` could re-run a stale assembly and report a
+  false green. That is the round-three lesson holding.
+  **Issue:** #574

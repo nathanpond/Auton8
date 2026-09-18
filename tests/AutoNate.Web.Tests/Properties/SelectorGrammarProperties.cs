@@ -240,29 +240,31 @@ public sealed class SelectorEvaluatorAgreementProperties
     }
 
     /// <summary>
-    /// The wildcard divergence — a real authorization defect, pinned.
+    /// The wildcard agrees on both evaluation paths (#574).
     /// </summary>
     /// <remarks>
-    /// Draft advisory <b>GHSA-vrw7-qxhw-m9q8</b>. The agreement property found
-    /// it on its first run: 69 leaks and 539 lockouts across 200 selectors and
-    /// 40 rows, every one a wildcard value.
+    /// <para>This was <c>The_wildcard_divergence_still_holds</c>, and it pinned
+    /// the defect rather than the fix: <c>tag=*</c> compiled to <c>IS NULL</c>
+    /// while <see cref="InMemorySelectorEvaluator"/> read it as
+    /// <c>actual is not null</c> — exact complements, measured at 69 leaks and
+    /// 539 lockouts (GHSA-vrw7-qxhw-m9q8).</para>
     ///
-    /// <para><c>ResolveTagValue</c> maps <c>WildcardValue</c> to null, and
-    /// <c>CompileStringEquals</c> reads a null value as an explicit request to
-    /// match NULL — the branch meant for <c>tag=null</c>. So <c>assignee=*</c>
-    /// compiles to <c>assignee IS NULL</c>, while
-    /// <c>InMemorySelectorEvaluator</c> reads the same wildcard as
-    /// <c>actual is not null</c>. Exact complements.</para>
+    /// <para><b>Inverted, not deleted.</b> The old test's own comment said what
+    /// to do when the decision came: <i>"if it is fixed, remove the exclusion in
+    /// SelectorGenerators.ValueFor so the agreement property covers it."</i>
+    /// Deleting it would have removed the only direct assertion on wildcard
+    /// semantics and left the change visible nowhere; inverting it keeps the
+    /// same two rows, the same two paths, and flips what they must agree on.</para>
     ///
-    /// <para><b>Not fixed here, deliberately.</b> Correcting it widens what
-    /// existing grants permit — a <c>tag=*</c> grant would start matching rows
-    /// it currently excludes — and that is a decision for a person rather than
-    /// something to slip into a test story. This test pins the broken behaviour
-    /// so it cannot drift while the decision is pending, and fails loudly the
-    /// moment either side changes.</para>
+    /// <para><b>This is the widening, asserted.</b> The owner's decision
+    /// (2026-09-18) was that <c>*</c> means "has any value", accepting that a
+    /// stored <c>tag=*</c> grant starts matching rows it currently excludes and
+    /// stops matching rows it currently returns. Both halves are asserted below,
+    /// because a test that checked only the newly-matched row would pass against
+    /// a compiler that matched everything.</para>
     /// </remarks>
     [Fact]
-    public async Task The_wildcard_divergence_still_holds()
+    public async Task The_wildcard_agrees_and_means_has_any_value()
     {
         await using var app = await AutoNateWebApplicationFactory.CreateAsync();
         _ = app.CreateClient();
@@ -292,12 +294,104 @@ public sealed class SelectorEvaluatorAgreementProperties
             .Select(r => r.FlowableTaskId)
             .ToList();
 
-        // The defect, stated as an assertion. If either of these fails, the
-        // wildcard semantics changed — reconcile with GHSA-vrw7-qxhw-m9q8,
-        // and if it is fixed, remove the exclusion in
-        // SelectorGenerators.ValueFor so the agreement property covers it.
-        Assert.Equal(["task-unassigned"], fromSql);
+        // The row with a value matches, on BOTH paths. Before #574 the SQL path
+        // returned exactly the other one.
+        Assert.Equal(["task-assigned"], fromSql);
         Assert.Equal(["task-assigned"], fromMemory);
+
+        // And they agree with each other, which is the property the whole
+        // thread exists to restore. Asserting each against a literal would pass
+        // if both changed together in some third, wrong direction.
+        Assert.Equal(fromMemory, fromSql);
+    }
+
+    /// <summary>
+    /// A wildcard DENY stops denying unset rows and starts denying set ones (#574).
+    /// </summary>
+    /// <remarks>
+    /// <para>The owner's decision was framed on allows — "existing <c>tag=*</c>
+    /// grants widen". Both compilers serve denies as well as allows
+    /// (<c>Authorizer</c> splits them), so the same inversion runs the other way
+    /// too: a <c>tag=*</c> deny that today withholds unset-tag rows will now
+    /// withhold set-tag ones instead.</para>
+    ///
+    /// <para>That is the worse half to leave unasserted — an allow that widens
+    /// is visible the first time someone sees a row they did not expect, while a
+    /// deny that silently stops denying is visible to nobody. Asserted here as
+    /// its own fact rather than folded into the agreement test above, because it
+    /// is a different claim about the same change.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_wildcard_deny_withholds_the_rows_that_have_a_value()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var assigned = NewRow("deny-assigned", assignee: "alice");
+        var unassigned = NewRow("deny-unassigned", assignee: null);
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(assigned, unassigned);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask[assignee=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var denied = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        // What a deny covers is what the predicate matches; the rows that
+        // survive it are its complement.
+        var withheld = await db.WorkflowTaskCache.Where(denied)
+            .Select(t => t.FlowableTaskId).ToListAsync();
+        var survives = await db.WorkflowTaskCache.Where(ExpressionUtilities.Not(denied))
+            .Select(t => t.FlowableTaskId).ToListAsync();
+
+        Assert.Equal(["deny-assigned"], withheld);
+        Assert.Equal(["deny-unassigned"], survives);
+    }
+
+    /// <summary>An array tag's wildcard means the array is non-empty (#574).</summary>
+    /// <remarks>
+    /// <c>candidateuser=*</c> reaches the same resolver and used to throw
+    /// <c>requires a non-null value</c> — so it failed to <b>compile</b>, and an
+    /// uncompilable grant is skipped with a warning, which for a deny fails open
+    /// (#577). Both array columns are <c>NOT NULL DEFAULT ARRAY[]::TEXT[]</c>,
+    /// so a null array cannot occur and emptiness is the only decidable thing.
+    /// </remarks>
+    [Fact]
+    public async Task An_array_tags_wildcard_matches_a_non_empty_array()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var withCandidates = NewRow("arr-has", assignee: null);
+        withCandidates.CandidateUsers = ["alice"];
+        var withoutCandidates = NewRow("arr-empty", assignee: null);
+        withoutCandidates.CandidateUsers = [];
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(withCandidates, withoutCandidates);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask[candidateuser=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId).ToListAsync();
+
+        // Non-empty matches; empty does not. Before #574 this selector threw at
+        // compile time and the grant was skipped entirely.
+        Assert.Equal(["arr-has"], fromSql);
     }
 
     /// <summary>
@@ -358,6 +452,49 @@ public sealed class SelectorEvaluatorAgreementProperties
         }
 
         return current;
+    }
+
+    /// <summary>
+    /// The execution compiler widens the same way (#574).
+    /// </summary>
+    /// <remarks>
+    /// <para>The fix touched two compilers and only one of them had any property
+    /// coverage, so this is the execution side's own assertion rather than an
+    /// inference from the task side passing.</para>
+    ///
+    /// <para><c>startedby</c> is the tag that can demonstrate it:
+    /// <c>process_definition_key</c>, <c>process_definition_id</c> and
+    /// <c>status</c> are <c>NOT NULL</c>, so a wildcard over them cannot
+    /// distinguish anything, and <c>tenant</c> is hardcoded null by the
+    /// projection — which is #576's subject, not this one's.</para>
+    /// </remarks>
+    [Fact]
+    public async Task The_execution_compilers_wildcard_matches_rows_that_have_a_starter()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var started = NewExecutionRow("exec-started", startedBy: "alice");
+        var unstarted = NewExecutionRow("exec-unstarted", startedBy: null);
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowExecutionCache.AddRange(started, unstarted);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowexecution[startedby=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowExecutionCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowExecutionCache.Where(predicate)
+            .Select(e => e.FlowableInstanceId).ToListAsync();
+
+        // Before #574 this returned exactly the other row.
+        Assert.Equal(["exec-started"], fromSql);
     }
 
     private static WorkflowTaskCache NewRow(string id, string? assignee) => new()
@@ -437,4 +574,15 @@ public sealed class SelectorEvaluatorAgreementProperties
             + "divergence is fixed — remove the exclusion in SelectorGenerators.SharedTags "
             + "so the agreement property covers these tags too.");
     }
+
+    private static WorkflowExecutionCache NewExecutionRow(string id, string? startedBy) => new()
+    {
+        FlowableInstanceId = id,
+        ProcessDefinitionKey = "onboarding",
+        ProcessDefinitionId = "onboarding:1:1",
+        Status = "active",
+        StartedBy = startedBy,
+        StartTime = DateTime.UtcNow,
+        LastSyncAtUtc = DateTime.UtcNow
+    };
 }

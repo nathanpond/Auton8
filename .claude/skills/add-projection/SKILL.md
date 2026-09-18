@@ -177,21 +177,23 @@ Implement `ISelectorCompiler<XxxCache>`. Map each tag in your cache's
 selector AST and grant evaluator — see
 `WorkflowExecutionCacheSelectorCompiler`.
 
-> ⚠️ **Do not copy that exemplar's wildcard handling — it carries GHSA-vrw7-qxhw-m9q8.**
+> ✅ **The wildcard is fixed as of #574 — copy the exemplar.**
 >
-> `WorkflowExecutionCacheSelectorCompiler` maps `WildcardValue => null`, and a null
-> value compiles to `Expression.Equal(column, null)` → SQL `IS NULL`. But
-> `InMemorySelectorEvaluator` reads `WildcardValue => actual is not null`. They are
-> exact complements: `[startedby=*]` means "any non-null starter" in memory and
-> "started_by IS NULL" in SQL. Measured at 69 leaks and 539 lockouts.
-> `WorkflowTaskCacheSelectorCompiler` has the same defect.
+> Both workflow cache compilers now branch on `WildcardValue` **before** resolving a
+> value, emitting `column != null` for a string tag and `array.Length > 0` for an
+> array one. `ResolveTagValue` no longer maps the wildcard to anything; it throws if
+> reached, because the wildcard is not a value and giving it one is what caused the
+> defect.
 >
-> In your compiler, `WildcardValue` means **match-any** — `AlwaysTrue`, or at most
-> `column != null`. It must **not** share the `value is null` branch with `tag=null`
-> or an unresolvable `$me`.
+> The history is worth knowing, because the shape recurs: `WildcardValue => null` fed
+> a `value is null` branch meant for a null literal, so `[startedby=*]` meant "any
+> non-null starter" in memory and `started_by IS NULL` in SQL — exact complements,
+> measured at 69 leaks and 539 lockouts (GHSA-vrw7-qxhw-m9q8). The `value is null`
+> branch turned out to be unreachable anyway: the grammar has no null literal.
 >
-> Check case semantics too: the compiler emits `Expression.Equal` (Postgres `=`,
-> case-**sensitive**) while `InMemorySelectorEvaluator` uses `OrdinalIgnoreCase`.
+> **In your compiler**, `WildcardValue` means match-any. Give it its own branch. Do
+> not let it share a path with anything else, and do not give it a value.
+>
 > Whatever you choose, the two paths must agree — a grant that behaves differently
 > depending on which path evaluates it is an authorization bug, not a performance
 > detail.

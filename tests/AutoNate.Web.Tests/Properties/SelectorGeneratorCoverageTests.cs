@@ -99,10 +99,18 @@ public sealed class SelectorGeneratorCoverageTests
             $"The shared selector generator never produced: {string.Join(", ", missing)}. "
             + $"The agreement property is only as strong as what this reaches. (Sampled {Samples}.)");
 
-        // The wildcard must stay out until GHSA-vrw7-qxhw-m9q8 is resolved.
-        // Left in, it buries every future divergence under the known one — the
-        // first run reported 69 leaks and 539 lockouts, all of them this.
-        Assert.DoesNotContain(
+        // THE WILDCARD MUST NOW BE REACHED, not avoided (#574).
+        //
+        // This assertion used to be its exact opposite — `Assert.DoesNotContain`
+        // — because the wildcard diverged between the two paths
+        // (GHSA-vrw7-qxhw-m9q8) and leaving it in the generator buried every
+        // future divergence under the known one.
+        //
+        // Inverted rather than deleted, deliberately. Deleting it would leave
+        // the agreement property silently not exercising the construct whose
+        // divergence this whole thread was about, and nothing would say so. A
+        // positive requirement keeps the coverage instrument accountable for it.
+        Assert.Contains(
             asts,
             a => Exprs(a).OfType<TagExpr>().Any(t => t.Value is WildcardValue));
     }
