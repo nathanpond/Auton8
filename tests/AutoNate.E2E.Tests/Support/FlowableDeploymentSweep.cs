@@ -95,7 +95,7 @@ internal static class FlowableDeploymentSweep
     /// short — the previous version treated exactly this number as the whole
     /// population and reported 0 once the engine held more.
     /// </remarks>
-    private const int PageSize = 500;
+    internal const int PageSize = 500;
 
     /// <summary>One deployment row, as the engine reports it (#537).</summary>
     private static (string Id, string Name, DateTimeOffset? CreatedAt) Read(JsonElement element) => (
@@ -148,7 +148,16 @@ internal static class FlowableDeploymentSweep
                 using var response = await client.GetAsync(
                     "service/repository/deployments"
                     + $"?size={PageSize}&start={start}&sort=deployTime&order=asc");
-                if (!response.IsSuccessStatusCode) return 0;
+                // A FAILED PAGE STOPS THE READ; IT DOES NOT DISCARD IT (#548).
+                //
+                // This was `return 0` inside the loop, so a 500 on page three
+                // threw away the two pages already read and reported "swept
+                // nothing" -- the same "a query returning nothing reads like a
+                // verdict" shape #537 was filed about, moved rather than removed.
+                // Sweeping what was actually seen is strictly better: the
+                // deletion is filtered by prefix AND age either way, so a partial
+                // pass is safe and idempotent, and the next run takes the rest.
+                if (!response.IsSuccessStatusCode) break;
 
                 using var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
                 var rows = page.RootElement.GetProperty("data").EnumerateArray().ToList();
