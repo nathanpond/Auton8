@@ -229,6 +229,17 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // cannot hide behind "well, nothing happened", because something did.
         { "host-cancelled", "host-cancelled", "the boundary is non-interrupting, so its path runs and the host survives", "entered" },
 
+        // ROW-LEVEL, WHERE THE ELEMENT ALLOWS IT (#546). The timer control above
+        // is per-EFFECT, and for Error Boundary that is the only control possible
+        // -- BPMN forbids a non-interrupting error boundary and the product
+        // refuses it. For escalation and conditional it is NOT the only one
+        // possible, and #530's commit claimed it had added a row-level control
+        // when it had added none. These are the controls that claim was about:
+        // the same element, legal, genuinely firing, carrying the other
+        // configuration.
+        { "host-cancelled", "host-cancelled:escalation", "the escalation boundary is non-interrupting, so its path runs and the host survives", "entered" },
+        { "host-cancelled", "host-cancelled:conditional", "the conditional boundary is non-interrupting, so its path runs and the host survives", "entered" },
+
         // "DID NOT FIRE", which no control could previously express. The start
         // event is stripped of its trigger and nothing else changes, so the
         // assertion is that no instance ever comes into being -- reached from
@@ -477,6 +488,45 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
             + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="false">"""
             + """<timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></boundaryEvent>"""
+            + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+        // The escalation row's own complement (#546). An escalation boundary MAY
+        // be non-interrupting -- that is precisely what distinguishes it from an
+        // error boundary, and `WorkflowBpmnXml`'s error refusal says so: "catch an
+        // escalation instead if the work should carry on". So flipping the one
+        // attribute produces a valid, deployable diagram describing the opposite
+        // feature.
+        "host-cancelled:escalation" => WrapIn(key,
+            """<escalation id="Esc_1" name="e1" escalationCode="E1"/>""",
+            """<startEvent id="Start_1"/>"""
+            + """<subProcess id="Host_1"><startEvent id="In_1"/>"""
+            + """<intermediateThrowEvent id="Thrown_1"><escalationEventDefinition escalationRef="Esc_1"/></intermediateThrowEvent>"""
+            + """<userTask id="In_2" name="inner"/><endEvent id="In_3"/>"""
+            + """<sequenceFlow id="i1" sourceRef="In_1" targetRef="Thrown_1"/>"""
+            + """<sequenceFlow id="i2" sourceRef="Thrown_1" targetRef="In_2"/>"""
+            + """<sequenceFlow id="i3" sourceRef="In_2" targetRef="In_3"/></subProcess>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="false"><escalationEventDefinition escalationRef="Esc_1"/></boundaryEvent>"""
+            + """<userTask id="After_1" name="after"/>"""
+            + """<endEvent id="End_1"/><endEvent id="End_2"/>"""
+            + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
+            + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
+            + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
+            + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
+
+        // And the conditional row's (#546). A non-interrupting conditional
+        // boundary is legal too, and `ConditionalEventExecutionTests` already
+        // builds one -- so riding the timer control here was a choice, not a
+        // constraint. Same condition the positive cell uses, so it genuinely
+        // fires.
+        "host-cancelled:conditional" => WrapIn(key, "",
+            """<startEvent id="Start_1"/><userTask id="Host_1" name="host"/>"""
+            + """<boundaryEvent id="Ev_1" attachedToRef="Host_1" cancelActivity="false">"""
+            + """<conditionalEventDefinition><condition>${taken == true}</condition>"""
+            + """</conditionalEventDefinition></boundaryEvent>"""
             + """<userTask id="After_1" name="after"/><endEvent id="End_1"/><endEvent id="End_2"/>"""
             + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Host_1"/>"""
             + """<sequenceFlow id="f2" sourceRef="Host_1" targetRef="End_1"/>"""
@@ -743,6 +793,26 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             Assert.Equal(declaredLocalName, deployed!.Name.LocalName);
 
             Assert.Equal(declaredEventDefinition, AttributeIdentityOf(deployed));
+        }
+
+        // AND A NEVER-ENTERED ROW'S TAG (#549). `NeverEntered`'s own remarks say
+        // the entry check is traded for a deployed-form check -- "the element read
+        // back from the engine must still be the declared tag carrying the
+        // declared event definition". That was true of the compensation boundary
+        // and NOT of the data object reference: with a null event definition the
+        // block below never runs, so the only deployed-side assertion was that
+        // SOMETHING with that id came back, and `DeployedElementAsync` matches by
+        // id alone. A justification broader than the code is the thing this
+        // milestone's own oracle exists to catch.
+        if (neverEntered)
+        {
+            Assert.True(
+                string.Equals(deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal),
+                $"{name}: the engine deployed 'Ev_1' as a <{deployed.Name.LocalName}> where the "
+                + $"manifest says <{declaredLocalName}>. This row is exempt from the ENTRY check "
+                + "because the engine records no activity instance for it, and the deployed tag is "
+                + "what stands in for it -- without this, a same-id stand-in of any shape would "
+                + "reach the effect observation unchallenged (#549).");
         }
 
         var wasRewritten = !isMarkerRow && !string.Equals(
@@ -2017,8 +2087,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             //
             // The other half of the claim -- that nobody called start -- cannot
             // be seen from here, because the instance carries the answer, not the
-            // diagram. It is asserted in `SelfStartAsync`, against the engine's
-            // own `startUserId`, before this observer is ever reached.
+            // diagram. It is established in `SelfStartAsync`: for an UNTRIGGERED
+            // row by asserting the instance carries no `startUserId`, and for a
+            // triggered one by the pair of emptiness checks either side of
+            // publish, since an authenticated trigger legitimately records a
+            // start user. This comment used to claim the first of those for every
+            // row, which stopped being true at #529 (#550).
             case SelfStarting:
             {
                 var order = await EntryOrderAsync(api, instance);
@@ -2339,6 +2413,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="S_1" targetRef="End_1"/>"""
                 + """<sequenceFlow id="f5" sourceRef="Other_1" targetRef="End_2"/>"""),
 
+            // CONTROL: per-EFFECT (#546). This row rides `task-appears`'
+            // control -- a plain <subProcess> whose only user task sits OUTSIDE
+            // it. That is arguably the other configuration for this element (no
+            // `triggeredByEvent`), but it is shared with three other rows, so it
+            // is disclosed here the way the error boundary's fallback is.
             "Event Sub-Process" => Wrap("",
                 """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
                 + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
@@ -2476,6 +2555,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
+            // CONTROL: per-EFFECT, not per-row (#546), same as the conditional
+            // start above. An error start whose error is never thrown would be
+            // the row-level shape and is not built.
             "Error Start Event" => Wrap(
                 """<error id="Err_1" errorCode="E1" name="e1"/>""",
                 """<startEvent id="Start_1"/>"""
@@ -2512,6 +2594,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
+            // CONTROL: per-EFFECT, not per-row (#546). This row rides
+            // `variable-written`'s generic control -- a linear diagram whose
+            // script writes something that is not `proof`. A conditional start
+            // whose condition is never satisfiable would be the row-level shape;
+            // it is not built, and that is a gap rather than an impossibility.
             "Conditional Start Event" => Wrap("",
                 """<startEvent id="Start_1"/><userTask id="Main_1" name="main"/><endEvent id="End_1"/>"""
                 + """<sequenceFlow id="f1" sourceRef="Start_1" targetRef="Main_1"/>"""
@@ -2537,17 +2624,6 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
-            // NOTHING INSIDE THE DIAGRAM CAN FIRE THIS (#529). There is no
-            // instance until the signal arrives, which is what a signal start
-            // event is. The cell fires it through Auton8's own API after publish
-            // -- see `SelfStartTriggerSignal` -- and every other part of the
-            // self-start contract still applies, including that the instance it
-            // finds carries no start user.
-            //
-            // The signal name carries the run's key: Flowable keeps signal START
-            // subscriptions per name across the engine, and a fixed name would
-            // make every run after the first ambiguous -- the same hazard the
-            // three message rows already hit (#454).
             // TRIGGERED FROM OUTSIDE, like the signal start one, and for the
             // same reason: there is no instance until the message arrives (#528).
             // Delivered through `POST /api/workflow-messages`, which
@@ -2581,6 +2657,22 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f3" sourceRef="Ev_1" targetRef="After_1"/>"""
                 + """<sequenceFlow id="f4" sourceRef="After_1" targetRef="End_2"/>"""),
 
+            // NOTHING INSIDE THE DIAGRAM CAN FIRE THIS (#529). There is no
+            // instance until the signal arrives, which is what a signal start
+            // event is. The cell fires it through Auton8's own API after publish
+            // -- see `SelfStartTriggerSignal`.
+            //
+            // The start-user assertion does NOT apply to this row, and saying it
+            // did was wrong (#550). Auton8's route is authenticated, so Flowable
+            // records the REST user as the start user of an instance a broadcast
+            // created. What holds instead: no instance before publish, none after
+            // publish and before the trigger, one afterwards -- and the theory
+            // never calls POST /start on this branch at all.
+            //
+            // The signal name carries the run's key: Flowable keeps signal START
+            // subscriptions per name across the engine, and a fixed name would
+            // make every run after the first ambiguous -- the same hazard the
+            // three message rows already hit (#454).
             "Signal Start Event" => Wrap(
                 $"""<signal id="Sig_1" name="st{key}"/>""",
                 """<startEvent id="Ev_1"><signalEventDefinition signalRef="Sig_1"/></startEvent>"""
