@@ -8344,3 +8344,80 @@ so that nesting is meaningful rather than a workaround.
   Filed as **#581** rather than folded into #576, whose AC name only its own two
   tags.
   **Issue:** #575 → #581
+
+## M5 execution — #576 (status supplied in memory, tenant withdrawn)
+
+- **Decision:** `tenant` is **removed from the advertised tag set**, not populated.
+  **Why:** the AC allowed either, and the evidence decides it. The hardcoded
+  `TenantId = null` in `FlowableExecutionProjection.MapRow` is not an omission
+  the projection could fix — `WorkflowExecutionSummary`, the model it maps FROM,
+  has no tenant field at all. The column is structurally null, so "populate it"
+  means a new pull of tenant data out of Flowable, well outside this story.
+  **Cost if wrong:** a stored `[tenant=…]` grant now fails to compile instead of
+  matching nothing. That is the intent — a loud refusal beats a grant that
+  cannot mean what it says — but it is a behaviour change for any such grant.
+  The column itself stays; dropping it is a schema change.
+  **Issue:** #576
+
+- **Decision:** `NormalizeStatus` moved out of `FlowableExecutionProjection` into
+  `WorkflowExecutionStatuses`, with three callers.
+  **Why:** the projection writes the NORMALIZED string into the status column. A
+  fact builder passing Flowable's raw value through would make `[status=running]`
+  match in memory and nothing in SQL — the same defect one layer up, introduced
+  by the fix for it. One definition, no second copy.
+  **Issue:** #576
+
+- **Decision:** the instance authorizer derives status as
+  `Suspended ? "suspended" : "active"`.
+  **Why:** `FlowableProcessInstanceSummary` carries no status string. It comes
+  from the RUNTIME endpoint, so anything it returns is still running — these are
+  not an approximation of a richer value, they are the only two reachable states.
+  Written at the call site so the next reader does not have to re-derive it.
+  **Cost if wrong:** `[status=completed]` never matches on that path. It also
+  cannot: a completed instance is not in the collection being filtered.
+  **Issue:** #576
+
+- **Decision:** both `BuildFacts` methods made `internal` (the project already
+  has `InternalsVisibleTo`).
+  **Why:** the tests assert the PRODUCTION builders. A test that rebuilt the
+  dictionary itself would pass while `BuildFacts` still omitted the tag, which is
+  precisely the defect being closed.
+  **Issue:** #576
+
+- **Deviation from AC5, stated not glossed:** "the agreement property covers both
+  tags". The shared agreement property is *task*-shaped — `SharedSelector` builds
+  `/workflowtask` and the fixture is `TaskRows` — and `status` is a
+  `workflowexecution` tag. Making it both kinds would leave it harder to read
+  than the thing it protects, so `status` got a dedicated execution-side
+  agreement fact with the same structure and both directions. `tenant` needs no
+  coverage once nothing advertises it; its test is that it is refused.
+  **Issue:** #576
+
+## M5 execution — #577 (an uncompilable deny fails closed)
+
+- **Decision:** fail-closed is an **empty result set**, not a thrown exception.
+  **Why:** a throw out of an authorization filter becomes a 500, which tells the
+  caller nothing and pages somebody. An empty result is a refusal the caller can
+  act on, and it is already the shape this method uses one branch below for "no
+  allows matched".
+  **Issue:** #577
+
+- **Decision:** the asymmetry is written at the catch site, not only in the
+  commit message.
+  **Why:** two catches for one exception type, differing by effect, reads like an
+  inconsistency to the next person and is exactly the kind of thing that gets
+  "tidied" into symmetry. The comment says which direction is safe and why.
+  **Issue:** #577
+
+- **Scope note:** grants are loaded per `(kind, action)`, so an uncompilable deny
+  fails closed only the requests for that kind and action, not the whole app.
+  Checked rather than assumed.
+  **Issue:** #577
+
+- **Seam left open, deliberately:** #575 made the two cache compilers emit
+  `AlwaysFalse` for shapes the in-memory evaluator answers `false` to, rather
+  than throwing. Those never reach this code, so an *unrepresentable* deny still
+  denies nothing rather than failing closed. That is agreement with the
+  evaluator, which is what #575 was for — but the two stories together should not
+  be read as promising a guarantee neither makes.
+  **Issue:** #577 ← #575

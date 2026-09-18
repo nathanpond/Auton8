@@ -5,7 +5,8 @@ namespace AutoNate.Web.Authorization.Selectors;
 
 // Selector compiler for the workflow_execution_cache table. Tags mirror
 // CoreEntityTypes.WorkflowExecution.tags: `processkey`, `definitionkey`,
-// `startedby`, `status` and `tenant`.
+// `startedby` and `status`. (`tenant` was advertised here until #576 removed
+// it — see the note in CoreEntityTypes.)
 //
 // Path filters (`/workflowexecution/<id>`) ARE supported, as of #575. They
 // were not, and the note that used to stand here explained why in a way that
@@ -74,7 +75,13 @@ public sealed class WorkflowExecutionCacheSelectorCompiler : ISelectorCompiler<W
             "definitionkey" => CompileStringEquals(tag, context, e => e.ProcessDefinitionId),
             "startedby"     => CompileStringEquals(tag, context, e => e.StartedBy),
             "status"        => CompileStringEquals(tag, context, e => e.Status),
-            "tenant"        => CompileStringEquals(tag, context, e => e.TenantId),
+
+            // `tenant` is gone (#576). It compiled here against a column
+            // FlowableExecutionProjection always writes as null, so it matched
+            // nothing while the in-memory path -- which never supplied the fact
+            // -- denied everything. Falling through to the refusal below is the
+            // point: an unknown tag is a loud error, where the old case was a
+            // predicate that silently could not be satisfied.
             _ => throw new SelectorCompilationException(
                 $"Unknown workflowexecution tag '{tag.Tag}'.")
         };

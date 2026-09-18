@@ -142,12 +142,27 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
     // dropped from the registry — Flowable's process-instance summary has no
     // assignee field (assignees live on tasks). Reintroduce only if IFlowableClient
     // gains a way to enumerate the instance's task assignees up front.
-    private static IReadOnlyDictionary<string, string?> BuildFacts(Models.FlowableProcessInstanceSummary instance) =>
+    // internal for the same reason as the twin in ExecutionEndpoints (#576).
+    internal static IReadOnlyDictionary<string, string?> BuildFacts(Models.FlowableProcessInstanceSummary instance) =>
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["processkey"] = ExtractProcessKey(instance.ProcessDefinitionId),
             ["definitionkey"] = instance.ProcessDefinitionId,
-            ["startedby"] = instance.StartUserId
+            ["startedby"] = instance.StartUserId,
+
+            // `status` (#576). FlowableProcessInstanceSummary carries no status
+            // string -- only `Suspended` -- because it comes from the RUNTIME
+            // instance endpoint. Anything that endpoint returns is still
+            // running, so the only two states reachable here are suspended and
+            // active, and that is not an approximation of a richer value: a
+            // completed instance is not in the collection being filtered.
+            //
+            // The strings come from the shared normalizer's vocabulary rather
+            // than being spelled out, so this cannot drift from what the
+            // projection writes into the status column.
+            ["status"] = instance.Suspended
+                ? WorkflowExecutionStatuses.Suspended
+                : WorkflowExecutionStatuses.Active
         };
 
     private static string? ExtractProcessKey(string? processDefinitionId)

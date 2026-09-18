@@ -123,7 +123,22 @@ public static class CoreEntityTypes
             Actions.View, Actions.Cancel, Actions.Delete, Actions.Override, Actions.MoveState, Actions.DeleteAll
         },
         // Mirrors WorkflowExecutionCacheSelectorCompiler.CompileExpr.
-        tags: new[] { "processkey", "definitionkey", "startedby", "status", "tenant" });
+        // `tenant` was REMOVED here in #576, deliberately, and the reason belongs
+        // next to the advertisement rather than only in a commit message.
+        //
+        // It targeted workflow_execution_cache.tenant_id, which
+        // FlowableExecutionProjection.MapRow sets to null on every row. That is
+        // not an omission the projection could fix: WorkflowExecutionSummary,
+        // the model it maps FROM, has no tenant field at all. So the column is
+        // structurally null, and `[tenant=x]` matched nothing while
+        // `[tenant=null]` matched everything -- a grant that cannot mean what it
+        // says, which is worse than a tag that does not exist.
+        //
+        // The column stays (dropping it is a schema change). Nothing advertises
+        // or compiles a tag against it, so `[tenant=x]` is now an explicit
+        // "unknown tag" refusal. Re-advertise it only together with a projection
+        // that actually populates it.
+        tags: new[] { "processkey", "definitionkey", "startedby", "status" });
 
     public static EntityTypeDefinition WorkflowTask { get; } = new(
         kind: EntityKinds.WorkflowTask,

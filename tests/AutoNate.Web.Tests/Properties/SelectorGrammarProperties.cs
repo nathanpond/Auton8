@@ -516,8 +516,9 @@ public sealed class SelectorEvaluatorAgreementProperties
     /// <para><c>startedby</c> is the tag that can demonstrate it:
     /// <c>process_definition_key</c>, <c>process_definition_id</c> and
     /// <c>status</c> are <c>NOT NULL</c>, so a wildcard over them cannot
-    /// distinguish anything, and <c>tenant</c> is hardcoded null by the
-    /// projection — which is #576's subject, not this one's.</para>
+    /// distinguish anything. <c>tenant</c> would have been the other candidate
+    /// and was hardcoded null by the projection; #576 removed it from the
+    /// advertised tag set entirely, so it is no longer a tag to test.</para>
     /// </remarks>
     [Fact]
     public async Task The_execution_compilers_wildcard_matches_rows_that_have_a_starter()
