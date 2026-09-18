@@ -229,9 +229,14 @@ public sealed class EfCoreWorkflowModelStoreTests
         // The draft edit that used to un-declare it.
         await store.SaveAsync(published with { BpmnXml = DraftXml });
 
-        // A never-published model, so the filter half is exercised in the same
-        // fact as the join half -- one asserts the row is absent, the other
-        // asserts the surviving row carries the right xml.
+        // A never-published model, so the absence half is asserted here too.
+        //
+        // Not an independent guard on the `.Where` clause, and the first version
+        // of this comment said it was (#559): the join is INNER and keys on
+        // `PublishedVersionNumber`, so SQL `NULL = version_number` never matches
+        // and deleting the `.Where` changes nothing observable. The filter is
+        // subsumed by the join. What this row does buy is that `Assert.Single`
+        // is meaningful rather than vacuous.
         await store.SaveAsync(new WorkflowModel
         {
             Name = "Never Published",
@@ -247,6 +252,88 @@ public sealed class EfCoreWorkflowModelStoreTests
         // THE JOIN. A filter-only implementation returns DraftXml here and
         // passes every other assertion in this fact.
         Assert.Equal(PublishedXml, row.BpmnXml);
+    }
+
+    /// <summary>
+    /// The single-key lookup carries the published xml too (#557).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GetPublishedByProcessKeyAsync</c> was written to fix #553 and shipped
+    /// with no test at all — only stub implementations in four test doubles and
+    /// two tripwire strings. Reverting its body to
+    /// <c>GetByProcessKeyAsync</c>'s, which filters nothing and returns the
+    /// draft, left the entire suite green.
+    /// </para>
+    /// <para>
+    /// That is #552's finding, recurring inside the fix for the issue #552
+    /// blocked on. The caller-level tripwires the same commit added catch a
+    /// different property — "the caller asked the wrong method" — and cannot see
+    /// this one, because the stub supplies the answer.
+    /// </para>
+    /// <para>
+    /// Both callers are runtime ones — <c>WorkflowMessageCorrelator</c> deciding
+    /// which messages a RUNNING instance can be addressed by, and
+    /// <c>SendMessageBehavior</c> resolving a send from inside one — so the
+    /// diagram they read has to be the one the engine deployed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByProcessKeyAsync_ReturnsThePublishedXmlNotTheDraftEdit()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        const string PublishedXml = "<xml published=\"yes\" />";
+        const string DraftXml = "<xml published=\"no\" />";
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Published Flow",
+            ProcessKey = "published_flow",
+            BpmnXml = PublishedXml
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "published_flow",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        await store.SaveAsync(published with { BpmnXml = DraftXml });
+
+        var found = await store.GetPublishedByProcessKeyAsync("published_flow");
+
+        Assert.NotNull(found);
+
+        // THE ORACLE. A draft-returning body answers DraftXml here and passes
+        // the NotNull above, so the mutation dies on this line.
+        Assert.Equal(PublishedXml, found.BpmnXml);
+    }
+
+    /// <summary>A never-published draft is not found by process key (#557).</summary>
+    /// <remarks>
+    /// The complement. Without it the fact above passes against a lookup that
+    /// answers for every model regardless of publication — which is the first
+    /// half of #544, one method over.
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByProcessKeyAsync_DoesNotFindANeverPublishedDraft()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Never Published",
+            ProcessKey = "never_published",
+            BpmnXml = "<xml drafted=\"only\" />"
+        });
+
+        Assert.Null(await store.GetPublishedByProcessKeyAsync("never_published"));
     }
 
     [Fact]
