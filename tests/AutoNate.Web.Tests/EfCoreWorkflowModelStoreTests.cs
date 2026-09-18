@@ -391,6 +391,208 @@ public sealed class EfCoreWorkflowModelStoreTests
         Assert.Null(await store.GetPublishedByProcessKeyAsync("orders_v2"));
     }
 
+    /// <summary>
+    /// A key-only draft save is a definition change (#561).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>NormalizeDraftState</c> computed <c>hasDefinitionChanges</c> from
+    /// <c>BpmnXml</c> or <c>Name</c> only. A key-only save on a PUBLISHED model
+    /// therefore left <c>IsDraft</c> false and <c>DraftVersionNumber</c>
+    /// unbumped, with two consequences: the studio reported "not a draft" while
+    /// the row had diverged from what the engine is running, and the next
+    /// publish upserted the EXISTING version row rather than cutting a new one
+    /// — rewriting the recorded <c>process_key</c> of a version that is already
+    /// deployed.
+    /// </para>
+    /// <para>
+    /// The second is the one that matters: it is history being edited, not a
+    /// stale read, and it is what made #561's ambiguity reachable.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_TreatsAProcessKeyChangeAsADefinitionChange()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Orders",
+            ProcessKey = "orders_v1",
+            BpmnXml = "<xml />"
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "orders_v1",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        // ONLY the key changes. Same xml, same name.
+        var renamed = await store.SaveAsync(published with { ProcessKey = "orders_v2" });
+
+        Assert.True(renamed.IsDraft);
+
+        // AND THE DRAFT VERSION BUMPED, which is what stops the next publish
+        // overwriting version 1. Asserting IsDraft alone would pass against a
+        // fix that set the flag and left the version number, and the version
+        // number is the half that protects deployed history.
+        Assert.Equal(2, renamed.DraftVersionNumber);
+        Assert.Equal(1, renamed.PublishedVersionNumber);
+
+        // Version 1 still records the key it was deployed under.
+        var versions = await store.ListVersionsAsync(renamed.Id);
+        Assert.Equal("orders_v1", Assert.Single(versions).ProcessKey);
+    }
+
+    /// <summary>
+    /// Two published versions sharing a key resolve to the newer (#561).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #558 moved the match from <c>workflow_models.process_key</c>, which is
+    /// <c>UNIQUE</c>, to <c>workflow_model_versions.process_key</c>, which is
+    /// not. That fixed the rename case and made the answer ambiguous: an
+    /// unordered <c>FirstOrDefault</c> hands a running instance whichever row
+    /// the query planner returns.
+    /// </para>
+    /// <para>
+    /// Reachable exactly as built here — publish A under a key, rename A's
+    /// draft so the unique constraint on the model row is free, then publish B
+    /// under that key. Two published version rows now carry it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByProcessKeyAsync_PrefersTheNewerPublicationWhenAKeyIsReused()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var first = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "First", ProcessKey = "shared_key", BpmnXml = "<xml owner=\"first\" />"
+        });
+        var publishedFirst = await store.PublishAsync(first, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-first",
+            ProcessDefinitionId = "definition-first",
+            ProcessDefinitionKey = "shared_key",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow.AddHours(-1)
+        });
+
+        // Frees the model row's unique constraint on `shared_key`.
+        await store.SaveAsync(publishedFirst with { ProcessKey = "first_renamed" });
+
+        var second = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Second", ProcessKey = "shared_key", BpmnXml = "<xml owner=\"second\" />"
+        });
+        await store.PublishAsync(second, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-second",
+            ProcessDefinitionId = "definition-second",
+            ProcessDefinitionKey = "shared_key",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var found = await store.GetPublishedByProcessKeyAsync("shared_key");
+
+        Assert.NotNull(found);
+
+        // THE NEWER PUBLICATION. Without the ordering this is whatever the
+        // planner returns, and a running instance of the second workflow gets
+        // the first one's diagram.
+        Assert.Equal("<xml owner=\"second\" />", found.BpmnXml);
+    }
+
+    /// <summary>
+    /// The published queries key on BOTH model and version (#562).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #557 built this fixture shape for the two registries and did not lift it
+    /// into the store, which is the method #557 is named after. The reason it
+    /// has to be this shape was measured rather than assumed: a fixture with one
+    /// model holding one version row cannot tell a correct composite join from
+    /// an id-only or a version-only one, because all three return the same
+    /// single row when there is only one.
+    /// </para>
+    /// <para>
+    /// So: <c>OrderFlow</c> is published twice — version 1 superseded, version 2
+    /// current — and a second model is published on its own. An id-only join
+    /// then picks up the superseded row; a version-only join crosses the two
+    /// models.
+    /// </para>
+    /// <para>
+    /// Both published queries are asserted in one fact because they share the
+    /// join. <c>ListPublishedAsync</c> must return exactly the two current
+    /// versions, and <c>GetPublishedByProcessKeyAsync</c> must return
+    /// <c>OrderFlow</c>'s version 2 — not its version 1, and not the other
+    /// model's.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_published_queries_return_only_each_models_current_version()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        const string Superseded = "<xml version=\"1\" />";
+        const string Current = "<xml version=\"2\" />";
+        const string Other = "<xml model=\"other\" />";
+        const string Draft = "<xml version=\"3-draft\" />";
+
+        var draft = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Order Flow", ProcessKey = "order_flow", BpmnXml = Superseded
+        });
+        var v1 = await store.PublishAsync(draft, Deployment("order_flow", 1));
+
+        var v2Draft = await store.SaveAsync(v1 with { BpmnXml = Current });
+        var published = await store.PublishAsync(v2Draft, Deployment("order_flow", 2));
+
+        // AND AN UNPUBLISHED DRAFT EDIT on top, so this one fact covers the
+        // third mutation too -- returning `model.BpmnXml` instead of the
+        // version's. Without it the model row happens to carry version 2's xml
+        // and that mutation is invisible here.
+        await store.SaveAsync(published with { BpmnXml = Draft });
+
+        var otherDraft = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Shipping Flow", ProcessKey = "shipping_flow", BpmnXml = Other
+        });
+        await store.PublishAsync(otherDraft, Deployment("shipping_flow", 1));
+
+        var listed = await store.ListPublishedAsync();
+
+        // EXACTLY the two current versions. An id-only join adds order_flow's
+        // superseded row; a version-only join crosses the models.
+        // Ordinal order: `<xml model=` sorts before `<xml version=`.
+        Assert.Equal<IEnumerable<string>>(
+            new[] { Other, Current },
+            listed.Select(model => model.BpmnXml).OrderBy(xml => xml, StringComparer.Ordinal).ToArray());
+
+        var found = await store.GetPublishedByProcessKeyAsync("order_flow");
+
+        Assert.NotNull(found);
+        Assert.Equal(Current, found.BpmnXml);
+    }
+
+    private static WorkflowDeploymentInfo Deployment(string processKey, int version) => new()
+    {
+        DeploymentId = $"deployment-{processKey}-{version}",
+        ProcessDefinitionId = $"definition-{processKey}-{version}",
+        ProcessDefinitionKey = processKey,
+        ProcessDefinitionVersion = version,
+        DeployedAtUtc = DateTimeOffset.UtcNow
+    };
+
     [Fact]
     public async Task PublishAsync_FromDraftPromotesDraftVersionAndRetainsHistory()
     {

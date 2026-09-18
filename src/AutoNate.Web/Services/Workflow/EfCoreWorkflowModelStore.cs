@@ -84,7 +84,27 @@ public sealed class EfCoreWorkflowModelStore(
                 dbContext.WorkflowModelVersions.AsNoTracking(),
                 model => new { model.Id, Version = model.PublishedVersionNumber!.Value },
                 version => new { Id = version.WorkflowModelId, Version = version.VersionNumber },
-                (model, version) => new { model, version.BpmnXml, version.ProcessKey, version.Name })
+                (model, version) => new
+                {
+                    model,
+                    version.BpmnXml,
+                    version.ProcessKey,
+                    version.Name,
+                    version.PublishedAtUtc,
+                    version.VersionNumber
+                })
+            // NEWEST PUBLICATION FIRST, and the ordering is load-bearing (#561).
+            //
+            // `workflow_models.process_key` is UNIQUE; `workflow_model_versions`
+            // .process_key is NOT, so moving the match here made the answer
+            // ambiguous where the old one was merely wrong: publish A as `x`,
+            // rename A's draft (freeing the unique constraint), then publish B
+            // as `x`, and two published version rows carry `x`. An unordered
+            // FirstOrDefault then hands a running instance whichever row the
+            // planner felt like. Newest publication is the one the engine most
+            // recently deployed under that key.
+            .OrderByDescending(row => row.PublishedAtUtc)
+            .ThenByDescending(row => row.VersionNumber)
             .FirstOrDefaultAsync(row => row.ProcessKey == processKey, cancellationToken);
 
         return row is null
@@ -296,9 +316,22 @@ public sealed class EfCoreWorkflowModelStore(
 
         var existingPublishedVersionNumber = existingEntity.PublishedVersionNumber;
         var existingDraftVersionNumber = Math.Max(existingEntity.DraftVersionNumber, 1);
+        // PROCESS KEY COUNTS (#561).
+        //
+        // It was xml-or-name, and a key-only save therefore left `IsDraft`
+        // false and `DraftVersionNumber` unbumped on a PUBLISHED model. Two
+        // consequences, both real: the studio reported "not a draft" while the
+        // row had diverged from what the engine is running, and the next
+        // publish UPSERT-ed the existing version row rather than cutting a new
+        // one -- silently rewriting the recorded `process_key` of a version
+        // that is already deployed.
+        //
+        // The key is the identity the engine deploys under, so changing it is
+        // as much a definition change as changing the name.
         var hasDefinitionChanges =
             !string.Equals(existingEntity.BpmnXml, incomingModel.BpmnXml, StringComparison.Ordinal) ||
-            !string.Equals(existingEntity.Name, incomingModel.Name, StringComparison.Ordinal);
+            !string.Equals(existingEntity.Name, incomingModel.Name, StringComparison.Ordinal) ||
+            !string.Equals(existingEntity.ProcessKey, incomingModel.ProcessKey, StringComparison.Ordinal);
 
         var draftVersionNumber = existingDraftVersionNumber;
         if (hasDefinitionChanges &&

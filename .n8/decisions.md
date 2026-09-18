@@ -8063,3 +8063,58 @@ so that nesting is meaningful rather than a workaround.
   workflow fails it, which the exact-duplicate version could not detect.
   **Cost if wrong:** one test with a slightly larger fixture.
   **Issue:** #559
+
+## M4d fix pass, round four (verification findings #561-#563)
+
+- **Decision (Rule 1):** `ProcessKey` joins `hasDefinitionChanges` in
+  `NormalizeDraftState`.
+  **Why:** the key is the identity the engine deploys under, so changing it is as
+  much a definition change as changing the name. Without it a key-only save left
+  a published model reporting `IsDraft == false` while diverged from what is
+  running, and — worse — left `DraftVersionNumber` unbumped, so the next publish
+  upserted the existing version row and rewrote the recorded key of a version
+  already deployed. That is history being edited.
+  **Cost if wrong:** a key-only save now marks the model a draft, which it
+  arguably always should have. 189 existing store, publish and endpoint tests
+  pass unchanged.
+  **Issue:** #561
+
+- **Decision:** `GetPublishedByProcessKeyAsync` orders by `PublishedAtUtc` then
+  `VersionNumber`, descending.
+  **Why:** #558 — my own fix — moved the match from a `UNIQUE` column to one
+  that is not, which made an unordered `FirstOrDefault` ambiguous where the old
+  code was merely wrong. Newest publication is the right tie-break: it is the
+  definition the engine most recently deployed under that key.
+  **Cost if wrong:** an ORDER BY on a query returning at most a handful of rows.
+  **Issue:** #561
+
+- **Decision:** the redundant broadcaster test is **deleted**, and the pin drops
+  by one, rather than being sharpened a fourth time.
+  **Why:** it began as a test of nothing (#544), was renamed into an exact
+  duplicate (#552), then given a second workflow (#559) — while
+  `Every_workflow_catching_the_name_is_reported`, shipped in #539, already
+  asserted the same property with three workflows. `UnknownSignal` is asserted
+  three times in the same file, so #559's own prescription was covered too. There
+  was nothing left for it to carry, and a test that adds no coverage costs a pin
+  slot and a reader's attention. The history is recorded on the test that does
+  own the property, so the next person does not re-add it.
+  **Cost if wrong:** one fewer test; the property it claimed is asserted by a
+  strictly larger fixture.
+  **Issue:** #563
+
+- **Decision:** `tiers.env` names no commit at all.
+  **Why:** the provenance line carried a wrong sha three rounds running, always
+  the parent commit, because a commit cannot name its own hash — the line is
+  written before the value it describes exists. `git log -S` recovers it
+  correctly and forever, and `infra/tier-integrity.sh` already fails a build on a
+  wrong number, which is a stronger guarantee than a comment.
+  **Cost if wrong:** a reader runs one command instead of reading one line.
+  **Issue:** #563
+
+- **Method correction worth recording:** the first mutation run for #562
+  reported three green passes and found nothing, because the runner did
+  `dotnet test --no-build` after a build that had failed — so it re-ran the
+  previous assembly. Two of those three mutations were real. The runner now
+  asserts the build before testing. A mutation report from a stale binary is
+  worse than no mutation report, because it reads as evidence.
+  **Issue:** #562

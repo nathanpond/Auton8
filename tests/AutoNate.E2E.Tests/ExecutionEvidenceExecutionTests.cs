@@ -1123,7 +1123,8 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
     }
 
     /// <summary>
-    /// Publish, trigger nothing, and return the instance the engine made itself (#522).
+    /// Publish, never call start, and return the instance the row's own trigger
+    /// produced (#522).
     /// </summary>
     /// <remarks>
     /// <para>

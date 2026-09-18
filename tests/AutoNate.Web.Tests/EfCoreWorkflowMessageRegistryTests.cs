@@ -35,16 +35,7 @@ public sealed class EfCoreWorkflowMessageRegistryTests
         </definitions>
         """;
 
-    /// <summary>
-    /// A second published model, so a WRONG JOIN KEY cannot pass (#557).
-    /// </summary>
-    /// <remarks>
-    /// With one model holding one version, a join on model id alone — or on
-    /// version number alone — still returns the right row, so the fixture could
-    /// not tell a correct composite key from either broken one. Two models, each
-    /// with its own published version, make id-only and version-only joins
-    /// produce the wrong xml or duplicate rows.
-    /// </remarks>
+    /// <summary>Deployment metadata for one publish.</summary>
     private static WorkflowDeploymentInfo Deployment(string processKey, int version) => new()
     {
         DeploymentId = $"deployment-{processKey}-{version}",
@@ -131,9 +122,13 @@ public sealed class EfCoreWorkflowMessageRegistryTests
         var names = registry.GetMessageNamesForTopic(Topic);
 
         // EXACTLY these two. Set equality rather than three separate assertions,
-        // because each broken join fails it in its own way: reading the draft
-        // adds `order.renamed`, an id-only join adds `order.v1`, and a
-        // version-only join crosses the two models.
+        // because all three broken forms fail it: reading the draft adds
+        // `order.renamed`, and both broken joins add `order.v1`.
+        //
+        // What they do not do is fail DIFFERENTLY, and the first version of this
+        // comment claimed they would (#563). An id-only join and a version-only
+        // join both yield {order.placed, order.v1, shipment.booked} -- identical
+        // sets, identical message. The kill is real; the diagnosis is not.
         Assert.Equal<IEnumerable<string>>(
             new[] { "order.placed", "shipment.booked" },
             names.OrderBy(n => n, StringComparer.Ordinal).ToArray());
