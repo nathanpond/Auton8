@@ -3,6 +3,7 @@ using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -37,7 +38,7 @@ public sealed class WorkflowMessageDispatcherTests
     }
 
     /// <summary>
-    /// #524 AC3. Nothing started, and it is not silent about it.
+    /// #524 AC3, first half: nothing started.
     /// </summary>
     [Fact]
     public async Task A_name_no_workflow_starts_on_starts_nothing()
@@ -48,6 +49,71 @@ public sealed class WorkflowMessageDispatcherTests
         await dispatcher.HandleAsync(Bus(Topic, """{"eventType":"somethingElse"}"""));
 
         Assert.DoesNotContain(flowable.Calls, c => c.StartsWith("StartProcessInstanceByMessage", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// #524 AC3, second half: **and says so** (#547).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This half was implemented and unguarded. The test above injected
+    /// <c>NullLogger</c>, so deleting the warning left the suite green and
+    /// reduced the AC to "starts nothing **silently**" — the behaviour it was
+    /// written to forbid, and the one the source comment argues at length is
+    /// indistinguishable from the feature being broken.
+    /// </para>
+    /// <para>
+    /// Asserts the content, not merely that something was logged: an unmatched
+    /// name whose warning does not name the name, or does not say what the topic
+    /// does start on, tells a reader nothing they could act on.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_name_no_workflow_starts_on_is_not_discarded_silently()
+    {
+        var logger = new CapturingLogger<WorkflowMessageDispatcher>();
+        var flowable = new StubFlowableClient();
+        var dispatcher = Dispatcher(
+            flowable, StartedByMessage(Name), logger, Registration(Name, "orders"));
+
+        await dispatcher.HandleAsync(Bus(Topic, """{"eventType":"somethingElse"}"""));
+
+        var warnings = logger.MessagesAt(LogLevel.Warning).ToList();
+
+        Assert.True(
+            warnings.Count > 0,
+            "A message on a topic that DOES carry workflow starts matched none of them, and "
+            + "nothing was said. Discarding it quietly is indistinguishable from the feature "
+            + "being broken, which is why AC3 says \"and says so\" (#547).");
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("somethingElse", warning, StringComparison.Ordinal);
+        Assert.Contains(Topic, warning, StringComparison.Ordinal);
+
+        // And it says what the topic DOES start on, so the reader can see the
+        // drift rather than only that there was some.
+        Assert.Contains(Name, warning, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The complement: a topic that is nobody's workflow stays quiet (#547).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "says so" could be satisfied by warning about every message
+    /// on every topic — which would bury the one warning that means something.
+    /// Most traffic on most topics is not a workflow start.
+    /// </remarks>
+    [Fact]
+    public async Task A_topic_with_no_registrations_says_nothing()
+    {
+        var logger = new CapturingLogger<WorkflowMessageDispatcher>();
+        var flowable = new StubFlowableClient();
+        var dispatcher = Dispatcher(
+            flowable, StartedByMessage(Name), logger, Registration(Name, "orders"));
+
+        await dispatcher.HandleAsync(Bus("some.other.topic", $$"""{"eventType":"{{Name}}"}"""));
+
+        Assert.Empty(logger.MessagesAt(LogLevel.Warning));
     }
 
     /// <summary>
@@ -144,7 +210,14 @@ public sealed class WorkflowMessageDispatcherTests
         """;
 
     private static WorkflowMessageDispatcher Dispatcher(
-        StubFlowableClient flowable, string xml, params WorkflowMessageRegistration[] registrations)
+        StubFlowableClient flowable, string xml, params WorkflowMessageRegistration[] registrations) =>
+        Dispatcher(flowable, xml, NullLogger<WorkflowMessageDispatcher>.Instance, registrations);
+
+    private static WorkflowMessageDispatcher Dispatcher(
+        StubFlowableClient flowable,
+        string xml,
+        ILogger<WorkflowMessageDispatcher> logger,
+        params WorkflowMessageRegistration[] registrations)
     {
         // A real correlator behind a real scope factory, because the dispatcher
         // resolving one per message is part of what is under test — a captive
@@ -163,7 +236,7 @@ public sealed class WorkflowMessageDispatcherTests
         return new WorkflowMessageDispatcher(
             new FixedMessageRegistry(registrations),
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<WorkflowMessageDispatcher>.Instance);
+            logger);
     }
 
     private sealed class FixedMessageRegistry(IReadOnlyList<WorkflowMessageRegistration> registrations)
@@ -190,6 +263,9 @@ public sealed class WorkflowMessageDispatcherTests
     {
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             Task.FromResult<WorkflowModel?>(model with { ProcessKey = processKey });
+
+        public Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<WorkflowModel>>([model]);
