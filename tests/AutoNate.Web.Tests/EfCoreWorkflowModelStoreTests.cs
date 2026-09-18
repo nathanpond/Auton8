@@ -391,6 +391,126 @@ public sealed class EfCoreWorkflowModelStoreTests
         Assert.Null(await store.GetPublishedByProcessKeyAsync("orders_v2"));
     }
 
+    /// <summary>
+    /// A key-only draft save is a definition change (#561).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>NormalizeDraftState</c> computed <c>hasDefinitionChanges</c> from
+    /// <c>BpmnXml</c> or <c>Name</c> only. A key-only save on a PUBLISHED model
+    /// therefore left <c>IsDraft</c> false and <c>DraftVersionNumber</c>
+    /// unbumped, with two consequences: the studio reported "not a draft" while
+    /// the row had diverged from what the engine is running, and the next
+    /// publish upserted the EXISTING version row rather than cutting a new one
+    /// — rewriting the recorded <c>process_key</c> of a version that is already
+    /// deployed.
+    /// </para>
+    /// <para>
+    /// The second is the one that matters: it is history being edited, not a
+    /// stale read, and it is what made #561's ambiguity reachable.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_TreatsAProcessKeyChangeAsADefinitionChange()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Orders",
+            ProcessKey = "orders_v1",
+            BpmnXml = "<xml />"
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "orders_v1",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        // ONLY the key changes. Same xml, same name.
+        var renamed = await store.SaveAsync(published with { ProcessKey = "orders_v2" });
+
+        Assert.True(renamed.IsDraft);
+
+        // AND THE DRAFT VERSION BUMPED, which is what stops the next publish
+        // overwriting version 1. Asserting IsDraft alone would pass against a
+        // fix that set the flag and left the version number, and the version
+        // number is the half that protects deployed history.
+        Assert.Equal(2, renamed.DraftVersionNumber);
+        Assert.Equal(1, renamed.PublishedVersionNumber);
+
+        // Version 1 still records the key it was deployed under.
+        var versions = await store.ListVersionsAsync(renamed.Id);
+        Assert.Equal("orders_v1", Assert.Single(versions).ProcessKey);
+    }
+
+    /// <summary>
+    /// Two published versions sharing a key resolve to the newer (#561).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #558 moved the match from <c>workflow_models.process_key</c>, which is
+    /// <c>UNIQUE</c>, to <c>workflow_model_versions.process_key</c>, which is
+    /// not. That fixed the rename case and made the answer ambiguous: an
+    /// unordered <c>FirstOrDefault</c> hands a running instance whichever row
+    /// the query planner returns.
+    /// </para>
+    /// <para>
+    /// Reachable exactly as built here — publish A under a key, rename A's
+    /// draft so the unique constraint on the model row is free, then publish B
+    /// under that key. Two published version rows now carry it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByProcessKeyAsync_PrefersTheNewerPublicationWhenAKeyIsReused()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var first = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "First", ProcessKey = "shared_key", BpmnXml = "<xml owner=\"first\" />"
+        });
+        var publishedFirst = await store.PublishAsync(first, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-first",
+            ProcessDefinitionId = "definition-first",
+            ProcessDefinitionKey = "shared_key",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow.AddHours(-1)
+        });
+
+        // Frees the model row's unique constraint on `shared_key`.
+        await store.SaveAsync(publishedFirst with { ProcessKey = "first_renamed" });
+
+        var second = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Second", ProcessKey = "shared_key", BpmnXml = "<xml owner=\"second\" />"
+        });
+        await store.PublishAsync(second, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-second",
+            ProcessDefinitionId = "definition-second",
+            ProcessDefinitionKey = "shared_key",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var found = await store.GetPublishedByProcessKeyAsync("shared_key");
+
+        Assert.NotNull(found);
+
+        // THE NEWER PUBLICATION. Without the ordering this is whatever the
+        // planner returns, and a running instance of the second workflow gets
+        // the first one's diagram.
+        Assert.Equal("<xml owner=\"second\" />", found.BpmnXml);
+    }
+
     [Fact]
     public async Task PublishAsync_FromDraftPromotesDraftVersionAndRetainsHistory()
     {
