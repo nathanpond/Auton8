@@ -65,6 +65,24 @@ public sealed record class WorkflowElementSnapshot(
 // process definition key identifies the workflow to start; the
 // RecordTypeShortCodes set is empty for unfiltered registrations and contains
 // shortcodes the payload's `recordTypeId` must resolve to for filtered ones.
+// #524. One message START event in a published definition: the message name an
+// inbound bus event's `eventType` is matched against, the pub/sub topic to listen
+// on, and the process key to start.
+//
+// Deliberately a SEPARATE type from WorkflowSignalRegistration, feeding a separate
+// registry, and that is what enforces "a message and a signal with the same name
+// do not trigger each other". A topic-based boundary would break the moment an
+// author overrode a topic; a shared registry keyed on a bare name would not be a
+// boundary at all.
+//
+// No record-type filter: that is a signal-start feature (#158) driven by record
+// events, and a message start has no equivalent. Adding an always-empty set
+// would suggest a capability that does not exist.
+public sealed record class WorkflowMessageRegistration(
+    string MessageName,
+    string Topic,
+    string ProcessDefinitionKey);
+
 public sealed record class WorkflowSignalRegistration(
     string SignalName,
     string Topic,

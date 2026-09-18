@@ -20,6 +20,15 @@ public static partial class WorkflowBpmnXml
     // it on the signal in the modeler. External producers publish to this topic
     // unless a workflow opts into a custom topic per signal.
     public const string DefaultSignalTopic = "workflow.signals";
+
+    /// <summary>Where a message start event listens unless its author says otherwise (#524).</summary>
+    /// <remarks>
+    /// Its own topic rather than sharing the signal one, so the ordinary case
+    /// keeps the two streams apart without anybody configuring anything. It is
+    /// not what ENFORCES the separation -- the separate registries do that, and
+    /// they hold even when an author points both kinds at one topic.
+    /// </remarks>
+    public const string DefaultMessageTopic = "workflow.messages";
     private static readonly HashSet<string> ReplaceableTaskElementNames =
     [
         "task",
@@ -2819,6 +2828,84 @@ public static partial class WorkflowBpmnXml
         }
 
         return declarations;
+    }
+
+    /// <summary>
+    /// Every message START event a published definition offers the bus (#524).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A start event inside an EVENT SUB-PROCESS is excluded, and that is #162's
+    /// lesson borrowed rather than rediscovered: such an event starts a handler
+    /// within an already-running instance, so treating it as a way to start a
+    /// process makes the correlator ask Flowable to start one by a message no
+    /// process-level start event carries, and the engine refuses.
+    /// </para>
+    /// <para>
+    /// The topic lives on the <c>&lt;bpmn:message&gt;</c> root, like a signal's,
+    /// so an author who wants a message on their own topic says it the same way.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<WorkflowMessageRegistration> ExtractMessageRegistrations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageRegistration>();
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch
+        {
+            return Array.Empty<WorkflowMessageRegistration>();
+        }
+
+        var messagesById = document.Root?
+            .Elements(BpmnNamespace + "message")
+            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
+            .ToDictionary(
+                message => message.Attribute("id")!.Value,
+                message => message,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
+
+        var registrations = new Dictionary<(string Name, string Topic, string ProcessKey), WorkflowMessageRegistration>();
+
+        foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
+        {
+            if (IsInsideEventSubProcess(startEvent)) continue;
+
+            var definition = startEvent.Element(BpmnNamespace + "messageEventDefinition");
+            if (definition is null) continue;
+
+            var messageRef = definition.Attribute("messageRef")?.Value;
+            if (string.IsNullOrWhiteSpace(messageRef)
+                || !messagesById.TryGetValue(messageRef, out var message))
+            {
+                continue;
+            }
+
+            var name = message.Attribute("name")?.Value?.Trim();
+            if (string.IsNullOrEmpty(name)) continue;
+
+            var topic = message.Attribute(FlowableNamespace + "topic")?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(topic))
+            {
+                topic = DefaultMessageTopic;
+            }
+
+            var processKey = startEvent.Ancestors(BpmnNamespace + "process")
+                .FirstOrDefault()?.Attribute("id")?.Value?.Trim();
+            if (string.IsNullOrEmpty(processKey)) continue;
+
+            registrations[(name, topic, processKey)] =
+                new WorkflowMessageRegistration(name, topic, processKey);
+        }
+
+        return registrations.Values.ToList();
     }
 
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)

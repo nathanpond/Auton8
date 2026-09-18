@@ -259,6 +259,7 @@ builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.SystemHealthSer
 builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.ISystemHealthProbe>(
     sp => sp.GetRequiredService<AutoNate.Web.Services.SystemHealth.SystemHealthService>());
 builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
+builder.Services.AddSingleton<IWorkflowMessageRegistry, EfCoreWorkflowMessageRegistry>();
 builder.Services.AddSingleton<RecordTypeShortCodeCache>();
 builder.Services.AddSingleton<IRecordTypeShortCodeResolver>(
     sp => sp.GetRequiredService<RecordTypeShortCodeCache>());
@@ -392,6 +393,7 @@ builder.Services.AddScoped<IInstanceAuthorizer, WorkflowMessageInstanceAuthorize
 
 builder.Services.AddScoped<AutoNate.Web.Services.Workflow.WorkflowMessageCorrelator>();
 builder.Services.AddScoped<AutoNate.Web.Services.Workflow.WorkflowSignalBroadcaster>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Signals.WorkflowMessageDispatcher>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 // Content hierarchy — separate authorization path (project-role baseline +

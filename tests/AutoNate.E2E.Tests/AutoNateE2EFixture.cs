@@ -287,6 +287,18 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 
     /// <summary>This run's private sidecar ports, so the app talks to ITS sidecar.</summary>
     private int _daprHttpPort;
+
+    /// <summary>
+    /// This run's own sidecar HTTP port, or 0 when no sidecar was started (#524).
+    /// </summary>
+    /// <remarks>
+    /// Exposed so a test can PUBLISH to the bus rather than only observe it. The
+    /// port is deliberately private to this run -- see the comment on
+    /// `_daprHttpPort`'s assignment -- and a test that reached 127.0.0.1:3500
+    /// instead would be publishing into the container sidecar the app is not
+    /// listening to, which is the "trait as decoration" failure #487 fixed.
+    /// </remarks>
+    internal int DaprHttpPort => _daprHttpPort;
     private int _daprGrpcPort;
 
     /// <summary>The first match for <paramref name="tool"/> on PATH, or null.</summary>

@@ -7811,3 +7811,31 @@ so that nesting is meaningful rather than a workaround.
   reading as drift in six months. Receive tasks stay non-editable: they carry no
   subscription at all.
   **Issue:** #524
+
+- **Decision (Rule 3):** `workflow.messages` was added to `NatsStreamProvisioner`'s
+  subject list as part of #524.
+  **Why:** the feature cannot run without it — Dapr's publish fails at the sidecar
+  with `nats: no response from stream` and HTTP 500, which is exactly what the
+  queue-start E2E hit first. The provisioner's own comment states the rule ("new
+  top-level topic prefixes need a new entry here"), and `content.>` and
+  `dashboards.>` carry comments recording the same failure. The literal subject,
+  not a `.>` wildcard: Dapr publishes to the topic name itself.
+  **Issue:** #524
+
+- **Discovered, and NOT fixed inline:** `workflow.signals`, the default signal
+  topic, has no JetStream subject either, so a signal start event whose author
+  did not set a topic can never receive anything.
+  **Why not inline:** it is a pre-existing defect in a neighbouring feature rather
+  than something #524 needs, so it got its own issue (#540) rather than riding
+  along on a one-line diff. It has gone unnoticed because no test crosses the bus
+  for signals — every signal test reaches the engine or the dispatcher directly.
+  **Issue:** #540
+
+- **Finding, recorded because it is the useful kind:** the first version of the
+  subscriber change had a COMMENT describing the topic union and no union. Every
+  unit test still passed; the queue-start E2E is what caught it, because it is the
+  only thing that crosses that hop. That is precisely the failure the story's
+  must-have named — "message dispatch that is not reflected there is wiring that
+  will not run" — and it arrived as a comment asserting something the code did not
+  do, which this repo has paid for before.
+  **Issue:** #524
