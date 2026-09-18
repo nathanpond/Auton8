@@ -7884,3 +7884,60 @@ so that nesting is meaningful rather than a workaround.
   file — and the split reads better anyway: the API route and the queue hop are
   different concerns.
   **Issue:** #540
+
+## M4d fix pass (verification findings #544-#550)
+
+- **Decision:** `WorkflowSignalBroadcaster` reads published versions through a new
+  `IWorkflowModelStore.ListPublishedAsync`, rather than filtering the existing
+  `ListAsync` result in the broadcaster.
+  **Why:** `ListAsync` returns each model carrying its LATEST version's XML, so a
+  draft edit was both declaring signals that were never published and, worse,
+  supplying the draft's XML as the definition of what the published process
+  catches. Filtering in the caller cannot fix the second half — the wrong XML is
+  already in the row by then. The join belongs where the version is chosen.
+  **Cost if wrong:** one more store method for every fake to implement; three
+  test doubles gained a line.
+  **Issue:** #544
+
+- **Decision:** the two row-level negative controls #546 asked for are built for
+  escalation and conditional boundaries; the remaining four disclosures stay
+  per-effect, each with a comment saying so and why.
+  **Why:** the AC said per-row and the commit claimed per-row, and for two of the
+  six the row-level control is legal, deployable and genuinely fires — so riding
+  a shared effect control there was a choice, not a constraint, and it is now
+  made. For the error boundary it is impossible: BPMN forbids a non-interrupting
+  error boundary and the product refuses one. For the other three it is possible
+  but not built, and an undisclosed gap is the failure mode this oracle exists to
+  catch, so each says out loud which control it rides and what the row-level
+  shape would have been.
+  **Cost if wrong:** three disclosed gaps instead of three silent ones.
+  **Issue:** #546
+
+- **Decision:** `SweepPagingTests` lives in `AutoNate.E2E.Tests` with **no**
+  `RequiresService` trait, not in the backend project.
+  **Why:** the sweep helper is internal to the E2E assembly and the backend test
+  project has no reference to it; adding one to reach a test helper would invert
+  the dependency. An untraited class in the E2E project lands in the slim tier by
+  the same mechanism `BpmnDiagramHelperTests` uses, which is where a paging
+  regression needs to be visible — #537's own tests are `RequiresService=Flowable`
+  and pass or fail according to how many deployments the shared engine happens to
+  hold, which is why the original fix had no reproducible evidence.
+  **Cost if wrong:** two tests in a project named for end-to-end work that do not
+  touch an engine — already true of 223 others there.
+  **Issue:** #548
+
+- **Decision:** a mid-paging HTTP failure now `break`s rather than `return 0`.
+  **Why:** the pages already read are still valid, and the deletion is filtered by
+  prefix AND age either way, so sweeping what was seen is safe and idempotent.
+  `return 0` threw the read away and reported "swept nothing" — the same "a query
+  returning nothing reads like a verdict" shape #537 was filed about, moved
+  rather than removed.
+  **Cost if wrong:** a partial sweep leaves a backlog the next run takes.
+  **Issue:** #548
+
+- **Carried, not fixed:** #545 (nine of eighteen studio element panels have no
+  UI-driven save coverage). `sev:medium`, so the closure rule the owner set —
+  product defects block, tooling carries — leaves it open in this milestone. It is
+  a coverage gap in the studio's own tests, not a defect in shipped behaviour, and
+  closing it is a milestone of UI work rather than a fix.
+  **Issue:** #545
