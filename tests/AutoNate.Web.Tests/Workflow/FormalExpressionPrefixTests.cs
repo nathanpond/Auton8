@@ -9,8 +9,10 @@ namespace AutoNate.Web.Tests.Workflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>xsi:type</c> takes a QName, and six places hard-coded the prefix
-/// <c>bpmn</c>. A diagram that binds the BPMN namespace as the DEFAULT — legal
+/// <c>xsi:type</c> takes a QName, and <b>seven</b> places hard-coded the prefix
+/// <c>bpmn</c> — the count is spelled out once, in the site map below, because
+/// this sentence said "six" for three rounds while the map said seven and the
+/// code had seven (#559). A diagram that binds the BPMN namespace as the DEFAULT — legal
 /// BPMN, and what a hand-written or API-posted diagram often does — leaves that
 /// prefix unbound, and Flowable refuses the whole deployment with nothing
 /// actionable reaching the author.

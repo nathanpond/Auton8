@@ -162,40 +162,52 @@ public sealed class WorkflowSignalBroadcasterTests
     }
 
     /// <summary>
-    /// A published workflow declares what the store hands over (#544, #552).
+    /// What the store calls published is what gets declared — and nothing else (#559).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This used to be named <c>A_draft_edit_that_drops_the_name_does_not_undeclare_it</c>
-    /// and it could not possibly have tested that. The broadcaster sees only
+    /// This started life as <c>A_draft_edit_that_drops_the_name_does_not_undeclare_it</c>,
+    /// which it could not possibly have tested: the broadcaster sees only
     /// <c>ListPublishedAsync</c>'s output, so a draft edit is invisible from
-    /// here by construction -- there is no second xml for it to diverge from.
-    /// As written it was the positive path at the top of this file minus that
-    /// test's flowable assertion, i.e. strictly weaker than the test it was
-    /// copied from, wearing a name that promised the opposite (#552).
+    /// here by construction. #552 renamed it and restored the flowable
+    /// assertion it had dropped — and left it assertion-for-assertion identical
+    /// to <c>A_signal_a_published_workflow_catches_is_broadcast</c> at the top of
+    /// this file. Fixing "weaker than its source" by making it EQUAL to its
+    /// source bought no coverage (#559).
     /// </para>
     /// <para>
-    /// The real guard for the published-versus-draft xml is
-    /// <c>EfCoreWorkflowModelStoreTests.ListPublishedAsync_ReturnsThePublishedXmlNotTheDraftEdit</c>,
-    /// where the query is. What is left worth asserting here is the layer this
-    /// class does own: whatever the store calls published, the broadcaster
-    /// declares and actually fires.
+    /// So it now asserts the thing that class genuinely owns and nothing else
+    /// does: the broadcaster's answer follows the STORE's list, not the engine's
+    /// or its own opinion. Two published workflows, only one of which catches the
+    /// name — the other must not appear in <c>Declaring</c>, and exactly one
+    /// broadcast must be made.
+    /// </para>
+    /// <para>
+    /// The published-versus-draft xml is guarded where the query is, in
+    /// <c>EfCoreWorkflowModelStoreTests.ListPublishedAsync_ReturnsThePublishedXmlNotTheDraftEdit</c>.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task What_the_store_calls_published_is_what_gets_declared_and_fired()
+    public async Task Only_the_published_workflows_that_catch_the_name_declare_it()
     {
         var flowable = new StubFlowableClient();
-        var broadcaster = Broadcaster(flowable, ("orders", StartCatching(Caught)));
+
+        var broadcaster = Broadcaster(
+            flowable,
+            ("orders", StartCatching(Caught)),
+            ("shipping", StartCatching("shipment.booked")));
 
         var result = await broadcaster.BroadcastAsync(Caught, null);
 
         Assert.Equal(WorkflowSignalBroadcaster.Outcome.Broadcast, result.Outcome);
+
+        // ONLY the one that catches it. A broadcaster that declared every
+        // published workflow passes the outcome assertion and fails here.
         Assert.Equal(["orders"], result.Declaring);
 
-        // Restored (#552). Dropping this is what made the test weaker than the
-        // one it was copied from: without it, a broadcaster that decided
-        // correctly and then called nothing passes.
+        // And it fired exactly once. Without this a broadcaster that decided
+        // correctly and then called nothing passes -- "deploys and does nothing"
+        // wearing a different hat (#325).
         Assert.Equal([(Caught, (IReadOnlyDictionary<string, object?>?)null)], flowable.BroadcastedSignals);
     }
 
