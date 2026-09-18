@@ -241,7 +241,7 @@
       "name": "Message Start Event",
       "localName": "startEvent",
       "eventDefinition": "message",
-      "declaredEffect": null,
+      "declaredEffect": "instance-starts",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",
@@ -395,7 +395,7 @@
       "name": "Message Boundary",
       "localName": "boundaryEvent",
       "eventDefinition": "message",
-      "declaredEffect": null,
+      "declaredEffect": "host-cancelled",
       "liveEngineTestsMentioningIt": [
         "EventBasedGatewayExecutionTests",
         "EventSubProcessExecutionTests",

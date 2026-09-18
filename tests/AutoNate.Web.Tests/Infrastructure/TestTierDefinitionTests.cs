@@ -305,6 +305,22 @@ public sealed class TestTierDefinitionTests
     /// gate — whereas this identity is pure arithmetic over a checked-in file
     /// and is therefore decidable in slim, on every push.
     /// </para>
+    /// <para>
+    /// <b>Minus the overlap (#524).</b> The identity assumed every E2E test needs
+    /// at most ONE service, which was true until a test needed two: the
+    /// queue-start pair publishes to the bus <em>and</em> starts a workflow, so
+    /// it carries both traits, appears in both service pins, and appears once in
+    /// full-local. That is the traits being honest — each pin answers "how many
+    /// tests need THIS service" — so the arithmetic learns about the overlap
+    /// rather than the traits being bent to keep the arithmetic simple.
+    /// </para>
+    /// <para>
+    /// The overlap is PINNED rather than computed, which is the whole point. A
+    /// tolerance, or a term derived from the other pins, would absorb exactly the
+    /// drift this identity exists to catch: `FLOWABLE=150` would pass again by
+    /// calling the missing 84 an overlap. Pinned, a second dual-traited test is
+    /// as visible as anything else here, which is house style.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_tier_pins_add_up()
@@ -314,14 +330,66 @@ public sealed class TestTierDefinitionTests
         var slimE2E = int.Parse(tiers["AUTONATE_TIER_COUNT_SLIM_E2E"]);
         var flowable = int.Parse(tiers["AUTONATE_TIER_COUNT_FLOWABLE"]);
         var dapr = int.Parse(tiers["AUTONATE_TIER_COUNT_DAPR"]);
+        var multi = int.Parse(tiers["AUTONATE_TIER_COUNT_MULTI_SERVICE"]);
         var fullLocal = int.Parse(tiers["AUTONATE_TIER_COUNT_FULL_LOCAL"]);
 
         Assert.True(
-            slimE2E + flowable + dapr == fullLocal,
+            slimE2E + flowable + dapr - multi == fullLocal,
             $"the E2E pins disagree: slim {slimE2E} + Flowable {flowable} + Dapr {dapr} "
-            + $"= {slimE2E + flowable + dapr}, but full-local is pinned at {fullLocal}. "
-            + "full-local is every E2E test except Keycloak's, so these are the same "
-            + "number. Whichever pin moved, move the others in the same commit.");
+            + $"- {multi} counted twice = {slimE2E + flowable + dapr - multi}, but full-local "
+            + $"is pinned at {fullLocal}. full-local is every E2E test except Keycloak's, so "
+            + "these are the same number once a test needing two services stops being counted "
+            + "twice. Whichever pin moved, move the others in the same commit.");
+    }
+
+    /// <summary>
+    /// The overlap pin is a real count, not a fudge factor (#524).
+    /// </summary>
+    /// <remarks>
+    /// <c>MULTI_SERVICE</c> exists so the identity above stays exact when a test
+    /// genuinely needs two services. What would make it a fudge factor is nobody
+    /// checking it against the source: any disagreement between the pins could
+    /// then be absorbed by raising it. So it is counted the way it is defined —
+    /// E2E classes carrying more than one <c>RequiresService</c> trait, times the
+    /// tests in them.
+    /// </remarks>
+    [Fact]
+    public void The_multi_service_pin_matches_the_classes_that_carry_two_traits()
+    {
+        var pinned = int.Parse(Tiers()["AUTONATE_TIER_COUNT_MULTI_SERVICE"]);
+
+        var e2e = Path.Combine(RepoRoot.Path, "tests", "AutoNate.E2E.Tests");
+        var doubled = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(e2e, "*.cs", SearchOption.AllDirectories))
+        {
+            var source = File.ReadAllText(file);
+            var traits = System.Text.RegularExpressions.Regex
+                .Matches(source, """\[(?:Xunit\.)?Trait\("RequiresService", "(?<service>[A-Za-z]+)"\)\]""")
+                .Select(m => m.Groups["service"].Value)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (traits.Count > 1)
+            {
+                var facts = System.Text.RegularExpressions.Regex
+                    .Matches(source, """\[(?:Fact|Theory)\]""").Count;
+                doubled.Add($"{Path.GetFileName(file)}: {string.Join(" + ", traits)}, {facts} test(s)");
+            }
+        }
+
+        var counted = doubled
+            .Select(d => int.Parse(System.Text.RegularExpressions.Regex.Match(d, @"(\d+) test").Groups[1].Value))
+            .Sum();
+
+        Assert.True(
+            counted == pinned,
+            $"AUTONATE_TIER_COUNT_MULTI_SERVICE is {pinned} and the source says {counted}. "
+            + "It is the number of E2E tests carrying more than one RequiresService trait, "
+            + "and it is what keeps `The_tier_pins_add_up` exact -- a wrong value there can "
+            + "absorb a real pin disagreement, which is the drift that identity exists to "
+            + "catch. Classes carrying two:\n  "
+            + (doubled.Count == 0 ? "(none)" : string.Join("\n  ", doubled)));
     }
 
     /// <summary>

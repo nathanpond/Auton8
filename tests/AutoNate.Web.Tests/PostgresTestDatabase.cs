@@ -220,7 +220,41 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public EfCoreWorkflowModelStore CreateWorkflowStore(
         IWorkflowSignalRegistry signalRegistry,
         IDaprStreamingSubscriber streamingSubscriber) =>
-        new(CreateDbContextFactory(), signalRegistry, streamingSubscriber);
+        CreateWorkflowStore(signalRegistry, new RecordingWorkflowMessageRegistry(), streamingSubscriber);
+
+    // #524. The message registry overload, for the tests that assert publish
+    // refreshes it. The two-argument form keeps working and quietly supplies a
+    // recorder nobody reads, so existing call sites did not have to change to
+    // say something they do not care about.
+    public EfCoreWorkflowModelStore CreateWorkflowStore(
+        IWorkflowSignalRegistry signalRegistry,
+        IWorkflowMessageRegistry messageRegistry,
+        IDaprStreamingSubscriber streamingSubscriber) =>
+        new(CreateDbContextFactory(), signalRegistry, messageRegistry, streamingSubscriber);
+
+    // #524. Sibling of RecordingWorkflowSignalRegistry: counts RefreshAsync so a
+    // test can assert publish and delete reach it. A registry nothing refreshes
+    // is a subscription that never appears, and that failure is silent.
+    internal sealed class RecordingWorkflowMessageRegistry : IWorkflowMessageRegistry
+    {
+        private static readonly IReadOnlySet<string> Empty =
+            new HashSet<string>(StringComparer.Ordinal);
+
+        public int RefreshCount { get; private set; }
+
+        public IReadOnlyCollection<string> GetSubscribedTopics() => Array.Empty<string>();
+
+        public IReadOnlySet<string> GetMessageNamesForTopic(string topic) => Empty;
+
+        public IReadOnlyList<WorkflowMessageRegistration> GetRegistrationsForTopic(string topic) =>
+            Array.Empty<WorkflowMessageRegistration>();
+
+        public Task RefreshAsync(CancellationToken cancellationToken = default)
+        {
+            RefreshCount++;
+            return Task.CompletedTask;
+        }
+    }
 
     // Minimal in-memory test double. Counts RefreshAsync invocations so tests
     // can assert that publish triggers a refresh; doesn't actually parse XML.

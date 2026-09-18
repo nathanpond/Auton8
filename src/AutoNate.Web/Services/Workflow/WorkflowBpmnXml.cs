@@ -19,7 +19,53 @@ public static partial class WorkflowBpmnXml
     // Default Dapr topic for signal start events when the user doesn't override
     // it on the signal in the modeler. External producers publish to this topic
     // unless a workflow opts into a custom topic per signal.
+    /// <summary>
+    /// <c>xsi:type</c> for a formal expression, in this document's own prefix (#482).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>xsi:type</c> takes a QName, and six places hard-coded the prefix
+    /// <c>bpmn</c>. A diagram that binds the BPMN namespace as the DEFAULT --
+    /// perfectly legal, and what a hand-written or API-posted diagram often does
+    /// -- leaves that prefix unbound, and Flowable refuses the whole deployment
+    /// with nothing actionable reaching the author. bpmn-js emits prefixed
+    /// documents, so everything from the studio hid it.
+    /// </para>
+    /// <para>
+    /// #482 reported one of the six, because that is the one #471's minimal
+    /// diagrams happened to hit. Fixing only that one would have left five live,
+    /// and the complex gateway's expansion was measurably among them: with the
+    /// oracle's diagrams switched to the default namespace its cell failed the
+    /// same way the multi-instance ones had.
+    /// </para>
+    /// <para>
+    /// An empty prefix is the RIGHT answer, not a dropped attribute: an
+    /// unprefixed QName in an attribute value resolves against the default
+    /// namespace, which in that spelling is the BPMN namespace. The type
+    /// declaration survives both ways round.
+    /// </para>
+    /// <para>
+    /// <paramref name="context"/> must be an element already in the document --
+    /// a freshly constructed one has no namespace scope and would always answer
+    /// "unprefixed", which is wrong for exactly the documents that work today.
+    /// </para>
+    /// </remarks>
+    private static string FormalExpressionType(XElement context)
+    {
+        var prefix = context.GetPrefixOfNamespace(BpmnNamespace);
+        return string.IsNullOrEmpty(prefix) ? "tFormalExpression" : $"{prefix}:tFormalExpression";
+    }
+
     public const string DefaultSignalTopic = "workflow.signals";
+
+    /// <summary>Where a message start event listens unless its author says otherwise (#524).</summary>
+    /// <remarks>
+    /// Its own topic rather than sharing the signal one, so the ordinary case
+    /// keeps the two streams apart without anybody configuring anything. It is
+    /// not what ENFORCES the separation -- the separate registries do that, and
+    /// they hold even when an author points both kinds at one topic.
+    /// </remarks>
+    public const string DefaultMessageTopic = "workflow.messages";
     private static readonly HashSet<string> ReplaceableTaskElementNames =
     [
         "task",
@@ -404,7 +450,7 @@ public static partial class WorkflowBpmnXml
 
             owner.Add(new XElement(
                 BpmnNamespace + "completionCondition",
-                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                new XAttribute(XsiNamespace + "type", FormalExpressionType(owner)),
                 declared));
         }
     }
@@ -530,9 +576,11 @@ public static partial class WorkflowBpmnXml
             // An author who hand-wrote the child meant it.
             if (loop.Element(BpmnNamespace + "loopCardinality") is not null) continue;
 
+            // #482's headline case. See `FormalExpressionType` for why the
+            // prefix is resolved rather than assumed.
             var cardinality = new XElement(
                 BpmnNamespace + "loopCardinality",
-                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                new XAttribute(XsiNamespace + "type", FormalExpressionType(loop)),
                 declared);
 
             // The schema sequence puts loopCardinality after extensionElements
@@ -950,7 +998,7 @@ public static partial class WorkflowBpmnXml
 
                 flow.Add(new XElement(
                     BpmnNamespace + "conditionExpression",
-                    new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                    new XAttribute(XsiNamespace + "type", FormalExpressionType(flow)),
                     $"${{{resultVariable} == '{flowId}'}}"));
             }
         }
@@ -1547,7 +1595,7 @@ public static partial class WorkflowBpmnXml
 
                 var conditionElement = new XElement(
                     BpmnNamespace + "conditionExpression",
-                    new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                    new XAttribute(XsiNamespace + "type", FormalExpressionType(gatewayFlow)),
                     $"${{{GatewayChoiceVariableName} == '{flowId}'}}");
                 gatewayFlow.Add(conditionElement);
             }
@@ -2073,7 +2121,7 @@ public static partial class WorkflowBpmnXml
 
                 // Flowable reads the condition body; the xsi:type is what marks it
                 // a formal expression, exactly as sequence flow conditions do.
-                condition.SetAttributeValue(XsiNamespace + "type", "bpmn:tFormalExpression");
+                condition.SetAttributeValue(XsiNamespace + "type", FormalExpressionType(condition));
                 condition.Value = snapshot.ConditionExpression;
             }
         }
@@ -2821,6 +2869,84 @@ public static partial class WorkflowBpmnXml
         return declarations;
     }
 
+    /// <summary>
+    /// Every message START event a published definition offers the bus (#524).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A start event inside an EVENT SUB-PROCESS is excluded, and that is #162's
+    /// lesson borrowed rather than rediscovered: such an event starts a handler
+    /// within an already-running instance, so treating it as a way to start a
+    /// process makes the correlator ask Flowable to start one by a message no
+    /// process-level start event carries, and the engine refuses.
+    /// </para>
+    /// <para>
+    /// The topic lives on the <c>&lt;bpmn:message&gt;</c> root, like a signal's,
+    /// so an author who wants a message on their own topic says it the same way.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<WorkflowMessageRegistration> ExtractMessageRegistrations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageRegistration>();
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch
+        {
+            return Array.Empty<WorkflowMessageRegistration>();
+        }
+
+        var messagesById = document.Root?
+            .Elements(BpmnNamespace + "message")
+            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
+            .ToDictionary(
+                message => message.Attribute("id")!.Value,
+                message => message,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
+
+        var registrations = new Dictionary<(string Name, string Topic, string ProcessKey), WorkflowMessageRegistration>();
+
+        foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
+        {
+            if (IsInsideEventSubProcess(startEvent)) continue;
+
+            var definition = startEvent.Element(BpmnNamespace + "messageEventDefinition");
+            if (definition is null) continue;
+
+            var messageRef = definition.Attribute("messageRef")?.Value;
+            if (string.IsNullOrWhiteSpace(messageRef)
+                || !messagesById.TryGetValue(messageRef, out var message))
+            {
+                continue;
+            }
+
+            var name = message.Attribute("name")?.Value?.Trim();
+            if (string.IsNullOrEmpty(name)) continue;
+
+            var topic = message.Attribute(FlowableNamespace + "topic")?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(topic))
+            {
+                topic = DefaultMessageTopic;
+            }
+
+            var processKey = startEvent.Ancestors(BpmnNamespace + "process")
+                .FirstOrDefault()?.Attribute("id")?.Value?.Trim();
+            if (string.IsNullOrEmpty(processKey)) continue;
+
+            registrations[(name, topic, processKey)] =
+                new WorkflowMessageRegistration(name, topic, processKey);
+        }
+
+        return registrations.Values.ToList();
+    }
+
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml))
@@ -3073,7 +3199,15 @@ public static partial class WorkflowBpmnXml
         }
 
         conditionExpressionElement ??= new XElement(BpmnNamespace + "conditionExpression");
-        conditionExpressionElement.SetAttributeValue(XsiNamespace + "type", "bpmn:tFormalExpression");
+
+        // RESOLVED FROM `element`, NOT FROM THE CONDITION (#482). The condition
+        // may have just been constructed and not yet added -- see the
+        // `Parent is null` branch below -- and a detached element has no
+        // namespace scope, so it would answer "unprefixed" for every document,
+        // including the prefixed ones that work today. That would have turned a
+        // fix into a regression.
+        conditionExpressionElement.SetAttributeValue(
+            XsiNamespace + "type", FormalExpressionType(element));
         conditionExpressionElement.Value = snapshot.ConditionExpression;
 
         if (conditionExpressionElement.Parent is null)
@@ -3999,7 +4133,7 @@ public static partial class WorkflowBpmnXml
 
             timer.Add(new XElement(
                 BpmnNamespace + name,
-                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                new XAttribute(XsiNamespace + "type", FormalExpressionType(timer)),
                 value));
         }
 

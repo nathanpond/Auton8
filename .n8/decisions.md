@@ -7811,3 +7811,64 @@ so that nesting is meaningful rather than a workaround.
   reading as drift in six months. Receive tasks stay non-editable: they carry no
   subscription at all.
   **Issue:** #524
+
+- **Decision (Rule 3):** `workflow.messages` was added to `NatsStreamProvisioner`'s
+  subject list as part of #524.
+  **Why:** the feature cannot run without it — Dapr's publish fails at the sidecar
+  with `nats: no response from stream` and HTTP 500, which is exactly what the
+  queue-start E2E hit first. The provisioner's own comment states the rule ("new
+  top-level topic prefixes need a new entry here"), and `content.>` and
+  `dashboards.>` carry comments recording the same failure. The literal subject,
+  not a `.>` wildcard: Dapr publishes to the topic name itself.
+  **Issue:** #524
+
+- **Discovered, and NOT fixed inline:** `workflow.signals`, the default signal
+  topic, has no JetStream subject either, so a signal start event whose author
+  did not set a topic can never receive anything.
+  **Why not inline:** it is a pre-existing defect in a neighbouring feature rather
+  than something #524 needs, so it got its own issue (#540) rather than riding
+  along on a one-line diff. It has gone unnoticed because no test crosses the bus
+  for signals — every signal test reaches the engine or the dispatcher directly.
+  **Issue:** #540
+
+- **Finding, recorded because it is the useful kind:** the first version of the
+  subscriber change had a COMMENT describing the topic union and no union. Every
+  unit test still passed; the queue-start E2E is what caught it, because it is the
+  only thing that crosses that hop. That is precisely the failure the story's
+  must-have named — "message dispatch that is not reflected there is wiring that
+  will not run" — and it arrived as a comment asserting something the code did not
+  do, which this repo has paid for before.
+  **Issue:** #524
+
+- **Decision (Rule 1, widened):** #482 reported ONE hard-coded `bpmn:` QName; six
+  existed and all six are fixed.
+  **Why:** the issue named the instance #471's minimal diagrams happened to hit.
+  Fixing only that one would have left five live, and this was not theoretical —
+  switching the oracle's diagrams to the default namespace failed the Complex
+  Gateway cell the same way the Multi-Instance ones had. The defect is the
+  pattern, so the pattern got a helper and every site uses it.
+  **Issue:** #482
+
+- **Decision:** the fix resolves the author's prefix rather than dropping
+  `xsi:type`, which was #482's other suggestion.
+  **Why:** dropping it gives up the type declaration for every document to fix
+  one spelling. Resolving keeps it in all three — unprefixed, `bpmn:`, and an
+  author's own prefix, which a conditional swap would still get wrong. The third
+  case has its own test for that reason.
+  **Cost if wrong:** one more line than the alternative.
+  **Issue:** #482
+
+- **Near miss worth recording:** the first pass resolved the prefix from the
+  condition element itself at one site, where it may have just been constructed
+  and not yet added. A detached element has no namespace scope, so it answers
+  "unprefixed" for EVERY document — which would have turned #482 into a wider
+  version of itself, breaking the prefixed diagrams the studio produces. Caught
+  by reading the call site rather than by a test; the prefixed-diagram test now
+  covers it.
+  **Issue:** #482
+
+- **Discovered, not fixed inline:** an unrecognised engine refusal answers "the
+  reason is in the server log", which the author cannot reach — and #482 records
+  that the maintainer could not either without a direct deploy to Flowable.
+  Filed as #541 rather than widened into this story.
+  **Issue:** #541

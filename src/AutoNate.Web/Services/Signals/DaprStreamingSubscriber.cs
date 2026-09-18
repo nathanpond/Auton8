@@ -30,8 +30,10 @@ namespace AutoNate.Web.Services.Signals;
 public sealed class DaprStreamingSubscriber(
     DaprPublishSubscribeClient pubSubClient,
     IWorkflowSignalRegistry registry,
+    IWorkflowMessageRegistry messageRegistry,
     BusWatcherStreamService busWatcher,
     WorkflowSignalDispatcher signalDispatcher,
+    WorkflowMessageDispatcher messageDispatcher,
     IHttpClientFactory httpClientFactory,
     IOptions<DaprOptions> daprOptions,
     ILogger<DaprStreamingSubscriber> logger) : IHostedService, IDaprStreamingSubscriber
@@ -56,8 +58,10 @@ public sealed class DaprStreamingSubscriber(
 
     private readonly DaprPublishSubscribeClient _pubSubClient = pubSubClient;
     private readonly IWorkflowSignalRegistry _registry = registry;
+    private readonly IWorkflowMessageRegistry _messageRegistry = messageRegistry;
     private readonly BusWatcherStreamService _busWatcher = busWatcher;
     private readonly WorkflowSignalDispatcher _signalDispatcher = signalDispatcher;
+    private readonly WorkflowMessageDispatcher _messageDispatcher = messageDispatcher;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly DaprOptions _daprOptions = daprOptions.Value;
     private readonly ILogger<DaprStreamingSubscriber> _logger = logger;
@@ -76,6 +80,9 @@ public sealed class DaprStreamingSubscriber(
     {
         _lifetimeCts = new CancellationTokenSource();
         await _registry.RefreshAsync(cancellationToken);
+        // #524. Both registries, or the message topics are absent from the very
+        // first subscription sync and a message start never receives anything.
+        await _messageRegistry.RefreshAsync(cancellationToken);
         await SyncAsync(cancellationToken);
         _watchdogTask = Task.Run(() => RunWatchdogAsync(_lifetimeCts.Token), CancellationToken.None);
     }
@@ -439,6 +446,15 @@ public sealed class DaprStreamingSubscriber(
                 ExternalConnectionEventTopic.TopicName
             };
 
+            // #524. The message registry's topics, and this line is the feature.
+            // Without it the dispatch gate below is unreachable: the app never
+            // subscribes to the topic, so the message sits in the stream and
+            // nothing reads it. Caught by the queue-start E2E, which is the only
+            // thing that crosses this hop -- the first version of this change had
+            // the COMMENT describing the union and not the union, and every unit
+            // test still passed.
+            desired.UnionWith(_messageRegistry.GetSubscribedTopics());
+
             foreach (var topic in desired)
             {
                 if (_subscriptions.ContainsKey(topic))
@@ -516,14 +532,26 @@ public sealed class DaprStreamingSubscriber(
             // what's flowing through pub/sub.
             await _busWatcher.PublishAsync(busMessage, cancellationToken);
 
+            // Dispatch reads `eventType` out of the original payload; pass the
+            // raw bytes (not the prettified copy used for display) so
+            // JsonDocument.Parse sees the same shape the publisher produced.
+            var rawMessage = busMessage with { Payload = rawPayload };
+
             if (_registry.GetSignalNamesForTopic(topic).Count > 0)
             {
-                // Signal dispatch reads `eventType` out of the original
-                // payload; pass the raw bytes (not the prettified copy used
-                // for display) so JsonDocument.Parse sees the same shape the
-                // publisher produced.
-                var signalMessage = busMessage with { Payload = rawPayload };
-                await _signalDispatcher.HandleAsync(signalMessage);
+                await _signalDispatcher.HandleAsync(rawMessage);
+            }
+
+            // #524. Its own gate against its own registry, not an `||` folded
+            // into the one above. That is what keeps a message and a signal of
+            // the same name from triggering each other: each dispatcher is
+            // reached only when ITS OWN registrations cover the topic, and each
+            // then matches against its own names. A shared gate would hand every
+            // signal message to the message dispatcher and vice versa, leaving
+            // the separation resting on the name lookup alone.
+            if (_messageRegistry.GetMessageNamesForTopic(topic).Count > 0)
+            {
+                await _messageDispatcher.HandleAsync(rawMessage);
             }
 
             return TopicResponseAction.Success;

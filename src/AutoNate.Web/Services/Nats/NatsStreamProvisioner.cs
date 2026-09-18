@@ -85,7 +85,19 @@ public sealed class NatsStreamProvisioner(
             $"{QueryEventTopic.TopicRoot}.>",
             // DataStore CRUD + file/folder operations + CSV ingest. Critical
             // for "who took bytes out" audit via datastore.file.downloaded.
-            $"{DataStoreEventTopic.TopicRoot}.>"
+            $"{DataStoreEventTopic.TopicRoot}.>",
+            // #524. The default topic a message START event listens on. NOT a
+            // `.>` wildcard: Dapr publishes to the topic name itself, so the
+            // subject is `workflow.messages` exactly and a wildcard on it would
+            // match `workflow.messages.anything` and miss the one that is used.
+            // `workflow.*` would be wide enough and would also swallow
+            // `workflow.execution`, which has its own retention story.
+            //
+            // Without this the publish fails at the sidecar with
+            // "nats: no response from stream" and HTTP 500 -- measured, when the
+            // queue-start E2E first ran -- which is the same failure mode the
+            // content and dashboards entries above were added for.
+            WorkflowBpmnXml.DefaultMessageTopic
         })
         {
             MaxAge = StreamMaxAge

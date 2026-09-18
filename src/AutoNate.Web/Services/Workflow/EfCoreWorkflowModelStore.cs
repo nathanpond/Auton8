@@ -8,9 +8,11 @@ namespace AutoNate.Web.Services.Workflow;
 public sealed class EfCoreWorkflowModelStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     IWorkflowSignalRegistry signalRegistry,
+    IWorkflowMessageRegistry messageRegistry,
     IDaprStreamingSubscriber streamingSubscriber) : IWorkflowModelStore
 {
     private readonly IWorkflowSignalRegistry _signalRegistry = signalRegistry;
+    private readonly IWorkflowMessageRegistry _messageRegistry = messageRegistry;
     private readonly IDaprStreamingSubscriber _streamingSubscriber = streamingSubscriber;
 
     public async Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default)
@@ -166,6 +168,9 @@ public sealed class EfCoreWorkflowModelStore(
         // ones that no longer back a published workflow. Streaming subscriptions
         // mean these changes take effect without a sidecar restart.
         await _signalRegistry.RefreshAsync(cancellationToken);
+        // #524. Both, or a newly published message start never gets a
+        // subscription and a deleted one keeps receiving.
+        await _messageRegistry.RefreshAsync(cancellationToken);
         await _streamingSubscriber.SyncAsync(cancellationToken);
 
         return entity.ToModel();
@@ -205,6 +210,9 @@ public sealed class EfCoreWorkflowModelStore(
         // streaming subscriber needs to release those topics now that no
         // published version owns them.
         await _signalRegistry.RefreshAsync(cancellationToken);
+        // #524. Both, or a newly published message start never gets a
+        // subscription and a deleted one keeps receiving.
+        await _messageRegistry.RefreshAsync(cancellationToken);
         await _streamingSubscriber.SyncAsync(cancellationToken);
 
         return snapshot;
