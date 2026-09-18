@@ -385,11 +385,34 @@ public sealed class Authorizer : IAuthorizer
                     denies.Add(predicate);
                 }
             }
+            catch (SelectorCompilationException ex) when (grant.Effect == AuthEffect.Allow)
+            {
+                // AN UNCOMPILABLE ALLOW IS SKIPPED. AN UNCOMPILABLE DENY IS NOT (#577).
+                //
+                // The asymmetry is the whole point, and it belongs here rather
+                // than in a commit message: skipping an allow REMOVES access —
+                // visible, annoying, safe. Skipping a deny silently stops
+                // denying, which adds access nobody granted and shows up in no
+                // one's screen. A selector that will not compile is precisely
+                // the case where the system does not know what the grant means,
+                // and "permit" is the wrong guess to make there.
+                _log.LogWarning(ex,
+                    "Skipping ALLOW grant '{Selector}' for kind '{Kind}': compilation failed. "
+                    + "This removes access the grant would have given; it cannot add any.",
+                    grant.SelectorString, kind);
+            }
             catch (SelectorCompilationException ex)
             {
-                _log.LogWarning(ex,
-                    "Skipping grant '{Selector}' for kind '{Kind}': compilation failed.",
-                    grant.SelectorString, kind);
+                // The deny half. Logged at Error with the grant and the reason,
+                // because a request that fails closed with nothing to read is
+                // undiagnosable — the operator needs to know WHICH grant did it.
+                _log.LogError(ex,
+                    "DENY grant '{Selector}' for kind '{Kind}' failed to compile; failing the "
+                    + "request closed. A skipped deny would silently stop denying, so the "
+                    + "request returns no rows until the selector is fixed. Reason: {Reason}",
+                    grant.SelectorString, kind, ex.Message);
+
+                return source.Where(_ => false);
             }
         }
 
@@ -520,11 +543,22 @@ public sealed class Authorizer : IAuthorizer
                 if (grant.Effect == AuthEffect.Allow) allows.Add(sql);
                 else denies.Add(sql);
             }
+            catch (SelectorCompilationException ex) when (grant.Effect == AuthEffect.Allow)
+            {
+                // Same asymmetry as FilterQueryAsync, for the same reason (#577).
+                _log.LogWarning(ex,
+                    "Skipping ALLOW grant '{Selector}' for kind 'record' (SQL): compilation "
+                    + "failed. This removes access the grant would have given; it cannot add any.",
+                    grant.SelectorString);
+            }
             catch (SelectorCompilationException ex)
             {
-                _log.LogWarning(ex,
-                    "Skipping grant '{Selector}' for kind 'record' (SQL): compilation failed.",
-                    grant.SelectorString);
+                _log.LogError(ex,
+                    "DENY grant '{Selector}' for kind 'record' (SQL) failed to compile; failing "
+                    + "the request closed rather than dropping the deny. Reason: {Reason}",
+                    grant.SelectorString, ex.Message);
+
+                return RecordSqlFilter.Closed;
             }
         }
 
