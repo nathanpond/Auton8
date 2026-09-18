@@ -172,6 +172,83 @@ public sealed class EfCoreWorkflowModelStoreTests
         Assert.Equal(1, versions[0].VersionNumber);
     }
 
+    /// <summary>
+    /// The published list carries the PUBLISHED xml, not the draft's (#552).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #544 was two defects and this is the second, which its own fix commit
+    /// called the worse one: a workflow published catching a signal, then
+    /// draft-edited to drop it, read as no longer declaring it -- while real
+    /// instances sat parked on exactly that element in the engine. The fix was
+    /// to JOIN <c>WorkflowModelVersions</c> rather than filter
+    /// <c>ListAsync</c>, because filtering afterwards still hands back
+    /// <c>workflow_models.bpmn_xml</c>, which is the working copy.
+    /// </para>
+    /// <para>
+    /// <b>Nothing tested it.</b> The unit test that carried this defect's name
+    /// was a renamed copy of an existing positive path, and no test anywhere
+    /// invoked <c>ListPublishedAsync</c> against a store holding a
+    /// published-versus-draft divergence -- so replacing the join with
+    /// <c>.Where(m =&gt; m.PublishedVersionNumber != null).Select(m =&gt; m.ToModel())</c>
+    /// left the entire suite green. That is the mutation this fact exists to
+    /// kill, and it is killed on the xml assertion below rather than on a
+    /// precondition.
+    /// </para>
+    /// <para>
+    /// A broadcaster-level test cannot do this job at all: the broadcaster sees
+    /// only what the store returns, so draft-versus-published is invisible one
+    /// layer up. The guard has to sit where the query is.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ListPublishedAsync_ReturnsThePublishedXmlNotTheDraftEdit()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        const string PublishedXml = "<xml published=\"yes\" />";
+        const string DraftXml = "<xml published=\"no\" />";
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Published Flow",
+            ProcessKey = "published_flow",
+            BpmnXml = PublishedXml
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "published_flow",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        // The draft edit that used to un-declare it.
+        await store.SaveAsync(published with { BpmnXml = DraftXml });
+
+        // A never-published model, so the filter half is exercised in the same
+        // fact as the join half -- one asserts the row is absent, the other
+        // asserts the surviving row carries the right xml.
+        await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Never Published",
+            ProcessKey = "never_published",
+            BpmnXml = "<xml drafted=\"only\" />"
+        });
+
+        var listed = await store.ListPublishedAsync();
+
+        var row = Assert.Single(listed);
+        Assert.Equal("published_flow", row.ProcessKey);
+
+        // THE JOIN. A filter-only implementation returns DraftXml here and
+        // passes every other assertion in this fact.
+        Assert.Equal(PublishedXml, row.BpmnXml);
+    }
+
     [Fact]
     public async Task PublishAsync_FromDraftPromotesDraftVersionAndRetainsHistory()
     {
