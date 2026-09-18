@@ -49,11 +49,22 @@ public sealed class MessageCorrelationStudioTests : E2ETestBase
 
         await OpenConfigureAsync(page, "Catch_1");
 
-        // The message name is shown but not editable here: it comes from the
-        // <bpmn:message> the diagram declares, so letting it be typed would let it
-        // diverge from what the engine subscribes to.
+        // EDITABLE, AND THAT IS A DELIBERATE REVERSAL (#524).
+        //
+        // This asserted the field was DISABLED, with the reason written beside
+        // it: the name comes from the <bpmn:message> the diagram declares, so
+        // letting it be typed would let it diverge from what the engine
+        // subscribes to. That reasoning was right about the risk and wrong about
+        // the remedy -- it holds only while typing the name writes the EVENT
+        // alone. The studio now writes the <bpmn:message> root as well, so the
+        // two cannot diverge by construction rather than by scope. The owner's
+        // call, recorded in .n8/decisions.md.
+        //
+        // The value still arrives from the declaration on open, which is the half
+        // of the old assertion worth keeping: a field that forgot the name it was
+        // showing would be a regression whether or not it is editable.
         var messageField = page.GetByLabel("Message", new() { Exact = true });
-        await Assertions.Expect(messageField).ToBeDisabledAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(messageField).ToBeEnabledAsync(new() { Timeout = 10_000 });
         await Assertions.Expect(messageField).ToHaveValueAsync("paymentCleared");
 
         var correlation = page.GetByLabel("Correlation key", new() { Exact = true });
@@ -215,6 +226,98 @@ public sealed class MessageCorrelationStudioTests : E2ETestBase
           </bpmndi:BPMNDiagram>
         </bpmn:definitions>
         """;
+
+    /// <summary>
+    /// An author names the message, and the studio writes the declaration (#524).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The AC that matters, and the one an "is the field enabled" test does not
+    /// reach. Typing a name that no <c>&lt;bpmn:message&gt;</c> in the diagram
+    /// declares must produce the root element as well as the reference —
+    /// otherwise the field is editable and the engine subscribes to the old name,
+    /// which is worse than the disabled field it replaced.
+    /// </para>
+    /// <para>
+    /// A NEW name on purpose. Retyping one the diagram already declares would
+    /// pass against a studio that only repoints <c>messageRef</c> at an existing
+    /// root, which is exactly the half that did not exist before.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Typing_a_new_message_name_writes_the_declaration_and_the_reference()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var name = TestNames.Prefixed("message-name-studio");
+        var id = Guid.NewGuid();
+        var typed = $"invoiceSettled{Guid.NewGuid():N}"[..24];
+
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id,
+                name,
+                processKey = $"mns{Guid.NewGuid():N}"[..20],
+                bpmnXml = Diagram
+            }
+        });
+        Assert.True(created.Ok, $"Seeding failed: {created.Status} {await created.TextAsync()}");
+
+        await page.GotoAsync("/workflow");
+        var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(selector).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await selector.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+
+        await OpenConfigureAsync(page, "Catch_1");
+
+        var messageField = page.GetByLabel("Message", new() { Exact = true });
+        await Assertions.Expect(messageField).ToBeEnabledAsync(new() { Timeout = 10_000 });
+        await messageField.FillAsync(typed);
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+
+        var saved = await ReadSavedXmlAsync(page.APIRequest, id,
+            xml => xml.Contains(typed, StringComparison.Ordinal),
+            "the typed message name to reach the saved diagram");
+
+        // THE DECLARATION, not just the name appearing somewhere. A name written
+        // onto the event alone would satisfy a Contains on the document.
+        var parsed = System.Xml.Linq.XDocument.Parse(saved);
+        var declared = parsed.Root!.Elements()
+            .Where(e => e.Name.LocalName == "message")
+            .FirstOrDefault(e => (string?)e.Attribute("name") == typed);
+
+        Assert.True(
+            declared is not null,
+            $"The studio wrote '{typed}' without declaring a <bpmn:message> for it. The field "
+            + "being editable is only safe because the declaration is written too; without it "
+            + "the author's name and the engine's subscription diverge, which is the risk the "
+            + "disabled field used to avoid (#524).");
+
+        // AND THE EVENT POINTS AT IT. A declaration nothing references is a root
+        // element the engine never subscribes under.
+        var definition = parsed.Descendants()
+            .First(e => (string?)e.Attribute("id") == "Catch_1")
+            .Elements().First(e => e.Name.LocalName == "messageEventDefinition");
+
+        Assert.Equal((string?)declared!.Attribute("id"), (string?)definition.Attribute("messageRef"));
+
+        // And it comes back, which is the read path a write-only test leaves
+        // unexercised.
+        await page.ReloadAsync();
+        var reloaded = page.GetByRole(AriaRole.Combobox, new() { Name = "Workflow Model" });
+        await Assertions.Expect(reloaded).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await reloaded.ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true }).ClickAsync();
+        await OpenConfigureAsync(page, "Catch_1");
+
+        await Assertions.Expect(page.GetByLabel("Message", new() { Exact = true }))
+            .ToHaveValueAsync(typed, new() { Timeout = 10_000 });
+    }
 
     private static async Task OpenConfigureAsync(IPage page, string elementId)
     {

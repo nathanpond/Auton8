@@ -1450,7 +1450,8 @@ export function updateMessageElementProperties(modelerHandle, payload) {
   const modeler = modelerHandle?.modeler;
   const elementRegistry = modeler?.get?.("elementRegistry", false);
   const modeling = modeler?.get?.("modeling", false);
-  if (!elementRegistry || !modeling || !payload?.id) {
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
     throw new Error("The BPMN modeler is not ready to update this message element.");
   }
 
@@ -1481,6 +1482,21 @@ export function updateMessageElementProperties(modelerHandle, payload) {
     // an IMPORTED diagram, which may carry that attribute for reasons of its own.
     // This changes only what the studio itself produces.
     writeFlowableAttribute(businessObject, "behaviorKey", SEND_MESSAGE_BEHAVIOR_KEY);
+  } else {
+    // #524. THE STUDIO OWNS THE DECLARATION.
+    //
+    // The Message field used to be disabled everywhere but a send task, and the
+    // reason given was sound as far as it went: the name comes from the
+    // <bpmn:message> the diagram declares, so typing it would let the two
+    // diverge. That is true as long as typing it writes only the EVENT. Writing
+    // the root as well removes the divergence by construction rather than by
+    // scope, which is the owner's decision.
+    //
+    // Same shape as `applySignalStartEvent` one screen down, including reusing a
+    // root by name so several events sharing a message stay linked when it is
+    // renamed. bpmn-js knows `bpmn:Message` -- it is standard BPMN, not a
+    // Flowable extension, so the vendored moddle serialises it.
+    writeMessageRef(moddle, modeler, businessObject, payload.messageName);
   }
 
   // Through modeling so the command stack records it and the dirty flag flips —
@@ -2289,11 +2305,65 @@ function pruneLegacyServiceTaskExtensionFields(businessObject) {
   }
 }
 
-function buildSignalId(rootElements, signalName) {
-  const slug = signalName
+// #524. Point a message event at a <bpmn:message> root with this name, creating
+// the root when nothing declares it yet.
+//
+// A cleared name strips `messageRef` rather than guessing, exactly as the signal
+// path does: the XML stays parseable and the server's validation surfaces the
+// missing name, instead of the event quietly keeping a stale subscription.
+function writeMessageRef(moddle, modeler, businessObject, rawName) {
+  const definitions =
+    typeof modeler.getDefinitions === "function" ? modeler.getDefinitions() : null;
+  if (!definitions) {
+    throw new Error("The BPMN modeler is missing a definitions root.");
+  }
+
+  const definition = (
+    Array.isArray(businessObject.eventDefinitions) ? businessObject.eventDefinitions : []
+  ).find((d) => d && d.$type === "bpmn:MessageEventDefinition");
+
+  // Not a message EVENT -- a receive task reaches this function too, and it has
+  // no subscription to point anywhere. It is addressed by its own element id,
+  // which is why the correlator treats it as a separate kind.
+  if (!definition) return;
+
+  const messageName = normalizeOptionalString(rawName);
+  if (!messageName) {
+    definition.messageRef = undefined;
+    return;
+  }
+
+  const rootElements = Array.isArray(definitions.rootElements) ? definitions.rootElements : [];
+  let message = definition.messageRef ?? null;
+
+  const existingByName = rootElements.find(
+    (rootElement) => rootElement?.$type === "bpmn:Message" && rootElement.name === messageName
+  );
+
+  if (existingByName && existingByName !== message) {
+    message = existingByName;
+  } else if (!message || message.$type !== "bpmn:Message") {
+    message = moddle.create("bpmn:Message", {
+      id: buildRootId(rootElements, "Message", messageName),
+      name: messageName
+    });
+    rootElements.push(message);
+    if (typeof message.$parent === "object") {
+      message.$parent = definitions;
+    }
+  }
+
+  message.name = messageName;
+  definition.messageRef = message;
+}
+
+// Shared by the signal and message roots (#524). Was `buildSignalId`; the second
+// caller made the "Signal_" prefix a parameter rather than a copy.
+function buildRootId(rootElements, prefix, name) {
+  const slug = name
     .replace(/[^A-Za-z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  const base = slug ? `Signal_${slug}` : "Signal_event";
+  const base = slug ? `${prefix}_${slug}` : `${prefix}_event`;
   const existingIds = new Set(
     rootElements
       .map((rootElement) => rootElement?.id)
@@ -2309,6 +2379,10 @@ function buildSignalId(rootElements, signalName) {
     counter += 1;
   }
   return `${base}_${counter}`;
+}
+
+function buildSignalId(rootElements, signalName) {
+  return buildRootId(rootElements, "Signal", signalName);
 }
 
 export function updateSequenceFlowProperties(modelerHandle, flow) {

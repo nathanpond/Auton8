@@ -21,6 +21,7 @@ public static class WorkflowResourceKinds
     public const string Execution = "workflow.execution";
     public const string Task = "workflow.task";
     public const string Message = "workflow.message";
+    public const string Signal = "workflow.signal";
 }
 
 public static class WorkflowAdminEventTypes
@@ -60,6 +61,8 @@ public static class WorkflowAdminEventTypes
     // process is modelled wrong and nobody finds that out from a 409 alone.
     public const string MessageDelivered = "workflow.message.delivered";
     public const string MessageRefused = "workflow.message.refused";
+    public const string SignalBroadcast = "workflow.signal.broadcast";
+    public const string SignalRefused = "workflow.signal.refused";
 
     // View events (Phase 4)
     public const string ModelListViewed = "workflow.model.list.viewed";

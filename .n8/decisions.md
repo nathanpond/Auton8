@@ -7761,3 +7761,53 @@ so that nesting is meaningful rather than a workaround.
   stands and this is the correction beside it; the reason and the probe comment
   are fixed at source.
   **Issue:** #535
+
+- **Decision:** M4d is delivered in two PRs, not one. The first (#538) is the
+  oracle instrument plus the nine coverage rows that need no new product API; the
+  second is the trigger surface (#523, #524) and the two rows that consume it
+  (#528, #529).
+  **Why:** the planning ledger already records that the owner's trigger-surface
+  decision "turned M4d from a coverage milestone into one with two feature
+  slices". Holding thirteen commits of green, tier-verified work on an unmerged
+  branch while two feature slices are built is risk with no upside, and the two
+  halves share no files. The milestone stays open; `/n8-verify` still closes it.
+  Cost if wrong: two merge commits to read instead of one.
+  **Issue:** #538
+
+- **Finding:** the unaccounted ratchet went 16 to 4 in the first slice. The four
+  left — Message Start, Message Boundary, Signal Start, Signal Boundary — are
+  exactly the rows the trigger surface exists for, which is the planning slice
+  line holding up under execution rather than by accident.
+  **Issue:** #523, #524
+
+- **Decision:** #524 is landed in two commits, and this one delivers only the
+  studio half (AC1). The queue half — a message dispatcher, message registrations
+  in the registry, the `DaprStreamingSubscriber` gate and the cross-talk boundary
+  — is not in it.
+  **Why:** the two halves share no files and the studio half is complete and
+  provable on its own: an author types a name, the studio writes the
+  `<bpmn:message>` declaration and the reference, and it round-trips. Landing it
+  green is better than holding it behind a second subsystem. Cost if wrong: the
+  story shows partial for a while, which is what it is.
+  **Issue:** #524
+
+- **Decision:** the studio writes the `<bpmn:message>` root through bpmn-js's own
+  moddle, and `prepare` writes it too.
+  **Why:** not redundancy — two entry points. `applySignalStartEvent` already
+  creates a `bpmn:Signal` root in the browser, so the vendored moddle handles a
+  standard BPMN root fine; and `ApplySignalStartEventSnapshot` writes the same
+  thing server-side for the snapshot-driven path. Messages needed both for the
+  same reasons. Doing only the browser half would leave a snapshot from an older
+  SPA build writing an event with no declaration.
+  **Issue:** #524
+
+- **Decision:** `MessageCorrelationStudioTests`' disabled-field assertion is
+  reversed to `ToBeEnabledAsync`, with the old reason quoted and answered in
+  place rather than deleted.
+  **Why:** the owner decided the field is editable everywhere. The old reasoning
+  was right about the risk — a typed name diverging from what the engine
+  subscribes to — and wrong about the remedy, because it holds only while typing
+  writes the event alone. Leaving the original reason visible is what stops this
+  reading as drift in six months. Receive tasks stay non-editable: they carry no
+  subscription at all.
+  **Issue:** #524

@@ -1030,6 +1030,23 @@ public static class EventCatalog
                         "The refusals are on the record on purpose: a multi-match means a process is modelled wrong, and nobody learns that from a 409 alone."
                     ]),
                 new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.SignalBroadcast,
+                    "A named signal was fired into the engine from outside any instance.",
+                    "Fires from POST /api/workflow-signals/ once at least one published workflow declared a catch for the name.",
+                    [
+                        "resource: { signalName }. details: { declaring } \u2014 the process keys whose diagrams catch that name.",
+                        "`declaring` is who was LISTENING, not who woke: a signal is addressed by name to everything waiting, and the engine decides what that turns out to be.",
+                        "Gated on workflowsignal:send, which is a separate right from workflowmessage:send because it wakes every waiting instance rather than one named process."
+                    ]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.SignalRefused,
+                    "A signal was fired for a name no published workflow catches, and nothing was broadcast.",
+                    "Fires from POST /api/workflow-signals/ on every refusal.",
+                    [
+                        "resource: { signalName }. details: { available } \u2014 the names that are caught.",
+                        "The refusal is the point: Flowable accepts a broadcast nobody subscribes to and answers 204, so passing it through would report success for a signal that reached nobody."
+                    ]),
+                new EventCatalogEntry(
                     WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.AdhocActivityStarted,
                     "Someone chose and started one activity inside a running ad-hoc sub-process.",
                     "Fires from POST /api/executions/{processInstanceId}/adhoc/{executionId}/activities/{activityId}.",
