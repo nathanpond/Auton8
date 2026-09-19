@@ -8821,3 +8821,37 @@ elements executing on the engine, not the executions read model.
   the end kills 4, ignoring `maxPages` kills exactly the bound test, and swallowing
   a failed page kills exactly the truncation test.
   **Issue:** #588
+
+## M5 execution — #104 (execution reads move to the cache)
+
+- **Decision:** `/{id}/tasks` is the only route this story moves, and the rest are
+  named rather than attempted.
+  **Why:** the set was settled by two column facts and one semantic one, all
+  verified: `workflow_execution_cache` has no parent-instance column, so
+  `/children` cannot be served from it at all; enabled ad-hoc activities are live
+  engine state, so `/adhoc` is not a projection of anything; and diagram, history,
+  log and completed-assignees need BPMN XML, `workflow_event_log_cache` and
+  `workflow_variable_cache` — the sibling read-throughs this story's own AC offers
+  as the alternative to naming them out of scope.
+  **Issue:** #104
+
+- **Decision:** `ProcessDefinitionName` is left **null**, matching the live path.
+  **Why:** `FlowableClient.GetTasksByProcessInstanceAsync` never sets it either.
+  Filling it from `workflow_model_name` — which #583 made available — would be an
+  improvement, and an unrequested content change in a story whose job is to change
+  where the answer comes from, not what it says.
+  **Issue:** #104
+
+- **Decision:** the exception list lives in a test, not a comment.
+  **Why:** prose records a set on the day it is written. The guard asserts it in
+  **both** directions — a route that starts injecting `IFlowableClient` must be
+  added with a reason, and one that stops must be removed — so the live-reading
+  set cannot grow silently, which is the creep this story exists to prevent. It
+  carries a vacuity check: if the regex stops matching `MapGet`, the guard says so
+  rather than passing against an empty set.
+  **Issue:** #104
+
+- **Note:** AC6 (`IFlowableReadThrough` injected and used, closing #19) was already
+  delivered by **#579**, which made the single-execution authorizer its first
+  consumer. This story adds a second. #19 closed with #587.
+  **Issue:** #104

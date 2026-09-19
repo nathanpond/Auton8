@@ -97,17 +97,31 @@ public sealed class ExecutionEndpointsTests
         Assert.Contains("Log:inst-log", factory.FlowableStub.Calls);
     }
 
+    /// <summary>
+    /// `/tasks` is served from the cache, not by delegating to Flowable (#104).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Inverted, not deleted.</b> This test asserted the delegation
+    /// (`Assert.Contains("TasksByInstance:inst-456", …)`), which is precisely the
+    /// behaviour #104 removed — so leaving it would have pinned the old source,
+    /// and deleting it would have left the change asserted nowhere.</para>
+    ///
+    /// <para>An unknown instance now 404s rather than returning an empty list,
+    /// because the read-through cannot resolve it and there are no facts to serve.
+    /// `ExecutionTasksFromCacheTests` covers the populated cases.</para>
+    /// </remarks>
     [Fact]
-    public async Task GetTasksByInstance_DelegatesToFlowableClient()
+    public async Task GetTasksByInstance_ServesFromTheCacheRatherThanFlowable()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
         var client = factory.CreateClient();
 
-        var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>(
-            "/api/executions/inst-456/tasks");
+        var response = await client.GetAsync("/api/executions/inst-456/tasks");
 
-        Assert.NotNull(tasks);
-        Assert.Contains("TasksByInstance:inst-456", factory.FlowableStub.Calls);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain(
+            factory.FlowableStub.Calls,
+            call => call.StartsWith("TasksByInstance:", StringComparison.Ordinal));
     }
 
     [Fact]
