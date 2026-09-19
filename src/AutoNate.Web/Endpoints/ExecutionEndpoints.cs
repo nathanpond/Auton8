@@ -116,6 +116,22 @@ public static class ExecutionEndpoints
             return Results.Ok(new { items, totalCount });
         }).AuthorizedInHandler("filters via ExecutionListQuery (WorkflowExecution, View) pushed into SQL");
 
+        // HOW CURRENT THIS VIEW IS, AND WHETHER IT IS STILL UPDATING (#594).
+        //
+        // A separate endpoint rather than fields on the list, because
+        // GET /api/executions returns a bare array and wrapping it would break
+        // the SPA, the endpoint tests and the E2E specs for a purely additive
+        // signal.
+        executions.MapGet("/freshness", async (
+            HttpContext http,
+            ExecutionFreshnessService freshness,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            CancellationToken cancellationToken) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            return Results.Ok(await freshness.GetAsync(db, http.User, cancellationToken));
+        }).RequireKindPermission(EntityKinds.WorkflowExecution, Actions.View);
+
         executions.MapGet("/{processInstanceId}/diagram", async (
             string processInstanceId,
             IFlowableClient flowable,

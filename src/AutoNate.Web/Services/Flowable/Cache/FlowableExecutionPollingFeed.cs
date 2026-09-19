@@ -15,15 +15,18 @@ namespace AutoNate.Web.Services.Flowable.Cache;
 public sealed class FlowableExecutionPollingFeed : PeriodicPollingFeed<WorkflowExecutionSummary>
 {
     private readonly IFlowableClient _flowable;
+    private readonly IProjectionWatermarkStore _watermarks;
     private readonly FlowableCacheOptions _options;
 
     public FlowableExecutionPollingFeed(
         IFlowableClient flowable,
+        IProjectionWatermarkStore watermarks,
         IOptions<FlowableCacheOptions> options,
         ILogger<FlowableExecutionPollingFeed> logger)
         : base("flowable.exec.poll", options.Value.ExecutionPollInterval, logger)
     {
         _flowable = flowable;
+        _watermarks = watermarks;
         _options = options.Value;
     }
 
@@ -41,5 +44,18 @@ public sealed class FlowableExecutionPollingFeed : PeriodicPollingFeed<WorkflowE
                     ChangeOp.Upsert, instance.Id, instance, DateTimeOffset.UtcNow),
                 cancellationToken);
         }
+
+        // HEARTBEAT (#594). Written only after the whole tick succeeded -- a tick
+        // that threw never reaches here, which is what lets a reader tell "the
+        // feed is not updating" from "nothing has changed lately".
+        //
+        // THE SEMANTIC OVERLOAD IS DELIBERATE AND WORTH NAMING. For the history
+        // feed a watermark means "how far I have read". This fetch has no time
+        // filter to resume from -- GetWorkflowExecutionsAsync pages from the start
+        // every tick -- so here it means "when the last sweep completed". It rides
+        // projection_watermarks rather than an in-process flag so every replica
+        // reads the same answer, and rather than a new table because one row per
+        // feed already exists for exactly this kind of bookkeeping.
+        await _watermarks.SetAsync(FeedName, DateTimeOffset.UtcNow, cancellationToken);
     }
 }

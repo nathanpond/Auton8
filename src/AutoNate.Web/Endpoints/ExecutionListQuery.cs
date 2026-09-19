@@ -81,6 +81,10 @@ public static class ExecutionListQuery
             CurrentStep = c.CurrentActivityName,
             CacheStatus = c.Status,
 
+            // Carried so the freshness endpoint can take the OLDEST of them over
+            // the authorized set (#594), without a second query shape.
+            LastSyncAtUtc = c.LastSyncAtUtc,
+
             // The Errored overlay, as an EXISTS rather than a second round trip.
             // ix_workflow_execution_errors_process_instance_id covers it.
             IsErrored = db.WorkflowExecutionErrors
@@ -226,6 +230,7 @@ public sealed class ExecutionListRow
     public DateTime StartedAtUtc { get; set; }
     public DateTime? LastActivityAtUtc { get; set; }
     public string CacheStatus { get; set; } = string.Empty;
+    public DateTime LastSyncAtUtc { get; set; }
     public bool IsErrored { get; set; }
     public string? CurrentStep { get; set; }
     public string? ProcessDefinitionId { get; set; }

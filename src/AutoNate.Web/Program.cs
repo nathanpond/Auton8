@@ -1135,6 +1135,7 @@ builder.Services.AddScoped<
     AutoNate.Web.Services.Records.Rollups.RecordActivityRollupBackfillSource>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.IFlowableReadThrough,
     AutoNate.Web.Services.Flowable.Cache.FlowableReadThrough>();
+builder.Services.AddScoped<AutoNate.Web.Endpoints.ExecutionFreshnessService>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.WorkflowTaskCompletionSweep>();
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Flowable.Cache.WorkflowTaskCompletionSweep>());
