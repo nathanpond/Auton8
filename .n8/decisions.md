@@ -8596,3 +8596,56 @@ was "the cache has no name"; #586 is "the cache cannot tell open from closed".
 Both were found on the first line of implementation, not in planning, because both
 are absences — a column that is not there, a delete that is never emitted — and
 the planning simulations read what the code does rather than what it omits.
+
+## M5 execution — #579 (a single execution is authorized from the cache)
+
+- **Decision:** `WorkflowExecutionInstanceAuthorizer` takes `IFlowableReadThrough`
+  instead of `IFlowableClient`, making it the first consumer of that interface and
+  **closing #19** — which #104 was going to close and now cannot.
+  **Why:** the read-through is cache-first, reads through on miss or staleness, and
+  returns the cached row when the live call throws. Every
+  `RequirePermission(..., "processInstanceId")` gate previously carried a hard
+  per-request dependency on the engine.
+  **Issue:** #579
+
+- **Decision:** facts are built from the cache row's columns, and `processkey` is
+  taken from `ProcessDefinitionKey` rather than re-derived.
+  **Why:** the projection already ran `ExtractProcessKey` when it wrote the row, so
+  taking the column cannot drift from what the list path computes. Parity with
+  `ExecutionEndpoints.BuildFacts` is asserted by a test rather than assumed.
+  **Issue:** #579
+
+- **Supersession, recorded not silent:** #576's
+  `The_instance_authorizer_supplies_status_from_the_suspension_flag` was
+  **rewritten**, not deleted. #576 had to infer status from
+  `FlowableProcessInstanceSummary.Suspended` because the runtime shape carries no
+  status string, which capped that path at two reachable states. Reading the cache
+  row gives it the projection's normalized status, so `completed`, `cancelled` and
+  `terminated` are reachable there for the first time — something the old test
+  could not express, which is why it was replaced rather than adjusted.
+  **Issue:** #579 supersedes part of #576
+
+- **Decision:** a cache miss while Flowable is unreachable **refuses**.
+  **Why:** with no row there are no facts, so no selector can be evaluated.
+  Admitting on absent evidence is exactly the failure #577 closed on the query
+  path. The story had to state which answer this case gets; this is it.
+  **Issue:** #579
+
+- **Method failure caught by mutation, worth recording.** The first version of
+  these tests seeded `last_sync_at = NOW()`, so the read-through served straight
+  from cache and **never called Flowable at all** — two tests named "with Flowable
+  unreachable" never reached the throwing stub and would have passed with the
+  degradation path broken. The mutation that makes `FlowableReadThrough` rethrow
+  killed only the cache-miss test, which is how it was found. The helper now ages
+  the row past `ReadThroughFreshness`, and the same mutation now kills three of
+  four. A comment in that helper had asserted the opposite; it was wrong and is
+  corrected in place.
+  **Issue:** #579
+
+- **Vacuity caught by the complement.** `AutoNateWebApplicationFactory` defaults to
+  `Authorization:Enabled=false`, so `IsAuthorizedAsync` returns true for
+  everything. The permitted-actor test passed vacuously; the complement failed and
+  exposed it. Both now run with enforcement on via `extraConfig` — and
+  `AuthorizationOptions`' own startup validator rejected `"Full"`, insisting on
+  lower-case `"full"`, which is the guard working as designed.
+  **Issue:** #579
