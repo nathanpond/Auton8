@@ -9436,3 +9436,47 @@ and its transcript recorded on the issue, which is the same standard
 **Pins:** SLIM_BACKEND 2856 → 2864, FLOWABLE 240 → 243, FULL_LOCAL 470 → 473.
 
 **Issue:** #106
+
+## M5 execution — #229, the shape that says interrupting and is not (2026-09-19)
+
+**The decision the issue asked for: a publish-time warning, not a refusal and not
+a workaround.** Epic #40's line is that Auton8 does not reimplement execution
+semantics, so "work around the engine" was never available whatever the
+specification says. And nothing here is broken — the handler runs, the diagram
+deploys, and an author who wants this arrangement can have it. What they could
+not have was to know they had it. So the deliverable is visibility.
+
+The issue asked whether the specification requires the sibling to die. **That
+question is left open on purpose.** The warning describes what the engine does,
+which is what an author gets either way, and it says so rather than implying a
+verdict.
+
+**Three arrangements measured, not two.** The issue described the problem as "the
+handler beside the error end event in the same scope". That is not quite the
+condition:
+
+| arrangement | sibling |
+|---|---|
+| throw one scope deeper than the handler | **cancelled** |
+| throw, sibling and handler all inside one `subProcess` | **keeps running** |
+| throw, sibling and handler all at the **process** level | **cancelled** |
+
+The third was found by building the first version of the differential wrong — my
+shape B put everything at the process level, and the sibling died, which looked
+like the issue being mistaken. It was not; the issue's own note said "history
+confirmed `scope`, `ongoing`, `handler` and `ht` all still open", and that
+`scope` is the enclosing subprocess I had left out.
+
+Two consequences. The rule is keyed on an error end event that is a **direct
+child** of the scope holding the handler, so `Descendants` would make it fire on
+the arrangement that works — mutation-checked, and it is the negative case that
+catches it. And it does not fire at the process level, which is a shape people
+actually draw.
+
+**Three of the four slim facts are negative cases**, deliberately. A warning that
+fired on every event subprocess would satisfy the positive one and teach authors
+to ignore warnings.
+
+**Pins:** SLIM_BACKEND 2864 → 2868, FLOWABLE 243 → 245, FULL_LOCAL 473 → 475.
+
+**Issue:** #229

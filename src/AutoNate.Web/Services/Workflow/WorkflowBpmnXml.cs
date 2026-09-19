@@ -1803,6 +1803,8 @@ public static partial class WorkflowBpmnXml
             warnings.AddRange(triggerFindings.Warnings);
             warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
+            // #229: an interrupting handler that will not interrupt its siblings.
+            warnings.AddRange(BuildSameScopeErrorHandlerWarnings(document));
 
 
             return new WorkflowBpmnValidationResult(errors, warnings);
@@ -5283,6 +5285,98 @@ public static partial class WorkflowBpmnXml
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Warns where "interrupting" will not interrupt (#229).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An interrupting error event subprocess cancels the scope it guards — except
+    /// when it sits in the same subprocess as the error end event that throws.
+    /// Then the handler runs and a parallel sibling in that subprocess <b>keeps
+    /// going</b>, while <c>isInterrupting="true"</c> sits on the diagram saying
+    /// otherwise.
+    /// </para>
+    /// <para>
+    /// **This is a warning, not a refusal.** Nothing is broken: the handler runs,
+    /// the diagram deploys, and an author who wants exactly this can have it. What
+    /// they cannot currently have is to know they have it, because on a canvas the
+    /// difference from the interrupting shape is which box the handler is drawn
+    /// in. A refusal would also break diagrams that are already deployed and
+    /// working.
+    /// </para>
+    /// <para>
+    /// **The condition is measured, not reasoned.**
+    /// <c>EventSubProcessScopeDifferentialTests</c> runs all three arrangements
+    /// against a live engine: a throw one scope deeper cancels the sibling, and so
+    /// does a throw at the <em>process</em> level — it is specifically a handler
+    /// inside a <c>subProcess</c>, catching an error thrown in that same
+    /// subprocess, that does not. Keying the warning on "same scope" alone would
+    /// have fired it on the process-level shape, which behaves correctly.
+    /// </para>
+    /// <para>
+    /// Deliberately silent about what the specification requires. That question is
+    /// open on #229; this describes the engine, which is what an author gets
+    /// either way.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildSameScopeErrorHandlerWarnings(XDocument document)
+    {
+        var warnings = new List<string>();
+
+        foreach (var scope in document.Descendants(BpmnNamespace + "subProcess"))
+        {
+            // The scope itself must not be an event subprocess: a handler is not
+            // the scope whose siblings are at stake.
+            if (string.Equals(scope.Attribute("triggeredByEvent")?.Value, "true",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var handlers = scope.Elements(BpmnNamespace + "subProcess")
+                .Where(child => string.Equals(
+                    child.Attribute("triggeredByEvent")?.Value, "true",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (handlers.Count == 0) continue;
+
+            // An error end event that is a DIRECT child of this scope. One nested
+            // deeper is the arrangement that interrupts correctly, so Descendants
+            // would make the warning fire on the working shape.
+            var throwsHere = scope.Elements(BpmnNamespace + "endEvent")
+                .Any(end => end.Element(BpmnNamespace + "errorEventDefinition") is not null);
+            if (!throwsHere) continue;
+
+            foreach (var handler in handlers)
+            {
+                var interruptingErrorStart = handler.Elements(BpmnNamespace + "startEvent")
+                    .Any(start =>
+                        start.Element(BpmnNamespace + "errorEventDefinition") is not null
+                        && !string.Equals(start.Attribute("isInterrupting")?.Value, "false",
+                            StringComparison.OrdinalIgnoreCase));
+                if (!interruptingErrorStart) continue;
+
+                warnings.Add(
+                    $"Event subprocess '{ElementLabel(handler)}' catches an error thrown in its own "
+                    + $"subprocess '{ElementLabel(scope)}'. It is marked interrupting, but in this "
+                    + "arrangement Flowable runs the handler WITHOUT cancelling the other work in "
+                    + $"'{ElementLabel(scope)}' — parallel branches there keep running. Move the throwing "
+                    + "step into a nested subprocess if you need the scope cancelled.");
+            }
+        }
+
+        return warnings;
+    }
+
+    /// <summary>A human label for any element: its name, else its id.</summary>
+    private static string ElementLabel(XElement element)
+    {
+        var name = element.Attribute("name")?.Value;
+        return string.IsNullOrWhiteSpace(name)
+            ? element.Attribute("id")?.Value ?? "(unnamed)"
+            : name;
     }
 
     private static string GatewayLabel(XElement gateway)
