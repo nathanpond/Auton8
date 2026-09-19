@@ -9700,3 +9700,64 @@ should happen.
 a `make test-slim` output. Untracked, and `/trx/` is gitignored now.
 
 **Issue:** #232
+
+## M5 — four owner decisions, taken 2026-09-19
+
+Asked as four questions after the first batch merged; all four answered. Recorded
+here in full because during an autonomous run this log is the only window into
+which calls were the owner's and which were mine.
+
+### 1. `Pool / Participant` becomes `engine: "executes"` (#169)
+
+The epic-level question #169's own replan flagged for the owner rather than
+deciding. Chosen because the manifest's job is to say what the engine does with an
+element, and after #169 the engine deploys a pool as a definition — `annotation`
+would be the false one, and its current reason (*"no instance ever enters it, so no
+run can prove it"*) becomes untrue the moment the story ships, so it had to be
+rewritten either way.
+
+**What it commits to**, written on #169 so the story does not rediscover it: the
+row moves on **both** axes; `BpmnSupportManifestTests.The_engine_axis_agrees_with_the_inventory_or_declares_why_not`
+needs a declared departure with its reason, as #218's complex-gateway flip did; the
+reason is digest-pinned (#380) so `bpmn-reason-baseline.tsv` regenerates in the same
+commit; and the departure's reason should say **what is different about it**, because
+a pool does not execute the way a user task does — its *contents* do. That is the
+honest form of the claim, and writing it down is what stops `executes` quietly
+widening epic #40's *"every element the studio offers executes"*.
+
+**Ordering recorded, because it matters:** #578 currently refuses a multi-pool
+publish, and that refusal is what makes multi-pool safe today. Nothing relaxes it
+until the split-and-deploy path works — fix save, build deploy, *then* remove the
+refusal, with #578's E2E **inverted rather than deleted**.
+
+#170 and #171 unblocked as dependents.
+
+### 2–4. Three closed-box criteria amended to describe what shipped (#284, #286, #285)
+
+The same shape three times: a closed story's criterion describes work that does not
+exist, while the fallback clause or the prevention design is what actually shipped.
+Amending a closed contract is a retroactive edit, which is why it was the owner's
+call; leaving it would have left three ticked boxes promising things nobody built.
+
+- **#218** (via #284) — the generated default flow and distinguishability. Verified
+  first: `ExpandComplexGateways` *honours* an author-set `default` rather than
+  generating one, and the deployed element stays a `bpmn:complexGateway`, so there is
+  no generated exclusive gateway for the criterion to be about. Now describes the
+  prevention design, guarded by three named tests. Distinguishability is **not**
+  filed as follow-up: nothing needs it, and the hazard is closed.
+- **#115** (via #286) — the variable snapshot. Now says the handler sees current
+  values, names the manifest rows where an author meets the limitation and the test
+  that pins it, and records that snapshotting ourselves was rejected as Auton8
+  reimplementing an execution semantic.
+- **#168** (via #285) — the dead-letter conjunction. Now stops at the engine, where
+  the story's own body already said the operator-facing view belonged. **#172 carries
+  the join** and shipped it in #600 with exactly those assertions.
+
+Every amendment carries its own *why* inline, so a later reader sees the reasoning
+rather than only that the wording changed. Audit trail on each amended issue;
+#284, #285 and #286 closed.
+
+### Sequencing
+
+Next: **finish #110, then #111** — decision tables end to end. #110 is half built
+(schema, validator, generator) and half-building it was the worst available outcome.
