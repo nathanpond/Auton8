@@ -288,6 +288,29 @@ public sealed class PluginRuntime
                 }
             }
         }
+        // ANY failure to enable is a RESULT, not an exception (#585).
+        //
+        // The inner try covers the assembly load, which is where most failures
+        // land. It does not cover the two dozen lines before it -- resolving the
+        // entry path, constructing the load context -- and the outer try had only
+        // a finally. Anything thrown there escaped to the endpoint as a 500,
+        // which is what a user met when a corrupt plugin happened to fail early
+        // rather than at LoadFromAssemblyPath.
+        //
+        // Broad on purpose. The criterion is "for ANY exception the loader
+        // raises, not an enumerated subset" -- a catch list tuned to the failures
+        // seen so far is exactly how this shipped, since the loader's exception
+        // type for corrupt bytes is not contractual.
+        catch (OperationCanceledException)
+        {
+            // Cancellation is not a plugin fault and must not be reported as one.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to enable plugin {Id} ({EntryAssembly}) before load.", row.Id, row.EntryAssembly);
+            return new(false, ex.Message);
+        }
         finally
         {
             _gate.Release();
