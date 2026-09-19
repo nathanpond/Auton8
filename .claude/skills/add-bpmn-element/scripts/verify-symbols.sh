@@ -92,8 +92,11 @@ fi
 
 # The lint ratchet, matched in context rather than as a bare substring — a bare
 # grep for the number matches a line number or an issue number and passes on a stale skill.
+# Tolerate markdown emphasis between the word and the number: SKILL.md writes
+# **98**, and the first version of this check read that as "something else" -- a
+# false rot report, which costs exactly as much trust as a missed one.
 r=$(grep -o 'max-warnings=[0-9]*' "$SPA/../package.json" 2>/dev/null | head -1)
-if grep -qE "currently ${r#*=}|max-warnings=${r#*=}" .claude/skills/add-bpmn-element/SKILL.md; then
+if grep -qE "currently [*_]*${r#*=}|max-warnings=${r#*=}" .claude/skills/add-bpmn-element/SKILL.md; then
   ok "lint ratchet ($r) matches SKILL.md"
 else
   bad "lint ratchet" "package.json says $r; SKILL.md quotes something else"
@@ -104,13 +107,27 @@ n=$(grep -rho "MENU_GROUP_ORDER" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -eq 0 ] && ok "MENU_GROUP_ORDER gone (0 occurrences)" \
   || bad "MENU_GROUP_ORDER" "$n occurrences — the dead constant is back"
 
-# The support manifest is one file with 68 entries, and both sides read it (#107).
-# Counted from the JSON rather than eyeballed, which is what the old check asked for.
+# The support manifest is one file, both sides read it (#107), and SKILL.md quotes
+# its entry count.
+#
+# The EXPECTED number is read out of SKILL.md, not hard-coded here. It was hard-coded
+# as 68, which meant this check compared the manifest against a literal in the guard
+# while its failure message said "not the N SKILL.md quotes" -- so a stale GUARD would
+# have reported a correct skill as rotted, and a skill updated without touching the
+# guard would keep failing. A guard that hard-codes the value it claims to be reading
+# from the document is not checking the document.
 MANIFEST=src/shared/bpmn-support.json
 if [ -f "$MANIFEST" ]; then
   n=$(grep -c '"localName":' "$MANIFEST")
-  [ "$n" -eq 68 ] && ok "support manifest has 68 entries" \
-    || bad "support manifest" "has $n entries, not the 68 SKILL.md quotes"
+  quoted=$(grep -oE 'Each of the [*_]*[0-9]+[*_]* entries' \
+    .claude/skills/add-bpmn-element/SKILL.md | grep -oE '[0-9]+' | head -1)
+  if [ -z "$quoted" ]; then
+    bad "support manifest" "SKILL.md no longer quotes an entry count (\"Each of the N entries\"), so this check has nothing to compare against"
+  elif [ "$n" -eq "$quoted" ]; then
+    ok "support manifest has $n entries, as SKILL.md says"
+  else
+    bad "support manifest" "has $n entries; SKILL.md says $quoted"
+  fi
 else
   bad "support manifest" "src/shared/bpmn-support.json is gone — step 1 no longer applies"
 fi
