@@ -8921,3 +8921,56 @@ elements executing on the engine, not the executions read model.
     subqueries) plus **2.8 ms** for the count — over all 12,744, paged in the
     database.
   **Issue:** #108
+
+## M5 execution — #109 blocked on #594 (2026-09-19)
+
+**Blocker.** #109 renders two things the API does not expose.
+
+Its must-haves name *"the response field #104 provides"*; #104 provides no such
+field — verified on `master` @ `2fada70`, neither `ExecutionListQuery` nor
+`ExecutionEndpoints` carries a freshness value. That half is small.
+
+The half that is not: its third AC requires *"not updating"* to read differently
+from *"updated a minute ago"*. Nothing can tell them apart today. There is no
+feed-health surface, `FlowableExecutionPollingFeed` writes no watermark so
+`projection_watermarks` holds no row for it, and `last_sync_at` advances only when
+a tick succeeds — so a stalled feed and a quiet system are indistinguishable from
+the row alone.
+
+**Why filed rather than decided.** What counts as "not updating" (one failed tick?
+several? a duration?), whether the signal is per-feed or global, and how the
+endpoint answers it without acquiring a per-request dependency on the thing that is
+down — these are product decisions with user-visible semantics. Making them inside
+a SPA story would bury them in a UI change. Filed as **#594** with complements in
+both directions: a quiet system must report *fresh*, and a stalled feed must report
+*not updating* even while `last_sync_at` values sit unchanged and plausible.
+
+**No AC change to #109.** Its criteria are right, including the one that makes the
+distinction load-bearing. It needs #594 first.
+
+## M5 — phase 2 complete (2026-09-19)
+
+"One source of truth for executions" is done: #583, #586, #588, #579, #104, #108,
+and #19 closed with it. Backend suite 2794 → 2840 across the run.
+
+**The pattern, recorded because it cost five stories to learn.** The cache failed
+to answer the endpoint's question five times, and four of the five were
+*absences* — a column that was not there (#583), a delete never emitted (#586), a
+fetch that did not page (#588), a field the projection discarded (last activity,
+#108). The executor simulations that caught six false premises during the first M5
+replan read what the code *does*; none of these is a thing the code does. A future
+planning pass over a projection-backed surface should ask what each response field
+is built from, column by column, rather than whether the table exists.
+
+**Twice a third-party parameter was about to be written from memory and the live
+engine disagreed** — `finishedAfter` on `historic-task-instances` and `startedAfter`
+on `historic-activity-instances` both return 200 with *unfiltered* results. An
+implementation would have looked correct while reprocessing all of history. The
+same probe found `startedAfter` IS honoured on `historic-process-instances`, so the
+lesson is not "Flowable ignores filters" but "measure the endpoint you are calling".
+Filed as #590 for the feed that ships that no-op today.
+
+**The guards paid for themselves on each other.** #104's live-read allow list
+caught #108 the moment `/` and `/page` moved off the live path, by name. The repo's
+own `RepoRootAnchorTests` caught a helper of mine that anchored on a `.git`
+directory, which throws in the worktrees `/n8-verify` uses.
