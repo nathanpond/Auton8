@@ -57,7 +57,13 @@ public sealed record class WorkflowElementSnapshot(
     // cannot diverge by construction rather than by scope. `prepare` writes the
     // <bpmn:message> root and the messageRef, the same way
     // ApplySignalStartEventSnapshot has always done for signals.
-    string? MessageName = null);
+    string? MessageName = null,
+    // #111. Appended, never inserted -- positional record.
+    //
+    // The decision table a business rule task runs. It reaches the stored diagram
+    // as an `autonate:decisionKey` attribute, and publish moves it into the
+    // `decisionTableReferenceKey` field extension the engine reads.
+    string? DecisionKey = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

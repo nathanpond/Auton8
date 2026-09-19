@@ -221,7 +221,9 @@ export const WITHHELD_ICON_CLASSES = new Set(
     // #264. `className` alone was not enough: bpmn-js names some elements
     // differently in its own popups than the palette does, so
     // `bpmn-icon-business-rule-task` matched NOTHING in the bundle and Business
-    // Rule Task -- which publish refuses -- stayed one click away on every menu.
+    // Rule Task -- which publish refused at the time -- stayed one click away on
+    // every menu. (#111 has since made that element supported, so it is no longer
+    // the example; the mismatch it revealed is why `menuClassNames` exists.)
     // `menuClassNames` carries the bundle's spelling beside ours, and
     // BpmnPaletteManifestTests asserts every key here really occurs in the
     // vendored bundle, because a deny key that matches nothing fails silently.

@@ -9866,3 +9866,69 @@ per-story assertion.
 
 The completion comment on #110 quoted that assertion approvingly. Corrected on the
 issue rather than left standing.
+
+## M5 execution — #111, and the AC that was not available (2026-09-19)
+
+**Step 0 paid for itself immediately.** The restructured `add-bpmn-element` skill
+says to probe the engine before anything else and to treat #103's verdict as a
+hypothesis. Doing that contradicted this story's own acceptance criterion within
+the hour.
+
+The AC said the studio change was *"a single edit to the BPMN support manifest"*.
+It was not, and the reason is sharper than #105 recorded:
+
+- `BusinessRuleParseHandler` has **exactly one path**, to
+  `createBusinessRuleTaskActivityBehavior`, which needs KIE/Drools. KIE is absent
+  from the image. So a `bpmn:businessRuleTask` **fails to deploy** — HTTP 500,
+  `NoClassDefFoundError org/kie/api/runtime/rule/AgendaFilter` — rather than
+  failing at run time. The behaviour is resolved while parsing, before any
+  instance exists.
+- `flowable:type="dmn"` is **never consulted** on that element.
+  `createDmnActivityBehavior` takes a `ServiceTask` or a `SendTask`.
+- So a one-line manifest edit would have marked it executable and it would still
+  have thrown. #105's reason was right about the element; it was wrong only in
+  conflating the **KIE engine** with the **DMN engine**, which #106 proved is
+  present and working.
+
+**The shape is Path B — publish-time expansion**, the milestone's dominant pattern.
+The author draws the element BPMN means; the deployed copy carries
+`serviceTask flowable:type="dmn"` with a `decisionTableReferenceKey` field
+extension; the stored diagram keeps what was drawn. Probed end to end before
+building: same table, same field extension, one element name changed, and the
+expanded form wrote `route = "big"` into a process variable.
+
+**The manifest row moved on BOTH axes**, with a declared departure — the same
+treatment `Complex Gateway` got in #218, and for the same reason: it executes *by
+expansion*. That cost six guards, exactly as the replan predicted: the reason
+digest, the deny-key literal, the not-offered theory, the engine tally, the
+bucket list, and the coming-soon membership. Each one is a place the claim is
+written down, which is why they all fired.
+
+**`A_refusal_names_the_offending_element_in_the_diagram` was rebased a SECOND
+time** — #218 moved it off a complex gateway, #111 moves it off a business rule
+task. The pattern is worth naming rather than fixing again: **every story that
+makes an element executable orphans whatever fixture used it as "the refused
+one", and the test stays green while testing nothing**, because it finds some
+other error and matches on it. Rebased onto `Transaction`, which is `withdrawn`
+as well as `cannot-execute`, so no story is queued to make it run — and the
+predicate now matches "cannot be deployed" rather than the element's name, since
+an empty transaction also trips the start-event rule.
+
+**A skill correction, in the same commit.** My own restructure said the editor
+state clearing is N×N and to match 16 `set*Editor(null)` sites. That is stale:
+#159/#163/#166 replaced it with a single `clearEditors()`, whose own comment says
+"adding one means adding it here and nowhere else". The old advice would have had
+me make 16 edits, 15 of them wrong. Found by using the skill on a real story,
+which is exactly the cold-test value the restructure could not give itself.
+
+**A test that read too early, corrected.** The studio round trip first read the
+stored model immediately after the status text appeared, and failed against a save
+that then succeeded. The probe that found it also produced the finding that
+matters: `autonate:decisionKey` **is** in what bpmn-js serialised. It now asserts
+`/prepare`'s body first — bpmn-js's own output, which is the claim that cannot be
+established by reading — and polls the stored row second.
+
+**Pins:** SLIM_BACKEND 2906 → 2913, FLOWABLE 252 → 254, SLIM_E2E 233 → 234,
+FULL_LOCAL 486 → 489.
+
+**Issue:** #111

@@ -85,6 +85,11 @@ export type WorkflowElementSnapshot = {
   // own transaction boundary, so a failure retries it alone. Optional so an
   // older snapshot leaves an existing setting alone rather than clearing it.
   retryPoint?: boolean | null;
+
+  // #111. The decision table a business rule task runs. Optional and absent
+  // (not null) on every other element, because onRequestConfigure routes on
+  // `$type` AND key presence.
+  decisionKey?: string | null;
 };
 
 export type PrepareWorkflowRequest = {

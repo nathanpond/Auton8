@@ -221,6 +221,9 @@ public static partial class WorkflowBpmnXml
         ExpandMultiInstanceCardinality(document);
         ExpandCompletionConditions(document);
         ExpandComplexGateways(document);
+        // #111. A business rule task is refused by the engine at DEPLOY, so it has
+        // to become a DMN service task before the file is sent.
+        ExpandBusinessRuleTasks(document);
         NamespaceScriptTaskResultVariables(document);
         ApplySignalScopes(document);
 
@@ -229,6 +232,89 @@ public static partial class WorkflowBpmnXml
             : $"{document.Declaration}\n";
 
         return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// A business rule task becomes a DMN service task in the deployed copy (#111).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured, not reasoned.</b> A <c>bpmn:businessRuleTask</c> does not fail
+    /// at run time on this image — it fails to <b>deploy</b>, with HTTP 500:
+    /// </para>
+    /// <code>
+    /// java.lang.NoClassDefFoundError: org/kie/api/runtime/rule/AgendaFilter
+    ///   at DefaultActivityBehaviorFactory.createBusinessRuleTaskActivityBehavior(:372)
+    ///   at BusinessRuleParseHandler.executeParse(BusinessRuleParseHandler.java:31)
+    /// </code>
+    /// <para>
+    /// <c>BusinessRuleParseHandler</c> has exactly one path and resolves the
+    /// behaviour at deployment time, so the KIE/Drools class is needed before any
+    /// instance exists — and KIE is not in the image. <c>flowable:type="dmn"</c> is
+    /// never consulted on this element. The DMN integration lives on
+    /// <c>createDmnActivityBehavior(ServiceTask)</c>, which is only reachable from
+    /// a service task.
+    /// </para>
+    /// <para>
+    /// So the author draws the element BPMN means for this, and the deployed copy
+    /// carries the one the engine can run. Probed end to end before this was
+    /// written: the same table, the same field extension, one element name changed,
+    /// deploys and writes <c>route = "big"</c> into a process variable.
+    /// </para>
+    /// <para>
+    /// <b>Idempotent.</b> Running it over an already-expanded document finds no
+    /// <c>businessRuleTask</c> and does nothing — publish runs the whole expansion
+    /// chain every time, and a second pass that rewrote its own output would be a
+    /// different diagram each publish.
+    /// </para>
+    /// </remarks>
+    private static void ExpandBusinessRuleTasks(XDocument document)
+    {
+        foreach (var task in document.Descendants(BpmnNamespace + "businessRuleTask").ToList())
+        {
+            // The element NAME changes; everything else about the node is kept.
+            // Rebuilding it from scratch would drop incoming/outgoing references,
+            // documentation, and the multi-instance characteristics an author may
+            // have set -- none of which this expansion has any business touching.
+            task.Name = BpmnNamespace + "serviceTask";
+
+            task.SetAttributeValue(FlowableNamespace + "type", "dmn");
+
+            // The authoring attribute moves into the field extension the engine
+            // reads, and is then STRIPPED from the deployed copy. Leaving it
+            // behind is a schema violation of the same class that refused
+            // `scriptFormat` on a complexGateway (#218).
+            var decisionKey = task.Attribute(ScriptTaskIdentity.AutoNateNamespace + "decisionKey")?.Value;
+            task.SetAttributeValue(ScriptTaskIdentity.AutoNateNamespace + "decisionKey", null);
+
+            if (string.IsNullOrWhiteSpace(decisionKey))
+            {
+                // Validation refuses this at prepare, so reaching here means the
+                // diagram bypassed it. Leaving the task unconfigured would deploy
+                // a step that fails on whoever runs it; leaving the element as a
+                // businessRuleTask fails the deployment instead, which is the
+                // louder and more diagnosable of the two.
+                task.Name = BpmnNamespace + "businessRuleTask";
+                task.SetAttributeValue(FlowableNamespace + "type", null);
+                continue;
+            }
+
+            var extensions = task.Element(BpmnNamespace + "extensionElements");
+            if (extensions is null)
+            {
+                extensions = new XElement(BpmnNamespace + "extensionElements");
+                // FIRST child: the BPMN schema requires extensionElements before
+                // every other child of an activity, and Flowable validates the
+                // deployed XML against the strict schema -- a violation is a 500
+                // at publish, not a degradation.
+                task.AddFirst(extensions);
+            }
+
+            extensions.Add(new XElement(
+                FlowableNamespace + "field",
+                new XAttribute("name", "decisionTableReferenceKey"),
+                new XElement(FlowableNamespace + "string", new XCData(decisionKey))));
+        }
     }
 
     private static void ExpandMessageSendEvents(XDocument document)
@@ -1753,6 +1839,9 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
             // #578: more than one pool deploys a definition Auton8 can never see.
             errors.AddRange(BuildMultiPoolParticipantErrors(document));
+            // #111: a business rule task with no table decides nothing, and the
+            // engine would refuse the deployment rather than say so usefully.
+            errors.AddRange(BuildBusinessRuleTaskErrors(document));
             // #158: a conditional start event is legal only inside an event
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
@@ -2028,6 +2117,11 @@ public static partial class WorkflowBpmnXml
             if (string.Equals(element.Name.LocalName, "sequenceFlow", StringComparison.Ordinal))
             {
                 ApplySequenceFlowSnapshot(element, snapshot);
+            }
+
+            if (string.Equals(element.Name.LocalName, "businessRuleTask", StringComparison.Ordinal))
+            {
+                ApplyBusinessRuleTaskSnapshot(element, snapshot);
             }
 
             if (string.Equals(element.Name.LocalName, "startEvent", StringComparison.Ordinal) &&
@@ -3036,6 +3130,30 @@ public static partial class WorkflowBpmnXml
 
     private static readonly IReadOnlySet<string> EmptyShortCodeSet =
         FrozenSet<string>.Empty;
+
+    /// <summary>
+    /// The decision table an author chose reaches the STORED diagram (#111).
+    /// </summary>
+    /// <remarks>
+    /// An <c>autonate:</c> attribute, which is the only shape proven to survive a
+    /// bpmn-js round trip — the studio loads no Flowable moddle extension, so a
+    /// typed property or a child element is silently dropped on the author's next
+    /// save. <c>ExpandBusinessRuleTasks</c> moves it into the engine's field
+    /// extension at publish and strips it from the deployed copy.
+    /// </remarks>
+    private static void ApplyBusinessRuleTaskSnapshot(
+        XElement element, WorkflowElementSnapshot snapshot)
+    {
+        // Null means "the studio did not send this", which must leave an existing
+        // key alone -- a snapshot from an older SPA build clearing an author's
+        // decision table would be indistinguishable from them removing it. Empty
+        // string IS a clear, because that is what the picker sends for "none".
+        if (snapshot.DecisionKey is null) return;
+
+        element.SetAttributeValue(
+            ScriptTaskIdentity.AutoNateNamespace + "decisionKey",
+            string.IsNullOrWhiteSpace(snapshot.DecisionKey) ? null : snapshot.DecisionKey.Trim());
+    }
 
     private static void ApplyScriptTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
     {
@@ -5285,6 +5403,46 @@ public static partial class WorkflowBpmnXml
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// A business rule task must name a decision table (#111).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Refused at prepare, where the author is, rather than at deployment, where
+    /// the engine answers a 500 naming a Java class. The AC asks for exactly this:
+    /// <i>"Configuring a business rule task without a table, or with one that has
+    /// been deleted, fails at deployment with a clear message rather than at
+    /// execution."</i>
+    /// </para>
+    /// <para>
+    /// <b>Whether the table EXISTS is not checked here</b>, deliberately. This
+    /// function is pure and sees only the XML; a deleted table is a database
+    /// question, and answering it from here would mean either a DB round trip in a
+    /// pure validator or a check that silently passes when it cannot look. The
+    /// existence check belongs with the DB-aware rules
+    /// (<c>BuildRecordTypeShortCodeWarningsAsync</c> is the precedent) and is
+    /// wired at the publish endpoint.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildBusinessRuleTaskErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var task in document.Descendants(BpmnNamespace + "businessRuleTask"))
+        {
+            var key = task.Attribute(ScriptTaskIdentity.AutoNateNamespace + "decisionKey")?.Value;
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                errors.Add(
+                    $"Business rule task '{ElementLabel(task)}' does not name a decision table. "
+                    + "Open it and choose one — a business rule task with no table deploys as a step "
+                    + "that decides nothing.");
+            }
+        }
+
+        return errors;
     }
 
     /// <summary>

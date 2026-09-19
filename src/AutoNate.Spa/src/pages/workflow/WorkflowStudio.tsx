@@ -32,6 +32,7 @@ import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { ScriptTestRunPanel } from "./ScriptTestRunPanel";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
+import { listDecisionTables, type DecisionTable } from "@/api/decisionTables";
 import {
   usePauseWorkflow,
   usePublishWorkflow,
@@ -256,6 +257,16 @@ type SignalEventEditor = {
 
 type VariableMapping = { source: string; target: string };
 
+// #111. A business rule task names the decision table it runs. The author PICKS
+// one rather than typing a key -- a typed key that does not exist deploys a step
+// that decides nothing, and the AC says so.
+type BusinessRuleTaskEditor = {
+  id: string;
+  type: string;
+  name: string;
+  decisionKey: string;
+};
+
 type CallActivityEditor = {
   id: string;
   type: string;
@@ -371,6 +382,9 @@ type ElementSelection = {
   // #168. Present only on service tasks the studio recognises, like
   // serviceTaskKind and behaviorKey above.
   retryPoint?: boolean | null;
+  // #111. Present ONLY on a business rule task, which is what lets
+  // onRequestConfigure route on the key rather than on the type alone.
+  decisionKey?: string | null;
   // #112. Present only on message-carrying elements, receive tasks and send
   // tasks. Their absence is what keeps everything else out of the message editor.
   messageDirection?: string | null;
@@ -528,6 +542,8 @@ export default function WorkflowStudio() {
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
   const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
   const [codedEventEditor, setCodedEventEditor] = useState<CodedEventEditor | null>(null);
+  const [businessRuleEditor, setBusinessRuleEditor] =
+    useState<BusinessRuleTaskEditor | null>(null);
   const [callActivityEditor, setCallActivityEditor] = useState<CallActivityEditor | null>(null);
   const [signalEditor, setSignalEditor] = useState<SignalEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
@@ -570,6 +586,7 @@ export default function WorkflowStudio() {
   // Every element editor this component owns. Adding one means adding it
   // here and nowhere else.
   const clearEditors = useCallback(() => {
+    setBusinessRuleEditor(null);
     setCallActivityEditor(null);
     setCodedEventEditor(null);
     setConditionalEventEditor(null);
@@ -715,6 +732,20 @@ export default function WorkflowStudio() {
       });
       return;
     }
+    // #111. Routed on $type AND the key's presence, per the routing rule: a
+    // describe helper merges `decisionKey` only for a business rule task, so
+    // checking both keeps every other bpmn:Task-shaped element out of here.
+    if (selection && selection.type === "bpmn:BusinessRuleTask"
+        && typeof selection.decisionKey === "string") {
+      setBusinessRuleEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        decisionKey: selection.decisionKey
+      });
+      return;
+    }
+
     // #113. A call activity carries its own configuration and would otherwise
     // reach the generic editor, where the author could only rename it.
     if (selection && selection.type === "bpmn:CallActivity") {
@@ -1383,6 +1414,19 @@ export default function WorkflowStudio() {
       setCodedEventEditor(null);
     });
 
+  const applyBusinessRuleTask = () =>
+    runBusy("applying the decision table", async () => {
+      if (!handle || !businessRuleEditor) {
+        throw new Error("Select a business rule task before applying changes.");
+      }
+      await workflow.updateBusinessRuleTaskProperties(handle, {
+        id: businessRuleEditor.id,
+        name: businessRuleEditor.name,
+        decisionKey: businessRuleEditor.decisionKey
+      });
+      setBusinessRuleEditor(null);
+    });
+
   const applyCallActivity = () =>
     runBusy("applying call activity settings", async () => {
       if (!handle || !callActivityEditor) {
@@ -1925,6 +1969,19 @@ export default function WorkflowStudio() {
             setSignalEditor(null);
           }}
           onApply={applySignalEvent}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {businessRuleEditor && (
+        <BusinessRuleTaskModal
+          editor={businessRuleEditor}
+          onChange={setBusinessRuleEditor}
+          onClose={() => {
+            if (busy) return;
+            setBusinessRuleEditor(null);
+          }}
+          onApply={applyBusinessRuleTask}
           disabled={!!busy || !handle}
         />
       )}
@@ -4152,6 +4209,117 @@ function CodedEventModal({
 // The current workflow is excluded. A first version calling itself has nothing to
 // resolve and is refused at publish anyway; leaving it in the list would offer a
 // choice that cannot work.
+/**
+ * Pick the decision table a business rule task runs (#111).
+ *
+ * <b>Picked, not typed.</b> The AC says so, and the reason is that a typed key
+ * which does not exist deploys a step that decides nothing — the exact silent
+ * failure epic #40 exists to end. The list is the PUBLISHED tables, because an
+ * unpublished one is not deployed and a process referencing it would fail.
+ */
+function BusinessRuleTaskModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: BusinessRuleTaskEditor;
+  onChange: (next: BusinessRuleTaskEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const { data: tables = [], isLoading, error } = useQuery<DecisionTable[]>({
+    queryKey: ["decision-tables"],
+    queryFn: ({ signal }) => listDecisionTables(signal)
+  });
+
+  const published = tables.filter((t) => t.publishedVersionNumber !== null);
+  const chosenIsMissing =
+    editor.decisionKey.length > 0 &&
+    !published.some((t) => t.decisionKey === editor.decisionKey);
+
+  return (
+    <Modal opened onClose={onClose} title="Business Rule Task" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Run a decision table when the workflow reaches this step. The table&apos;s outputs
+          become process variables, so a gateway after this step can branch on what it
+          decided.
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <TextInput
+          label="Step name (optional)"
+          aria-label="Business rule task name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          placeholder="Route the invoice"
+        />
+
+        {error ? (
+          <Alert color="red" variant="light" role="alert" title="Decision table">
+            Failed to load decision tables. Try reopening this modal.
+          </Alert>
+        ) : (
+          <NativeSelect
+            label="Decision table"
+            aria-label="Decision table"
+            value={editor.decisionKey}
+            disabled={isLoading}
+            onChange={(e) => onChange({ ...editor, decisionKey: e.target.value })}
+            data={[
+              { value: "", label: isLoading ? "Loading…" : "Select a decision table…" },
+              ...published.map((t) => ({
+                value: t.decisionKey,
+                label: `${t.name} (${t.decisionKey})`
+              })),
+              // A key saved earlier whose table is gone or was never published
+              // stays visible, so an author can see what is wired up before
+              // changing it rather than finding the field mysteriously blank.
+              ...(chosenIsMissing
+                ? [
+                    {
+                      value: editor.decisionKey,
+                      label: `${editor.decisionKey} (not published on this server)`
+                    }
+                  ]
+                : [])
+            ]}
+            error={
+              chosenIsMissing
+                ? "Nothing published has that key. Publishing this workflow will be refused "
+                  + "until it exists — deliberately: otherwise this step decides nothing when "
+                  + "someone runs it."
+                : undefined
+            }
+            description={
+              published.length === 0 && !isLoading
+                ? "No decision tables are published yet. Create one under Site Configuration "
+                  + "→ Decision Tables and publish it."
+                : undefined
+            }
+          />
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || editor.decisionKey.trim().length === 0}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 function CallActivityModal({
   editor,
   currentProcessKey,
