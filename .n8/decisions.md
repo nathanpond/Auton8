@@ -8563,3 +8563,36 @@ facts, none of which is a display field, so #583 does not reach them.
   the rule about reading output unconditionally rather than gating on the exit
   code — the edit "succeeded".
   **Issue:** #583
+
+## M5 execution — #104 blocked (2026-09-18)
+
+**Blocker.** The one route #104 had scoped in — `/{processInstanceId}/tasks` —
+cannot be served from `workflow_task_cache`, because that table never learns a
+task completed. `FlowableTaskProjection.MapRow` writes `CompletedTime = null` and
+`Status = "active"` unconditionally, no producer emits `ChangeOp.Delete` for a
+task, and the poll lists only runtime tasks — so a completed task stops appearing
+and its row is orphaned in the `active` state until retention deletes it by
+process age, 2555 days later. Filed as **#586**.
+
+**Why it is a live defect and not only a blocker.** `FlowsQueryEntity.cs:293-295`
+already filters `Status == "active" && CompletedTime == null` and takes the oldest
+match as the current step. That filter cannot exclude any row, so `CURRENTSTEP()`
+reports an instance's first task forever once it completes. The filter reads as
+correctness.
+
+**The question put to the owner**, with options: sequence #586 ahead (recommended
+— it is worth doing on its own merits and is the only option that leaves #104
+meaning its title); re-scope #104 onto #579's caller; or close #104 and let #108
+and #579 carry the read-model work.
+
+**Not blocking #108.** The #108 → #104 edge was wired for the read-model framing.
+With #583 landed, #108's actual needs are met — execution rows carrying names, and
+a selector compiler that agrees with the in-memory evaluator — and it does not
+touch the task cache. Proceeding there.
+
+**Pattern worth naming.** This is the second story in a row whose premise held for
+authorization facts and failed for the question the endpoint actually asks. #583
+was "the cache has no name"; #586 is "the cache cannot tell open from closed".
+Both were found on the first line of implementation, not in planning, because both
+are absences — a column that is not there, a delete that is never emitted — and
+the planning simulations read what the code does rather than what it omits.
