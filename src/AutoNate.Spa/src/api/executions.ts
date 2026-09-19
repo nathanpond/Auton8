@@ -352,3 +352,107 @@ export async function completeAdhocSubProcess(
       `${encodeURIComponent(executionId)}/complete`
   );
 }
+
+// ── Jobs and timers (#172) ───────────────────────────────────────────────────
+//
+// Read LIVE from the engine, not from workflow_execution_cache. The question an
+// operator opens these to answer is "what is stuck right now", and a cache would
+// put a staleness question in front of exactly the reader who cannot tolerate
+// one. That is the deliberate difference from the executions list, which #104
+// serves from the cache.
+
+/** Which of the engine's four collections a job is sitting in. */
+export type WorkflowJobQueue = "Executable" | "Timer" | "DeadLetter" | "Suspended";
+
+export type WorkflowJob = {
+  id: string;
+  queue: WorkflowJobQueue;
+  processInstanceId: string | null;
+  processDefinitionId: string | null;
+  /** The BPMN element this job belongs to — the step an operator recognises. */
+  elementId: string | null;
+  elementName: string | null;
+  /** Attempts remaining. Zero on a dead-lettered job, which is what put it there. */
+  retries: number;
+  exceptionMessage: string | null;
+  /** When a timer will fire, or when a retrying job is next due. */
+  dueAtUtc: string | null;
+  createdAtUtc: string | null;
+};
+
+export async function listExecutionJobs(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<WorkflowJob[]> {
+  const { data } = await api.get<WorkflowJob[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/jobs`,
+    { signal }
+  );
+  return data;
+}
+
+/**
+ * Every stuck job, across every execution the caller may see.
+ *
+ * Defaults to dead-lettered only. A list that also carried every healthy
+ * scheduled timer would bury the thing it exists to surface.
+ */
+export async function listStuckJobs(
+  all: boolean,
+  signal?: AbortSignal
+): Promise<WorkflowJob[]> {
+  const { data } = await api.get<WorkflowJob[]>(
+    `/api/executions/jobs${all ? "?all=true" : ""}`,
+    { signal }
+  );
+  return data;
+}
+
+/**
+ * The stack the engine retained, or null when it kept none.
+ *
+ * Null is a real answer, not a failure: a job can be dead-lettered with a
+ * message and no stack.
+ */
+export async function getJobExceptionStack(
+  processInstanceId: string,
+  jobId: string,
+  queue: WorkflowJobQueue,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const { data } = await api.get<{ jobId: string; stack: string | null }>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/jobs/` +
+      `${encodeURIComponent(jobId)}/exception?queue=${encodeURIComponent(queue)}`,
+    { signal }
+  );
+  return data.stack;
+}
+
+/**
+ * Puts a failed or dead-lettered job back in front of the engine.
+ *
+ * Resolving means the job is QUEUED again, not that the step succeeded — for a
+ * dead-lettered job the engine performs a move, and the async executor picks it
+ * up afterwards. Callers report what was asked for, not what happened.
+ */
+export async function retryJob(
+  processInstanceId: string,
+  jobId: string,
+  queue: WorkflowJobQueue
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/jobs/${encodeURIComponent(jobId)}/retry`,
+    { queue }
+  );
+}
+
+export async function rescheduleJob(
+  processInstanceId: string,
+  jobId: string,
+  dueAtUtc: string
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/jobs/${encodeURIComponent(jobId)}/reschedule`,
+    { dueAtUtc }
+  );
+}

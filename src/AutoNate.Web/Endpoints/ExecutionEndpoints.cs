@@ -13,6 +13,7 @@ using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Flowable.Cache;
+using Microsoft.AspNetCore.Mvc;
 using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
@@ -1169,10 +1170,183 @@ public static class ExecutionEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowTask, Actions.Complete, "taskId");
 
+        // ── #172: jobs and timers ───────────────────────────────────────────
+        //
+        // Read LIVE from the engine, not from workflow_execution_cache. #104's
+        // executions are cached; these deliberately are not, and the difference
+        // is stated rather than left to be discovered: the question an operator
+        // opens this to answer is "what is stuck right now", and a cache would
+        // put a staleness question in front of exactly the reader who cannot
+        // tolerate one.
+
+        executions.MapGet("/{processInstanceId}/jobs", async (
+            string processInstanceId,
+            IFlowableJobClient jobs,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var found = await jobs.GetJobsForExecutionAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.JobsViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = found.Count },
+                cancellationToken);
+            return Results.Ok(found);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapGet("/{processInstanceId}/jobs/{jobId}/exception", async (
+            string processInstanceId,
+            string jobId,
+            [FromQuery] string? queue,
+            IFlowableJobClient jobs,
+            CancellationToken cancellationToken) =>
+        {
+            if (!Enum.TryParse<WorkflowJobQueue>(queue, ignoreCase: true, out var parsed))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"'{queue}' is not a job queue. Expected one of: "
+                        + string.Join(", ", Enum.GetNames<WorkflowJobQueue>())
+                });
+            }
+
+            // Null is a real answer -- a job can be dead-lettered with a message
+            // and no stack -- so it is 200 with null rather than 404, which the
+            // caller would have to distinguish from "no such job".
+            var stack = await jobs.GetJobExceptionStackAsync(jobId, parsed, cancellationToken);
+            return Results.Ok(new { jobId, stack });
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/jobs/{jobId}/retry", async (
+            string processInstanceId,
+            string jobId,
+            RetryJobRequest request,
+            IFlowableJobClient jobs,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            if (!Enum.TryParse<WorkflowJobQueue>(request?.Queue, ignoreCase: true, out var queue))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"'{request?.Queue}' is not a job queue. Expected one of: "
+                        + string.Join(", ", Enum.GetNames<WorkflowJobQueue>())
+                });
+            }
+
+            await jobs.RetryJobAsync(jobId, queue, cancellationToken);
+
+            // Recorded BEFORE the engine has finished acting, and deliberately
+            // worded as what was asked for. Retrying a dead-lettered job is a
+            // move back to the executable queue; whether the step then succeeds
+            // is a separate event on the execution's own stream.
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.JobRetried,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId, jobId },
+                details: new { queue = queue.ToString() },
+                cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.RetryJob, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/jobs/{jobId}/reschedule", async (
+            string processInstanceId,
+            string jobId,
+            RescheduleJobRequest request,
+            IFlowableJobClient jobs,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            if (request?.DueAtUtc is not { } dueAt)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "A reschedule needs a due date. The engine refuses one without it."
+                });
+            }
+
+            await jobs.RescheduleTimerJobAsync(jobId, dueAt, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.JobRescheduled,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId, jobId },
+                details: new { dueAtUtc = dueAt.ToUniversalTime() },
+                cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.RescheduleJob, "processInstanceId");
+
+        // The cross-execution stuck list: "what is stuck right now", which is the
+        // question an operator opens this page to answer.
+        //
+        // A FILTER on the executions area rather than its own page (#172,
+        // discretion). An operator arrives here from "something is wrong", and a
+        // page of its own would need a permanent navigation entry for a list that
+        // is empty on a healthy system.
+        executions.MapGet("/jobs", async (
+            HttpContext http,
+            [FromQuery] bool? all,
+            IFlowableJobClient jobs,
+            IAuthorizer authorizer,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var found = await jobs.GetJobsAsync(deadLetteredOnly: all != true, cancellationToken);
+
+            // Jobs come from the engine; the authorization set comes from the
+            // cache. So the two are joined here rather than the list being
+            // returned whole -- an operator granted over some executions must not
+            // see another team's stuck work just because the engine knows about
+            // it.
+            //
+            // A job whose execution is not in the cache yet is DROPPED. That is
+            // the safe direction and it is a real consequence worth naming: a
+            // failure in the first seconds of a brand-new instance can be
+            // invisible here until the projection catches up. Stated rather than
+            // hidden, because the alternative -- showing what cannot be
+            // authorized -- is the one that cannot be walked back.
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var authorizedRows = await ExecutionListQuery.BuildAsync(
+                db, authorizer, http.User, search: null, status: null, workflowModelId: null,
+                cancellationToken);
+            var visible = (await authorizedRows.Select(r => r.Id).ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.Ordinal);
+
+            var items = found
+                .Where(job => job.ProcessInstanceId is { } id && visible.Contains(id))
+                .ToArray();
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.JobsViewed,
+                WorkflowResourceKinds.Execution,
+                resource: null,
+                details: new { resultCount = items.Length, deadLetteredOnly = all != true },
+                cancellationToken);
+
+            return Results.Ok(items);
+        }).AuthorizedInHandler(
+            "filters engine jobs against the ExecutionListQuery authorized set (WorkflowExecution, View)");
+
         return app;
     }
 
     public sealed record CompleteTaskRequest(Dictionary<string, object?>? Variables);
+
+    /// <param name="Queue">
+    /// Which collection the job is in. Required, and not inferred: each queue
+    /// takes a different verb at the engine, and a retry that guessed would be
+    /// right two times in three.
+    /// </param>
+    public sealed record RetryJobRequest(string? Queue);
+
+    public sealed record RescheduleJobRequest(DateTimeOffset? DueAtUtc);
 
     public sealed record UpdateProcessVariablesRequest(IReadOnlyList<ProcessVariableUpdate> Variables);
 

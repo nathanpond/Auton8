@@ -9538,3 +9538,76 @@ Recorded together because they share a shape worth naming: **the executable work
 in each was done, and what remains is a contract edit on a closed story.** Doing
 those silently is how a milestone reads as delivered while its record drifts —
 which is the failure this milestone has spent the week correcting.
+
+## M5 execution — #172, the jobs an operator could not see (2026-09-19)
+
+`IFlowableClient` had thirty-odd methods and not one touched jobs. A timer that
+did not fire, a step retrying in the background, a step that exhausted its retries
+— none of it was visible anywhere in Auton8.
+
+**The REST surface was read out of the shipped engine, not recalled.**
+`flowable-rest-8.0.0.jar`'s `JobResource` carries the literals, and they are not
+uniform: `/management/jobs/{id}` takes only `execute`, `/management/timer-jobs/{id}`
+takes `move` or `reschedule` ("Reschedule timer actions must have a valid due
+date"), `/management/deadletter-jobs/{id}` takes `move` or `moveToHistoryJob`. A
+single "retry" that guessed one verb would have been right two times in three.
+`TimerJobActionRequest` has one field, `dueDate`.
+
+So **retrying a dead-lettered job is a MOVE**, not an execution in place. The call
+returning means "queued again", not "the step succeeded" — which is why every
+assertion is on the process advancing, and why the toast says *"Job queued to run
+again"* rather than claiming an outcome the call cannot know.
+
+**Discretion, decided.**
+
+- **Live reads, not cached.** The story permitted either. The question an operator
+  opens this to answer is "what is stuck *right now*", and a cache would put a
+  staleness question in front of exactly the reader who cannot tolerate one. The
+  difference from #104's cached executions is stated in the code rather than left
+  to be discovered.
+- **The stuck list is a filter on the executions area, not its own page.** A
+  separate page needs a permanent navigation entry for a list that is empty on a
+  healthy system, and an entry that says "stuck work" every day teaches people to
+  stop reading it. It renders *nothing* when nothing is stuck.
+- **Exception detail behind one click.** An operator who cannot see why it failed
+  cannot decide whether retrying is sensible; a stack in every row makes the list
+  unscannable.
+- **Pending timers surviving a redeploy: filed as #601.** A measurement, not a
+  feature, and it belongs with the other engine probes.
+
+**Existing kind, two new actions — not a new kind.** A job has no independent
+existence; its scope is its execution, which is also the scope an operator is
+granted over, so `/workflowexecution/<id>` and `[processkey=orders]` already mean
+the right thing. A `workflowjob` kind would have needed its own
+`IInstanceAuthorizer` and `ISelectorCompiler` — the registration pair the
+`add-permission-gate` skill records as having shipped missing **five times**,
+denying everyone but super-admins each time.
+
+**Three defects the tests caught that nothing else would have.**
+
+1. `WorkflowJobQueue` serialized as a **number**. The list answered `"queue": 2`
+   while the retry endpoint took `"deadletter"` — the read and the write speaking
+   different languages about the same concept. Fixed with the codebase's own
+   pattern, `[JsonConverter(typeof(JsonStringEnumConverter))]` on the enum.
+2. `StuckJobsPanel` linked to `/workflow-executions/{id}`. The route is
+   `/executions/:id`; every link would have 404'd.
+3. The empty-state alert wore Mantine's default `role="alert"` — announcing
+   assertively that everything is fine, which is #597's defect on a new surface.
+   Now `role="presentation"`, with the genuine failure keeping `role="alert"`, and
+   both halves asserted so the second cannot pass against a panel that shouts at
+   everything.
+
+**The task list is not the instrument for "the process advanced."** Measured here:
+after a successful retry, history showed `boom` errored and `two` OPEN while
+`/tasks` still listed the force-completed "Step one". #592 serves task reads from
+the cache, so an assertion there measures projection latency rather than the
+feature. Both engine tests assert on `/history`.
+
+Mutation-checked: making retry and reschedule no-ops fails both engine facts, each
+naming the trail it stalled on (`f0 | s | wait` and `f0 | one | s | f1 | boom`).
+Pointing both gates at one action fails both theories of the independence test.
+
+**Pins:** SLIM_BACKEND 2868 → 2870, FLOWABLE 246 → 250, SLIM_E2E 229 → 231,
+FULL_LOCAL 476 → 482.
+
+**Issue:** #172
