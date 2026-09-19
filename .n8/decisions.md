@@ -9646,3 +9646,57 @@ the shape of `dead-theme-classes.test.ts`.
 
 **Slim result after both fixes:** backend **2870 passed, 0 failed, 0 skipped**, at
 its pin.
+
+## M5 execution — #232, the skill restructure, and its own guard's two defects (2026-09-19)
+
+**The three structural problems, all addressed.**
+
+1. **It did not start where the work starts.** Step 0 is now the engine probe, with
+   #103's inventory verdict named as a *hypothesis* rather than an input, and a table
+   of what the engine actually did against what was assumed. Added #229's lesson while
+   it was fresh: one shape is not a measurement — probe the shape the story describes
+   *and* its near neighbour, because the difference between them is usually the
+   finding.
+2. **Expansion is a first-class path.** Three paths now, chosen at Step 1: **A**
+   authored, **B** expanded at publish, **C** removed/composed/converted. B carries the
+   five concerns none of which is intuitive — idempotence, id mapping back to the
+   author's element, artifact ordering, stripping authoring attributes, and deploying
+   once against a real engine.
+3. **Length: 452 → 410**, with more in it. What went was the long "this skill went
+   unused" retrospective (once restructured, it *is* the change rather than a note
+   about the change) and the old fact 6, which argued not every element needs all nine
+   steps and is now the path choice itself.
+
+**Three rotted claims**, two found by grepping and one by the skill's own verifier:
+the manifest has **69** entries not 68; there are **16** distinct `set*Editor(null)`
+clears not 14; and `scripts/verify-symbols.sh` resolves to the repo root, where it
+does not exist — it is under `.claude/skills/add-bpmn-element/scripts/`, and the very
+first instruction in the skill pointed at a missing file.
+
+**The more useful finding is two defects in the verifier.**
+
+- It **hard-coded** the manifest count as 68 while its failure message read *"not the
+  N SKILL.md quotes"*. So a stale *guard* would have reported a correct skill as
+  rotted, and a skill updated without touching the guard would keep failing. It reads
+  the number out of SKILL.md now, and fails loudly if SKILL.md stops quoting one. A
+  guard that hard-codes the value it claims to be reading from a document is not
+  checking the document — which is the same shape as the audit failure CLAUDE.md names,
+  a test still passing because it stopped checking.
+- Its lint-ratchet pattern did not tolerate markdown emphasis, so `**98**` read as
+  "something else". **A false rot report costs exactly as much trust as a missed one**,
+  and this one fired on my first restructured draft.
+
+**Also folded in**, because they are current and a reader needs them: #234's
+save-versus-publish split, #380's digest-pinned manifest reasons, #229's
+`Elements`-not-`Descendants` trap, and #602's Mantine `Alert` role default.
+
+**Not done, and recorded honestly:** the skill's own rule says a **cold test** is
+required after any change to its *steps*, and this changed all of them. `verify-symbols.sh`
+is green, and the skill itself says that is necessary and not sufficient. The cold
+test wants a fresh agent and a real element story; the next element story is where it
+should happen.
+
+**A stray artifact, caught on the way:** `git add -A` committed `trx/slim-e2e.trx`,
+a `make test-slim` output. Untracked, and `/trx/` is gitignored now.
+
+**Issue:** #232
