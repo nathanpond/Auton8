@@ -127,9 +127,10 @@ fact 2.
 minimum and keeps `/<kind>/<id>` and `/<kind>/*` grants working.
 
 ⚠️ If you write a real compiler rather than the path-only one, read the wildcard
-warning in the `add-projection` skill first: `WildcardValue` must mean *match-any* and
-must agree with `InMemorySelectorEvaluator`. The shipped workflow compilers get this
-backwards (GHSA-vrw7-qxhw-m9q8) — do not copy them.
+section in the `add-projection` skill first: `WildcardValue` must mean *match-any* and
+must agree with `InMemorySelectorEvaluator`. The shipped workflow compilers got this
+backwards until #574 (GHSA-vrw7-qxhw-m9q8); they are now the exemplar to copy rather
+than the warning.
 
 **5c. Content kinds are different — and this applies to a new *action* too, not just a new kind.** `RequirePermissionFilter.cs:47-59` diverts any
 `ContentKinds.IsContentKind` to `IContentAuthorizer`, and a new action must be added

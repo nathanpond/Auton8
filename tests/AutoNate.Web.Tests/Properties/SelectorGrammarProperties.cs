@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Tests.Properties.Generators;
@@ -162,13 +163,38 @@ public sealed class SelectorEvaluatorAgreementProperties
         await using (var seed = await factory.CreateDbContextAsync())
         {
             seed.WorkflowTaskCache.AddRange(rows);
+
+            // The actor's outbound user edges, in the table the SQL subquery
+            // reads (#575). The in-memory evaluator is handed the SAME
+            // declaration below, so nesting is compared across one world rather
+            // than two.
+            foreach (var (edgeKind, targets) in SelectorGenerators.ActorOutboundEdges)
+            {
+                foreach (var target in targets)
+                {
+                    seed.EntityEdges.Add(new EntityEdge
+                    {
+                        Id = Guid.NewGuid(),
+                        EdgeKind = edgeKind,
+                        FromKind = EntityKinds.User,
+                        FromId = SelectorGenerators.ActorUserId.ToString(),
+                        ToKind = EntityKinds.User,
+                        ToId = target,
+                        CreatedAtUtc = DateTime.UtcNow,
+                        CreatedBy = SelectorGenerators.ActorUserId,
+                    });
+                }
+            }
+
             await seed.SaveChangesAsync();
         }
 
         var selectors = SelectorGenerators.SharedSelector().Sample(200, 40).ToList();
 
         var compiler = new WorkflowTaskCacheSelectorCompiler();
-        var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
+        var evaluator = new InMemorySelectorEvaluator(
+            SelectorGenerators.ActorUserId,
+            SelectorGenerators.ActorOutboundEdges);
 
         var leaks = new List<string>();
         var lockouts = new List<string>();
@@ -240,29 +266,31 @@ public sealed class SelectorEvaluatorAgreementProperties
     }
 
     /// <summary>
-    /// The wildcard divergence — a real authorization defect, pinned.
+    /// The wildcard agrees on both evaluation paths (#574).
     /// </summary>
     /// <remarks>
-    /// Draft advisory <b>GHSA-vrw7-qxhw-m9q8</b>. The agreement property found
-    /// it on its first run: 69 leaks and 539 lockouts across 200 selectors and
-    /// 40 rows, every one a wildcard value.
+    /// <para>This was <c>The_wildcard_divergence_still_holds</c>, and it pinned
+    /// the defect rather than the fix: <c>tag=*</c> compiled to <c>IS NULL</c>
+    /// while <see cref="InMemorySelectorEvaluator"/> read it as
+    /// <c>actual is not null</c> — exact complements, measured at 69 leaks and
+    /// 539 lockouts (GHSA-vrw7-qxhw-m9q8).</para>
     ///
-    /// <para><c>ResolveTagValue</c> maps <c>WildcardValue</c> to null, and
-    /// <c>CompileStringEquals</c> reads a null value as an explicit request to
-    /// match NULL — the branch meant for <c>tag=null</c>. So <c>assignee=*</c>
-    /// compiles to <c>assignee IS NULL</c>, while
-    /// <c>InMemorySelectorEvaluator</c> reads the same wildcard as
-    /// <c>actual is not null</c>. Exact complements.</para>
+    /// <para><b>Inverted, not deleted.</b> The old test's own comment said what
+    /// to do when the decision came: <i>"if it is fixed, remove the exclusion in
+    /// SelectorGenerators.ValueFor so the agreement property covers it."</i>
+    /// Deleting it would have removed the only direct assertion on wildcard
+    /// semantics and left the change visible nowhere; inverting it keeps the
+    /// same two rows, the same two paths, and flips what they must agree on.</para>
     ///
-    /// <para><b>Not fixed here, deliberately.</b> Correcting it widens what
-    /// existing grants permit — a <c>tag=*</c> grant would start matching rows
-    /// it currently excludes — and that is a decision for a person rather than
-    /// something to slip into a test story. This test pins the broken behaviour
-    /// so it cannot drift while the decision is pending, and fails loudly the
-    /// moment either side changes.</para>
+    /// <para><b>This is the widening, asserted.</b> The owner's decision
+    /// (2026-09-18) was that <c>*</c> means "has any value", accepting that a
+    /// stored <c>tag=*</c> grant starts matching rows it currently excludes and
+    /// stops matching rows it currently returns. Both halves are asserted below,
+    /// because a test that checked only the newly-matched row would pass against
+    /// a compiler that matched everything.</para>
     /// </remarks>
     [Fact]
-    public async Task The_wildcard_divergence_still_holds()
+    public async Task The_wildcard_agrees_and_means_has_any_value()
     {
         await using var app = await AutoNateWebApplicationFactory.CreateAsync();
         _ = app.CreateClient();
@@ -270,6 +298,89 @@ public sealed class SelectorEvaluatorAgreementProperties
 
         var assigned = NewRow("task-assigned", assignee: "alice");
         var unassigned = NewRow("task-unassigned", assignee: null);
+        // A third row with a DIFFERENT value. Without it the wildcard and the
+        // literal `assignee=alice` would return the same single row, and the
+        // "they compile to different predicates" claim below would be true by
+        // coincidence rather than by meaning.
+        var other = NewRow("task-other", assignee: "bob");
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(assigned, unassigned, other);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask[assignee=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        // Ordered explicitly: Postgres makes no ordering promise without an
+        // ORDER BY, and the two sides are compared to each other below.
+        var fromSql = await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId)
+            .OrderBy(id => id)
+            .ToListAsync();
+
+        var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
+        var fromMemory = new[] { assigned, unassigned, other }
+            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
+            .Select(r => r.FlowableTaskId)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
+
+        // Both rows that HAVE a value match, on both paths; the unset one does
+        // not. Before #574 the SQL path returned exactly the complement of this.
+        Assert.Equal(["task-assigned", "task-other"], fromSql);
+        Assert.Equal(["task-assigned", "task-other"], fromMemory);
+
+        // And they agree with each other, which is the property the whole
+        // thread exists to restore. Asserting each against a literal would pass
+        // if both changed together in some third, wrong direction.
+        Assert.Equal(fromMemory, fromSql);
+
+        // #574 AC: the wildcard and a literal compile to DIFFERENT predicates,
+        // asserted as different row sets rather than by comparing expression
+        // trees. `assignee=alice` selects one of the two rows the wildcard
+        // selects — so the wildcard is not silently compiling to an equality
+        // against the actor, or to "match everything".
+        var literal = SelectorParser.Parse("/workflowtask[assignee=alice]");
+        var literalPredicate = new WorkflowTaskCacheSelectorCompiler().Compile(literal, context);
+        var fromLiteral = await db.WorkflowTaskCache.Where(literalPredicate)
+            .Select(t => t.FlowableTaskId)
+            .OrderBy(id => id)
+            .ToListAsync();
+
+        Assert.Equal(["task-assigned"], fromLiteral);
+        Assert.NotEqual(fromSql, fromLiteral);
+    }
+
+    /// <summary>
+    /// A wildcard DENY stops denying unset rows and starts denying set ones (#574).
+    /// </summary>
+    /// <remarks>
+    /// <para>The owner's decision was framed on allows — "existing <c>tag=*</c>
+    /// grants widen". Both compilers serve denies as well as allows
+    /// (<c>Authorizer</c> splits them), so the same inversion runs the other way
+    /// too: a <c>tag=*</c> deny that today withholds unset-tag rows will now
+    /// withhold set-tag ones instead.</para>
+    ///
+    /// <para>That is the worse half to leave unasserted — an allow that widens
+    /// is visible the first time someone sees a row they did not expect, while a
+    /// deny that silently stops denying is visible to nobody. Asserted here as
+    /// its own fact rather than folded into the agreement test above, because it
+    /// is a different claim about the same change.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_wildcard_deny_withholds_the_rows_that_have_a_value()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var assigned = NewRow("deny-assigned", assignee: "alice");
+        var unassigned = NewRow("deny-unassigned", assignee: null);
 
         await using (var seed = await factory.CreateDbContextAsync())
         {
@@ -281,23 +392,57 @@ public sealed class SelectorEvaluatorAgreementProperties
 
         await using var db = await factory.CreateDbContextAsync();
         var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var denied = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        // What a deny covers is what the predicate matches; the rows that
+        // survive it are its complement.
+        var withheld = await db.WorkflowTaskCache.Where(denied)
+            .Select(t => t.FlowableTaskId).ToListAsync();
+        var survives = await db.WorkflowTaskCache.Where(ExpressionUtilities.Not(denied))
+            .Select(t => t.FlowableTaskId).ToListAsync();
+
+        Assert.Equal(["deny-assigned"], withheld);
+        Assert.Equal(["deny-unassigned"], survives);
+    }
+
+    /// <summary>An array tag's wildcard means the array is non-empty (#574).</summary>
+    /// <remarks>
+    /// <c>candidateuser=*</c> reaches the same resolver and used to throw
+    /// <c>requires a non-null value</c> — so it failed to <b>compile</b>, and an
+    /// uncompilable grant is skipped with a warning, which for a deny fails open
+    /// (#577). Both array columns are <c>NOT NULL DEFAULT ARRAY[]::TEXT[]</c>,
+    /// so a null array cannot occur and emptiness is the only decidable thing.
+    /// </remarks>
+    [Fact]
+    public async Task An_array_tags_wildcard_matches_a_non_empty_array()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var withCandidates = NewRow("arr-has", assignee: null);
+        withCandidates.CandidateUsers = ["alice"];
+        var withoutCandidates = NewRow("arr-empty", assignee: null);
+        withoutCandidates.CandidateUsers = [];
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(withCandidates, withoutCandidates);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask[candidateuser=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
         var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
 
         var fromSql = await db.WorkflowTaskCache.Where(predicate)
             .Select(t => t.FlowableTaskId).ToListAsync();
 
-        var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
-        var fromMemory = new[] { assigned, unassigned }
-            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
-            .Select(r => r.FlowableTaskId)
-            .ToList();
-
-        // The defect, stated as an assertion. If either of these fails, the
-        // wildcard semantics changed — reconcile with GHSA-vrw7-qxhw-m9q8,
-        // and if it is fixed, remove the exclusion in
-        // SelectorGenerators.ValueFor so the agreement property covers it.
-        Assert.Equal(["task-unassigned"], fromSql);
-        Assert.Equal(["task-assigned"], fromMemory);
+        // Non-empty matches; empty does not. Before #574 this selector threw at
+        // compile time and the grant was skipped entirely.
+        Assert.Equal(["arr-has"], fromSql);
     }
 
     /// <summary>
@@ -358,6 +503,312 @@ public sealed class SelectorEvaluatorAgreementProperties
         }
 
         return current;
+    }
+
+    /// <summary>
+    /// The execution compiler widens the same way (#574).
+    /// </summary>
+    /// <remarks>
+    /// <para>The fix touched two compilers and only one of them had any property
+    /// coverage, so this is the execution side's own assertion rather than an
+    /// inference from the task side passing.</para>
+    ///
+    /// <para><c>startedby</c> is the tag that can demonstrate it:
+    /// <c>process_definition_key</c>, <c>process_definition_id</c> and
+    /// <c>status</c> are <c>NOT NULL</c>, so a wildcard over them cannot
+    /// distinguish anything. <c>tenant</c> would have been the other candidate
+    /// and was hardcoded null by the projection; #576 removed it from the
+    /// advertised tag set entirely, so it is no longer a tag to test.</para>
+    /// </remarks>
+    [Fact]
+    public async Task The_execution_compilers_wildcard_matches_rows_that_have_a_starter()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var started = NewExecutionRow("exec-started", startedBy: "alice");
+        var unstarted = NewExecutionRow("exec-unstarted", startedBy: null);
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowExecutionCache.AddRange(started, unstarted);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowexecution[startedby=*]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowExecutionCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowExecutionCache.Where(predicate)
+            .Select(e => e.FlowableInstanceId).ToListAsync();
+
+        // Before #574 this returned exactly the other row.
+        Assert.Equal(["exec-started"], fromSql);
+    }
+
+
+    /// <summary>
+    /// A path-id selector filters to those ids in SQL, and excludes the rest (#575).
+    /// </summary>
+    /// <remarks>
+    /// <para>Before this, nothing in either cache compiler read
+    /// <c>ast.Path</c>. <c>/workflowtask/task-a[...]</c> matched exactly one row
+    /// in memory and EVERY row in SQL — not a wider answer to the same
+    /// question, an answer to a different one.</para>
+    ///
+    /// <para>Both directions are asserted. A compiler that ignores path ids
+    /// passes any test that only checks the named row is present, because it
+    /// returns the named row along with everything else.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_path_id_selector_filters_to_those_ids_and_excludes_the_rest()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var named = NewRow("task-a", assignee: "alice");
+        var alsoNamed = NewRow("task-b", assignee: "bob");
+        var outside = NewRow("task-c", assignee: "alice");
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(named, alsoNamed, outside);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask/{task-a,task-b}");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = (await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId).OrderBy(id => id).ToListAsync());
+
+        var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
+        var fromMemory = new[] { named, alsoNamed, outside }
+            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
+            .Select(r => r.FlowableTaskId)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["task-a", "task-b"], fromSql);
+        Assert.Equal(fromMemory, fromSql);
+
+        // The complement, stated as its own assertion so the failure names it:
+        // the row outside the path is absent. Before #575 it was present.
+        Assert.DoesNotContain("task-c", fromSql);
+    }
+
+    /// <summary>
+    /// A path id naming nothing selects nothing, rather than everything (#575).
+    /// </summary>
+    /// <remarks>
+    /// The degenerate case, and the one that shows the old behaviour at its
+    /// worst: a selector scoped to an id that does not exist used to return the
+    /// whole table.
+    /// </remarks>
+    [Fact]
+    public async Task A_path_id_that_matches_no_row_selects_nothing()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var row = NewRow("task-real", assignee: "alice");
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.Add(row);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask/task-does-not-exist");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId).ToListAsync();
+
+        var evaluator = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId);
+        var fromMemory = new[] { row }
+            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
+            .Select(r => r.FlowableTaskId)
+            .ToList();
+
+        Assert.Empty(fromSql);
+        Assert.Empty(fromMemory);
+    }
+
+    /// <summary>
+    /// The execution compiler honours path ids too, and excludes the rest (#575).
+    /// </summary>
+    /// <remarks>
+    /// Its own fact rather than a theory row on the task one: the two compilers
+    /// are separate files that each grew their own gap, and a shared test would
+    /// let one of them be fixed while reporting both.
+    /// </remarks>
+    [Fact]
+    public async Task The_execution_compiler_filters_to_the_path_ids()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var named = NewExecutionRow("exec-a", startedBy: "alice");
+        var outside = NewExecutionRow("exec-b", startedBy: "alice");
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowExecutionCache.AddRange(named, outside);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowexecution/exec-a");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
+        var predicate = new WorkflowExecutionCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowExecutionCache.Where(predicate)
+            .Select(e => e.FlowableInstanceId).ToListAsync();
+
+        Assert.Equal(["exec-a"], fromSql);
+        Assert.DoesNotContain("exec-b", fromSql);
+    }
+
+    /// <summary>
+    /// A nested multi-hop predicate resolves the same subject set in SQL as in
+    /// memory, and refuses subjects outside it (#575).
+    /// </summary>
+    /// <remarks>
+    /// <para><c>[assignee=user[supervisor=user]]</c> means "the assignee is
+    /// someone the actor supervises". The compiler used to drop
+    /// <c>tag.Nested</c> silently and emit <c>assignee = &lt;actor&gt;</c> — a
+    /// different set, which leaks one way (rows assigned to the actor, who is
+    /// not necessarily supervised by themselves) and locks out the other (rows
+    /// assigned to a supervisee).</para>
+    ///
+    /// <para>The fixture makes both visible at once: one row assigned to a user
+    /// the actor supervises, one to a user they do not, and one assigned to the
+    /// actor themselves — the row the OLD predicate would have returned and the
+    /// new one must not.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_nested_predicate_resolves_the_supervised_subject_set()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var actorId = SelectorGenerators.ActorUserId;
+        var supervised = NewRow("task-supervised", assignee: SelectorGenerators.SupervisedUser);
+        var unsupervised = NewRow("task-unsupervised", assignee: "bob");
+        var assignedToActor = NewRow("task-actor", assignee: actorId.ToString());
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.AddRange(supervised, unsupervised, assignedToActor);
+            seed.EntityEdges.Add(new EntityEdge
+            {
+                Id = Guid.NewGuid(),
+                EdgeKind = "supervisor",
+                FromKind = EntityKinds.User,
+                FromId = actorId.ToString(),
+                ToKind = EntityKinds.User,
+                ToId = SelectorGenerators.SupervisedUser,
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = actorId,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse("/workflowtask[assignee=user[supervisor=user]]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, actorId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId).OrderBy(id => id).ToListAsync();
+
+        var evaluator = new InMemorySelectorEvaluator(actorId, SelectorGenerators.ActorOutboundEdges);
+        var fromMemory = new[] { supervised, unsupervised, assignedToActor }
+            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
+            .Select(r => r.FlowableTaskId)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["task-supervised"], fromSql);
+        Assert.Equal(fromMemory, fromSql);
+
+        // The complements, named separately so a failure says which half broke.
+        Assert.DoesNotContain("task-unsupervised", fromSql);
+
+        // This is the one the dropped-nesting bug returned INSTEAD: the old
+        // predicate was `assignee = <actor>`, so it matched exactly this row and
+        // missed the supervised one.
+        Assert.DoesNotContain("task-actor", fromSql);
+    }
+
+    /// <summary>
+    /// A nested predicate the grammar allows but neither path resolves compiles
+    /// to "matches nothing", not to the un-nested predicate (#575).
+    /// </summary>
+    /// <remarks>
+    /// <para>Three hops is the case: <c>InMemorySelectorEvaluator</c> answers
+    /// false ("recursion deeper than two hops not supported"), so the SQL path
+    /// must answer false too. What it must NOT do is what it used to — ignore
+    /// the nesting and compile the outer tag alone, which is a predicate that
+    /// matches real rows for a selector nobody can satisfy.</para>
+    ///
+    /// <para>AlwaysFalse rather than a thrown
+    /// <c>SelectorCompilationException</c>: a throw makes Authorizer skip the
+    /// grant, and a skipped deny stops denying (#577). Agreeing with the
+    /// evaluator is the safer and the specified behaviour.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_nesting_neither_path_resolves_matches_nothing()
+    {
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = app.CreateClient();
+        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        var actorId = SelectorGenerators.ActorUserId;
+        var assignedToActor = NewRow("task-actor", assignee: actorId.ToString());
+
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            seed.WorkflowTaskCache.Add(assignedToActor);
+            await seed.SaveChangesAsync();
+        }
+
+        var selector = SelectorParser.Parse(
+            "/workflowtask[assignee=user[supervisor=user[supervisor=user]]]");
+
+        await using var db = await factory.CreateDbContextAsync();
+        var context = new CompilationContext(db, actorId);
+        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
+
+        var fromSql = await db.WorkflowTaskCache.Where(predicate)
+            .Select(t => t.FlowableTaskId).ToListAsync();
+
+        var evaluator = new InMemorySelectorEvaluator(actorId, SelectorGenerators.ActorOutboundEdges);
+        var fromMemory = new[] { assignedToActor }
+            .Where(r => evaluator.Matches(selector, r.FlowableTaskId, SelectorGenerators.FactsFor(r)))
+            .Select(r => r.FlowableTaskId)
+            .ToList();
+
+        // Both empty. The old code returned ["task-actor"] here, because it
+        // dropped the nesting and compiled `assignee = <actor>`.
+        Assert.Empty(fromSql);
+        Assert.Empty(fromMemory);
     }
 
     private static WorkflowTaskCache NewRow(string id, string? assignee) => new()
@@ -437,4 +888,15 @@ public sealed class SelectorEvaluatorAgreementProperties
             + "divergence is fixed — remove the exclusion in SelectorGenerators.SharedTags "
             + "so the agreement property covers these tags too.");
     }
+
+    private static WorkflowExecutionCache NewExecutionRow(string id, string? startedBy) => new()
+    {
+        FlowableInstanceId = id,
+        ProcessDefinitionKey = "onboarding",
+        ProcessDefinitionId = "onboarding:1:1",
+        Status = "active",
+        StartedBy = startedBy,
+        StartTime = DateTime.UtcNow,
+        LastSyncAtUtc = DateTime.UtcNow
+    };
 }

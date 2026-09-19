@@ -46,29 +46,89 @@ internal static class SelectorGenerators
             // The actor-relative form, which resolves to the actor's id on both
             // paths and is the construct most likely to diverge.
             (2, Gen.Constant((ValueNode)new CurrentUserValue())),
-            (1, Gen.Constant((ValueNode)new CurrentUserValue { PinnedId = ActorUserId.ToString() }))),
-            // WildcardValue is deliberately absent. The two paths read it as
-            // exact complements — IS NOT NULL in memory, IS NULL in SQL — which
-            // is a real defect, filed as draft advisory GHSA-vrw7-qxhw-m9q8 and
-            // pinned by
-            // SelectorEvaluatorAgreementProperties.The_wildcard_divergence_still_holds.
-            // Leaving it in the shared generator would bury every future
-            // divergence under hundreds of known ones: the first run reported
-            // 69 leaks and 539 lockouts, all of them this.
+            (1, Gen.Constant((ValueNode)new CurrentUserValue { PinnedId = ActorUserId.ToString() })),
+            // WildcardValue is BACK IN, as of #574. It was excluded while the
+            // two paths read it as exact complements — `IS NOT NULL` in memory,
+            // `IS NULL` in SQL (GHSA-vrw7-qxhw-m9q8) — because leaving it in
+            // buried every future divergence under the known one: the first run
+            // reported 69 leaks and 539 lockouts, all of them this.
+            //
+            // The exclusion was always meant to be temporary, and the test that
+            // pinned the defect said so in as many words: "if it is fixed,
+            // remove the exclusion in SelectorGenerators.ValueFor so the
+            // agreement property covers it." That is what this is.
+            //
+            // Weighted at 1 rather than 4: it is one construct among several and
+            // over-sampling it would crowd out the literal and actor-relative
+            // forms the property is also there to exercise.
+            (1, Gen.Constant((ValueNode)new WildcardValue()))),
     };
 
     private static Gen<PredicateExpr> SharedTagExpr() =>
         Gen.Elements(SharedTags).SelectMany(tag =>
             ValueFor(tag).Select(v => (PredicateExpr)new TagExpr { Tag = tag, Value = v }));
 
+    /// <summary>The one user the actor supervises in the shared fixture (#575).</summary>
+    public const string SupervisedUser = "alice";
+
+    /// <summary>
+    /// The actor's outbound user→user edges, as the agreement fixture seeds them
+    /// into <c>entity_edges</c> (#575).
+    /// </summary>
+    /// <remarks>
+    /// Exposed rather than built inline so the in-memory evaluator's map and the
+    /// rows the SQL subquery reads come from ONE declaration. Two hand-kept
+    /// copies of a fixture is how an agreement property starts comparing two
+    /// different worlds and calling the result agreement.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, IReadOnlySet<string>> ActorOutboundEdges { get; } =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            ["supervisor"] = new HashSet<string>(StringComparer.Ordinal) { SupervisedUser },
+        };
+
+    // The multi-hop form, in scope for the shared property as of #575. The outer
+    // value must be `=user` — both paths answer false to anything else — and the
+    // inner tag is the edge kind the fixture seeds.
+    private static Gen<PredicateExpr> SharedNestedExpr() =>
+        Gen.Constant((PredicateExpr)new TagExpr
+        {
+            Tag = "assignee",
+            Value = new CurrentUserValue(),
+            Nested = new PredicateNode
+            {
+                Expressions = [new TagExpr { Tag = "supervisor", Value = new CurrentUserValue() }],
+            },
+        });
+
+    private static Gen<PredicateExpr> SharedExpr() =>
+        Gen.Frequency((6, SharedTagExpr()), (1, SharedNestedExpr()));
+
+    // Path ids are in scope as of #575, when the SQL compilers started reading
+    // ast.Path at all. `task-99` is deliberately absent from the 40-row fixture:
+    // a selector naming only missing ids must return the empty set on BOTH
+    // paths, which is the complement direction — a compiler that ignores path
+    // ids returns everything there.
+    private static Gen<PathNode> SharedPath() =>
+        Gen.Frequency(
+            (6, Gen.Constant(new PathNode { Kinds = ["workflowtask"] })),
+            (1, Gen.Constant(new PathNode { Kinds = ["workflowtask"], Ids = ["*"] })),
+            (3, Gen.NonEmptyListOf(Gen.Elements("task-0", "task-3", "task-17", "task-99"))
+                .Select(ids => new PathNode
+                {
+                    Kinds = ["workflowtask"],
+                    Ids = ids.Distinct().ToList(),
+                })));
+
     /// <summary>A selector both the in-memory and the SQL path can evaluate.</summary>
     public static Gen<SelectorAst> SharedSelector() =>
-        Gen.Choose(1, 3).SelectMany(n =>
-            Gen.ListOf(SharedTagExpr(), n).Select(exprs => new SelectorAst
-            {
-                Path = new PathNode { Kinds = ["workflowtask"] },
-                Predicate = new PredicateNode { Expressions = exprs.ToList() },
-            }));
+        SharedPath().SelectMany(path =>
+            Gen.Choose(1, 3).SelectMany(n =>
+                Gen.ListOf(SharedExpr(), n).Select(exprs => new SelectorAst
+                {
+                    Path = path,
+                    Predicate = new PredicateNode { Expressions = exprs.ToList() },
+                })));
 
     public static Arbitrary<SelectorAst> SharedSelectorArb() =>
         Arb.From(SharedSelector(), ShrinkSelector);

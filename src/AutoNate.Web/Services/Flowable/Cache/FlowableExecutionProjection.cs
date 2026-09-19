@@ -252,14 +252,10 @@ public sealed class FlowableExecutionProjection : IProjection<WorkflowExecutionS
         return parts.Length >= 2 && int.TryParse(parts[1], out var v) ? v : null;
     }
 
-    private static string NormalizeStatus(string? raw) => (raw?.ToLowerInvariant()) switch
-    {
-        null or "" => "active",
-        "running" => "active",
-        "complete" or "completed" => "completed",
-        "cancelled" or "canceled" => "cancelled",
-        "terminated" => "terminated",
-        "suspended" => "suspended",
-        var other => other
-    };
+    // Moved to WorkflowExecutionStatuses (#576). It is shared with the two
+    // in-memory fact builders now: the projection writes the normalized string
+    // into the status column, so a fact builder using the raw Flowable value
+    // would disagree with SQL on `[status=running]`.
+    private static string NormalizeStatus(string? raw) =>
+        WorkflowExecutionStatuses.Normalize(raw);
 }

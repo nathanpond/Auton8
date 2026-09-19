@@ -8240,3 +8240,184 @@ so that nesting is meaningful rather than a workaround.
   the pin is **49** (`ExecutionOracleSizeTests.cs:40`). Found while replanning #231,
   and worth fixing on its own — it sat in the paragraph explaining why pins are exact
   rather than floors, in the file loaded into every session in this repo.
+
+## M5 execution — #574 (the wildcard's own compiled form)
+
+- **Decision:** the wildcard is branched **before** `ResolveTagValue`, and that
+  resolver now throws if a wildcard reaches it.
+  **Why:** the defect was not the `IS NULL` expression, it was giving the wildcard
+  a *value* at all. `WildcardValue => null` fed a branch meant for a null literal.
+  Making the resolver's contract "returns the value a tag was given" and throwing
+  for the one construct that has no value means the same mistake cannot be made
+  again by a future caller who reaches for the resolver first.
+  **Cost if wrong:** a throw on a path that should be unreachable.
+  **Issue:** #574
+
+- **Decision:** `The_wildcard_divergence_still_holds` was **inverted, not deleted**.
+  **Why:** it was the only direct assertion on wildcard semantics, and the old
+  test's own comment prescribed exactly this ("if it is fixed, remove the exclusion
+  in SelectorGenerators.ValueFor so the agreement property covers it"). Deleting it
+  would have left the change visible nowhere and dropped the pin by one.
+  **Issue:** #574
+
+- **Decision:** the `Assert.DoesNotContain(WildcardValue)` coverage guard was
+  inverted into `Assert.Contains` rather than removed.
+  **Why:** removing it would leave the agreement property silently not exercising
+  the construct this whole thread was about, with nothing to say so. A positive
+  requirement keeps the coverage instrument accountable.
+  **Issue:** #574
+
+- **Decision (Rule 1, in scope):** `candidateuser=*` / `candidategroup=*` used to
+  **throw** at compile time, so the grant was skipped with a warning.
+  **Why it mattered here:** a skipped deny fails open, which is #577's subject —
+  so leaving the array tags to throw would have left a live instance of the defect
+  #577 exists to close. Both array columns are `NOT NULL DEFAULT ARRAY[]`, so "has
+  any value" is decidable as non-empty.
+  **Issue:** #574
+
+- **Decision:** the "eight other compilers have no wildcard branch" AC is delivered
+  as an executable guard (`WildcardCompilerScopeTests`) rather than prose.
+  **Why:** prose confirms a count on the day it is written; a test confirms it on
+  the day a ninth compiler is added, which is the only day it matters. It carries
+  its own vacuity check — if reflection finds fewer than eight compilers the guard
+  is looking in the wrong place and says so rather than passing.
+  **Cost if wrong:** a reflection walk over IL, which is cruder than parsing source
+  and survives a rename.
+  **Issue:** #574
+
+- **Method note:** the first mutation of that guard did not compile, and the build
+  check caught it before `--no-build` could re-run a stale assembly and report a
+  false green. That is the round-three lesson holding.
+  **Issue:** #574
+
+## M5 execution — #575 (path ids and nested predicates on the SQL path)
+
+- **Decision:** both are **honoured**, not refused.
+  **Why:** the AC allowed either, but refusal is the weaker option here. Path
+  ids are trivially expressible (`IN (...)`), and the nested form already has a
+  working shape in `RecordSelectorCompiler` to copy. Refusing would also have
+  meant a `SelectorCompilationException`, which `Authorizer` turns into "skip
+  this grant" — and a skipped deny fails open (#577).
+  **Issue:** #575
+
+- **Decision:** shapes the in-memory evaluator answers `false` to — outer value
+  not `=user`, inner not `=user`, nesting deeper than two hops — compile to
+  `AlwaysFalse` rather than throwing.
+  **Why:** it reads like the defect this story is about, so it is worth being
+  explicit. It is the opposite. Today those shapes compile to
+  `assignee = <actor>` — *a different predicate*, which is the silent wrongness
+  AC3 names. `AlwaysFalse` is the evaluator's own answer for the same input, so
+  the two paths agree, which is what AC1 and AC2 ask for.
+  **Cost if wrong:** an unrepresentable deny denies nothing rather than failing
+  closed. Flagged on the issue before implementing, and noted for #577.
+  **Issue:** #575
+
+- **Decision:** the inner `PinnedId` is **ignored**, mirroring
+  `InMemorySelectorEvaluator`, which always walks the actor's outbound edges.
+  **Why:** `RecordSelectorCompiler` and `RecordSelectorSqlCompiler` honour
+  `PinnedId ?? actor` here, so the evaluator and the record pair already
+  disagree on this. Honouring it in the cache compilers would have made them
+  agree with the record pair and disagree with the evaluator — creating a new
+  divergence inside a milestone named for closing them. Mirroring the evaluator
+  is this story's job; the record pair's disagreement is its own defect.
+  **Cost if wrong:** a pinned inner id is ignored on the cache path.
+  **Issue:** #575
+
+- **Decision:** `ExpressionUtilities.Compose` inlines the accessor instead of
+  using `Expression.Invoke`.
+  **Why:** an invocation node survives into the query tree and EF Core
+  translates it only where it has been taught to. A replaced parameter leaves a
+  tree indistinguishable from a hand-written one, which needs no such luck.
+  **Issue:** #575
+
+- **Decision:** the agreement property's edge fixture is declared once, in
+  `SelectorGenerators.ActorOutboundEdges`, and read by both the in-memory
+  evaluator's map and the `entity_edges` rows the SQL subquery reads.
+  **Why:** two hand-kept copies of a fixture is how an agreement property starts
+  comparing two different worlds and calling the result agreement.
+  **Issue:** #575
+
+- **Discovered work, filed not fixed:** `candidateuser` / `candidategroup` are
+  advertised and compile in SQL but are never supplied as in-memory facts — the
+  #576 defect class on a second tag pair, already pinned by
+  `The_known_candidate_tag_divergence_still_holds` but with no issue to end it.
+  Filed as **#581** rather than folded into #576, whose AC name only its own two
+  tags.
+  **Issue:** #575 → #581
+
+## M5 execution — #576 (status supplied in memory, tenant withdrawn)
+
+- **Decision:** `tenant` is **removed from the advertised tag set**, not populated.
+  **Why:** the AC allowed either, and the evidence decides it. The hardcoded
+  `TenantId = null` in `FlowableExecutionProjection.MapRow` is not an omission
+  the projection could fix — `WorkflowExecutionSummary`, the model it maps FROM,
+  has no tenant field at all. The column is structurally null, so "populate it"
+  means a new pull of tenant data out of Flowable, well outside this story.
+  **Cost if wrong:** a stored `[tenant=…]` grant now fails to compile instead of
+  matching nothing. That is the intent — a loud refusal beats a grant that
+  cannot mean what it says — but it is a behaviour change for any such grant.
+  The column itself stays; dropping it is a schema change.
+  **Issue:** #576
+
+- **Decision:** `NormalizeStatus` moved out of `FlowableExecutionProjection` into
+  `WorkflowExecutionStatuses`, with three callers.
+  **Why:** the projection writes the NORMALIZED string into the status column. A
+  fact builder passing Flowable's raw value through would make `[status=running]`
+  match in memory and nothing in SQL — the same defect one layer up, introduced
+  by the fix for it. One definition, no second copy.
+  **Issue:** #576
+
+- **Decision:** the instance authorizer derives status as
+  `Suspended ? "suspended" : "active"`.
+  **Why:** `FlowableProcessInstanceSummary` carries no status string. It comes
+  from the RUNTIME endpoint, so anything it returns is still running — these are
+  not an approximation of a richer value, they are the only two reachable states.
+  Written at the call site so the next reader does not have to re-derive it.
+  **Cost if wrong:** `[status=completed]` never matches on that path. It also
+  cannot: a completed instance is not in the collection being filtered.
+  **Issue:** #576
+
+- **Decision:** both `BuildFacts` methods made `internal` (the project already
+  has `InternalsVisibleTo`).
+  **Why:** the tests assert the PRODUCTION builders. A test that rebuilt the
+  dictionary itself would pass while `BuildFacts` still omitted the tag, which is
+  precisely the defect being closed.
+  **Issue:** #576
+
+- **Deviation from AC5, stated not glossed:** "the agreement property covers both
+  tags". The shared agreement property is *task*-shaped — `SharedSelector` builds
+  `/workflowtask` and the fixture is `TaskRows` — and `status` is a
+  `workflowexecution` tag. Making it both kinds would leave it harder to read
+  than the thing it protects, so `status` got a dedicated execution-side
+  agreement fact with the same structure and both directions. `tenant` needs no
+  coverage once nothing advertises it; its test is that it is refused.
+  **Issue:** #576
+
+## M5 execution — #577 (an uncompilable deny fails closed)
+
+- **Decision:** fail-closed is an **empty result set**, not a thrown exception.
+  **Why:** a throw out of an authorization filter becomes a 500, which tells the
+  caller nothing and pages somebody. An empty result is a refusal the caller can
+  act on, and it is already the shape this method uses one branch below for "no
+  allows matched".
+  **Issue:** #577
+
+- **Decision:** the asymmetry is written at the catch site, not only in the
+  commit message.
+  **Why:** two catches for one exception type, differing by effect, reads like an
+  inconsistency to the next person and is exactly the kind of thing that gets
+  "tidied" into symmetry. The comment says which direction is safe and why.
+  **Issue:** #577
+
+- **Scope note:** grants are loaded per `(kind, action)`, so an uncompilable deny
+  fails closed only the requests for that kind and action, not the whole app.
+  Checked rather than assumed.
+  **Issue:** #577
+
+- **Seam left open, deliberately:** #575 made the two cache compilers emit
+  `AlwaysFalse` for shapes the in-memory evaluator answers `false` to, rather
+  than throwing. Those never reach this code, so an *unrepresentable* deny still
+  denies nothing rather than failing closed. That is agreement with the
+  evaluator, which is what #575 was for — but the two stories together should not
+  be read as promising a guarantee neither makes.
+  **Issue:** #577 ← #575

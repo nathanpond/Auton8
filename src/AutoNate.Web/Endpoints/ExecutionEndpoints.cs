@@ -1250,12 +1250,24 @@ public static class ExecutionEndpoints
         return visible;
     }
 
-    private static IReadOnlyDictionary<string, string?> BuildFacts(WorkflowExecutionSummary execution) =>
+    // internal so the #576 tests can assert the PRODUCTION fact builder supplies
+    // `status`. A test that rebuilt the dictionary itself would pass while this
+    // method still omitted the tag, which is the defect it exists to catch.
+    internal static IReadOnlyDictionary<string, string?> BuildFacts(WorkflowExecutionSummary execution) =>
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["processkey"] = ExtractProcessKey(execution.ProcessDefinitionId),
             ["definitionkey"] = execution.ProcessDefinitionId,
-            ["startedby"] = execution.StartUserId
+            ["startedby"] = execution.StartUserId,
+
+            // `status` is advertised and compiles in SQL; until #576 it was
+            // never supplied here, so `[status=active]` denied EVERY row on this
+            // path while filtering correctly on the other one.
+            //
+            // Normalized through the shared helper, not passed through raw: the
+            // projection writes the normalized string into the status column, so
+            // the raw value would make `[status=running]` agree with nothing.
+            ["status"] = WorkflowExecutionStatuses.Normalize(execution.Status)
         };
 
     private static string? ExtractProcessKey(string? processDefinitionId)
