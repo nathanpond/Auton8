@@ -20,12 +20,17 @@ public sealed class ExecutionListEnforcementTests
         ["Authorization:AssignSuperAdminToAllExistingUsers"] = "false"
     };
 
-    private static void SeedExecutions(AutoNateWebApplicationFactory factory)
+    // Seeds the CACHE, because that is what the list reads as of #108.
+    //
+    // It used to fill FlowableStub.Executions, and the comment said "the facts on
+    // each summary drive the in-memory selector evaluator" -- true then. The list
+    // is now a SQL query with authorization pushed into it, so the same summaries
+    // go through the real projection and the facts are the cache row's columns.
+    // What these tests assert is unchanged: which runs a grant admits.
+    private static async Task SeedExecutionsAsync(AutoNateWebApplicationFactory factory)
     {
-        // Two runs the admin started, one started by a stranger. The
-        // facts on each summary drive the in-memory selector evaluator.
         var stranger = Guid.NewGuid().ToString();
-        factory.FlowableStub.Executions.AddRange(new[]
+        var summaries = new[]
         {
             new WorkflowExecutionSummary
             {
@@ -48,7 +53,19 @@ public sealed class ExecutionListEnforcementTests
                 StartUserId = stranger,
                 Status = "Running"
             }
-        });
+        };
+
+        using var scope = factory.Services.CreateScope();
+        var projection = scope.ServiceProvider
+            .GetRequiredService<AutoNate.Web.Services.Flowable.Cache.FlowableExecutionProjection>();
+        var dbFactory = scope.ServiceProvider
+            .GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AutoNate.Web.Persistence.AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+
+        await projection.ApplyAsync(
+            summaries.Select(x => new AutoNate.Web.Services.Projections.ChangeEvent<WorkflowExecutionSummary>(
+                AutoNate.Web.Services.Projections.ChangeOp.Upsert, x.Id, x, DateTimeOffset.UtcNow)).ToArray(),
+            db, CancellationToken.None);
     }
 
     private static async Task GrantAsync(
@@ -66,7 +83,7 @@ public sealed class ExecutionListEnforcementTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
-        SeedExecutions(factory);
+        await SeedExecutionsAsync(factory);
 
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
@@ -82,7 +99,7 @@ public sealed class ExecutionListEnforcementTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
-        SeedExecutions(factory);
+        await SeedExecutionsAsync(factory);
         await GrantAsync(factory, Actions.View, "/workflowexecution/*");
 
         var client = factory.CreateClient();
@@ -99,7 +116,7 @@ public sealed class ExecutionListEnforcementTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
-        SeedExecutions(factory);
+        await SeedExecutionsAsync(factory);
         await GrantAsync(factory, Actions.View, "/workflowexecution/*[startedby=user]");
 
         var client = factory.CreateClient();
@@ -117,7 +134,7 @@ public sealed class ExecutionListEnforcementTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
-        SeedExecutions(factory);
+        await SeedExecutionsAsync(factory);
 
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
@@ -135,7 +152,7 @@ public sealed class ExecutionListEnforcementTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
-        SeedExecutions(factory);
+        await SeedExecutionsAsync(factory);
         await GrantAsync(factory, Actions.View, "/workflowexecution/*[startedby=user]");
 
         var client = factory.CreateClient();

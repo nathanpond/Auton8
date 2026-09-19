@@ -8855,3 +8855,69 @@ elements executing on the engine, not the executions read model.
   delivered by **#579**, which made the single-execution authorizer its first
   consumer. This story adds a second. #19 closed with #587.
   **Issue:** #104
+
+## M5 execution — #108 (the executions list becomes a SQL query)
+
+- **Decision:** `lastActivityAtUtc` comes from `MAX(workflow_event_log_cache.event_time)`,
+  not from `EndTime ?? StartTime`.
+  **Why:** the cache has no last-activity column, and the fallback would show a
+  RUNNING instance its own start time in a column the table labels "Last activity"
+  — wrong for exactly the rows an operator watches. The event log carries the same
+  signal the live path read from activity history, and
+  `ix_workflow_event_log_instance_time (flowable_instance_id, event_time DESC)`
+  already exists, as does the errors-table index for the Errored overlay. No
+  schema change.
+  **Issue:** #108
+
+- **Decision:** the status vocabulary is translated at the boundary, and the live
+  path's precedence is preserved — Cancelled beats Errored (operator intent
+  supersedes a stale failure), Errored beats Running and Complete.
+  **Why:** the cache stores `active`/`completed`/`cancelled`; the SPA compares
+  against `"Running"`/`"Complete"`/`"Cancelled"`/`"Errored"`. Without the
+  translation every status count reads zero and nothing errors — the page simply
+  stops meaning anything. `suspended` maps to `Running` and `terminated` to
+  `Cancelled` because the API vocabulary has no member for either; that loses a
+  distinction the cache can make, and is recorded at the mapping rather than
+  hidden.
+  **Issue:** #108
+
+- **Decision:** the tie-break is an explicit `COLLATE "C"`.
+  **Why:** measured — this database reports `en_US.utf8` and yet orders `B,Z,a,b`,
+  identical to `C`, and Flowable's ids are lowercase-hex UUIDs where the two agree
+  anyway. So matching the old ordinal tie-break works here by coincidence of the
+  deployment. Collation is a server setting that can differ between a developer's
+  machine, CI and production, and a stable tie-break is what makes paging correct
+  rather than merely fast: without one a row can appear on two pages or none.
+  **Issue:** #108
+
+- **Rule 3 cleanup:** `ExecutionEndpoints.FilterVisibleExecutionsAsync` became dead
+  when both list routes moved to SQL. Removed, along with the stale reference to it
+  in `Authorizer`'s comment — a dead private method naming the old design misleads
+  the next reader about where authorization happens.
+  **Issue:** #108
+
+- **The #104 guard fired on the very next story, as designed.** Moving `/` and
+  `/page` off the live path made them stale entries in the live-read allow list,
+  and the both-directions assertion failed with "These routes are listed as
+  live-reading but no longer inject IFlowableClient". A one-directional guard would
+  have stayed quiet and let the list rot.
+  **Issue:** #108 ← #104
+
+- **Two bugs of my own, both caught by the tests:**
+  1. `EF.Functions.Collate(string.Empty, "C")` called **outside a query** to
+     "document intent". It only exists inside a query tree, so it threw — a 500 on
+     every list request. Removed, with a comment recording why the line existed and
+     why it cannot.
+  2. The tests granted permission to a **hardcoded GUID** while the request ran as
+     whoever dev auto-login signed in. The grant belonged to nobody, so every list
+     came back empty — which is also exactly what a broken query looks like. The
+     helper now reads the signed-in id back from `/api/auth/me` and grants to that.
+  **Issue:** #108
+
+- **Measured**, on the local database (12,744 executions, 135,695 event-log rows):
+  - **before**: ~120 ms of Flowable HTTP for four collections, **capped at 200
+    rows**, then filtered, sorted and paged in memory;
+  - **after**: **7.9 ms** for a 25-row page (top-N heapsort, index-driven
+    subqueries) plus **2.8 ms** for the count — over all 12,744, paged in the
+    database.
+  **Issue:** #108

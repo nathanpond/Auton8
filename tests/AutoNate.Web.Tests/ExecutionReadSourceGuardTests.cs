@@ -31,10 +31,6 @@ public sealed class ExecutionReadSourceGuardTests
     /// </summary>
     private static readonly Dictionary<string, string> LiveReadsAllowed = new(StringComparer.Ordinal)
     {
-        ["/"] =
-            "#108's — it rewrites the list as a SQL query over the cache with authorization pushed down.",
-        ["/page"] =
-            "#108's, same as the unpaged list.",
         ["/{processInstanceId}/diagram"] =
             "Needs BPMN XML and variables. workflow_execution_cache is 17 scalar columns and holds neither; "
             + "serving it means sibling read-throughs over the variable cache, which is its own story.",
