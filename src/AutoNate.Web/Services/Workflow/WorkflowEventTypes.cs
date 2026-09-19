@@ -22,6 +22,9 @@ public static class WorkflowResourceKinds
     public const string Task = "workflow.task";
     public const string Message = "workflow.message";
     public const string Signal = "workflow.signal";
+
+    // #110.
+    public const string DecisionTable = "workflow.decision.table";
 }
 
 public static class WorkflowAdminEventTypes
@@ -50,6 +53,20 @@ public static class WorkflowAdminEventTypes
     public const string JobRetried = "workflow.job.retried";
     public const string JobRescheduled = "workflow.job.rescheduled";
     public const string JobsViewed = "workflow.job.list.viewed";
+
+    // #110. Decision tables. On workflow-admin rather than a topic of their own:
+    // a decision table exists to be run by a process, so an auditor reconstructing
+    // "why did this workflow decide that" reads one stream rather than joining two.
+    //
+    // Publishing is on the record for the reason the story gives -- a published
+    // table decides business outcomes -- and so is DELETING one, which is the
+    // action that can make a deployed process stop working.
+    public const string DecisionTableSaved = "workflow.decision.table.saved";
+    public const string DecisionTablePublished = "workflow.decision.table.published";
+    public const string DecisionTableDeleted = "workflow.decision.table.deleted";
+    public const string DecisionTableListViewed = "workflow.decision.table.list.viewed";
+    public const string DecisionTableViewed = "workflow.decision.table.viewed";
+    public const string DecisionTableTested = "workflow.decision.table.tested";
 
     // Task admin commands
     public const string TaskForceCompleted = "workflow.task.force.completed";

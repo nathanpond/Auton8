@@ -119,12 +119,25 @@ public sealed class FlowableDecisionClient(HttpClient httpClient, IMemoryCache c
                 "evaluate the decision",
                 $"No decision is deployed with key '{decisionKey}'.");
 
-        await EnsureInputsSatisfyDeclaredTypesAsync(decision, inputs, cancellationToken);
+        // UNWRAP FIRST. An input that arrived over HTTP is a JsonElement, not an
+        // int or a string, and every type decision below would otherwise see
+        // "JsonElement" and answer wrongly -- the check would refuse a perfectly
+        // good call, and TypeNameFor would tell the engine "string" for a number.
+        //
+        // Found end to end, not in a unit test: the unit tests hand this method a
+        // real Dictionary<string, object?> with CLR values, which is exactly what
+        // no caller behind an endpoint ever does.
+        var unwrapped = inputs.ToDictionary(
+            pair => pair.Key,
+            pair => Unwrap(pair.Value),
+            StringComparer.Ordinal);
+
+        await EnsureInputsSatisfyDeclaredTypesAsync(decision, unwrapped, cancellationToken);
 
         var request = new DmnExecuteRequest
         {
             DecisionKey = decision.Key,
-            InputVariables = inputs
+            InputVariables = unwrapped
                 .Select(pair => new DmnVariable
                 {
                     Name = pair.Key,
@@ -281,13 +294,30 @@ public sealed class FlowableDecisionClient(HttpClient httpClient, IMemoryCache c
         _ => "string"
     };
 
+    /// <summary>
+    /// A <see cref="JsonElement"/> as the CLR value it stands for.
+    /// </summary>
+    /// <remarks>
+    /// Used on BOTH directions. Outputs come back as <c>JsonElement</c> from the
+    /// engine's response; inputs arrive as <c>JsonElement</c> from an endpoint's
+    /// model binder. The second is the one that bit: every type decision in this
+    /// client asks what a value <em>is</em>, and a boxed <c>JsonElement</c>
+    /// answers "JsonElement" to all of them.
+    /// </remarks>
     private static object? Unwrap(object? value) => value is JsonElement element
         ? element.ValueKind switch
         {
             JsonValueKind.String => element.GetString(),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            JsonValueKind.Number => element.TryGetInt64(out var whole) ? whole : element.GetDouble(),
+            // (object) on BOTH branches, deliberately. Without the casts C# unifies
+            // long and double to double, boxes every integer as a double, and
+            // TypeNameFor then tells the engine "double" for a whole number. It is
+            // survivable -- a DMN number column accepts either -- which is why it
+            // took a unit test asserting the emitted type name to see it at all.
+            JsonValueKind.Number => element.TryGetInt64(out var whole)
+                ? (object)whole
+                : (object)element.GetDouble(),
             JsonValueKind.Null or JsonValueKind.Undefined => null,
             _ => element.ToString()
         }

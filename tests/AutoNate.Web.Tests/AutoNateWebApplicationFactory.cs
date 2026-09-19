@@ -80,6 +80,9 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 
     public StubFlowableClient FlowableStub => Services.GetRequiredService<StubFlowableClient>();
 
+    public StubFlowableDecisionClient DecisionStub =>
+        Services.GetRequiredService<StubFlowableDecisionClient>();
+
     public RecordingAuditEventPublisher RecordedAuditEvents =>
         (RecordingAuditEventPublisher)Services.GetRequiredService<IAuditEventPublisher>();
 
@@ -184,6 +187,16 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
             services.RemoveAll<FlowableClient>();
             services.AddSingleton<StubFlowableClient>();
             services.AddSingleton<IFlowableClient>(sp => sp.GetRequiredService<StubFlowableClient>());
+
+            // #110. The DMN engine. Same reasoning as the BPMN stub above: slim
+            // stands up no Flowable, and the real engine's behaviour is pinned by
+            // DecisionEngineTests and GeneratedDecisionTableTests, which are
+            // RequiresService=Flowable.
+            services.RemoveAll<IFlowableDecisionClient>();
+            services.RemoveAll<FlowableDecisionClient>();
+            services.AddSingleton<StubFlowableDecisionClient>();
+            services.AddSingleton<IFlowableDecisionClient>(
+                sp => sp.GetRequiredService<StubFlowableDecisionClient>());
 
             // Replace the live Dapr publisher with a recording one so endpoint
             // tests can assert on every audit event published. Phase 1 of the

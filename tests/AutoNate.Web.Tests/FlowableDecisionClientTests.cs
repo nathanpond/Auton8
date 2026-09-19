@@ -252,6 +252,51 @@ public sealed class FlowableDecisionClientTests
     }
 
     [Fact]
+    public async Task EvaluateAsync_UnwrapsInputsThatArrivedAsJson()
+    {
+        var (client, stub) = CreateClient();
+        StubDecision(stub);
+        stub.WhenJson(HttpMethod.Post, "dmn-api/dmn-rule/execute",
+            new { resultVariables = Array.Empty<object[]>() }, HttpStatusCode.Created);
+
+        // THE REGRESSION. Every caller behind an endpoint hands this method
+        // JsonElement, not int and string -- a Dictionary<string, object?> bound
+        // from a JSON body holds boxed JsonElements. Every type decision in the
+        // client asks what a value IS, and a boxed JsonElement answers
+        // "JsonElement" to all of them: the declared-type check refused a
+        // perfectly good call, and TypeNameFor would have told the engine
+        // "string" for a number.
+        //
+        // It shipped past every other test in this file, because they all pass
+        // CLR values -- which is exactly what no HTTP caller ever does. Found end
+        // to end in GeneratedDecisionTableTests; pinned here so the merge gate
+        // sees it.
+        using var json = JsonDocument.Parse("""{"amount":50000,"region":"US"}""");
+        var inputs = new Dictionary<string, object?>
+        {
+            ["amount"] = json.RootElement.GetProperty("amount"),
+            ["region"] = json.RootElement.GetProperty("region")
+        };
+
+        var result = await client.EvaluateAsync("routing", inputs);
+        Assert.False(result.Matched);
+
+        var request = RequestFor(stub, HttpMethod.Post, "dmn-api/dmn-rule/execute");
+        using var body = JsonDocument.Parse(request.Body!);
+        var variables = body.RootElement.GetProperty("inputVariables");
+
+        // The engine binds by type NAME, so this is the half that matters: the
+        // number must go out as a number, not as whatever a JsonElement maps to.
+        var amount = variables.EnumerateArray().Single(v => v.GetProperty("name").GetString() == "amount");
+        Assert.Equal("integer", amount.GetProperty("type").GetString());
+        Assert.Equal(50000, amount.GetProperty("value").GetInt64());
+
+        var region = variables.EnumerateArray().Single(v => v.GetProperty("name").GetString() == "region");
+        Assert.Equal("string", region.GetProperty("type").GetString());
+        Assert.Equal("US", region.GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task EvaluateAsync_AllowsAnInputTheTableDoesNotDeclare()
     {
         var (client, stub) = CreateClient();
