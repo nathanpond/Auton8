@@ -104,6 +104,7 @@ public static class DecisionTableEndpoints
             IDecisionTableStore store,
             IFlowableDecisionClient engine,
             IAuditEventPublisher audit,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             var table = await store.GetAsync(id, cancellationToken);
@@ -132,8 +133,18 @@ public static class DecisionTableEndpoints
                 // deployment that did not happen would exist in Auton8 and not in
                 // the engine -- and every later read would report a published
                 // table that cannot be evaluated.
+                //
+                // #350. The raw message is the engine's WHOLE HTTP body -- JDBC
+                // URLs with passwords, internal hostnames, absolute paths, Java
+                // frames. It goes to the log and nowhere else; the caller gets a
+                // sentence. NoEndpointReturnsARawEngineMessageTests caught this
+                // file handing the raw text to an author.
+                loggerFactory.CreateLogger("AutoNate.Web.DecisionTables").LogWarning(
+                    exception, "Flowable refused a decision deployment. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this decision table"));
+
                 return Results.Json(
-                    new { errors = new[] { $"The engine refused the decision table. {exception.Message}" } },
+                    new { errors = new[] { EngineRefusal.Describe(exception, "this decision table") } },
                     statusCode: exception.IsCallerError ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway);
             }
 
@@ -166,6 +177,7 @@ public static class DecisionTableEndpoints
             IDecisionTableStore store,
             IFlowableDecisionClient engine,
             IAuditEventPublisher audit,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             var table = await store.GetAsync(id, cancellationToken);
@@ -193,8 +205,12 @@ public static class DecisionTableEndpoints
             }
             catch (FlowableRequestException exception)
             {
+                loggerFactory.CreateLogger("AutoNate.Web.DecisionTables").LogWarning(
+                    exception, "Flowable refused a decision evaluation. Caller was told: {Described}",
+                    EngineRefusal.Describe(exception, "this decision table"));
+
                 return Results.Json(
-                    new { errors = new[] { exception.Message } },
+                    new { errors = new[] { EngineRefusal.Describe(exception, "this decision table") } },
                     statusCode: exception.IsCallerError
                         ? StatusCodes.Status400BadRequest
                         : StatusCodes.Status502BadGateway);

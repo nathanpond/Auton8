@@ -177,9 +177,21 @@ public sealed class DecisionTablePublishTests
             $"/api/decision-tables/{created.Id}/versions");
         Assert.Empty(versions!);
 
-        // And the engine's own words reach the author, rather than a generic failure.
-        Assert.Contains("the engine hated", await response.Content.ReadAsStringAsync(),
-            StringComparison.Ordinal);
+        // AND THE RAW ENGINE TEXT DOES NOT REACH THE AUTHOR.
+        //
+        // This assertion was the other way round in its first form -- it asserted
+        // the engine's own words came through, which is the defect
+        // NoEndpointReturnsARawEngineMessageTests exists to catch: a
+        // FlowableRequestException's message is the engine's entire HTTP body,
+        // and that body can carry JDBC URLs with passwords, internal hostnames,
+        // absolute paths and Java stack frames. The raw text now survives in the
+        // log and nowhere else.
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("cvc-complex-type", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("the engine hated", body, StringComparison.Ordinal);
+
+        // The author still learns that the engine refused it, in our words.
+        Assert.Contains("decision table", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

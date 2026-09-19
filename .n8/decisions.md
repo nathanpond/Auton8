@@ -9824,3 +9824,45 @@ can find the box it is about.
 FULL_LOCAL 482 → 486.
 
 **Issue:** #110
+
+## M5 execution — a leak I reintroduced, and the guard that stopped it (2026-09-19)
+
+`make test-slim` failed #110's endpoints on **two** guards at once:
+
+```
+No_endpoint_puts_a_flowable_exception_message_into_a_response
+  DecisionTableEndpoints.cs: $"The engine refused the decision table. {exception.Message}"
+  DecisionTableEndpoints.cs: exception.Message
+
+Every_flowable_catch_that_answers_a_caller_also_logs
+  DecisionTableEndpoints.cs: catch (exception) answers a caller without logging  ×2
+```
+
+A `FlowableRequestException`'s message is the engine's **entire HTTP body** — JDBC
+URLs with passwords, internal hostnames, absolute paths, Java frames. Both catch
+blocks now route through `EngineRefusal.Describe` and log the raw text at Warning,
+as the publish and execution routes have since #350.
+
+**Two things worth recording beyond the fix.**
+
+First, #350 took *three rounds* to fix this on the publish route, and I reproduced
+it on a new one within the hour. That is what makes it a guard's job rather than a
+reviewer's.
+
+Second, and worse: **my own test asserted the defect.**
+`A_refused_deployment_leaves_the_draft_unpublished` ended with
+
+```csharp
+// And the engine's own words reach the author, rather than a generic failure.
+Assert.Contains("the engine hated", …);
+```
+
+I wrote that believing it was the good half — surfacing the engine's reason instead
+of a generic failure. It is now inverted: the response must **not** contain
+`cvc-complex-type` or the engine's phrasing, while the author still learns the
+engine refused it. A test written by the author of the defect encodes the author's
+mistake, which is precisely why this class needs a codebase-wide guard and not a
+per-story assertion.
+
+The completion comment on #110 quoted that assertion approvingly. Corrected on the
+issue rather than left standing.
