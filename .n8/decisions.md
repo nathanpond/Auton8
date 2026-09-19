@@ -8974,3 +8974,61 @@ Filed as #590 for the feed that ships that no-op today.
 caught #108 the moment `/` and `/page` moved off the live path, by name. The repo's
 own `RepoRootAnchorTests` caught a helper of mine that anchored on a `.git`
 directory, which throws in the worktrees `/n8-verify` uses.
+
+## M5 execution — #594 (the executions view says how current it is)
+
+**I filed this issue and drafted its criteria, so these decisions are mine as both
+author and executor. Recorded rather than assumed on that account.**
+
+- **Decision:** a separate `GET /api/executions/freshness` rather than fields on
+  the list.
+  **Why:** `GET /api/executions` returns a bare `WorkflowExecutionSummary[]` and the
+  executions page calls exactly that. Wrapping it to add freshness would be a
+  breaking contract change — for the SPA, the endpoint tests and the E2E specs —
+  for a purely additive signal. The new route carries its own authorization
+  decision (`WorkflowExecution` / `View`), per the third project invariant, and a
+  test asserts the gate refuses an ungranted actor.
+  **Issue:** #594
+
+- **Decision:** `asOfUtc` is the **oldest** `last_sync_at` among the rows the actor
+  may see, computed over the authorized set through the same `ExecutionListQuery`
+  path the list uses.
+  **Why:** the oldest bounds how stale anything on screen could be. The newest
+  would describe one lucky row and overstate how current the view is — and would
+  pass any test that merely checked the field was populated, which is why the test
+  asserts the age rather than the presence.
+  **Issue:** #594
+
+- **Decision:** the heartbeat rides `projection_watermarks` via the existing
+  `IProjectionWatermarkStore`, written only after a **successful** tick.
+  **Why:** an in-process flag would give each replica its own answer; a new table
+  would be a schema change for one row per feed that already exists for exactly
+  this bookkeeping. **The semantic overload is real and is documented at the
+  write:** for the history feed a watermark means "how far I have read", but this
+  fetch has no time filter to resume from, so here it means "when the last sweep
+  completed".
+  **Issue:** #594
+
+- **Decision:** "not updating" is `now - lastPolledAt > multiplier x pollInterval`,
+  with `StaleFeedIntervalMultiplier` defaulting to **3**.
+  **Why:** this is the product decision I said should not be buried in a SPA story,
+  so it is named and tunable instead. One missed tick is a hiccup — a slow
+  Flowable, a redeploy, a GC pause; three is a pattern. Crying wolf on a single
+  slow tick is how an indicator gets ignored, and this one exists for the operator
+  watching a stuck process. Configuration rather than a constant so an operator who
+  disagrees can change it without a release. At the 60s default that is a
+  three-minute window.
+  **Cost if wrong:** a stall is reported up to three minutes late.
+  **Issue:** #594
+
+- **Decision:** no heartbeat at all reads as **not updating**.
+  **Why:** that is the honest answer on a process which has never completed a sweep
+  — a fresh deployment, or a feed failing every tick since boot. Defaulting to
+  "updating" would make the worst case look like the best one.
+  **Issue:** #594
+
+- **Mutations, three applied and three killed**, each hitting only its own claim:
+  inverting the no-heartbeat case kills the never-swept test; ignoring the
+  heartbeat's age kills the stalled-feed test; taking the newest sync instead of
+  the oldest kills the asOf test.
+  **Issue:** #594

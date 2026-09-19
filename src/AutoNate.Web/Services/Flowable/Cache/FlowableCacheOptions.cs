@@ -29,6 +29,19 @@ public sealed class FlowableCacheOptions
     // a number that can be raised in configuration is better than one that cannot.
     public int ExecutionBackfillMaxPages { get; set; } = 10_000;
 
+    // #594. How many missed poll intervals before the executions view reports
+    // "not updating" rather than merely stale.
+    //
+    // Three, deliberately: one missed tick is a hiccup -- a slow Flowable, a
+    // redeploy, a GC pause -- and three is a pattern. Telling a user the system
+    // has stopped updating when it has merely been slow once is the cry-wolf that
+    // makes the indicator ignored, and the indicator exists for the operator
+    // watching a stuck process.
+    //
+    // Configuration rather than a constant so an operator who disagrees can change
+    // it without a release. At the 60s default poll this is a three-minute window.
+    public int StaleFeedIntervalMultiplier { get; set; } = 3;
+
     public TimeSpan TaskPollInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     // Variables are fetched per active instance, so this interval bounds
