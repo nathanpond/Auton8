@@ -71,23 +71,23 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
           </div>
           <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-dimmed)" }}>
             <span>{formatTimestamp(event.startedAtUtc)}</span>
-            <span className="mx-2">→</span>
+            <span style={{ margin: "0 var(--mantine-spacing-xs)" }}>→</span>
             <span>{event.endedAtUtc ? formatTimestamp(event.endedAtUtc) : "in progress"}</span>
             {event.endedAtUtc && event.durationMs !== null && (
               <>
-                <span className="mx-2">·</span>
+                <span style={{ margin: "0 var(--mantine-spacing-xs)" }}>·</span>
                 <span>{formatDuration(event.durationMs)}</span>
               </>
             )}
             {event.assignee && (
               <>
-                <span className="mx-2">·</span>
+                <span style={{ margin: "0 var(--mantine-spacing-xs)" }}>·</span>
                 <span>Assignee: {userFullDisplay(directory.get(event.assignee), event.assignee)}</span>
               </>
             )}
             {event.completedByUserId && event.completedByUserId !== event.assignee && (
               <>
-                <span className="mx-2">·</span>
+                <span style={{ margin: "0 var(--mantine-spacing-xs)" }}>·</span>
                 <span>
                   Task Completed By: {userFullDisplay(directory.get(event.completedByUserId), event.completedByUserId)}
                 </span>

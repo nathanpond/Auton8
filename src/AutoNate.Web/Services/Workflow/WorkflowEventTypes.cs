@@ -43,6 +43,14 @@ public static class WorkflowAdminEventTypes
     public const string ExecutionDeleted = "workflow.execution.deleted";
     public const string ExecutionsBulkDeleted = "workflow.execution.deleted.all";
 
+    // #172. Job mutations. Both are mutations on someone else's process -- a
+    // retry puts work back in front of the engine, a reschedule changes when
+    // something fires -- so who did what to which job is on the record, the same
+    // as cancel and move-state above.
+    public const string JobRetried = "workflow.job.retried";
+    public const string JobRescheduled = "workflow.job.rescheduled";
+    public const string JobsViewed = "workflow.job.list.viewed";
+
     // Task admin commands
     public const string TaskForceCompleted = "workflow.task.force.completed";
     public const string TaskReassigned = "workflow.task.reassigned";

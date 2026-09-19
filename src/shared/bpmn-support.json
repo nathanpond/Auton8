@@ -266,7 +266,7 @@
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: verified against 8.0.0. Compensation runs the handlers for activities that actually completed, in REVERSE order, and the throw waits for them before the process continues — measured with a recorded trail ('h3;h1;after;'), not by reading timestamps. A handler failure propagates rather than being swallowed.",
+      "reason": "#115: verified against 8.0.0. Compensation runs the handlers for activities that actually completed, in REVERSE order, and the throw waits for them before the process continues — measured with a recorded trail ('h3;h1;after;'), not by reading timestamps. A handler failure propagates rather than being swallowed. A compensation handler sees CURRENT variable values, not the values as at the compensated activity's completion — Flowable 8.0.0 does not snapshot, measured (#286). A handler that reads a variable to reverse a payment will reverse the WRONG one after any later write, silently and plausibly. Pass what the handler needs as a variable it alone writes, or name it per activity.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -386,7 +386,7 @@
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: the boundary event plus a <association> to an activity marked isForCompensation is what Flowable runs. Only activities that completed are compensated — an activity skipped by a gateway never had its handler run. A handler that WAITS (a user task or receive task) is refused at publish: Flowable fails its own transaction with an act_fk_exe_parent violation when such a handler is compensated during a task completion, and the task can then never be completed.",
+      "reason": "#115: the boundary event plus a <association> to an activity marked isForCompensation is what Flowable runs. Only activities that completed are compensated — an activity skipped by a gateway never had its handler run. A handler that WAITS (a user task or receive task) is refused at publish: Flowable fails its own transaction with an act_fk_exe_parent violation when such a handler is compensated during a task completion, and the task can then never be completed. A compensation handler sees CURRENT variable values, not the values as at the compensated activity's completion — Flowable 8.0.0 does not snapshot, measured (#286). A handler that reads a variable to reverse a payment will reverse the WRONG one after any later write, silently and plausibly. Pass what the handler needs as a variable it alone writes, or name it per activity.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -456,7 +456,7 @@
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "compensate",
-      "reason": "#115: executes by publish-time expansion. The raw element ends the process and compensates NOTHING — verified, the handler trail came back empty — the same silent-decoration shape as Message End (#112) and Signal End (#156). Publish rewrites the deployed copy into an intermediate throw followed by a none end event; the authored diagram keeps the end event.",
+      "reason": "#115: executes by publish-time expansion. The raw element ends the process and compensates NOTHING — verified, the handler trail came back empty — the same silent-decoration shape as Message End (#112) and Signal End (#156). Publish rewrites the deployed copy into an intermediate throw followed by a none end event; the authored diagram keeps the end event. A compensation handler sees CURRENT variable values, not the values as at the compensated activity's completion — Flowable 8.0.0 does not snapshot, measured (#286). A handler that reads a variable to reverse a payment will reverse the WRONG one after any later write, silently and plausibly. Pass what the handler needs as a variable it alone writes, or name it per activity.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {
@@ -606,7 +606,7 @@
       "engine": "executes",
       "localName": "*",
       "eventDefinition": "isForCompensation",
-      "reason": "#115: isForCompensation is what makes an activity a handler rather than a step nothing can reach. It survives the studio round trip untouched, along with the association — asserted, because bpmn-js drops what its moddle does not model.",
+      "reason": "#115: isForCompensation is what makes an activity a handler rather than a step nothing can reach. It survives the studio round trip untouched, along with the association — asserted, because bpmn-js drops what its moddle does not model. A compensation handler sees CURRENT variable values, not the values as at the compensated activity's completion — Flowable 8.0.0 does not snapshot, measured (#286). A handler that reads a variable to reverse a payment will reverse the WRONG one after any later write, silently and plausibly. Pass what the handler needs as a variable it alone writes, or name it per activity.",
       "evidence": "deployed and started; compensation order and skipping verified"
     },
     {

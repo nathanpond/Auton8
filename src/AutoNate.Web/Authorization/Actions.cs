@@ -56,6 +56,25 @@ public static class Actions
 
     public const string MoveState = "movestate";
 
+    // #172. The two job mutations, on EntityKinds.WorkflowExecution.
+    //
+    // Separately grantable on purpose, and the AC asks for it: putting a failed
+    // step back in front of the engine and changing when a timer fires are
+    // different risks with different audiences. A support operator who should be
+    // able to retry a stuck integration call should not thereby be able to make
+    // every scheduled workflow fire now.
+    //
+    // NOT a new EntityKind. A job has no independent existence -- its scope is
+    // its execution, which is also the scope an operator is granted over, so
+    // `/workflowexecution/<id>` and `[processkey=orders]` mean the right thing
+    // for jobs without a second selector vocabulary. A `workflowjob` kind would
+    // need its own IInstanceAuthorizer and ISelectorCompiler, which per the
+    // add-permission-gate skill is the registration pair that has shipped
+    // missing five times and denies everyone but super-admins when it does.
+    public const string RetryJob = "retryjob";
+
+    public const string RescheduleJob = "reschedulejob";
+
     public const string Manage = "manage";
 
     // Documents — re-resolve live data bindings (record fields, AQL

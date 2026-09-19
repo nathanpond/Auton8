@@ -65,6 +65,8 @@ import ConfirmModal from "@/components/ConfirmModal";
 import ChangeDueDateModal from "./ChangeDueDateModal";
 import ExecutionHistory from "./ExecutionHistory";
 import ExecutionLog from "./ExecutionLog";
+import { ExecutionJobsPanel } from "./ExecutionJobsPanel";
+import { StuckJobsPanel } from "./StuckJobsPanel";
 import ProcessVariablesPanel from "./ProcessVariablesPanel";
 import ReassignTaskModal from "./ReassignTaskModal";
 import { describeError as describeErrorUtil, formatTimestamp as formatTimestampUtil } from "./utils";
@@ -380,6 +382,12 @@ export default function WorkflowExecutions() {
           </Alert>
         )}
 
+        {/* #172. An IN-PAGE Alert, not a toast: "three things are stuck" is a
+            condition belonging to the page, still true after a reload, and it
+            should still be there when the operator comes back to look. It
+            renders nothing at all when nothing is stuck. */}
+        <StuckJobsPanel />
+
         <Group gap="xs" wrap="wrap" align="center">
           <Badge color={busStreamColor(busStatus)} variant="filled" radius="sm">
             {browserStatusLabel(busStatus)}
@@ -520,7 +528,7 @@ type ExecutionContentProps = {
   onError: (message: string) => void;
 };
 
-type ExecutionTab = "diagram" | "history" | "log" | "children" | "adhoc";
+type ExecutionTab = "diagram" | "history" | "log" | "children" | "adhoc" | "jobs";
 
 export function ExecutionContent({
   processInstanceId,
@@ -769,6 +777,14 @@ export function ExecutionContent({
               something to show. A process with no ad-hoc subprocess must not
               carry an empty tab implying it has case work. */}
           {adhocSubProcesses.length > 0 && <Tabs.Tab value="adhoc">Case Work</Tabs.Tab>}
+          {/* #172. ALWAYS shown, unlike Called Workflows and Case Work above.
+              The others are hidden when empty because an empty tab would imply
+              a capability the process does not have. This one is the opposite:
+              "is anything stuck?" is a question worth being able to ask of an
+              execution that turns out to have nothing stuck, and hiding the tab
+              would make a healthy execution indistinguishable from one whose
+              jobs could not be read. */}
+          <Tabs.Tab value="jobs">Jobs &amp; Timers</Tabs.Tab>
         </Tabs.List>
 
         {/* Each panel stays mounted (`keepMounted`) so the BPMN viewer
@@ -866,6 +882,10 @@ export function ExecutionContent({
 
         <Tabs.Panel value="history" p="md">
           {tab === "history" && <ExecutionHistory processInstanceId={processInstanceId} />}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="jobs" p="md">
+          <ExecutionJobsPanel processInstanceId={processInstanceId} />
         </Tabs.Panel>
 
         <Tabs.Panel value="log" p="md">

@@ -103,13 +103,22 @@ public sealed class ApiSeeder
     /// deployment collisions with prior runs or with the dev developer's
     /// workflows. <see cref="TestNames"/>'s slugs already supply that.
     /// </summary>
+    /// <param name="userFormMode">
+    /// <c>flowable:userFormMode</c> on the user task -- "simple" (the default
+    /// when omitted), "modal" or "page". It decides where the My Tasks panel
+    /// sends the user on Open: a modal in place, or the dedicated task-form
+    /// route. Page mode also needs <paramref name="userFormShortCode"/>, or the
+    /// page renders "no form is selected" and cannot be completed.
+    /// </param>
     public async Task<WorkflowDto> CreateAndPublishWorkflowAsync(
         string processKey,
         string name,
-        string? assignee = null)
+        string? assignee = null,
+        string? userFormMode = null,
+        string? userFormShortCode = null)
     {
         var modelId = Guid.NewGuid();
-        var bpmnXml = MinimalUserTaskBpmn(processKey, name, assignee);
+        var bpmnXml = MinimalUserTaskBpmn(processKey, name, assignee, userFormMode, userFormShortCode);
         var now = DateTimeOffset.UtcNow;
 
         var saveResponse = await _request.PostAsync("/api/workflows/", new APIRequestContextOptions
@@ -307,7 +316,13 @@ public sealed class ApiSeeder
     /// a "New form" heading via <c>JsxFormHost</c> at <c>/form/{shortCode}</c>
     /// once published.
     /// </summary>
-    public async Task<FormDto> CreateFormAsync(string name, string shortCode, bool siteAvailable)
+    /// <param name="formCode">
+    /// Optional JSX. Omitted, the server's default is used -- which renders a
+    /// heading and nothing else, so a test that has to SUBMIT the form has to
+    /// bring its own.
+    /// </param>
+    public async Task<FormDto> CreateFormAsync(
+        string name, string shortCode, bool siteAvailable, string? formCode = null)
     {
         var response = await _request.PostAsync("/api/forms/", new APIRequestContextOptions
         {
@@ -315,7 +330,8 @@ public sealed class ApiSeeder
             {
                 name,
                 shortCode,
-                siteAvailable
+                siteAvailable,
+                formCode
             }
         });
         await EnsureSuccessAsync(response, "create form");
@@ -370,11 +386,21 @@ public sealed class ApiSeeder
         await EnsureSuccessAsync(response, "create dashboard mount");
     }
 
-    private static string MinimalUserTaskBpmn(string processKey, string name, string? assignee)
+    private static string MinimalUserTaskBpmn(
+        string processKey,
+        string name,
+        string? assignee,
+        string? userFormMode = null,
+        string? userFormShortCode = null)
     {
-        var assigneeAttribute = string.IsNullOrWhiteSpace(assignee)
-            ? string.Empty
-            : $" flowable:assignee=\"{System.Security.SecurityElement.Escape(assignee)}\"";
+        static string Attr(string localName, string? value) =>
+            string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : $" flowable:{localName}=\"{System.Security.SecurityElement.Escape(value)}\"";
+
+        var assigneeAttribute = Attr("assignee", assignee)
+            + Attr("userFormMode", userFormMode)
+            + Attr("userFormShortCode", userFormShortCode);
         return $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"

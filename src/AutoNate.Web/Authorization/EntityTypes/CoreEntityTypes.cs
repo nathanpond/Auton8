@@ -120,7 +120,12 @@ public static class CoreEntityTypes
         idClrType: typeof(string),
         actions: new[]
         {
-            Actions.View, Actions.Cancel, Actions.Delete, Actions.Override, Actions.MoveState, Actions.DeleteAll
+            Actions.View, Actions.Cancel, Actions.Delete, Actions.Override, Actions.MoveState, Actions.DeleteAll,
+            // #172. Registered for DISCOVERABILITY -- the registry does not gate
+            // anything (the authorizer string-compares grants), so this is what
+            // puts the two verbs in the Grants help table, SelectorBuilder and
+            // Explain. Both are enforced by RequirePermission on their endpoints.
+            Actions.RetryJob, Actions.RescheduleJob
         },
         // Mirrors WorkflowExecutionCacheSelectorCompiler.CompileExpr.
         // `tenant` was REMOVED here in #576, deliberately, and the reason belongs

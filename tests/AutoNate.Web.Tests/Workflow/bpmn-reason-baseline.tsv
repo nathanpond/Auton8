@@ -17,9 +17,9 @@ Business Rule Task	232838fb224633c6
 Call Activity	5e212da2859f5256
 Cancel Boundary	fa2e604155db8414
 Cancel End	5a985e9a46050ecf
-Compensation Boundary	ca6b4435cd7f694d
-Compensation End	61e8ae937ddd8648
-Compensation Marker	fe2acc01aed51424
+Compensation Boundary	6916113534ab0150
+Compensation End	3ebdbd3841af9d60
+Compensation Marker	53d7ac5db29abd35
 Compensation Start Event	317f3063b9417b74
 Complex Gateway	abc90b736f6d33cf
 Conditional Start Event	8821c3ac279eb21e
@@ -38,7 +38,7 @@ Event-Based Gateway	7078a25b4729ba8a
 Intermediate Catch (Link)	e14ce60c4c601062
 Intermediate Catch (Message)	38bea94b616dee27
 Intermediate Catch (Signal)	2c0f72446a3711fd
-Intermediate Throw (Compensation)	d78c36351cd80b20
+Intermediate Throw (Compensation)	8d020cd57eff1f70
 Intermediate Throw (Escalation)	6cac0f9463a2ef8a
 Intermediate Throw (Link)	e14ce60c4c601062
 Intermediate Throw (Message)	c6e4ded383bca70b

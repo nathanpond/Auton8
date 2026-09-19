@@ -96,6 +96,13 @@ export type PrepareWorkflowResponse = {
   model: WorkflowModel;
   warnings: string[];
   errors: string[];
+  /**
+   * False when the XML could not be normalized at all, so `model` is the payload
+   * we sent, not a prepared one. Save uses it to tell "half-built" from
+   * "unreadable" -- the errors list cannot, because both arrive the same way
+   * (#234).
+   */
+  prepared: boolean;
 };
 
 export async function prepareWorkflow(

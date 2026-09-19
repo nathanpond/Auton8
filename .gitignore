@@ -91,3 +91,9 @@ secrets.json
 
 # xUnit trx logger output (`dotnet test --logger trx`)
 TestResults/
+
+# Test-result artifacts. `make test-slim` writes trx/slim-backend.trx and
+# trx/slim-e2e.trx so tier_gate.py can see skipped tests (#492); they are outputs
+# of a run, not inputs to one, and one of them was committed by an `git add -A`
+# that had no reason to know better.
+/trx/

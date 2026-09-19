@@ -11,7 +11,12 @@ import {
   getTaskFormConfig,
   TaskFormConfig
 } from "@/api/executions";
-import { taskFormConfigQueryKey, useCompleteTask } from "@/hooks/useExecutions";
+import {
+  HOME_MY_TASKS_QUERY_KEY,
+  HOME_TEAM_TASKS_QUERY_KEY,
+  taskFormConfigQueryKey,
+  useCompleteTask
+} from "@/hooks/useExecutions";
 import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import { useMe } from "@/hooks/useMe";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
@@ -29,7 +34,10 @@ import TaskFormModal from "@/components/workflow/TaskFormModal";
 // API doesn't paginate so we always pull the full task set.
 const RECORD_PRELOAD = 1000;
 const COLUMN_WIDTHS = ["24%", "10%", "16%", "20%", "8%", "14%", "8%"];
-const QUERY_KEY = ["home", "my-tasks"] as const;
+// Re-exported from the hooks module, where the mutations that must invalidate
+// it can see it (#268). A local literal here is what let TaskFormPage inherit
+// the staleness bug.
+const QUERY_KEY = HOME_MY_TASKS_QUERY_KEY;
 
 type TaskRow =
   | {
@@ -74,7 +82,7 @@ export default function MyTasksPanel() {
     [userId],
   );
   const queryKeys = useMemo(
-    () => [QUERY_KEY, ["home", "team-tasks"] as const],
+    () => [QUERY_KEY, HOME_TEAM_TASKS_QUERY_KEY],
     [],
   );
   useInvalidateOnChannels(channels, queryKeys, { enabled: Boolean(userId) });
@@ -138,24 +146,23 @@ export default function MyTasksPanel() {
 
   const completeFromModal = useCallback(
     async (taskId: string, variables?: Record<string, unknown>) => {
-      await completeTask.mutateAsync({ taskId, variables });
-
-      // #259. This panel's own keys, which the mutation does not know about.
-      //
-      // useCompleteTask invalidates ["tasks","assigned-to-me"] and
-      // ["tasks","assigned-to-team"]; this panel queries ["home","my-tasks"]
-      // and ["home","team-tasks"], which merge the workflow tasks with the
-      // assigned RECORDS. Those key sets never match, so completing a task from
-      // here refreshed nothing.
+      // useCompleteTask invalidates this panel's keys itself (#268). It did not
+      // when #259 fixed the staleness here: this panel queries ["home",…] while
+      // the mutation invalidated only ["tasks",…], and those prefixes never
+      // match, so completing a task from here refreshed nothing.
       //
       // It looked fine because useInvalidateOnChannels does invalidate the right
       // keys when the push arrives — so the row usually vanished, and did not
       // when the channel was slow, disconnected, or absent (as in E2E, which is
       // where this was finally caught). Waiting on a push to reflect the user's
       // OWN action is the part that was wrong; the push is for everyone else's.
-      await Promise.all(queryKeys.map((queryKey) => qc.invalidateQueries({ queryKey })));
+      //
+      // The patch lived here, at one of two call sites, and the other one
+      // (TaskFormPage, which this very panel navigates to for a Page-mode task)
+      // still had the bug. It now lives in the mutation, so every caller gets it.
+      await completeTask.mutateAsync({ taskId, variables });
     },
-    [completeTask, qc, queryKeys]
+    [completeTask]
   );
 
   const columns = useMemo<DataTableColumn<TaskRow>[]>(

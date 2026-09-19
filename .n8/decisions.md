@@ -9224,3 +9224,479 @@ condition is incidental. Forcing the condition is what turns "it broke on CI" in
   stopped checking. With the path fixed, the mutation that makes every enable
   report failure kills it.
   **Issue:** #585
+
+## M5 execution — #578, the multi-pool refusal (2026-09-19)
+
+**What the issue asked for**: a workflow with more than one pool must be refused
+at publish, because Auton8 deploys one process per model and Flowable would take
+only the first participant's process — silently, with the rest of the diagram
+gone. A refusal at publish is the honest version of that.
+
+**Where the check went.** `WorkflowBpmnXml.ValidateProcess`, alongside the other
+publish-blocking rules, counting `bpmn:participant` descendants and naming every
+pool in one error rather than one error per pool. Naming them matters: an author
+with three pools wants to know which three, and a per-pool error list reads as
+three separate problems.
+
+**A stale claim fixed in passing (Rule 1).** The studio's "Coming soon" note on
+the Collaboration palette rows said publishing one *"is refused until its story
+lands"*. That was false for every row it covered — nothing refused anything. It
+now says what is actually true.
+
+**Issue:** #578
+
+## M5 execution — #234, save and publish stop sharing a bar (2026-09-19)
+
+**The decision the issue asked for.** Its three options were: save ignores errors,
+split the set, or document the status quo. Taking **option 2**, with the split
+drawn at *what would corrupt the stored model*: a draft holds almost anything an
+author has half-built; it must not hold something the studio cannot reopen.
+
+Option 1 as written would store whatever the client sent when normalization
+failed outright — the one case where there is no prepared model at all.
+
+**Why it needed a contract change, small as it is.** The two failure classes were
+indistinguishable in the response: both arrive as a non-empty `Errors` list, and
+both carry a `WorkflowModel` that looks fine — in the unreadable case it is the
+request's own model handed back. So `PrepareWorkflowResponse` gained
+`Prepared` (defaulting true; only the `catch` sets it false). Additive, one
+consumer, and it is the server that knows the answer.
+
+**Why this was never chosen.** #225 moved the full validation set onto `/publish`,
+which was right for the API. Save went through the same `prepareAndStore` call, so
+every rule promoted to a publish refusal became a save refusal in the same commit —
+each new rule joining the set without anyone deciding. The fix is at that root:
+`prepareAndStore` now takes a mode, and a new publish rule affects publish.
+
+**The complement, deliberately kept.** Errors are still *reported* on save. A
+version that let the draft through by discarding the diagnostics would pass "the
+author can save" while making the studio quieter about real problems — the
+opposite of what #159 and #163 exist for.
+
+**Evidence.** Two backend facts pin the flag in both directions (a readable
+diagram that breaks a rule IS prepared; unreadable XML is not) — one direction
+alone passes against a constant. One E2E spec drives the studio with a single
+diagram and asserts *two verdicts on it*: Save stores it (and the stored model
+really contains the element), Publish refuses it and never POSTs. Mutation-checked
+both ways: removing `Prepared: false` kills 1 of 2 backend facts; making
+`prepareAndStore` bail unconditionally kills the E2E, and its failure message
+shows the exact shape of the original bug — `/api/workflows/prepare` POSTed, no
+save POST at all.
+
+**A method correction worth recording.** The E2E's first form read the request
+counter once, immediately after the "Saved" status appeared, and failed against a
+save that had demonstrably happened: Playwright dispatches `Request` events over
+its own connection, so the DOM can update before the event reaches the test
+process. The counter is now polled, and the publish-side zero waits first — an
+immediate zero there would have meant "not yet", not "refused".
+
+**A stale comment fixed in passing.** `WorkflowPaletteTests` explained that it
+reads `/prepare` rather than the stored model *because* a refusal at prepare also
+refused the save. True when written; #234 is exactly what makes it false.
+
+**Issue:** #234
+
+## M5 execution — #268, the fix moves to where the keys are (2026-09-19)
+
+**What the issue found.** #259's staleness fix was correct and landed at one of
+**two** call sites. `MyTasksPanel.completeFromModal` invalidated the panel's own
+keys after completing; `TaskFormPage` — the page that same panel navigates to for
+a `userFormMode="page"` task — carried the identical mismatch untouched. So the
+reported bug survived on a path the fixed component dispatches to.
+
+**The fix is structural, not another patch.** `HOME_MY_TASKS_QUERY_KEY` and
+`HOME_TEAM_TASKS_QUERY_KEY` moved out of the two panels and into
+`hooks/useExecutions.ts`, next to the mutations that have to invalidate them;
+`useCompleteTask` now invalidates them itself, and both panels import the
+constants they used to declare. A key a mutation must know about cannot be a
+private detail of one component, or the next call site inherits the bug by
+default — which is exactly what happened here.
+
+The per-call-site patch in `completeFromModal` is gone rather than left as
+belt-and-braces. Two places doing the same invalidation is how one of them
+quietly stops being necessary and nobody notices when it breaks.
+
+**Test choice.** The new E2E drives the path that had **no** coverage —
+Page mode — rather than re-asserting the modal path #259 already covers. It
+navigates back to `/home` client-side on purpose: a full reload would rebuild the
+query cache and pass against the broken code. Mutation-checked: removing the two
+`invalidateQueries` calls fails it with the row still present after 20s.
+
+Two additive seeder capabilities, both small and both needed by that path:
+`CreateAndPublishWorkflowAsync` can now set `flowable:userFormMode` /
+`userFormShortCode`, and `CreateFormAsync` takes optional JSX — the server's
+default form code renders a heading with no submit control, so a test that has to
+submit has to bring its own form.
+
+**Issue:** #268
+
+## M5 execution — #235, the ColorAdmin sweep, and the guard it needed (2026-09-19)
+
+**What was there.** 36 `form-control`, 13 `form-select`, 20 `form-check` groups
+and their `btn`/`d-flex`/`mt-*` companions in `WorkflowStudio.tsx` — about 110
+dead class names in one file — plus strays in `ModelCatalogPage`, `UserBadge`,
+`RecordList`, `PluginDocumentation`, `ExecutionHistory` and one orphaned CSS
+rule in `SystemHealth.css`. None of them match a rule any more; they render
+browser defaults beside Mantine controls and pick up none of `SiteAppearance`'s
+theming.
+
+**Mapping chosen to change styling, not behaviour.** `<select>` became
+Mantine's `NativeSelect` rather than `Select`, because `NativeSelect` renders a
+real `<select>` and keeps `onChange={(e) => e.target.value}` exactly as written;
+`Select` would have changed the event shape at every call site. Numeric inputs
+became `TextInput type="number"` rather than `NumberInput` for the same reason:
+the state holds strings, and `NumberInput` clamps and reformats. The one place
+that is a genuine improvement rather than a translation is the radio groups —
+loose `<input type="radio">` siblings sharing a `name` by convention became
+`Radio.Group`, which owns the selection, so the two or four handlers that each
+set the same field collapse into one.
+
+**Two accessibility fixes fell out of it.** The week-day toggles conveyed
+selection with colour alone (`btn-primary` vs `btn-outline-primary`); they now
+carry `aria-pressed`. And several inputs that had been labelled only by an
+adjacent `<span>` inside a `<label>` wrapper now carry real labels or
+`aria-label`s, because Mantine's `label` prop wires `for`/`id` and the old
+markup's association was positional.
+
+**The guard is the point, not the sweep.** A cleanup with no guard is a cleanup
+that gets to be done again — these arrived one copy-paste at a time.
+`src/lib/__tests__/dead-theme-classes.test.ts` scans every SPA source file for
+whole class tokens from an explicit dead list. Whole tokens, because
+`panel-body` is a substring of the project's own `workflow-rsb-panel-body`.
+
+Not an ESLint rule, deliberately: `react/forbid-dom-props` cannot see inside a
+template literal (`` className={`btn ${on ? "btn-primary" : ""}`} ``), and the
+SPA's lint ratchet counts *warnings*, so a new violation there would read as a
+number going up rather than a build going red.
+
+**The guard has its own complement, and it earned it immediately.** Two of its
+three assertions are about the detector, not the codebase: it must flag a
+planted `form-control` and a `btn-primary` inside a template literal, and it
+must *not* flag `workflow-rsb-panel-body`. The file-count assertion is there for
+the same reason — a scanner rooted at the wrong directory reports "clean" in
+exactly the same green as a clean codebase.
+
+On its first run it found `mx-2` × 4 in `ExecutionHistory.tsx`, which every grep
+I had written by hand had missed.
+
+Mutation-checked: adding `className="form-control"` to one converted input fails
+it, naming the file and the token.
+
+**Issue:** #235
+
+## M5 execution — #106, the DMN engine was already there (2026-09-19)
+
+**The finding the story existed for: DMN costs no container.** The engine ships
+enabled on `flowable/flowable-rest@sha256:708dfa32…`, the image this repo already
+builds and pins, mounted under `/flowable-rest/dmn-api/`. Evidence is a running
+engine, as the AC demanded — `dmn-management/engine` answers `{"version":"8.0.0"}`,
+and the repository, rule and history services all answer. **#58, #52 and #49
+acquire nothing**, and the existing `RequiresService=Flowable` trait covers DMN
+tests, so CI's exclusion list does not grow either.
+
+The one detail worth writing down is the path prefix: `dmn-api/dmn-repository/…`.
+Without that segment it is a 404, and it is exactly the thing someone who knows
+the BPMN routes would "correct".
+
+**Shape chosen.** A separate `IFlowableDecisionClient` rather than more methods on
+`IFlowableClient` (the story delegated this). They share a host and credentials —
+and share `FlowableClient.ConfigureHttpClient` so the auth is not invented twice —
+but they are two engines with two REST services and two vocabularies, and
+`IFlowableClient` is already past thirty methods.
+
+**Three things were measured that would have been wrong from memory.**
+
+1. An unknown decision key returns **400**, not the 500 I had written the client
+   against. The engine classifies a caller's typo correctly. The client still
+   resolves the key first, but for a message that names it — not to repair a
+   status.
+2. A **type-mismatched input is accepted**: 201 Created, empty result,
+   byte-identical to a legitimate no-match. This is the sharpest finding in the
+   story. A caller who passes `amount` as a string is told "no rule applied", and
+   a routing decision silently becomes "do nothing". The AC required the three
+   failure modes to be *distinguishable*, and relaying what the engine does could
+   not deliver that — so the client reads the decision's own DMN XML
+   (`decisions/{id}/resourcedata`, cached per immutable decision id) and refuses
+   inputs the author's declared `typeRef` cannot use.
+3. The client's request body was serialized **PascalCase**. `PropertyNameCaseInsensitive`
+   governs reading, not writing, so `{"DecisionKey":…}` went out and the engine's
+   case-sensitive binder read neither the key nor the inputs. Caught by a slim
+   unit test asserting the body — and, importantly, **not catchable** by any test
+   that talks to the engine directly, because such a test writes its own JSON.
+
+**Test split**, the same one `PlacementDifferentialTests` uses and for the same
+reason: eight slim facts pin what the client sends and parses (merge gate), three
+full-local facts pin what the engine does (needs the engine). The E2E project
+cannot reference `AutoNate.Web`, and `TestTierDefinitionTests` forbids a
+`RequiresService` trait in the backend project, so neither project can hold both
+halves. The join — the real client against the real engine — was demonstrated once
+and its transcript recorded on the issue, which is the same standard
+`bpmn-placement.json` was produced to.
+
+**Pins:** SLIM_BACKEND 2856 → 2864, FLOWABLE 240 → 243, FULL_LOCAL 470 → 473.
+
+**Issue:** #106
+
+## M5 execution — #229, the shape that says interrupting and is not (2026-09-19)
+
+**The decision the issue asked for: a publish-time warning, not a refusal and not
+a workaround.** Epic #40's line is that Auton8 does not reimplement execution
+semantics, so "work around the engine" was never available whatever the
+specification says. And nothing here is broken — the handler runs, the diagram
+deploys, and an author who wants this arrangement can have it. What they could
+not have was to know they had it. So the deliverable is visibility.
+
+The issue asked whether the specification requires the sibling to die. **That
+question is left open on purpose.** The warning describes what the engine does,
+which is what an author gets either way, and it says so rather than implying a
+verdict.
+
+**Three arrangements measured, not two.** The issue described the problem as "the
+handler beside the error end event in the same scope". That is not quite the
+condition:
+
+| arrangement | sibling |
+|---|---|
+| throw one scope deeper than the handler | **cancelled** |
+| throw, sibling and handler all inside one `subProcess` | **keeps running** |
+| throw, sibling and handler all at the **process** level | **cancelled** |
+
+The third was found by building the first version of the differential wrong — my
+shape B put everything at the process level, and the sibling died, which looked
+like the issue being mistaken. It was not; the issue's own note said "history
+confirmed `scope`, `ongoing`, `handler` and `ht` all still open", and that
+`scope` is the enclosing subprocess I had left out.
+
+Two consequences. The rule is keyed on an error end event that is a **direct
+child** of the scope holding the handler, so `Descendants` would make it fire on
+the arrangement that works — mutation-checked, and it is the negative case that
+catches it. And it does not fire at the process level, which is a shape people
+actually draw.
+
+**Three of the four slim facts are negative cases**, deliberately. A warning that
+fired on every event subprocess would satisfy the positive one and teach authors
+to ignore warnings.
+
+**Pins:** SLIM_BACKEND 2864 → 2868, FLOWABLE 243 → 245, FULL_LOCAL 473 → 475.
+
+**Issue:** #229
+
+## M5 execution — #286, the compensation-variable trap, pinned and moved (2026-09-19)
+
+Two of the issue's three asks are done; the third is a blocker by its own words.
+
+**Pinned.** `A_handler_reads_the_current_variable_value_not_the_value_at_completion`
+deploys `paymentId='A'` → compensable step → overwrite to `'B'` → throw, and
+asserts the handler read **`B`**. The assertion is on the *value*, not on the
+handler having run: the point is that a future Flowable which starts snapshotting
+— or stops running the handler — becomes visible. `CompensationExecutionTests` had
+four facts and none touched variables, so the limitation could have changed in
+either direction and the ledger entry would have quietly become wrong.
+
+**Moved.** The note is now in `bpmn-support.json`'s `reason` for all four
+compensation rows, which the studio's BPMN types panel renders. A behaviour author
+now meets it where they are choosing the element, not in `.n8/decisions.md`.
+
+**An existing guard did its job, and it is worth recording that it did.**
+`BpmnSupportManifestTests.Every_reason_is_still_the_one_that_was_measured` failed
+on the edit, naming all four rows and their digests — #380's baseline working
+exactly as designed. The baseline was regenerated with
+`AUTONATE_REGENERATE_REASON_BASELINE=1`, and its diff is **exactly those four
+rows**, which is the evidence that the note went where it was meant to and nowhere
+else.
+
+**Blocked, and why it is not a judgment call.** The third ask — rewrite #115's
+criterion to say what is true — changes what a closed box means on a closed story.
+The issue asks for the owner's word and the exec rules reserve that class of
+change; asked on #286.
+
+**Pins:** FLOWABLE 245 → 246, FULL_LOCAL 475 → 476.
+
+**Issue:** #286
+
+## M5 blockers raised — #284, #285, #286's criterion (2026-09-19)
+
+Three issues whose remaining work is a decision about what a **closed box** means.
+Each asks for the owner's word in its own body; §3's blocker path applies, and
+none of them holds up anything else in M5.
+
+- **#284** — #218 shipped prevention (publish refuses an author condition on a
+  route; the route contract refuses null) rather than the generated default flow
+  and distinguishability its criterion describes. Verified before filing: no
+  exclusive gateway is generated at all, so the criterion has no subject.
+  Recommended: amend the criterion to describe the prevention; file
+  distinguishability separately only if it is wanted for its own sake.
+- **#285** — #168's conjunction is still unverifiable here. Re-measured: the
+  `autonate-flowable-dapr` container exists but the fixture runs with
+  `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true` and no `workflow_execution_errors`
+  row appears. Recommended: re-word the criterion to stop at the engine and let
+  **#172** carry the join, since its AC already requires the same arrow and would
+  give the environment work a home instead of a fourth tier.
+- **#286** — the criterion half only; the pin and the manifest note shipped.
+
+Recorded together because they share a shape worth naming: **the executable work
+in each was done, and what remains is a contract edit on a closed story.** Doing
+those silently is how a milestone reads as delivered while its record drifts —
+which is the failure this milestone has spent the week correcting.
+
+## M5 execution — #172, the jobs an operator could not see (2026-09-19)
+
+`IFlowableClient` had thirty-odd methods and not one touched jobs. A timer that
+did not fire, a step retrying in the background, a step that exhausted its retries
+— none of it was visible anywhere in Auton8.
+
+**The REST surface was read out of the shipped engine, not recalled.**
+`flowable-rest-8.0.0.jar`'s `JobResource` carries the literals, and they are not
+uniform: `/management/jobs/{id}` takes only `execute`, `/management/timer-jobs/{id}`
+takes `move` or `reschedule` ("Reschedule timer actions must have a valid due
+date"), `/management/deadletter-jobs/{id}` takes `move` or `moveToHistoryJob`. A
+single "retry" that guessed one verb would have been right two times in three.
+`TimerJobActionRequest` has one field, `dueDate`.
+
+So **retrying a dead-lettered job is a MOVE**, not an execution in place. The call
+returning means "queued again", not "the step succeeded" — which is why every
+assertion is on the process advancing, and why the toast says *"Job queued to run
+again"* rather than claiming an outcome the call cannot know.
+
+**Discretion, decided.**
+
+- **Live reads, not cached.** The story permitted either. The question an operator
+  opens this to answer is "what is stuck *right now*", and a cache would put a
+  staleness question in front of exactly the reader who cannot tolerate one. The
+  difference from #104's cached executions is stated in the code rather than left
+  to be discovered.
+- **The stuck list is a filter on the executions area, not its own page.** A
+  separate page needs a permanent navigation entry for a list that is empty on a
+  healthy system, and an entry that says "stuck work" every day teaches people to
+  stop reading it. It renders *nothing* when nothing is stuck.
+- **Exception detail behind one click.** An operator who cannot see why it failed
+  cannot decide whether retrying is sensible; a stack in every row makes the list
+  unscannable.
+- **Pending timers surviving a redeploy: filed as #601.** A measurement, not a
+  feature, and it belongs with the other engine probes.
+
+**Existing kind, two new actions — not a new kind.** A job has no independent
+existence; its scope is its execution, which is also the scope an operator is
+granted over, so `/workflowexecution/<id>` and `[processkey=orders]` already mean
+the right thing. A `workflowjob` kind would have needed its own
+`IInstanceAuthorizer` and `ISelectorCompiler` — the registration pair the
+`add-permission-gate` skill records as having shipped missing **five times**,
+denying everyone but super-admins each time.
+
+**Three defects the tests caught that nothing else would have.**
+
+1. `WorkflowJobQueue` serialized as a **number**. The list answered `"queue": 2`
+   while the retry endpoint took `"deadletter"` — the read and the write speaking
+   different languages about the same concept. Fixed with the codebase's own
+   pattern, `[JsonConverter(typeof(JsonStringEnumConverter))]` on the enum.
+2. `StuckJobsPanel` linked to `/workflow-executions/{id}`. The route is
+   `/executions/:id`; every link would have 404'd.
+3. The empty-state alert wore Mantine's default `role="alert"` — announcing
+   assertively that everything is fine, which is #597's defect on a new surface.
+   Now `role="presentation"`, with the genuine failure keeping `role="alert"`, and
+   both halves asserted so the second cannot pass against a panel that shouts at
+   everything.
+
+**The task list is not the instrument for "the process advanced."** Measured here:
+after a successful retry, history showed `boom` errored and `two` OPEN while
+`/tasks` still listed the force-completed "Step one". #592 serves task reads from
+the cache, so an assertion there measures projection latency rather than the
+feature. Both engine tests assert on `/history`.
+
+Mutation-checked: making retry and reschedule no-ops fails both engine facts, each
+naming the trail it stalled on (`f0 | s | wait` and `f0 | one | s | f1 | boom`).
+Pointing both gates at one action fails both theories of the independence test.
+
+**Pins:** SLIM_BACKEND 2868 → 2870, FLOWABLE 246 → 250, SLIM_E2E 229 → 231,
+FULL_LOCAL 476 → 482.
+
+**Issue:** #172
+
+## M5 execution — what the full slim gate caught that targeted runs did not (2026-09-19)
+
+Two defects in #172's work, both found by running `make test-slim` rather than the
+tests I had written. Recorded because the lesson is about method, not about jobs.
+
+**1. Three new audit event types with no `EventCatalog` entry.**
+`WorkflowEventCatalogParityTests` failed on CI, naming all three: *"published but
+not in the EventCatalog, so they are invisible on the Events admin page and
+undiscoverable by subscribers"*. The guard is right and I had not run it — I ran
+the authorization invariants and the new tests, not the suite. The exec skill says
+run the **full** suite; this is what it is for.
+
+**2. `StuckJobsPanel` broke #109's test — and would have shipped on a clean
+database.** The panel rendered a Mantine `<Alert>`, which defaults to
+`role="alert"`, on the executions list page.
+`ExecutionFreshnessIndicatorTests.A_stopped_feed_reads_as_not_updating_without_posing_as_an_error`
+asserts no alert banner is visible there, and it failed — **only because the dev
+database had stuck jobs left over from this story's own E2E runs.** On a clean
+database the panel renders nothing and the test passes.
+
+Fixed with `role="status"`: stuck work is a standing *condition*, true on every
+load until someone acts, so an assertive region would interrupt a screen-reader
+user every time they came back. The genuine failure state — "we could not ask" —
+keeps `role="alert"`.
+
+**The pattern is now three deep** (#597's freshness indicator, this story's jobs
+empty state, this story's stuck panel), each caught by a different accident, and
+the third by leftover test data. Measured: **135 of 151** `<Alert>`s in the SPA
+declare no role at all. Filed as **#602** with the rule that would prevent a
+fourth — every `<Alert>` states its role explicitly, guarded by a source scan in
+the shape of `dead-theme-classes.test.ts`.
+
+**Slim result after both fixes:** backend **2870 passed, 0 failed, 0 skipped**, at
+its pin.
+
+## M5 execution — #232, the skill restructure, and its own guard's two defects (2026-09-19)
+
+**The three structural problems, all addressed.**
+
+1. **It did not start where the work starts.** Step 0 is now the engine probe, with
+   #103's inventory verdict named as a *hypothesis* rather than an input, and a table
+   of what the engine actually did against what was assumed. Added #229's lesson while
+   it was fresh: one shape is not a measurement — probe the shape the story describes
+   *and* its near neighbour, because the difference between them is usually the
+   finding.
+2. **Expansion is a first-class path.** Three paths now, chosen at Step 1: **A**
+   authored, **B** expanded at publish, **C** removed/composed/converted. B carries the
+   five concerns none of which is intuitive — idempotence, id mapping back to the
+   author's element, artifact ordering, stripping authoring attributes, and deploying
+   once against a real engine.
+3. **Length: 452 → 410**, with more in it. What went was the long "this skill went
+   unused" retrospective (once restructured, it *is* the change rather than a note
+   about the change) and the old fact 6, which argued not every element needs all nine
+   steps and is now the path choice itself.
+
+**Three rotted claims**, two found by grepping and one by the skill's own verifier:
+the manifest has **69** entries not 68; there are **16** distinct `set*Editor(null)`
+clears not 14; and `scripts/verify-symbols.sh` resolves to the repo root, where it
+does not exist — it is under `.claude/skills/add-bpmn-element/scripts/`, and the very
+first instruction in the skill pointed at a missing file.
+
+**The more useful finding is two defects in the verifier.**
+
+- It **hard-coded** the manifest count as 68 while its failure message read *"not the
+  N SKILL.md quotes"*. So a stale *guard* would have reported a correct skill as
+  rotted, and a skill updated without touching the guard would keep failing. It reads
+  the number out of SKILL.md now, and fails loudly if SKILL.md stops quoting one. A
+  guard that hard-codes the value it claims to be reading from a document is not
+  checking the document — which is the same shape as the audit failure CLAUDE.md names,
+  a test still passing because it stopped checking.
+- Its lint-ratchet pattern did not tolerate markdown emphasis, so `**98**` read as
+  "something else". **A false rot report costs exactly as much trust as a missed one**,
+  and this one fired on my first restructured draft.
+
+**Also folded in**, because they are current and a reader needs them: #234's
+save-versus-publish split, #380's digest-pinned manifest reasons, #229's
+`Elements`-not-`Descendants` trap, and #602's Mantine `Alert` role default.
+
+**Not done, and recorded honestly:** the skill's own rule says a **cold test** is
+required after any change to its *steps*, and this changed all of them. `verify-symbols.sh`
+is green, and the skill itself says that is necessary and not sufficient. The cold
+test wants a fresh agent and a real element story; the next element story is where it
+should happen.
+
+**A stray artifact, caught on the way:** `git add -A` committed `trx/slim-e2e.trx`,
+a `make test-slim` output. Untracked, and `/trx/` is gitignored now.
+
+**Issue:** #232

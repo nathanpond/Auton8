@@ -13,9 +13,12 @@
 
 /* Services column ------------------------------------------------- */
 
-.system-health-services .panel-body {
-  padding: 0;
-}
+/*
+  A `.system-health-services .panel-body` rule lived here. `.panel-body` was
+  ColorAdmin's, and nothing has rendered one since the Mantine migration -- the
+  services card is a Mantine <Paper>. Removed rather than kept "in case",
+  because a selector with no subject reads as live styling to the next reader.
+*/
 
 .system-health-service-list {
   list-style: none;

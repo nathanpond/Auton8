@@ -1751,6 +1751,8 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
             // #107: silence becomes a refusal with a reason.
             errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
+            // #578: more than one pool deploys a definition Auton8 can never see.
+            errors.AddRange(BuildMultiPoolParticipantErrors(document));
             // #158: a conditional start event is legal only inside an event
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
@@ -1801,6 +1803,8 @@ public static partial class WorkflowBpmnXml
             warnings.AddRange(triggerFindings.Warnings);
             warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
+            // #229: an interrupting handler that will not interrupt its siblings.
+            warnings.AddRange(BuildSameScopeErrorHandlerWarnings(document));
 
 
             return new WorkflowBpmnValidationResult(errors, warnings);
@@ -4057,6 +4061,57 @@ public static partial class WorkflowBpmnXml
     // ENGINE axis, not its studio axis: an element Flowable runs deploys even while
     // the studio still lists it as coming soon, because "we have not built the
     // property editor yet" is not a reason to reject a hand-authored diagram.
+    /// <summary>
+    /// More than one pool is refused, because only one of them would survive (#578).
+    /// </summary>
+    /// <remarks>
+    /// <para>A two-pool collaboration used to publish <b>silently</b>. Pool,
+    /// Participant, Lane and Message Flow are all <c>engine: annotation</c> in
+    /// <c>bpmn-support.json</c>, which that manifest documents as "Deploys and
+    /// carries no execution semantics by design — never refused", so
+    /// <c>BuildUnsupportedElementErrors</c> let the diagram through. Flowable then
+    /// accepted a deployment containing two process definitions while
+    /// <c>DeployProcessAsync</c> read the result back by process key, which
+    /// resolves exactly one. The second definition existed in the engine,
+    /// appeared in no <c>workflow_models</c> row, and was unreachable from every
+    /// Auton8 surface.</para>
+    ///
+    /// <para><b>This refuses the SHAPE, not the elements.</b> The manifest is not
+    /// touched and those rows keep their classification: a lone pool, a lane, a
+    /// message flow inside one process all still publish. What is refused is the
+    /// arrangement that produces a definition nothing can reach — which is why the
+    /// count is of participants rather than of any element the manifest names.</para>
+    ///
+    /// <para>It sits with the other publish validations, so it runs before
+    /// anything is deployed. There is no partial deployment to roll back because
+    /// none is ever made.</para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildMultiPoolParticipantErrors(XDocument document)
+    {
+        var participants = document.Descendants(BpmnNamespace + "participant").ToList();
+        if (participants.Count <= 1)
+        {
+            return Array.Empty<string>();
+        }
+
+        // Named, because a second pool can be collapsed or off-screen and
+        // "multi-pool is not supported" alone leaves an author hunting for it.
+        var names = participants
+            .Select(p => p.Attribute("name")?.Value
+                         ?? p.Attribute("id")?.Value
+                         ?? "(unnamed pool)")
+            .ToList();
+
+        return new[]
+        {
+            $"This diagram has {participants.Count} pools ({string.Join(", ", names)}). "
+            + "Publishing a multi-pool collaboration is not supported yet: only one pool's "
+            + "process would be reachable afterwards, and the others would be deployed to the "
+            + "engine where Auton8 could not see or manage them. "
+            + "Publish one pool per workflow for now."
+        };
+    }
+
     private static IReadOnlyList<string> BuildUnsupportedElementErrors(
         XDocument document,
         BpmnSupportManifest support)
@@ -5230,6 +5285,98 @@ public static partial class WorkflowBpmnXml
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Warns where "interrupting" will not interrupt (#229).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An interrupting error event subprocess cancels the scope it guards — except
+    /// when it sits in the same subprocess as the error end event that throws.
+    /// Then the handler runs and a parallel sibling in that subprocess <b>keeps
+    /// going</b>, while <c>isInterrupting="true"</c> sits on the diagram saying
+    /// otherwise.
+    /// </para>
+    /// <para>
+    /// **This is a warning, not a refusal.** Nothing is broken: the handler runs,
+    /// the diagram deploys, and an author who wants exactly this can have it. What
+    /// they cannot currently have is to know they have it, because on a canvas the
+    /// difference from the interrupting shape is which box the handler is drawn
+    /// in. A refusal would also break diagrams that are already deployed and
+    /// working.
+    /// </para>
+    /// <para>
+    /// **The condition is measured, not reasoned.**
+    /// <c>EventSubProcessScopeDifferentialTests</c> runs all three arrangements
+    /// against a live engine: a throw one scope deeper cancels the sibling, and so
+    /// does a throw at the <em>process</em> level — it is specifically a handler
+    /// inside a <c>subProcess</c>, catching an error thrown in that same
+    /// subprocess, that does not. Keying the warning on "same scope" alone would
+    /// have fired it on the process-level shape, which behaves correctly.
+    /// </para>
+    /// <para>
+    /// Deliberately silent about what the specification requires. That question is
+    /// open on #229; this describes the engine, which is what an author gets
+    /// either way.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildSameScopeErrorHandlerWarnings(XDocument document)
+    {
+        var warnings = new List<string>();
+
+        foreach (var scope in document.Descendants(BpmnNamespace + "subProcess"))
+        {
+            // The scope itself must not be an event subprocess: a handler is not
+            // the scope whose siblings are at stake.
+            if (string.Equals(scope.Attribute("triggeredByEvent")?.Value, "true",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var handlers = scope.Elements(BpmnNamespace + "subProcess")
+                .Where(child => string.Equals(
+                    child.Attribute("triggeredByEvent")?.Value, "true",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (handlers.Count == 0) continue;
+
+            // An error end event that is a DIRECT child of this scope. One nested
+            // deeper is the arrangement that interrupts correctly, so Descendants
+            // would make the warning fire on the working shape.
+            var throwsHere = scope.Elements(BpmnNamespace + "endEvent")
+                .Any(end => end.Element(BpmnNamespace + "errorEventDefinition") is not null);
+            if (!throwsHere) continue;
+
+            foreach (var handler in handlers)
+            {
+                var interruptingErrorStart = handler.Elements(BpmnNamespace + "startEvent")
+                    .Any(start =>
+                        start.Element(BpmnNamespace + "errorEventDefinition") is not null
+                        && !string.Equals(start.Attribute("isInterrupting")?.Value, "false",
+                            StringComparison.OrdinalIgnoreCase));
+                if (!interruptingErrorStart) continue;
+
+                warnings.Add(
+                    $"Event subprocess '{ElementLabel(handler)}' catches an error thrown in its own "
+                    + $"subprocess '{ElementLabel(scope)}'. It is marked interrupting, but in this "
+                    + "arrangement Flowable runs the handler WITHOUT cancelling the other work in "
+                    + $"'{ElementLabel(scope)}' — parallel branches there keep running. Move the throwing "
+                    + "step into a nested subprocess if you need the scope cancelled.");
+            }
+        }
+
+        return warnings;
+    }
+
+    /// <summary>A human label for any element: its name, else its id.</summary>
+    private static string ElementLabel(XElement element)
+    {
+        var name = element.Attribute("name")?.Value;
+        return string.IsNullOrWhiteSpace(name)
+            ? element.Attribute("id")?.Value ?? "(unnamed)"
+            : name;
     }
 
     private static string GatewayLabel(XElement gateway)

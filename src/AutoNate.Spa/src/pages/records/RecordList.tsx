@@ -11,6 +11,7 @@ import {
   Pill,
   Popover,
   Stack,
+  Text,
   Tooltip,
   UnstyledButton
 } from "@mantine/core";
@@ -261,7 +262,11 @@ export default function RecordList() {
         accessorKey: "status",
         header: "Status",
         cell: ({ row }) =>
-          row.original.status ?? <span className="text-body text-opacity-50">—</span>
+          row.original.status ?? (
+              <Text span c="dimmed">
+                —
+              </Text>
+            )
       },
       {
         id: "dueDate",
@@ -271,7 +276,11 @@ export default function RecordList() {
           row.original.dueDate ? (
             formatDate(row.original.dueDate)
           ) : (
-            <span className="text-body text-opacity-50">—</span>
+            (
+              <Text span c="dimmed">
+                —
+              </Text>
+            )
           )
       },
       ...allFields.map((f): DataTableColumn<RecordModel> => ({
