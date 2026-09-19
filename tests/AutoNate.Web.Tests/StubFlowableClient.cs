@@ -367,14 +367,29 @@ internal sealed class StubFlowableClient : IFlowableClient
     // returns entries filtered by sinceUtc and paged by start/size.
     public List<FlowableHistoricActivityEvent> HistoricActivityEvents { get; } = new();
 
+    /// <summary>
+    /// Historic activity events, newest first and <b>unfiltered</b> (#590).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This stub used to be more capable than the real server, which is
+    /// why no test caught #590.</b> It took a <c>sinceUtc</c> and honoured it, so
+    /// every assertion written against it confirmed what the code BELIEVED
+    /// Flowable did. The engine ignores <c>startedAfter</c> on this collection
+    /// entirely — a value of 2030 returns every row.</para>
+    ///
+    /// <para>It now behaves as the engine does: descending by start time, no time
+    /// filter, and the caller is responsible for stopping. A stub that implements
+    /// the contract its caller wishes for cannot fail the way production does.</para>
+    /// </remarks>
     public Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
-        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default)
+        int start, int size, CancellationToken cancellationToken = default)
     {
-        Calls.Add($"HistoricActivities:start={start},size={size},since={sinceUtc?.UtcDateTime.ToString("o") ?? "<none>"}");
-        var src = sinceUtc is { } since
-            ? HistoricActivityEvents.Where(e => e.StartTime is { } st && st >= since)
-            : HistoricActivityEvents;
-        var page = src.OrderBy(e => e.StartTime ?? DateTimeOffset.MinValue).Skip(start).Take(size).ToArray();
+        Calls.Add($"HistoricActivities:start={start},size={size}");
+        var page = HistoricActivityEvents
+            .OrderByDescending(e => e.StartTime ?? DateTimeOffset.MinValue)
+            .Skip(start)
+            .Take(size)
+            .ToArray();
         return Task.FromResult<IReadOnlyList<FlowableHistoricActivityEvent>>(page);
     }
 

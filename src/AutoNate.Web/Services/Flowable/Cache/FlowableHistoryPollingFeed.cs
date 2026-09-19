@@ -5,11 +5,12 @@ using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Flowable.Cache;
 
-// Pages the global Flowable historic-activity-instances endpoint sinceUtc =
-// watermark. Each page advances the watermark to the latest StartTime seen
-// so a restart resumes from where we left off rather than replaying the
-// entire history. The append-only projection makes occasional overlap
-// (boundary clock skew) harmless.
+// Pages the global Flowable historic-activity-instances endpoint NEWEST FIRST
+// and stops at the first event older than the watermark (#590).
+//
+// It used to page ascending with a `startedAfter` the server ignores, which
+// meant it replayed the entire history every tick while looking incremental.
+// The append-only projection makes the deliberate boundary overlap harmless.
 public sealed class FlowableHistoryPollingFeed : PeriodicPollingFeed<FlowableHistoricActivityEvent>
 {
     private readonly IFlowableClient _flowable;
@@ -28,20 +29,56 @@ public sealed class FlowableHistoryPollingFeed : PeriodicPollingFeed<FlowableHis
         _options = options.Value;
     }
 
-    protected override async Task TickAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// One tick, for tests. Same shape as <c>WorkflowCacheRetentionService</c>
+    /// and <c>WorkflowTaskCompletionSweep</c> expose, so a test can drive a sweep
+    /// without waiting on the timer loop.
+    /// </summary>
+    /// <returns>How many events this tick emitted — which is what makes the
+    /// boundary behaviour observable, rather than only the page count.</returns>
+    internal Task<int> RunTickOnceAsync(CancellationToken cancellationToken) =>
+        SweepAsync(cancellationToken);
+
+    protected override async Task TickAsync(CancellationToken cancellationToken) =>
+        await SweepAsync(cancellationToken);
+
+    private async Task<int> SweepAsync(CancellationToken cancellationToken)
     {
+        var emitted = 0;
         var watermark = await _watermarks.GetAsync(FeedName, cancellationToken);
         var start = 0;
         var pageSize = Math.Max(1, _options.HistoryPageSize);
-        var newWatermark = watermark;
+        DateTimeOffset? newWatermark = watermark;
+        var reachedKnownHistory = false;
 
-        while (!cancellationToken.IsCancellationRequested)
+        // NEWEST FIRST, STOPPING AT WHAT WE ALREADY HAVE (#590).
+        //
+        // This used to page ASCENDING from the beginning with a `startedAfter`
+        // the server ignores, so every tick re-read all of history -- 3162 events
+        // and growing -- while the watermark advanced and the logs read as
+        // incremental. The watermark was decorative.
+        //
+        // It is now the stop condition. Descending order IS honoured by Flowable,
+        // so once a page yields an event older than the watermark, everything
+        // beyond it is older still and already recorded.
+        while (!cancellationToken.IsCancellationRequested && !reachedKnownHistory)
         {
-            var page = await _flowable.GetHistoricActivityEventsAsync(start, pageSize, watermark, cancellationToken);
+            var page = await _flowable.GetHistoricActivityEventsAsync(start, pageSize, cancellationToken);
             if (page.Count == 0) break;
 
             foreach (var ev in page)
             {
+                // STRICTLY older, not older-or-equal. Several events can share a
+                // timestamp, and stopping at equality would drop the ones a
+                // previous tick had not reached yet. Re-reading the boundary
+                // second is harmless -- the projection is idempotent on event_id
+                // -- and missing an event is not.
+                if (watermark is { } mark && ev.StartTime is { } when && when < mark)
+                {
+                    reachedKnownHistory = true;
+                    break;
+                }
+
                 await EmitAsync(
                     new ChangeEvent<FlowableHistoricActivityEvent>(
                         ChangeOp.Upsert,
@@ -52,6 +89,7 @@ public sealed class FlowableHistoryPollingFeed : PeriodicPollingFeed<FlowableHis
                         ev,
                         DateTimeOffset.UtcNow),
                     cancellationToken);
+                emitted++;
 
                 if (ev.StartTime is { } st && (newWatermark is null || st > newWatermark))
                 {
@@ -67,5 +105,7 @@ public sealed class FlowableHistoryPollingFeed : PeriodicPollingFeed<FlowableHis
         {
             await _watermarks.SetAsync(FeedName, w, cancellationToken);
         }
+
+        return emitted;
     }
 }

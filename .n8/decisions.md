@@ -9120,3 +9120,41 @@ discovery rather than arithmetic.
 **Transferable:** a test that only fails in one environment is a test whose
 condition is incidental. Forcing the condition is what turns "it broke on CI" into
 "it is covered".
+
+## M5 execution — #590 (the history feed's watermark does nothing)
+
+- **Decision:** drop `startedAfter` entirely and bound the tick by the **ordering**
+  instead — newest-first, stopping at the first event older than the watermark.
+  **Why:** measured, twice: `startedAfter` on `historic-activity-instances`
+  returns all 3162 rows whether the value is 2020 or 2030, while the same
+  parameter IS honoured on `historic-process-instances`. A query string the server
+  ignores, next to a comment asserting it does not, is worse than no filter — it
+  made the feed look incremental in code, in logs and in `projection_watermarks`
+  while it replayed all of history every 60 seconds. `sort=startTime&order=desc`
+  is honoured, which is the only bound left.
+  **Issue:** #590
+
+- **Decision:** the stop is on **strictly older**, so the boundary second is
+  re-read every tick.
+  **Why:** several activities can start in the same millisecond. Stopping at
+  older-or-equal would silently drop any a previous tick had not reached, and the
+  feed would look healthy while losing events. The projection is idempotent on
+  `event_id`, so a repeat is a no-op and a miss is permanent — that is the cheap
+  direction to be wrong in.
+  **Issue:** #590
+
+- **Root cause of why no test caught it: the stub was more capable than the
+  server.** `StubFlowableClient.GetHistoricActivityEventsAsync` took a `sinceUtc`
+  and **honoured** it, so every assertion written against it confirmed what the
+  code *believed* Flowable did. The stub now behaves as the engine does —
+  descending, unfiltered, caller stops — and the tests assert on **pages fetched
+  and rows emitted** rather than on the URL. Asserting a parameter was *sent* is
+  what let this ship.
+  **Issue:** #590
+
+- **A mutation survived and bought a fourth test.** Changing the stop from `<` to
+  `<=` passed all three original facts: none could observe an event being lost at
+  the boundary, because page counts are identical either way. Making the tick
+  return how many events it emitted made the difference observable, and the new
+  fact kills that mutation.
+  **Issue:** #590
