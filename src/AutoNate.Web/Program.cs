@@ -1069,6 +1069,17 @@ builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
         FlowableClient.ConfigureHttpClient(httpClient, options);
     });
 
+// The DMN engine (#106). Same host, same credentials, same pinned image -- it
+// ships enabled on flowable-rest and answers under /dmn-api/, so this adds no
+// service to the stack and reuses the BPMN client's HttpClient configuration
+// rather than restating the base address and Basic auth.
+builder.Services.AddHttpClient<IFlowableDecisionClient, FlowableDecisionClient>()
+    .ConfigureHttpClient((serviceProvider, httpClient) =>
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<FlowableOptions>>().Value;
+        FlowableClient.ConfigureHttpClient(httpClient, options);
+    });
+
 // Projection framework — materializes external/expensive data into AQL-queryable
 // Postgres tables. AddProjectionFramework() wires the worker, registry, and
 // version/watermark stores. Each AddProjection<TSource, TProjection>() +

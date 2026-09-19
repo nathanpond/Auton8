@@ -9383,3 +9383,56 @@ Mutation-checked: adding `className="form-control"` to one converted input fails
 it, naming the file and the token.
 
 **Issue:** #235
+
+## M5 execution — #106, the DMN engine was already there (2026-09-19)
+
+**The finding the story existed for: DMN costs no container.** The engine ships
+enabled on `flowable/flowable-rest@sha256:708dfa32…`, the image this repo already
+builds and pins, mounted under `/flowable-rest/dmn-api/`. Evidence is a running
+engine, as the AC demanded — `dmn-management/engine` answers `{"version":"8.0.0"}`,
+and the repository, rule and history services all answer. **#58, #52 and #49
+acquire nothing**, and the existing `RequiresService=Flowable` trait covers DMN
+tests, so CI's exclusion list does not grow either.
+
+The one detail worth writing down is the path prefix: `dmn-api/dmn-repository/…`.
+Without that segment it is a 404, and it is exactly the thing someone who knows
+the BPMN routes would "correct".
+
+**Shape chosen.** A separate `IFlowableDecisionClient` rather than more methods on
+`IFlowableClient` (the story delegated this). They share a host and credentials —
+and share `FlowableClient.ConfigureHttpClient` so the auth is not invented twice —
+but they are two engines with two REST services and two vocabularies, and
+`IFlowableClient` is already past thirty methods.
+
+**Three things were measured that would have been wrong from memory.**
+
+1. An unknown decision key returns **400**, not the 500 I had written the client
+   against. The engine classifies a caller's typo correctly. The client still
+   resolves the key first, but for a message that names it — not to repair a
+   status.
+2. A **type-mismatched input is accepted**: 201 Created, empty result,
+   byte-identical to a legitimate no-match. This is the sharpest finding in the
+   story. A caller who passes `amount` as a string is told "no rule applied", and
+   a routing decision silently becomes "do nothing". The AC required the three
+   failure modes to be *distinguishable*, and relaying what the engine does could
+   not deliver that — so the client reads the decision's own DMN XML
+   (`decisions/{id}/resourcedata`, cached per immutable decision id) and refuses
+   inputs the author's declared `typeRef` cannot use.
+3. The client's request body was serialized **PascalCase**. `PropertyNameCaseInsensitive`
+   governs reading, not writing, so `{"DecisionKey":…}` went out and the engine's
+   case-sensitive binder read neither the key nor the inputs. Caught by a slim
+   unit test asserting the body — and, importantly, **not catchable** by any test
+   that talks to the engine directly, because such a test writes its own JSON.
+
+**Test split**, the same one `PlacementDifferentialTests` uses and for the same
+reason: eight slim facts pin what the client sends and parses (merge gate), three
+full-local facts pin what the engine does (needs the engine). The E2E project
+cannot reference `AutoNate.Web`, and `TestTierDefinitionTests` forbids a
+`RequiresService` trait in the backend project, so neither project can hold both
+halves. The join — the real client against the real engine — was demonstrated once
+and its transcript recorded on the issue, which is the same standard
+`bpmn-placement.json` was produced to.
+
+**Pins:** SLIM_BACKEND 2856 → 2864, FLOWABLE 240 → 243, FULL_LOCAL 470 → 473.
+
+**Issue:** #106
