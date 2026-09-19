@@ -9329,3 +9329,57 @@ default form code renders a heading with no submit control, so a test that has t
 submit has to bring its own form.
 
 **Issue:** #268
+
+## M5 execution — #235, the ColorAdmin sweep, and the guard it needed (2026-09-19)
+
+**What was there.** 36 `form-control`, 13 `form-select`, 20 `form-check` groups
+and their `btn`/`d-flex`/`mt-*` companions in `WorkflowStudio.tsx` — about 110
+dead class names in one file — plus strays in `ModelCatalogPage`, `UserBadge`,
+`RecordList`, `PluginDocumentation`, `ExecutionHistory` and one orphaned CSS
+rule in `SystemHealth.css`. None of them match a rule any more; they render
+browser defaults beside Mantine controls and pick up none of `SiteAppearance`'s
+theming.
+
+**Mapping chosen to change styling, not behaviour.** `<select>` became
+Mantine's `NativeSelect` rather than `Select`, because `NativeSelect` renders a
+real `<select>` and keeps `onChange={(e) => e.target.value}` exactly as written;
+`Select` would have changed the event shape at every call site. Numeric inputs
+became `TextInput type="number"` rather than `NumberInput` for the same reason:
+the state holds strings, and `NumberInput` clamps and reformats. The one place
+that is a genuine improvement rather than a translation is the radio groups —
+loose `<input type="radio">` siblings sharing a `name` by convention became
+`Radio.Group`, which owns the selection, so the two or four handlers that each
+set the same field collapse into one.
+
+**Two accessibility fixes fell out of it.** The week-day toggles conveyed
+selection with colour alone (`btn-primary` vs `btn-outline-primary`); they now
+carry `aria-pressed`. And several inputs that had been labelled only by an
+adjacent `<span>` inside a `<label>` wrapper now carry real labels or
+`aria-label`s, because Mantine's `label` prop wires `for`/`id` and the old
+markup's association was positional.
+
+**The guard is the point, not the sweep.** A cleanup with no guard is a cleanup
+that gets to be done again — these arrived one copy-paste at a time.
+`src/lib/__tests__/dead-theme-classes.test.ts` scans every SPA source file for
+whole class tokens from an explicit dead list. Whole tokens, because
+`panel-body` is a substring of the project's own `workflow-rsb-panel-body`.
+
+Not an ESLint rule, deliberately: `react/forbid-dom-props` cannot see inside a
+template literal (`` className={`btn ${on ? "btn-primary" : ""}`} ``), and the
+SPA's lint ratchet counts *warnings*, so a new violation there would read as a
+number going up rather than a build going red.
+
+**The guard has its own complement, and it earned it immediately.** Two of its
+three assertions are about the detector, not the codebase: it must flag a
+planted `form-control` and a `btn-primary` inside a template literal, and it
+must *not* flag `workflow-rsb-panel-body`. The file-count assertion is there for
+the same reason — a scanner rooted at the wrong directory reports "clean" in
+exactly the same green as a clean codebase.
+
+On its first run it found `mx-2` × 4 in `ExecutionHistory.tsx`, which every grep
+I had written by hand had missed.
+
+Mutation-checked: adding `className="form-control"` to one converted input fails
+it, naming the file and the token.
+
+**Issue:** #235

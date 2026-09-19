@@ -1,3 +1,4 @@
+import { Text } from "@mantine/core";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 
 type Props = {
@@ -15,7 +16,11 @@ export default function UserBadge({ userId, withByPrefix }: Props) {
   const directory = useUserDirectory();
 
   if (!userId) {
-    return <span className="text-body text-opacity-50">unknown</span>;
+    return (
+      <Text span c="dimmed">
+        unknown
+      </Text>
+    );
   }
 
   const user = directory.get(userId);
@@ -34,9 +39,9 @@ export default function UserBadge({ userId, withByPrefix }: Props) {
   // Fallback: short hex form so debugging is still possible. The full id is in
   // the title attribute for hover.
   return (
-    <span title={userId} className="text-body text-opacity-75">
+    <Text span title={userId} c="dimmed">
       {withByPrefix ? "by " : ""}
       <code>{userId.substring(0, 8)}</code>
-    </span>
+    </Text>
   );
 }

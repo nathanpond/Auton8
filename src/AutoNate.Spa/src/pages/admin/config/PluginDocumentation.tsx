@@ -1286,31 +1286,31 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
             or the target is missing from this plugin&apos;s schema (check the
             migration ran).
           </dd>
-          <dt className="mt-2">Plugin enables but the hook never fires</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>Plugin enables but the hook never fires</dt>
           <dd>
             Verify the hook name matches a constant in <code>HookPoints</code>;
             string typos won&apos;t error, they just never match. Also confirm
             another plugin earlier in priority isn&apos;t short-circuiting the chain.
           </dd>
-          <dt className="mt-2">&quot;Plugin row is missing code or role password&quot;</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>&quot;Plugin row is missing code or role password&quot;</dt>
           <dd>
             The plugin row predates the data-isolation feature (uploaded before
             this version). Re-upload to provision the schema.
           </dd>
-          <dt className="mt-2">Migration fails on enable</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>Migration fails on enable</dt>
           <dd>
             Plugin status flips back to Disabled and <code>last_error</code>{" "}
             shows the offending filename. Fix the SQL, rebuild, re-upload as a
             new plugin install (or for in-flight dev: edit the file in the
             staged plugin folder and re-enable).
           </dd>
-          <dt className="mt-2">&quot;Plugin folder still locked&quot; at delete</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>&quot;Plugin folder still locked&quot; at delete</dt>
           <dd>
             Windows-only. The schema and role were already dropped; only files
             remain. Status is <code>DeletedPending</code>; the next host
             startup retries the file delete.
           </dd>
-          <dt className="mt-2">Plugin&apos;s menu item doesn&apos;t appear in the sidebar</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>Plugin&apos;s menu item doesn&apos;t appear in the sidebar</dt>
           <dd>
             Check that <code>Configure()</code> actually called{" "}
             <code>context.Menus.AddXxx()</code> (no early return / try-swallow).
@@ -1321,14 +1321,14 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
             explicit parent always works. The sidebar caches the menu in the
             SPA; a hard refresh after enable shows the new items.
           </dd>
-          <dt className="mt-2">Plugin page renders without the config sidebar</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>Plugin page renders without the config sidebar</dt>
           <dd>
             The path falls outside <code>/admin/config/*</code>. Place it under
             that prefix (convention:{" "}
             <code>{"/admin/config/plugins/{context.Code}/{key}"}</code>) so it
             mounts inside <code>ConfigLayout</code>.
           </dd>
-          <dt className="mt-2">JSX page shows &quot;Define a function Page()…&quot;</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>JSX page shows &quot;Define a function Page()…&quot;</dt>
           <dd>
             The compiled source didn&apos;t expose a top-level{" "}
             <code>function Page()</code>. Make sure the function is declared
@@ -1336,7 +1336,7 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
             conditional. The error surfaces verbatim from{" "}
             <code>JsxPage</code>.
           </dd>
-          <dt className="mt-2">Cast fails inside Configure</dt>
+          <dt style={{ marginTop: "var(--mantine-spacing-xs)" }}>Cast fails inside Configure</dt>
           <dd>
             Almost always a type-identity issue from shipping a host-shared
             assembly inside the zip. Re-check the build&apos;s exclusion list and

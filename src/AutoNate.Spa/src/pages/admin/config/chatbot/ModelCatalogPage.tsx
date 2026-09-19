@@ -166,16 +166,22 @@ export default function ModelCatalogPage() {
         const hasInput = m.inputCostPerMillionTokens !== null && m.inputCostPerMillionTokens !== undefined;
         const hasOutput = m.outputCostPerMillionTokens !== null && m.outputCostPerMillionTokens !== undefined;
         if (!hasInput && !hasOutput && !m.costPublishedAtUtc) {
-          return <span className="text-muted">—</span>;
+          return (
+            <Text size="sm" c="dimmed">
+              —
+            </Text>
+          );
         }
         return (
-          <div className="small">
+          <Text size="sm" component="div">
             <div>Input: {formatCost(m.inputCostPerMillionTokens, m.costCurrency)}</div>
             <div>Output: {formatCost(m.outputCostPerMillionTokens, m.costCurrency)}</div>
             {m.costPublishedAtUtc && (
-              <div className="text-muted">as of {m.costPublishedAtUtc.slice(0, 10)}</div>
+              <Text size="sm" c="dimmed">
+                as of {m.costPublishedAtUtc.slice(0, 10)}
+              </Text>
             )}
-          </div>
+          </Text>
         );
       }
     },
@@ -186,9 +192,13 @@ export default function ModelCatalogPage() {
       enableSorting: false,
       meta: { wrap: true },
       cell: ({ row }) => (
-        <span className="small">
-          {row.original.description ?? <span className="text-muted">—</span>}
-        </span>
+        <Text size="sm">
+          {row.original.description ?? (
+            <Text span c="dimmed">
+              —
+            </Text>
+          )}
+        </Text>
       )
     },
     {

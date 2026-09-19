@@ -8,6 +8,7 @@ import {
   ActionIcon,
   Autocomplete,
   Alert,
+  Badge,
   Box,
   Button,
   Checkbox,
@@ -16,6 +17,7 @@ import {
   Group,
   List,
   Modal,
+  NativeSelect,
   Radio,
   Select,
   Stack,
@@ -2402,8 +2404,8 @@ function DefaultProcessVariablesSection({
                   </div>
                 </div>
                 <div className="workflow-default-var-controls">
-                  <select
-                    className="form-select form-select-sm"
+                  <NativeSelect
+                    size="xs"
                     value={variable.type}
                     onChange={(e) =>
                       updateVariable(
@@ -2419,13 +2421,8 @@ function DefaultProcessVariablesSection({
                       )
                     }
                     aria-label={`Type for ${variable.name}`}
-                  >
-                    {DEFAULT_VARIABLE_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                    data={DEFAULT_VARIABLE_TYPES.map((t) => ({ value: t, label: t }))}
+                  />
                   <DefaultVariableValueInput
                     variable={variable}
                     onChange={(value) =>
@@ -2468,9 +2465,9 @@ function AddCustomVariableForm({
   return (
     <div className="workflow-default-var-add">
       <div className="workflow-default-var-add-row">
-        <input
+        <TextInput
           type="text"
-          className="form-control form-control-sm"
+          size="xs"
           value={name}
           onChange={(e) => {
             setName(e.target.value);
@@ -2485,14 +2482,15 @@ function AddCustomVariableForm({
           placeholder="Add a custom variable…"
           aria-label="Custom variable name"
         />
-        <button
-          type="button"
-          className="btn btn-sm btn-outline-primary"
+        <Button
+          size="xs"
+          variant="outline"
           onClick={submit}
           disabled={name.trim() === ""}
+          leftSection={<i className="fa fa-plus" aria-hidden="true" />}
         >
-          <i className="fa fa-plus" aria-hidden="true"></i> Add
-        </button>
+          Add
+        </Button>
       </div>
       {error && (
         <p className="workflow-default-var-add-error" role="alert">
@@ -2513,25 +2511,26 @@ function DefaultVariableValueInput({
   const ariaLabel = `Default value for ${variable.name}`;
   if (variable.type === "boolean") {
     return (
-      <select
-        className="form-select form-select-sm"
+      <NativeSelect
+        size="xs"
         value={variable.value === true ? "true" : variable.value === false ? "false" : ""}
         onChange={(e) =>
           onChange(e.target.value === "" ? null : e.target.value === "true")
         }
         aria-label={ariaLabel}
-      >
-        <option value="">(not set)</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </select>
+        data={[
+          { value: "", label: "(not set)" },
+          { value: "true", label: "true" },
+          { value: "false", label: "false" }
+        ]}
+      />
     );
   }
   if (variable.type === "number") {
     return (
-      <input
+      <TextInput
         type="number"
-        className="form-control form-control-sm"
+        size="xs"
         value={variable.value === null || variable.value === undefined ? "" : String(variable.value)}
         onChange={(e) => {
           const raw = e.target.value;
@@ -2551,9 +2550,9 @@ function DefaultVariableValueInput({
   // user can author objects/arrays without us imposing a parser here; the
   // backend treats type="json" as raw JSON when applied at start.
   return (
-    <input
+    <TextInput
       type="text"
-      className="form-control form-control-sm"
+      size="xs"
       value={variable.value === null || variable.value === undefined ? "" : String(variable.value)}
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
       aria-label={ariaLabel}
@@ -3340,272 +3339,252 @@ function TimerStartEventModal({
           </Alert>
         )}
 
-        <label className="workflow-field">
-          <span>Event Name (optional)</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-            placeholder="Daily reminder"
-          />
-        </label>
+        <TextInput
+          label="Event Name (optional)"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          placeholder="Daily reminder"
+        />
 
-        <fieldset disabled={editor.rawCronOverride} className="workflow-field">
-          <legend>
-            <span>Pattern</span>
-          </legend>
-          <select
-            className="form-select"
-            value={editor.recurrence.mode}
-            onChange={(e) =>
-              setRecurrence((r) => ({ ...r, mode: e.target.value as TimerMode }))
-            }
-          >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-        </fieldset>
+        <NativeSelect
+          label="Pattern"
+          disabled={editor.rawCronOverride}
+          value={editor.recurrence.mode}
+          onChange={(e) =>
+            setRecurrence((r) => ({ ...r, mode: e.target.value as TimerMode }))
+          }
+          data={[
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+            { value: "monthly", label: "Monthly" },
+            { value: "yearly", label: "Yearly" }
+          ]}
+        />
 
         {!editor.rawCronOverride && editor.recurrence.mode === "daily" && (
-          <div className="workflow-field">
-            <span>Recurrence</span>
-            <div className="d-flex align-items-center gap-2 mt-1">
-              <span>Every</span>
-              <input
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Recurrence
+            </Text>
+            <Group gap="xs" align="center">
+              <Text size="sm">Every</Text>
+              <TextInput
                 type="number"
                 min={1}
                 max={31}
-                className="form-control"
-                style={{ width: "5rem" }}
+                w="5rem"
                 value={editor.recurrence.dailyEveryN}
                 disabled={editor.recurrence.dailyWeekdaysOnly}
                 onChange={(e) =>
                   setRecurrence((r) => ({ ...r, dailyEveryN: e.target.value }))
                 }
               />
-              <span>day(s)</span>
-            </div>
-            <label className="form-check mt-2">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                checked={editor.recurrence.dailyWeekdaysOnly}
-                onChange={(e) =>
-                  setRecurrence((r) => ({ ...r, dailyWeekdaysOnly: e.target.checked }))
-                }
-              />
-              <span className="form-check-label">Weekdays only (Mon–Fri)</span>
-            </label>
-          </div>
+              <Text size="sm">day(s)</Text>
+            </Group>
+            <Checkbox
+              label="Weekdays only (Mon–Fri)"
+              checked={editor.recurrence.dailyWeekdaysOnly}
+              onChange={(e) =>
+                setRecurrence((r) => ({ ...r, dailyWeekdaysOnly: e.currentTarget.checked }))
+              }
+            />
+          </Stack>
         )}
 
         {!editor.rawCronOverride && editor.recurrence.mode === "weekly" && (
-          <div className="workflow-field">
-            <span>Recurrence</span>
-            <div className="d-flex align-items-center gap-2 mt-1">
-              <span>Every</span>
-              <input
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Recurrence
+            </Text>
+            <Group gap="xs" align="center">
+              <Text size="sm">Every</Text>
+              <TextInput
                 type="number"
                 min={1}
                 max={52}
-                className="form-control"
-                style={{ width: "5rem" }}
+                w="5rem"
                 value={editor.recurrence.weeklyEveryN}
                 onChange={(e) =>
                   setRecurrence((r) => ({ ...r, weeklyEveryN: e.target.value }))
                 }
               />
-              <span>week(s) on:</span>
-            </div>
-            <div className="btn-group mt-2" role="group" aria-label="Days of the week">
-              {WEEK_DAYS.map((day) => {
-                const active = editor.recurrence.weeklyDays.includes(day);
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    className={`btn btn-sm ${active ? "btn-primary" : "btn-outline-primary"}`}
-                    onClick={() => toggleWeekDay(day)}
-                  >
-                    {WEEK_DAY_LABELS[day]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+              <Text size="sm">week(s) on:</Text>
+            </Group>
+            {/*
+              Button.Group does not forward role/aria-label, so the group label
+              lives on a wrapping element. Each button carries aria-pressed, which
+              is what actually tells a screen reader which days are selected --
+              the old markup conveyed that with colour alone.
+            */}
+            <Box role="group" aria-label="Days of the week">
+              <Button.Group>
+                {WEEK_DAYS.map((day) => {
+                  const active = editor.recurrence.weeklyDays.includes(day);
+                  return (
+                    <Button
+                      key={day}
+                      size="xs"
+                      variant={active ? "filled" : "outline"}
+                      aria-pressed={active}
+                      onClick={() => toggleWeekDay(day)}
+                    >
+                      {WEEK_DAY_LABELS[day]}
+                    </Button>
+                  );
+                })}
+              </Button.Group>
+            </Box>
+          </Stack>
         )}
 
         {!editor.rawCronOverride && editor.recurrence.mode === "monthly" && (
-          <div className="workflow-field">
-            <span>Recurrence</span>
-            <div className="form-check mt-1">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-monthly-dom"
-                checked={editor.recurrence.monthlyKind === "dayOfMonth"}
-                onChange={() =>
-                  setRecurrence((r) => ({ ...r, monthlyKind: "dayOfMonth" as MonthlyKind }))
-                }
-              />
-              <label className="form-check-label d-flex align-items-center gap-2" htmlFor="timer-monthly-dom">
-                <span>Day</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  className="form-control"
-                  style={{ width: "5rem" }}
-                  value={editor.recurrence.monthlyDayOfMonth}
-                  disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
-                  onChange={(e) =>
-                    setRecurrence((r) => ({ ...r, monthlyDayOfMonth: e.target.value }))
-                  }
-                />
-                <span>of every</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  className="form-control"
-                  style={{ width: "5rem" }}
-                  value={editor.recurrence.monthlyEveryN}
-                  disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
-                  onChange={(e) =>
-                    setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
-                  }
-                />
-                <span>month(s)</span>
-              </label>
-            </div>
-            <div className="form-check mt-2">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-monthly-ord"
-                checked={editor.recurrence.monthlyKind === "ordinalWeekday"}
-                onChange={() =>
-                  setRecurrence((r) => ({ ...r, monthlyKind: "ordinalWeekday" as MonthlyKind }))
-                }
-              />
-              <label className="form-check-label d-flex align-items-center gap-2" htmlFor="timer-monthly-ord">
-                <span>The</span>
-                <select
-                  className="form-select"
-                  style={{ width: "auto" }}
-                  value={editor.recurrence.monthlyOrdinal}
-                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
-                  onChange={(e) =>
-                    setRecurrence((r) => ({ ...r, monthlyOrdinal: e.target.value as Ordinal }))
-                  }
-                >
-                  {(["1", "2", "3", "4", "L"] as Ordinal[]).map((ord) => (
-                    <option key={ord} value={ord}>
-                      {ORDINAL_LABELS[ord]}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="form-select"
-                  style={{ width: "auto" }}
-                  value={editor.recurrence.monthlyOrdinalDay}
-                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
-                  onChange={(e) =>
-                    setRecurrence((r) => ({ ...r, monthlyOrdinalDay: e.target.value as WeekDay }))
-                  }
-                >
-                  {WEEK_DAYS.map((d) => (
-                    <option key={d} value={d}>
-                      {WEEK_DAY_LABELS[d]}
-                    </option>
-                  ))}
-                </select>
-                <span>of every</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  className="form-control"
-                  style={{ width: "5rem" }}
-                  value={editor.recurrence.monthlyEveryN}
-                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
-                  onChange={(e) =>
-                    setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
-                  }
-                />
-                <span>month(s)</span>
-              </label>
-            </div>
-          </div>
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Recurrence
+            </Text>
+            {/*
+              One Radio.Group, where there were two loose radios sharing a name
+              only by convention. Mantine's group owns the selection, so the two
+              onChange handlers that each set monthlyKind become one.
+            */}
+            <Radio.Group
+              value={editor.recurrence.monthlyKind}
+              onChange={(value) =>
+                setRecurrence((r) => ({ ...r, monthlyKind: value as MonthlyKind }))
+              }
+            >
+              <Stack gap="xs">
+                <Group gap="xs" align="center">
+                  <Radio value="dayOfMonth" id="timer-monthly-dom" label="Day" />
+                  <TextInput
+                    type="number"
+                    min={1}
+                    max={31}
+                    w="5rem"
+                    aria-label="Day of the month"
+                    value={editor.recurrence.monthlyDayOfMonth}
+                    disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
+                    onChange={(e) =>
+                      setRecurrence((r) => ({ ...r, monthlyDayOfMonth: e.target.value }))
+                    }
+                  />
+                  <Text size="sm">of every</Text>
+                  <TextInput
+                    type="number"
+                    min={1}
+                    max={12}
+                    w="5rem"
+                    aria-label="Months between occurrences, by day of month"
+                    value={editor.recurrence.monthlyEveryN}
+                    disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
+                    onChange={(e) =>
+                      setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
+                    }
+                  />
+                  <Text size="sm">month(s)</Text>
+                </Group>
+                <Group gap="xs" align="center">
+                  <Radio value="ordinalWeekday" id="timer-monthly-ord" label="The" />
+                  <NativeSelect
+                    w="auto"
+                    aria-label="Which occurrence in the month"
+                    value={editor.recurrence.monthlyOrdinal}
+                    disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                    onChange={(e) =>
+                      setRecurrence((r) => ({ ...r, monthlyOrdinal: e.target.value as Ordinal }))
+                    }
+                    data={(["1", "2", "3", "4", "L"] as Ordinal[]).map((ord) => ({
+                      value: ord,
+                      label: ORDINAL_LABELS[ord]
+                    }))}
+                  />
+                  <NativeSelect
+                    w="auto"
+                    aria-label="Day of the week"
+                    value={editor.recurrence.monthlyOrdinalDay}
+                    disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                    onChange={(e) =>
+                      setRecurrence((r) => ({ ...r, monthlyOrdinalDay: e.target.value as WeekDay }))
+                    }
+                    data={WEEK_DAYS.map((d) => ({ value: d, label: WEEK_DAY_LABELS[d] }))}
+                  />
+                  <Text size="sm">of every</Text>
+                  <TextInput
+                    type="number"
+                    min={1}
+                    max={12}
+                    w="5rem"
+                    aria-label="Months between occurrences, by weekday"
+                    value={editor.recurrence.monthlyEveryN}
+                    disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                    onChange={(e) =>
+                      setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
+                    }
+                  />
+                  <Text size="sm">month(s)</Text>
+                </Group>
+              </Stack>
+            </Radio.Group>
+          </Stack>
         )}
 
         {!editor.rawCronOverride && editor.recurrence.mode === "yearly" && (
-          <div className="workflow-field">
-            <span>Recurrence</span>
-            <div className="d-flex align-items-center gap-2 mt-1">
-              <span>Every year on</span>
-              <select
-                className="form-select"
-                style={{ width: "auto" }}
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Recurrence
+            </Text>
+            <Group gap="xs" align="center">
+              <Text size="sm">Every year on</Text>
+              <NativeSelect
+                w="auto"
+                aria-label="Month"
                 value={editor.recurrence.yearlyMonth}
                 onChange={(e) =>
                   setRecurrence((r) => ({ ...r, yearlyMonth: e.target.value }))
                 }
-              >
-                {MONTH_LABELS.map((label, i) => (
-                  <option key={label} value={String(i + 1)}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <input
+                data={MONTH_LABELS.map((label, i) => ({
+                  value: String(i + 1),
+                  label
+                }))}
+              />
+              <TextInput
                 type="number"
                 min={1}
                 max={31}
-                className="form-control"
-                style={{ width: "5rem" }}
+                w="5rem"
+                aria-label="Day of the month"
                 value={editor.recurrence.yearlyDay}
                 onChange={(e) =>
                   setRecurrence((r) => ({ ...r, yearlyDay: e.target.value }))
                 }
               />
-            </div>
-          </div>
+            </Group>
+          </Stack>
         )}
 
-        <label className="workflow-field">
-          <span>Time of day</span>
-          <input
-            type="time"
-            className="form-control"
-            style={{ width: "10rem" }}
-            value={timeValue}
-            disabled={editor.rawCronOverride}
-            onChange={(e) => onTimeChange(e.target.value)}
-          />
-        </label>
+        <TextInput
+          label="Time of day"
+          type="time"
+          w="10rem"
+          value={timeValue}
+          disabled={editor.rawCronOverride}
+          onChange={(e) => onTimeChange(e.target.value)}
+        />
 
-        <label className="workflow-field">
-          <span>End by (optional)</span>
-          <input
-            type="date"
-            className="form-control"
-            style={{ width: "12rem" }}
-            value={editor.endDate}
-            onChange={(e) => onChange({ ...editor, endDate: e.target.value })}
-          />
-          <p className="workflow-modal-note">
-            Leave blank to recur indefinitely. Otherwise, no instances start after this date (engine timezone).
-          </p>
-        </label>
+        <TextInput
+          label="End by (optional)"
+          type="date"
+          w="12rem"
+          value={editor.endDate}
+          onChange={(e) => onChange({ ...editor, endDate: e.target.value })}
+          description="Leave blank to recur indefinitely. Otherwise, no instances start after this date (engine timezone)."
+        />
 
         {generatorError && !editor.rawCronOverride && (
-          <div className="alert alert-danger" role="alert">
+          <Alert color="red" variant="light" role="alert">
             {generatorError}
             {" Open Advanced below and override with a raw cron expression."}
-          </div>
+          </Alert>
         )}
 
         {!editor.rawCronOverride && generation.ok && (
@@ -3627,47 +3606,43 @@ function TimerStartEventModal({
           }
         >
           <summary>Advanced</summary>
-          <label className="workflow-field mt-2">
-            <span>Generated cron expression</span>
-            <input
-              className="form-control font-monospace"
+          <Stack gap="xs" mt="xs">
+            <TextInput
+              label="Generated cron expression"
+              ff="monospace"
               readOnly
               value={generatedCron}
               placeholder="(Configure recurrence above to see the generated cron)"
             />
-          </label>
-          <label className="form-check mt-2">
-            <input
-              type="checkbox"
-              className="form-check-input"
+            <Checkbox
+              label="Override with raw cron expression"
               checked={editor.rawCronOverride}
               onChange={(e) =>
                 onChange({
                   ...editor,
-                  rawCronOverride: e.target.checked,
-                  rawCronText: e.target.checked
+                  rawCronOverride: e.currentTarget.checked,
+                  rawCronText: e.currentTarget.checked
                     ? editor.rawCronText || generatedCron
                     : editor.rawCronText
                 })
               }
             />
-            <span className="form-check-label">Override with raw cron expression</span>
-          </label>
-          {editor.rawCronOverride && (
-            <label className="workflow-field mt-2">
-              <span>Raw cron (Quartz 6-field)</span>
-              <input
-                className="form-control font-monospace"
+            {editor.rawCronOverride && (
+              <TextInput
+                label="Raw cron (Quartz 6-field)"
+                ff="monospace"
                 value={editor.rawCronText}
                 onChange={(e) => onChange({ ...editor, rawCronText: e.target.value })}
                 placeholder="0 0 9 * * ?"
+                description={
+                  <>
+                    Format: <code>seconds minutes hours day-of-month month day-of-week</code>.
+                    Example: <code>0 0 9 ? * MON-FRI</code> = 9:00 AM every weekday.
+                  </>
+                }
               />
-              <p className="workflow-modal-note">
-                Format: <code>seconds minutes hours day-of-month month day-of-week</code>. Example:{" "}
-                <code>0 0 9 ? * MON-FRI</code> = 9:00 AM every weekday.
-              </p>
-            </label>
-          )}
+            )}
+          </Stack>
         </details>
 
         <Group justify="flex-end" gap="xs">
@@ -3727,167 +3702,112 @@ function TimerIntermediateCatchEventModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Event Name (optional)</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-            placeholder="Wait for review window"
-          />
-        </label>
+        <TextInput
+          label="Event Name (optional)"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          placeholder="Wait for review window"
+        />
 
-        <fieldset className="workflow-field">
-          <legend>
-            <span>Trigger</span>
-          </legend>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
+        <Radio.Group
+          label="Trigger"
+          value={editor.mode}
+          onChange={(value) => setMode(value as TimerIntermediateMode)}
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio
+              value="duration"
               id="timer-catch-mode-duration"
-              checked={editor.mode === "duration"}
-              onChange={() => setMode("duration")}
+              label="Duration after node start"
             />
-            <label className="form-check-label" htmlFor="timer-catch-mode-duration">
-              Duration after node start
-            </label>
-          </div>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="timer-catch-mode-date"
-              checked={editor.mode === "date"}
-              onChange={() => setMode("date")}
-            />
-            <label className="form-check-label" htmlFor="timer-catch-mode-date">
-              Specific date / time
-            </label>
-          </div>
-        </fieldset>
+            <Radio value="date" id="timer-catch-mode-date" label="Specific date / time" />
+          </Stack>
+        </Radio.Group>
 
         {editor.mode === "duration" && (
-          <fieldset className="workflow-field">
-            <legend>
-              <span>Duration</span>
-            </legend>
-            <div className="form-check form-check-inline">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-catch-duration-literal"
-                checked={editor.durationKind === "literal"}
-                onChange={() => setDurationKind("literal")}
-              />
-              <label className="form-check-label" htmlFor="timer-catch-duration-literal">
-                Hard-coded
-              </label>
-            </div>
-            <div className="form-check form-check-inline">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-catch-duration-expression"
-                checked={editor.durationKind === "expression"}
-                onChange={() => setDurationKind("expression")}
-              />
-              <label className="form-check-label" htmlFor="timer-catch-duration-expression">
-                Expression
-              </label>
-            </div>
+          <Stack gap="xs">
+            <Radio.Group
+              label="Duration"
+              value={editor.durationKind}
+              onChange={(value) => setDurationKind(value as TimerIntermediateValueKind)}
+            >
+              <Group gap="md" mt="xs">
+                <Radio value="literal" id="timer-catch-duration-literal" label="Hard-coded" />
+                <Radio
+                  value="expression"
+                  id="timer-catch-duration-expression"
+                  label="Expression"
+                />
+              </Group>
+            </Radio.Group>
             {editor.durationKind === "literal" ? (
-              <>
-                <input
-                  className="form-control mt-2"
-                  value={editor.durationLiteral}
-                  onChange={(e) => onChange({ ...editor, durationLiteral: e.target.value })}
-                  placeholder="PT15M"
-                />
-                <p className="workflow-modal-note">
-                  ISO 8601 duration — for example <code>PT15M</code> (15 minutes), <code>PT2H</code>{" "}
-                  (2 hours), <code>P1D</code> (1 day), <code>P1DT12H</code> (1 day 12 hours).
-                </p>
-              </>
+              <TextInput
+                aria-label="Duration"
+                value={editor.durationLiteral}
+                onChange={(e) => onChange({ ...editor, durationLiteral: e.target.value })}
+                placeholder="PT15M"
+                description={
+                  <>
+                    ISO 8601 duration — for example <code>PT15M</code> (15 minutes),{" "}
+                    <code>PT2H</code> (2 hours), <code>P1D</code> (1 day), <code>P1DT12H</code> (1
+                    day 12 hours).
+                  </>
+                }
+              />
             ) : (
-              <>
-                <textarea
-                  className="form-control workflow-expression-editor mt-2"
-                  rows={3}
-                  spellCheck={false}
-                  value={editor.durationExpression}
-                  onChange={(e) => onChange({ ...editor, durationExpression: e.target.value })}
-                  placeholder="${execution.getVariable('waitDuration')}"
-                />
-                <p className="workflow-modal-note">
-                  Flowable expression evaluated when the token reaches this event. Must resolve to
-                  an ISO 8601 duration string like <code>PT15M</code>.
-                </p>
-              </>
+              <Textarea
+                aria-label="Duration expression"
+                className="workflow-expression-editor"
+                rows={3}
+                spellCheck={false}
+                value={editor.durationExpression}
+                onChange={(e) => onChange({ ...editor, durationExpression: e.target.value })}
+                placeholder="${execution.getVariable('waitDuration')}"
+                description="Flowable expression evaluated when the token reaches this event. Must resolve to an ISO 8601 duration string like PT15M."
+              />
             )}
-          </fieldset>
+          </Stack>
         )}
 
         {editor.mode === "date" && (
-          <fieldset className="workflow-field">
-            <legend>
-              <span>Date / Time</span>
-            </legend>
-            <div className="form-check form-check-inline">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-catch-date-literal"
-                checked={editor.dateKind === "literal"}
-                onChange={() => setDateKind("literal")}
-              />
-              <label className="form-check-label" htmlFor="timer-catch-date-literal">
-                Hard-coded
-              </label>
-            </div>
-            <div className="form-check form-check-inline">
-              <input
-                type="radio"
-                className="form-check-input"
-                id="timer-catch-date-expression"
-                checked={editor.dateKind === "expression"}
-                onChange={() => setDateKind("expression")}
-              />
-              <label className="form-check-label" htmlFor="timer-catch-date-expression">
-                Expression
-              </label>
-            </div>
+          <Stack gap="xs">
+            <Radio.Group
+              label="Date / Time"
+              value={editor.dateKind}
+              onChange={(value) => setDateKind(value as TimerIntermediateValueKind)}
+            >
+              <Group gap="md" mt="xs">
+                <Radio value="literal" id="timer-catch-date-literal" label="Hard-coded" />
+                <Radio value="expression" id="timer-catch-date-expression" label="Expression" />
+              </Group>
+            </Radio.Group>
             {editor.dateKind === "literal" ? (
-              <>
-                <input
-                  className="form-control mt-2"
-                  value={editor.dateLiteral}
-                  onChange={(e) => onChange({ ...editor, dateLiteral: e.target.value })}
-                  placeholder="2026-12-31T09:00:00"
-                />
-                <p className="workflow-modal-note">
-                  ISO 8601 date or date/time — <code>YYYY-MM-DD</code> or{" "}
-                  <code>YYYY-MM-DDTHH:mm:ss</code>. Times use the Flowable engine&apos;s timezone (UTC by
-                  default).
-                </p>
-              </>
+              <TextInput
+                aria-label="Date / time"
+                value={editor.dateLiteral}
+                onChange={(e) => onChange({ ...editor, dateLiteral: e.target.value })}
+                placeholder="2026-12-31T09:00:00"
+                description={
+                  <>
+                    ISO 8601 date or date/time — <code>YYYY-MM-DD</code> or{" "}
+                    <code>YYYY-MM-DDTHH:mm:ss</code>. Times use the Flowable engine&apos;s timezone
+                    (UTC by default).
+                  </>
+                }
+              />
             ) : (
-              <>
-                <textarea
-                  className="form-control workflow-expression-editor mt-2"
-                  rows={3}
-                  spellCheck={false}
-                  value={editor.dateExpression}
-                  onChange={(e) => onChange({ ...editor, dateExpression: e.target.value })}
-                  placeholder="${execution.getVariable('reminderDate')}"
-                />
-                <p className="workflow-modal-note">
-                  Flowable expression evaluated when the token reaches this event. Must resolve to
-                  an ISO 8601 date or date/time string.
-                </p>
-              </>
+              <Textarea
+                aria-label="Date / time expression"
+                className="workflow-expression-editor"
+                rows={3}
+                spellCheck={false}
+                value={editor.dateExpression}
+                onChange={(e) => onChange({ ...editor, dateExpression: e.target.value })}
+                placeholder="${execution.getVariable('reminderDate')}"
+                description="Flowable expression evaluated when the token reaches this event. Must resolve to an ISO 8601 date or date/time string."
+              />
             )}
-          </fieldset>
+          </Stack>
         )}
 
         <Group justify="flex-end" gap="xs">
@@ -3935,72 +3855,58 @@ function ServiceTaskModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Task Name (optional)</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-            placeholder="Unlock account"
-          />
-        </label>
+        <TextInput
+          label="Task Name (optional)"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          placeholder="Unlock account"
+        />
 
-        <label className="workflow-field">
-          <span>Type</span>
-          <select
-            className="form-select"
-            value={editor.kind}
-            onChange={(e) => onChange({ ...editor, kind: e.target.value as ServiceTaskKind })}
-          >
-            <option value="behavior">Behavior</option>
-          </select>
-          <p className="workflow-modal-note">
-            Behavior runs a curated routine inside Auton8. More service-task types (HTTP webhook,
-            etc.) will appear here as they ship.
-          </p>
-        </label>
+        <NativeSelect
+          label="Type"
+          value={editor.kind}
+          onChange={(e) => onChange({ ...editor, kind: e.target.value as ServiceTaskKind })}
+          data={[{ value: "behavior", label: "Behavior" }]}
+          description="Behavior runs a curated routine inside Auton8. More service-task types (HTTP webhook, etc.) will appear here as they ship."
+        />
 
-        {editor.kind === "behavior" && (
-          <label className="workflow-field">
-            <span>Behavior</span>
-            {error ? (
-              <div className="alert alert-danger" role="alert">
-                Failed to load workflow behaviors. Try reopening this modal.
-              </div>
-            ) : (
-              <select
-                className="form-select"
-                value={editor.behaviorKey}
-                disabled={isLoading}
-                onChange={(e) => onChange({ ...editor, behaviorKey: e.target.value })}
-              >
-                <option value="">{isLoading ? "Loading…" : "Select a behavior…"}</option>
-                {behaviors.map((behavior) => (
-                  <option key={behavior.key} value={behavior.key}>
-                    {behavior.displayName}
-                  </option>
-                ))}
-                {/* If the saved key isn't in the catalog (plugin disabled, key
-                    renamed, etc.), keep it visible so authors can still see
-                    what's wired up before changing it. */}
-                {editor.behaviorKey && !behaviors.some((b) => b.key === editor.behaviorKey) && (
-                  <option value={editor.behaviorKey}>
-                    {editor.behaviorKey} (not registered on this server)
-                  </option>
-                )}
-              </select>
-            )}
-            {selected?.description && (
-              <p className="workflow-modal-note">{selected.description}</p>
-            )}
-            {!selected && editor.behaviorKey && (
-              <p className="workflow-modal-note text-warning">
-                The selected behavior key is not registered on this server. Saving will keep the
-                key, but the workflow can&apos;t run until a matching behavior is registered.
-              </p>
-            )}
-          </label>
-        )}
+        {editor.kind === "behavior" &&
+          (error ? (
+            <Alert color="red" variant="light" role="alert" title="Behavior">
+              Failed to load workflow behaviors. Try reopening this modal.
+            </Alert>
+          ) : (
+            <NativeSelect
+              label="Behavior"
+              value={editor.behaviorKey}
+              disabled={isLoading}
+              onChange={(e) => onChange({ ...editor, behaviorKey: e.target.value })}
+              data={[
+                { value: "", label: isLoading ? "Loading…" : "Select a behavior…" },
+                ...behaviors.map((behavior) => ({
+                  value: behavior.key,
+                  label: behavior.displayName
+                })),
+                // If the saved key isn't in the catalog (plugin disabled, key
+                // renamed, etc.), keep it visible so authors can still see
+                // what's wired up before changing it.
+                ...(editor.behaviorKey && !behaviors.some((b) => b.key === editor.behaviorKey)
+                  ? [
+                      {
+                        value: editor.behaviorKey,
+                        label: `${editor.behaviorKey} (not registered on this server)`
+                      }
+                    ]
+                  : [])
+              ]}
+              description={
+                selected?.description ??
+                (!selected && editor.behaviorKey
+                  ? "The selected behavior key is not registered on this server. Saving will keep the key, but the workflow can't run until a matching behavior is registered."
+                  : undefined)
+              }
+            />
+          ))}
 
         <Divider />
 
@@ -4076,70 +3982,61 @@ function MessageElementModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Name (optional)</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Name (optional)"
             aria-label="Message element name"
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.target.value })}
             placeholder="Await payment"
-          />
-        </label>
+        />
 
-        <label className="workflow-field">
-          <span>Message</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Message"
             aria-label="Message"
             value={editor.messageName}
             disabled={!editor.editableMessageName}
             onChange={(e) => onChange({ ...editor, messageName: e.target.value })}
             placeholder="paymentCleared"
-          />
-          <p className="workflow-modal-note">
-            {editor.editableMessageName
-              ? "The name a sender uses to address this. Saving writes the message onto the " +
-                "diagram too, so this and what the engine subscribes to cannot drift apart."
-              : "A receive task has no message subscription — it is addressed by its own id."}
-          </p>
-        </label>
+          description={editor.editableMessageName
+            ? "The name a sender uses to address this. Saving writes the message onto the " +
+              "diagram too, so this and what the engine subscribes to cannot drift apart."
+            : "A receive task has no message subscription — it is addressed by its own id."
+          }
+        />
 
         {isSend && (
-          <label className="workflow-field">
-            <span>Send to workflow</span>
-            <input
-              className="form-control"
+          <TextInput
+            label="Send to workflow"
               aria-label="Send to workflow"
               value={editor.targetProcessKey}
               onChange={(e) => onChange({ ...editor, targetProcessKey: e.target.value })}
               placeholder="orders"
-            />
-            <p className="workflow-modal-note">
+            description={
+              <>
               The process key of the workflow to notify. Auton8 never broadcasts &mdash; a message
               goes to exactly one waiting run, or the send reports that it found none.
-            </p>
-          </label>
+              </>
+            }
+          />
         )}
 
         {!isStart && (
-          <label className="workflow-field">
-            <span>Correlation key</span>
-            <input
-              className="form-control"
+          <TextInput
+            label="Correlation key"
               aria-label="Correlation key"
               value={editor.correlationKey}
               onChange={(e) => onChange({ ...editor, correlationKey: e.target.value })}
               placeholder="orderId"
-            />
-            <p className="workflow-modal-note">
+            description={
+              <>
               {isSend
                 ? "The process variable here whose value identifies the run to notify."
                 : "The process variable that identifies this run. A sender supplies its value."}{" "}
               It must be unique among waiting runs: if two match, Auton8 refuses and tells the
               sender how many, rather than picking one.
-            </p>
-          </label>
+              </>
+            }
+          />
         )}
 
         <Group justify="flex-end" gap="xs">
@@ -4199,33 +4096,29 @@ function CodedEventModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Name (optional)</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Name (optional)"
             aria-label="Event name"
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.target.value })}
             placeholder={isError ? "Payment declined" : "Needs a manager"}
-          />
-        </label>
+        />
 
-        <label className="workflow-field">
-          <span>{noun} code</span>
-          <input
-            className="form-control"
+        <TextInput
+          label={`${noun} code`}
             aria-label={`${noun} code`}
             value={editor.code}
             onChange={(e) => onChange({ ...editor, code: e.target.value })}
             placeholder={isError ? "PAYMENT_DECLINED" : "NEEDS_MANAGER"}
-          />
-          <p className="workflow-modal-note">
+          description={
+            <>
             This is what matches one end to the other, character for character. A code that
             nothing catches is not a warning at publish for escalations &mdash; it just means
             nobody was listening. For errors it <strong>is</strong> refused at publish, because
             an error nobody catches destroys the whole run.
-          </p>
-        </label>
+            </>
+          }
+        />
 
         {editor.interrupting !== null && (
           <Switch
@@ -4391,48 +4284,41 @@ function CallActivityModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Step name (optional)</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Step name (optional)"
             aria-label="Call activity name"
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.target.value })}
             placeholder="Run credit check"
-          />
-        </label>
+        />
 
-        <label className="workflow-field">
-          <span>Workflow to run</span>
-          <select
-            className="form-select"
-            aria-label="Workflow to run"
-            value={editor.calledElement}
-            disabled={isLoading}
-            onChange={(e) => onChange({ ...editor, calledElement: e.target.value })}
-          >
-            <option value="">{isLoading ? "Loading…" : "Select a workflow…"}</option>
-            {choices.map((w) => (
-              <option key={w.id} value={w.processKey}>
-                {w.name}
-              </option>
-            ))}
-            {/* A key saved earlier whose workflow is gone or unpublished stays
-                visible, so an author can see what is wired up before changing it
-                rather than finding the field mysteriously blank. */}
-            {chosenIsMissing && (
-              <option value={editor.calledElement}>
-                {editor.calledElement} (not published on this server)
-              </option>
-            )}
-          </select>
-          {chosenIsMissing && (
-            <p className="workflow-modal-note text-warning">
-              Nothing published has that key. Publishing this workflow will be refused until it
-              exists &mdash; which is deliberate: otherwise this step fails when someone runs it.
-            </p>
-          )}
-        </label>
+        <NativeSelect
+          label="Workflow to run"
+          aria-label="Workflow to run"
+          value={editor.calledElement}
+          disabled={isLoading}
+          onChange={(e) => onChange({ ...editor, calledElement: e.target.value })}
+          data={[
+            { value: "", label: isLoading ? "Loading…" : "Select a workflow…" },
+            ...choices.map((w) => ({ value: w.processKey, label: w.name })),
+            // A key saved earlier whose workflow is gone or unpublished stays
+            // visible, so an author can see what is wired up before changing it
+            // rather than finding the field mysteriously blank.
+            ...(chosenIsMissing
+              ? [
+                  {
+                    value: editor.calledElement,
+                    label: `${editor.calledElement} (not published on this server)`
+                  }
+                ]
+              : [])
+          ]}
+          error={
+            chosenIsMissing
+              ? "Nothing published has that key. Publishing this workflow will be refused until it exists — which is deliberate: otherwise this step fails when someone runs it."
+              : undefined
+          }
+        />
 
         {/* Sending IN, the target is a name inside the child: its declared inputs
             first, then anything else it declares. Bringing BACK, the source is a
@@ -4504,50 +4390,44 @@ function SignalEventModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Event name (optional)</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Event name (optional)"
             aria-label="Signal event name"
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.target.value })}
             placeholder="Approved"
-          />
-        </label>
+        />
 
-        <label className="workflow-field">
-          <span>Signal name</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Signal name"
             aria-label="Signal name"
             value={editor.signalName}
             onChange={(e) => onChange({ ...editor, signalName: e.target.value })}
             placeholder="approved"
-          />
-          <p className="workflow-modal-note">
+          description={
+            <>
             This is what matches one end to the other, character for character. A name nothing
             listens for is not an error &mdash; a signal is a broadcast, so it simply reaches
             nobody, which looks exactly like a mistyped name.
-          </p>
-        </label>
+            </>
+          }
+        />
 
-        <label className="workflow-field">
-          <span>Who hears it</span>
-          <select
-            className="form-select"
-            aria-label="Who hears it"
-            value={editor.scope}
-            onChange={(e) => onChange({ ...editor, scope: e.target.value })}
-          >
-            <option value="instance">Only this run of this workflow</option>
-            <option value="global">Any workflow listening for this name</option>
-          </select>
-          <p className="workflow-modal-note">
-            {editor.scope === "instance"
+        <NativeSelect
+          label="Who hears it"
+          aria-label="Who hears it"
+          value={editor.scope}
+          onChange={(e) => onChange({ ...editor, scope: e.target.value })}
+          data={[
+            { value: "instance", label: "Only this run of this workflow" },
+            { value: "global", label: "Any workflow listening for this name" }
+          ]}
+          description={
+            editor.scope === "instance"
               ? "The safe default. Another run of this same workflow will not react, and neither will anything else."
-              : "Careful: every workflow listening for this name reacts, including ones you did not write. Two unrelated workflows both using a name like “approved” will couple to each other, and neither diagram will show it."}
-          </p>
-        </label>
+              : "Careful: every workflow listening for this name reacts, including ones you did not write. Two unrelated workflows both using a name like “approved” will couple to each other, and neither diagram will show it."
+          }
+        />
 
         {editor.interrupting !== null && (
           <Switch
@@ -4819,325 +4699,271 @@ function UserTaskModal({
           <Code>{editor.type}</Code>
         </Group>
 
-        <label className="workflow-field">
-          <span>Task Name</span>
-          <input
-            className="form-control"
+        <TextInput
+          label="Task Name"
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.target.value })}
-          />
-        </label>
+        />
 
-        <fieldset className="workflow-field">
-          <legend>Assignee</legend>
-          <div className="form-check form-check-inline">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-assignee-mode-picker"
-              checked={editor.assigneeMode === "picker"}
-              onChange={() => onChange({ ...editor, assigneeMode: "picker" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-assignee-mode-picker">
-              Pick user
-            </label>
-          </div>
-          <div className="form-check form-check-inline">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-assignee-mode-expression"
-              checked={editor.assigneeMode === "expression"}
-              onChange={() => onChange({ ...editor, assigneeMode: "expression" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-assignee-mode-expression">
-              Expression
-            </label>
-          </div>
+        <Stack gap="xs">
+          <Radio.Group
+            label="Assignee"
+            value={editor.assigneeMode}
+            onChange={(value) =>
+              onChange({ ...editor, assigneeMode: value as AssignmentMode })
+            }
+          >
+            <Group gap="md" mt="xs">
+              <Radio value="picker" id="userTask-assignee-mode-picker" label="Pick user" />
+              <Radio
+                value="expression"
+                id="userTask-assignee-mode-expression"
+                label="Expression"
+              />
+            </Group>
+          </Radio.Group>
 
           {editor.assigneeMode === "picker" ? (
-            <div className="d-flex flex-column gap-2 mt-2">
+            <Stack gap="xs">
               {editor.assigneeUserId ? (
-                <div className="d-flex align-items-center gap-2">
-                  <span className="badge bg-secondary">{assigneeName}</span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
+                <Group gap="xs" align="center">
+                  <Badge color="gray">{assigneeName}</Badge>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    color="gray"
                     onClick={() => onChange({ ...editor, assigneeUserId: "" })}
                   >
                     Clear
-                  </button>
-                </div>
+                  </Button>
+                </Group>
               ) : (
-                <span className="text-body text-opacity-50 small">No assignee selected</span>
+                <Text size="sm" c="dimmed">
+                  No assignee selected
+                </Text>
               )}
-              <select
-                className="form-select"
+              <NativeSelect
+                aria-label="Select assignee"
                 value=""
                 onChange={(e) => {
                   const id = e.target.value;
                   if (id) onChange({ ...editor, assigneeUserId: id });
                 }}
-              >
-                <option value="">Select user…</option>
-                {sortedUsers.map((u) => (
-                  <option key={u.userId} value={u.userId}>
-                    {userDisplayName(u) ?? u.username}
-                  </option>
-                ))}
-              </select>
-            </div>
+                data={[
+                  { value: "", label: "Select user…" },
+                  ...sortedUsers.map((u) => ({
+                    value: u.userId,
+                    label: userDisplayName(u) ?? u.username
+                  }))
+                ]}
+              />
+            </Stack>
           ) : (
-            <input
-              className="form-control mt-2"
+            <TextInput
+              aria-label="Assignee expression"
               placeholder="${initiator}"
               value={editor.assigneeExpression}
               onChange={(e) => onChange({ ...editor, assigneeExpression: e.target.value })}
             />
           )}
-        </fieldset>
+        </Stack>
 
-        <fieldset className="workflow-field">
-          <legend>Candidate Users</legend>
-          <div className="form-check form-check-inline">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-candidate-mode-picker"
-              checked={editor.candidateUsersMode === "picker"}
-              onChange={() => onChange({ ...editor, candidateUsersMode: "picker" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-candidate-mode-picker">
-              Pick users
-            </label>
-          </div>
-          <div className="form-check form-check-inline">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-candidate-mode-expression"
-              checked={editor.candidateUsersMode === "expression"}
-              onChange={() => onChange({ ...editor, candidateUsersMode: "expression" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-candidate-mode-expression">
-              Expression
-            </label>
-          </div>
+        <Stack gap="xs">
+          <Radio.Group
+            label="Candidate Users"
+            value={editor.candidateUsersMode}
+            onChange={(value) =>
+              onChange({ ...editor, candidateUsersMode: value as AssignmentMode })
+            }
+          >
+            <Group gap="md" mt="xs">
+              <Radio value="picker" id="userTask-candidate-mode-picker" label="Pick users" />
+              <Radio
+                value="expression"
+                id="userTask-candidate-mode-expression"
+                label="Expression"
+              />
+            </Group>
+          </Radio.Group>
 
           {editor.candidateUsersMode === "picker" ? (
-            <div className="mt-2">
-              <AssigneePicker
-                value={editor.candidateUserIds}
-                onChange={(ids) => onChange({ ...editor, candidateUserIds: ids })}
-              />
-            </div>
+            <AssigneePicker
+              value={editor.candidateUserIds}
+              onChange={(ids) => onChange({ ...editor, candidateUserIds: ids })}
+            />
           ) : (
-            <textarea
-              className="form-control mt-2"
+            <Textarea
+              aria-label="Candidate users expression"
               rows={2}
               placeholder="${candidateUsers}"
               value={editor.candidateUsersExpression}
-              onChange={(e) =>
-                onChange({ ...editor, candidateUsersExpression: e.target.value })
-              }
+              onChange={(e) => onChange({ ...editor, candidateUsersExpression: e.target.value })}
             />
           )}
-        </fieldset>
+        </Stack>
 
-        <label className="workflow-field">
-          <span>Candidate Groups</span>
-          <textarea
-            className="form-control"
+        <Textarea
+          label="Candidate Groups"
             rows={2}
             placeholder="reviewers, approvers"
             value={editor.candidateGroupsRaw}
             onChange={(e) => onChange({ ...editor, candidateGroupsRaw: e.target.value })}
-          />
-          <p className="workflow-modal-note">
+          description={
+            <>
             Comma-separated group keys, or a single Flowable expression like{" "}
             <code>${"{currentRecord.groups}"}</code>. There is no group directory yet, so groups are
             free text.
-          </p>
-        </label>
+            </>
+          }
+        />
 
-        <fieldset className="workflow-field">
-          <legend>Due Date</legend>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-dueDate-mode-none"
-              checked={editor.dueDateMode === "none"}
-              onChange={() => onChange({ ...editor, dueDateMode: "none" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-dueDate-mode-none">
-              No due date
-            </label>
-          </div>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-dueDate-mode-activation"
-              checked={editor.dueDateMode === "afterActivation"}
-              onChange={() => onChange({ ...editor, dueDateMode: "afterActivation" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-dueDate-mode-activation">
-              Days after task activation
-            </label>
-          </div>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-dueDate-mode-start"
-              checked={editor.dueDateMode === "afterProcessStart"}
-              onChange={() => onChange({ ...editor, dueDateMode: "afterProcessStart" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-dueDate-mode-start">
-              Days after process start
-            </label>
-          </div>
-          <div className="form-check">
-            <input
-              type="radio"
-              className="form-check-input"
-              id="userTask-dueDate-mode-expression"
-              checked={editor.dueDateMode === "expression"}
-              onChange={() => onChange({ ...editor, dueDateMode: "expression" })}
-            />
-            <label className="form-check-label" htmlFor="userTask-dueDate-mode-expression">
-              Expression
-            </label>
-          </div>
+        <Stack gap="xs">
+          <Radio.Group
+            label="Due Date"
+            value={editor.dueDateMode}
+            onChange={(value) => onChange({ ...editor, dueDateMode: value as DueDateMode })}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio value="none" id="userTask-dueDate-mode-none" label="No due date" />
+              <Radio
+                value="afterActivation"
+                id="userTask-dueDate-mode-activation"
+                label="Days after task activation"
+              />
+              <Radio
+                value="afterProcessStart"
+                id="userTask-dueDate-mode-start"
+                label="Days after process start"
+              />
+              <Radio
+                value="expression"
+                id="userTask-dueDate-mode-expression"
+                label="Expression"
+              />
+            </Stack>
+          </Radio.Group>
 
           {(editor.dueDateMode === "afterActivation" ||
             editor.dueDateMode === "afterProcessStart") && (
-            <div className="mt-2">
-              <input
-                className="form-control"
-                placeholder="3 or ${slaDays}"
-                value={editor.dueDateDays}
-                onChange={(e) => onChange({ ...editor, dueDateDays: e.target.value })}
-              />
-              <p className="workflow-modal-note">
-                Enter a whole number of days, or a Flowable expression like{" "}
-                <code>${"{slaDays}"}</code> set by an upstream script task. The due date is
-                resolved when the task is created.
-              </p>
-            </div>
+            <TextInput
+              aria-label="Days until due"
+              placeholder="3 or ${slaDays}"
+              value={editor.dueDateDays}
+              onChange={(e) => onChange({ ...editor, dueDateDays: e.target.value })}
+              description={
+                <>
+                  Enter a whole number of days, or a Flowable expression like{" "}
+                  <code>${"{slaDays}"}</code> set by an upstream script task. The due date is
+                  resolved when the task is created.
+                </>
+              }
+            />
           )}
 
           {editor.dueDateMode === "expression" && (
-            <div className="mt-2">
-              <textarea
-                className="form-control"
-                rows={2}
-                placeholder="${customDueDate}"
-                value={editor.dueDateExpression}
-                onChange={(e) => onChange({ ...editor, dueDateExpression: e.target.value })}
-              />
-              <p className="workflow-modal-note">
-                Any value Flowable accepts in <code>flowable:dueDate</code>: an ISO duration like{" "}
-                <code>P3D</code>, an absolute timestamp, or an expression resolving to either. Set
-                the variable from a script task to drive due dates dynamically.
-              </p>
-            </div>
+            <Textarea
+              aria-label="Due date expression"
+              rows={2}
+              placeholder="${customDueDate}"
+              value={editor.dueDateExpression}
+              onChange={(e) => onChange({ ...editor, dueDateExpression: e.target.value })}
+              description={
+                <>
+                  Any value Flowable accepts in <code>flowable:dueDate</code>: an ISO duration
+                  like <code>P3D</code>, an absolute timestamp, or an expression resolving to
+                  either. Set the variable from a script task to drive due dates dynamically.
+                </>
+              }
+            />
           )}
-        </fieldset>
+        </Stack>
 
-        <fieldset className="workflow-field">
-          <legend>Behaviour</legend>
-          <p className="workflow-modal-note mb-2">
-            <strong>Default Behavior</strong> shows a built-in modal — a single
-            &quot;Complete Task&quot; button when this task flows into a normal node, or one
-            button per outgoing path when it flows directly into an exclusive
-            gateway. <strong>Form</strong> renders a custom form instead.
-          </p>
-          <div className="form-check">
-            <input
-              type="radio"
-              id="userTask-behaviour-default"
-              name="userTask-behaviour"
-              className="form-check-input"
-              checked={editor.userFormMode === "simple"}
-              onChange={() =>
-                onChange({ ...editor, userFormMode: "simple", userFormShortCode: "" })
-              }
-            />
-            <label htmlFor="userTask-behaviour-default" className="form-check-label">
-              Default Behavior
-            </label>
-          </div>
-          <div className="form-check">
-            <input
-              type="radio"
-              id="userTask-behaviour-form"
-              name="userTask-behaviour"
-              className="form-check-input"
-              checked={formNeedsPick}
-              onChange={() =>
-                onChange({
-                  ...editor,
-                  userFormMode:
-                    editor.userFormMode === "modal" || editor.userFormMode === "page"
-                      ? editor.userFormMode
-                      : "modal"
-                })
-              }
-            />
-            <label htmlFor="userTask-behaviour-form" className="form-check-label">
-              Form
-            </label>
-          </div>
+        <Stack gap="xs">
+          {/*
+            The two radios were `checked`/`onChange` pairs sharing a `name`, and
+            the second one's handler had to preserve modal-vs-page because the
+            group could not. Radio.Group owns the selection, so the "simple" case
+            is a plain value and only the Form case still needs the memory.
+          */}
+          <Radio.Group
+            label="Behaviour"
+            description={
+              <>
+                <strong>Default Behavior</strong> shows a built-in modal — a single
+                &quot;Complete Task&quot; button when this task flows into a normal node, or one
+                button per outgoing path when it flows directly into an exclusive gateway.{" "}
+                <strong>Form</strong> renders a custom form instead.
+              </>
+            }
+            value={formNeedsPick ? "form" : "default"}
+            onChange={(value) =>
+              onChange(
+                value === "default"
+                  ? { ...editor, userFormMode: "simple", userFormShortCode: "" }
+                  : {
+                      ...editor,
+                      userFormMode:
+                        editor.userFormMode === "modal" || editor.userFormMode === "page"
+                          ? editor.userFormMode
+                          : "modal"
+                    }
+              )
+            }
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio
+                value="default"
+                id="userTask-behaviour-default"
+                label="Default Behavior"
+              />
+              <Radio value="form" id="userTask-behaviour-form" label="Form" />
+            </Stack>
+          </Radio.Group>
 
           {formNeedsPick && (
-            <div className="mt-3">
-              <label className="form-label" htmlFor="user-form-render-mode">
-                Render mode
-              </label>
-              <select
+            <Stack gap="sm">
+              <NativeSelect
                 id="user-form-render-mode"
-                className="form-select"
+                label="Render mode"
                 value={editor.userFormMode}
                 onChange={(e) =>
                   onChange({ ...editor, userFormMode: e.target.value as UserFormMode })
                 }
-              >
-                <option value="modal">Form Modal — render the form in a modal</option>
-                <option value="page">
-                  Form Page — navigate to /workflow-tasks/&lt;taskId&gt;/form
-                </option>
-              </select>
+                data={[
+                  { value: "modal", label: "Form Modal — render the form in a modal" },
+                  {
+                    value: "page",
+                    label: "Form Page — navigate to /workflow-tasks/<taskId>/form"
+                  }
+                ]}
+              />
 
-              <label className="form-label mt-3" htmlFor="user-form-short-code">
-                Form
-              </label>
-              <select
+              <NativeSelect
                 id="user-form-short-code"
-                className={`form-select${userFormError ? " is-invalid" : ""}`}
+                label="Form"
                 value={editor.userFormShortCode}
-                onChange={(e) =>
-                  onChange({ ...editor, userFormShortCode: e.target.value })
+                onChange={(e) => onChange({ ...editor, userFormShortCode: e.target.value })}
+                error={userFormError || undefined}
+                data={[
+                  { value: "", label: "Select form…" },
+                  ...sortedForms.map((f) => ({
+                    value: f.shortCode,
+                    label: `${f.name} (${f.shortCode})${
+                      f.publishedVersionNumber === null ? " — unpublished" : ""
+                    }`
+                  }))
+                ]}
+                description={
+                  <>
+                    The form&apos;s process variables are passed in as <code>data</code>;
+                    submitting calls <code>POST /api/tasks/&lt;taskId&gt;/complete</code> with the
+                    payload as Flowable variables.
+                  </>
                 }
-              >
-                <option value="">Select form…</option>
-                {sortedForms.map((f) => (
-                  <option key={f.id} value={f.shortCode}>
-                    {f.name} ({f.shortCode})
-                    {f.publishedVersionNumber === null ? " — unpublished" : ""}
-                  </option>
-                ))}
-              </select>
-              {userFormError && <div className="invalid-feedback">{userFormError}</div>}
-              <p className="workflow-modal-note mt-1">
-                The form&apos;s process variables are passed in as <code>data</code>; submitting calls{" "}
-                <code>POST /api/tasks/&lt;taskId&gt;/complete</code> with the payload as Flowable
-                variables.
-              </p>
-            </div>
+              />
+            </Stack>
           )}
-        </fieldset>
+        </Stack>
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>
