@@ -1,4 +1,5 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EntityTypes;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Tests.Properties.Generators;
@@ -405,45 +406,7 @@ public sealed class SelectorEvaluatorAgreementProperties
         Assert.Equal(["deny-unassigned"], survives);
     }
 
-    /// <summary>An array tag's wildcard means the array is non-empty (#574).</summary>
-    /// <remarks>
-    /// <c>candidateuser=*</c> reaches the same resolver and used to throw
-    /// <c>requires a non-null value</c> — so it failed to <b>compile</b>, and an
-    /// uncompilable grant is skipped with a warning, which for a deny fails open
-    /// (#577). Both array columns are <c>NOT NULL DEFAULT ARRAY[]::TEXT[]</c>,
-    /// so a null array cannot occur and emptiness is the only decidable thing.
-    /// </remarks>
-    [Fact]
-    public async Task An_array_tags_wildcard_matches_a_non_empty_array()
-    {
-        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
-        _ = app.CreateClient();
-        var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
 
-        var withCandidates = NewRow("arr-has", assignee: null);
-        withCandidates.CandidateUsers = ["alice"];
-        var withoutCandidates = NewRow("arr-empty", assignee: null);
-        withoutCandidates.CandidateUsers = [];
-
-        await using (var seed = await factory.CreateDbContextAsync())
-        {
-            seed.WorkflowTaskCache.AddRange(withCandidates, withoutCandidates);
-            await seed.SaveChangesAsync();
-        }
-
-        var selector = SelectorParser.Parse("/workflowtask[candidateuser=*]");
-
-        await using var db = await factory.CreateDbContextAsync();
-        var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
-        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
-
-        var fromSql = await db.WorkflowTaskCache.Where(predicate)
-            .Select(t => t.FlowableTaskId).ToListAsync();
-
-        // Non-empty matches; empty does not. Before #574 this selector threw at
-        // compile time and the grant was skipped entirely.
-        Assert.Equal(["arr-has"], fromSql);
-    }
 
     /// <summary>
     /// The smallest selector derived from <paramref name="selector"/> on which
@@ -826,67 +789,47 @@ public sealed class SelectorEvaluatorAgreementProperties
     };
 
     /// <summary>
-    /// The known divergence, pinned so it cannot widen unnoticed.
+    /// The candidate tags are neither advertised nor compiled (#581).
     /// </summary>
     /// <remarks>
-    /// <c>FlowableInstanceAuthorizers.BuildFacts</c> supplies three facts —
-    /// assignee, processkey, definitionkey — and its comment records why
-    /// candidategroup is absent: Flowable's task summary endpoint returns no
-    /// identity links, so "grants like [candidategroup=...] silently miss".
-    /// <c>WorkflowTaskCacheSelectorCompiler</c> supports both candidate tags.
+    /// <para><b>Inverted, not deleted.</b> This fact used to PIN the divergence —
+    /// that `candidateuser` and `candidategroup` compiled in SQL while the
+    /// in-memory evaluator was never given facts for them — so it had to stop
+    /// passing once the divergence was gone, exactly as #574's wildcard pin did.</para>
     ///
-    /// So a grant on either candidate tag is honoured by the SQL path and
-    /// refused by the in-memory path. That is a real, deliberate inconsistency
-    /// rather than a bug this story introduced, and it is excluded from the
-    /// agreement property above so it does not drown out new divergences.
-    /// This test asserts it still behaves exactly as documented — if the
-    /// in-memory path ever gains those facts, this fails and the exclusion
-    /// above should be removed.
+    /// <para>The resolution was removal rather than supply, and for a stronger
+    /// reason than the divergence: <c>FlowableTaskProjection.MapRow</c> writes
+    /// <c>Array.Empty&lt;string&gt;()</c> for both columns unconditionally, because
+    /// candidate enrichment needs a follow-up Flowable call per task. Measured on
+    /// a real database: 8,040 task rows, zero with a non-empty candidate list. So
+    /// the tags matched nothing in SQL and denied everything in memory — backed by
+    /// nothing on either path.</para>
     /// </remarks>
     [Fact]
-    public async Task The_known_candidate_tag_divergence_still_holds()
+    public async Task The_candidate_tags_are_neither_advertised_nor_compiled()
     {
+        Assert.DoesNotContain("candidateuser", CoreEntityTypes.WorkflowTask.Tags);
+        Assert.DoesNotContain("candidategroup", CoreEntityTypes.WorkflowTask.Tags);
+
+        // Still advertised, so this cannot pass by the whole tag set vanishing.
+        Assert.Contains("assignee", CoreEntityTypes.WorkflowTask.Tags);
+
         await using var app = await AutoNateWebApplicationFactory.CreateAsync();
         _ = app.CreateClient();
         var factory = app.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
-
-        var row = new WorkflowTaskCache
-        {
-            FlowableTaskId = "task-candidate",
-            FlowableInstanceId = "inst-1",
-            ProcessDefinitionKey = "onboarding",
-            TaskDefinitionKey = "approve",
-            Assignee = null,
-            CandidateUsers = ["alice"],
-            CandidateGroups = ["finance"],
-            CreatedTime = DateTime.UtcNow,
-            Status = "active",
-            LastSyncAtUtc = DateTime.UtcNow,
-        };
-
-        await using (var seed = await factory.CreateDbContextAsync())
-        {
-            seed.WorkflowTaskCache.Add(row);
-            await seed.SaveChangesAsync();
-        }
-
-        var selector = SelectorParser.Parse("/workflowtask[candidategroup=finance]");
-
         await using var db = await factory.CreateDbContextAsync();
         var context = new CompilationContext(db, SelectorGenerators.ActorUserId);
-        var predicate = new WorkflowTaskCacheSelectorCompiler().Compile(selector, context);
 
-        var sqlMatches = await db.WorkflowTaskCache.Where(predicate).AnyAsync();
-        var memoryMatches = new InMemorySelectorEvaluator(SelectorGenerators.ActorUserId)
-            .Matches(selector, row.FlowableTaskId, SelectorGenerators.FactsFor(row));
-
-        Assert.True(sqlMatches, "The SQL path should honour [candidategroup=finance].");
-        Assert.False(
-            memoryMatches,
-            "The in-memory path unexpectedly honoured [candidategroup=finance]. If "
-            + "FlowableInstanceAuthorizers.BuildFacts now supplies candidate facts, this "
-            + "divergence is fixed — remove the exclusion in SelectorGenerators.SharedTags "
-            + "so the agreement property covers these tags too.");
+        // The complement the story asks for. There is no longer a grant to write
+        // that could admit or refuse a row -- the refusal IS the behaviour, and a
+        // loud one beats a predicate that silently cannot be satisfied.
+        foreach (var tag in new[] { "candidateuser", "candidategroup" })
+        {
+            var selector = SelectorParser.Parse($"/workflowtask[{tag}=alice]");
+            var ex = Assert.Throws<SelectorCompilationException>(
+                () => new WorkflowTaskCacheSelectorCompiler().Compile(selector, context));
+            Assert.Contains(tag, ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private static WorkflowExecutionCache NewExecutionRow(string id, string? startedBy) => new()

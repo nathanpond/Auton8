@@ -66,8 +66,13 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
             "processkey"     => CompileStringEquals(tag, context, t => t.ProcessDefinitionKey),
             "definitionkey"  => CompileStringEquals(tag, context, t => t.TaskDefinitionKey),
             "assignee"       => CompileStringEquals(tag, context, t => t.Assignee),
-            "candidateuser"  => CompileArrayContains(tag, context, t => t.CandidateUsers),
-            "candidategroup" => CompileArrayContains(tag, context, t => t.CandidateGroups),
+
+            // `candidateuser` and `candidategroup` are gone (#581). Nothing
+            // populates the columns they read -- the task projection writes empty
+            // arrays unconditionally -- so they matched nothing in SQL and denied
+            // everything in memory. Falling through to the refusal below is the
+            // point: an unknown tag is a loud error, where these were predicates
+            // that could not be satisfied. See the note in CoreEntityTypes.
             _ => throw new SelectorCompilationException(
                 $"Unknown workflowtask tag '{tag.Tag}'.")
         };
@@ -118,64 +123,6 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
         var value = ResolveTagValue(tag, context);
         var body = Expression.Equal(accessor.Body, Expression.Constant(value, typeof(string)));
         return Expression.Lambda<Func<WorkflowTaskCache, bool>>(body, p);
-    }
-
-    private static Expression<Func<WorkflowTaskCache, bool>> CompileArrayContains(
-        TagExpr tag,
-        CompilationContext context,
-        Expression<Func<WorkflowTaskCache, string[]>> accessor)
-    {
-        // An array tag carrying a nested predicate compiles to false, because
-        // that is what the in-memory evaluator answers (#575).
-        //
-        // The reason is worth stating exactly, because it is not "arrays cannot
-        // nest": FlowableInstanceAuthorizers.BuildFacts supplies only assignee,
-        // processkey and definitionkey, so `candidateuser` is never a fact at
-        // all. The evaluator's nested branch then hits `actual is null` and
-        // returns false before the edge walk.
-        //
-        // Which means these two tags are advertised in CoreEntityTypes
-        // (WorkflowTask.tags) and compile in SQL while being permanently
-        // invisible in memory -- the same defect #576 names for status and
-        // tenant, on a second pair of tags. Filed separately; agreeing with the
-        // evaluator as it stands is this story's job.
-        if (tag.Nested is not null)
-        {
-            return ExpressionUtilities.AlwaysFalse<WorkflowTaskCache>();
-        }
-
-        var p0 = accessor.Parameters[0];
-
-        // AN ARRAY TAG'S WILDCARD MEANS "NON-EMPTY" (#574).
-        //
-        // Settled here rather than left to fall through, because an array tag
-        // reaching the same resolver is exactly how this defect would survive
-        // its own fix. Before this it threw `requires a non-null value`, so
-        // `candidateuser=*` failed to COMPILE -- and an uncompilable grant is
-        // skipped with a warning, which for a deny fails open (#577).
-        //
-        // Non-empty is the only thing decidable: both array columns are
-        // `NOT NULL DEFAULT ARRAY[]::TEXT[]`, so a null array cannot occur.
-        if (tag.Value is WildcardValue)
-        {
-            var length = Expression.ArrayLength(accessor.Body);
-            var nonEmpty = Expression.GreaterThan(length, Expression.Constant(0));
-            return Expression.Lambda<Func<WorkflowTaskCache, bool>>(nonEmpty, p0);
-        }
-
-        var value = ResolveTagValue(tag, context);
-
-        // Translates to "WHERE :value = ANY(candidate_users)" — the Npgsql
-        // provider lowers Enumerable.Contains on an array-typed property to
-        // ANY(), which uses the column's GIN index.
-        var p = accessor.Parameters[0];
-        var containsCall = Expression.Call(
-            typeof(Enumerable),
-            nameof(Enumerable.Contains),
-            new[] { typeof(string) },
-            accessor.Body,
-            Expression.Constant(value, typeof(string)));
-        return Expression.Lambda<Func<WorkflowTaskCache, bool>>(containsCall, p);
     }
 
     // Mirrors InMemorySelectorEvaluator's nested branch EXACTLY, including the

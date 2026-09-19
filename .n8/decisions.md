@@ -9158,3 +9158,36 @@ condition is incidental. Forcing the condition is what turns "it broke on CI" in
   return how many events it emitted made the difference observable, and the new
   fact kills that mutation.
   **Issue:** #590
+
+## M5 execution — #581 (candidateuser / candidategroup withdrawn)
+
+- **Decision:** removed from the advertised tag set **and** from the compiler,
+  rather than supplied as in-memory facts.
+  **Why:** the issue framed this as a divergence — compiled in SQL, absent in
+  memory. Measured, it is worse: **they are backed by nothing on either path.**
+  `FlowableTaskProjection.MapRow` writes `Array.Empty<string>()` for both columns
+  unconditionally, because candidate enrichment needs a follow-up Flowable call
+  per task — the comment at the top of that file has said so all along. On a real
+  database: **8,040 task rows, zero with a non-empty candidate list.** So
+  `[candidateuser=alice]` matched nothing in SQL and denied everything in memory.
+  Supplying facts in memory would have fixed the divergence and left both readings
+  equally meaningless.
+  **Cost if wrong:** a stored grant naming either tag now fails to compile instead
+  of silently matching nothing — which is the intent. The columns stay; dropping
+  them is a schema change, and re-advertising is the easy half once enrichment
+  exists.
+  **Issue:** #581
+
+- **Consequence, taken deliberately:** `CompileArrayContains` existed only for
+  these two tags and is now dead, including #574's array-wildcard branch and its
+  fact. That work was correct; the tags turn out to be unbacked. Dead code kept
+  "for later" is how a compiler accumulates predicates nobody can satisfy.
+  `The_known_candidate_tag_divergence_still_holds` was **inverted**, not deleted —
+  it pinned a divergence that no longer exists, the same way #574's wildcard pin
+  was inverted rather than dropped.
+  **Issue:** #581
+
+- **The pin goes DOWN, 2849 → 2848.** House style is that a shrinking tier is a
+  failure unless it is deliberate and visible. This one is deliberate, and the
+  ledger paragraph in `tests/tiers.env` says which fact went and why.
+  **Issue:** #581

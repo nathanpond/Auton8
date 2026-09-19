@@ -145,8 +145,24 @@ public static class CoreEntityTypes
         clrType: typeof(object),
         idClrType: typeof(string),
         actions: new[] { Actions.View, Actions.Complete },
+        // `candidateuser` and `candidategroup` were REMOVED here in #581, and the
+        // reason belongs next to the advertisement rather than only in a commit.
+        //
+        // Nothing populates them on either path. FlowableTaskProjection.MapRow
+        // writes Array.Empty<string>() for both, unconditionally, because
+        // candidate enrichment needs a follow-up Flowable call per task -- the
+        // comment at the top of that file has said so all along. Measured on a
+        // real database: 8,040 task rows, zero with a non-empty candidate list.
+        //
+        // So `[candidateuser=alice]` matched nothing in SQL (an empty array
+        // contains nobody) and denied everything in memory. There is no reading
+        // under which the grant meant what it said.
+        //
+        // The columns stay -- dropping them is a schema change. Re-advertise only
+        // together with the enrichment that fills them.
+        //
         // Mirrors WorkflowTaskCacheSelectorCompiler.CompileExpr.
-        tags: new[] { "processkey", "definitionkey", "assignee", "candidateuser", "candidategroup" });
+        tags: new[] { "processkey", "definitionkey", "assignee" });
 
     // #112. The right to advance someone else's running process from outside it.
     // Kind-level only — a message is addressed by process key plus a correlation
