@@ -8421,3 +8421,40 @@ so that nesting is meaningful rather than a workaround.
   evaluator, which is what #575 was for — but the two stories together should not
   be read as promising a guarantee neither makes.
   **Issue:** #577 ← #575
+
+## Ad-hoc
+
+**The execution cache cannot serve the executions UI as three planned stories assume (2026-09-18).**
+
+`workflow_execution_cache` has no `name` column and no `workflow_model_name`
+column. `WorkflowExecutionSummary` — what every execution read returns today —
+carries both, and the SPA renders both: `WorkflowExecutions.tsx:217` uses
+`row.original.name ?? row.original.id` as the list's primary label, and `:431`
+searches over `name` and `workflowModelName`. `FlowableExecutionProjection.MapRow`
+drops them; they are not columns and not in `auth_tags`, which holds only
+processkey, definitionkey, startedby and status.
+
+**Why it deviates from the plan.** #104 ("serve every execution read from the
+cache"), #108 ("serve the executions list from the cache") and, downstream of
+whatever #104 settles, #579 all assume the cache can stand in for the live read.
+For authorization facts it can — that is what M5's first four stories just
+finished making true. For *display* it cannot: serving the list from the cache
+today would replace every run's name with its Flowable id, silently, and break
+search over names. `/{id}/tasks` fails the same way through
+`FlowableTaskSummary.ProcessInstanceName`, which `workflow_task_cache` does not
+carry either, so it cannot be recovered by joining the two cache tables.
+
+**What it implies.** Two columns, a `CurrentProjectionVersion` bump so existing
+rows are re-projected rather than served with nulls, and a backfill — otherwise
+every pre-existing run shows an id until the next poll touches it. That is the
+same "empty-looking list after a cutover" shape #108's backfill AC already names
+for a different reason. Filed as **#583** with acceptance criteria.
+
+**Milestones/issues likely affected:** M5 — #104, #108, #579, and #109 insofar as
+it describes what the list shows. The first four M5 stories (#574–#577, merged in
+#582) are unaffected: they concern authorization facts, none of which is a display
+field.
+
+**Recommendation:** `/n8-replan M5` before executing #104, so #583 is sequenced
+ahead of the three stories that depend on it rather than discovered inside one of
+them.
