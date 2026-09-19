@@ -1086,18 +1086,29 @@ public sealed class FlowableClient(
     }
 
     public async Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
-        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default)
+        int start, int size, CancellationToken cancellationToken = default)
     {
         if (size <= 0) return Array.Empty<FlowableHistoricActivityEvent>();
         if (start < 0) start = 0;
 
-        var url = $"service/history/historic-activity-instances?sort=startTime&order=asc&start={start}&size={size}";
-        if (sinceUtc is { } since)
-        {
-            // Flowable expects ISO-8601 with milliseconds and a `Z` suffix; the
-            // server interprets the value as the lower bound for startTime.
-            url += $"&startedAfter={Uri.EscapeDataString(since.UtcDateTime.ToString("o"))}";
-        }
+        // NEWEST FIRST, AND NO TIME FILTER (#590).
+        //
+        // This used to send `startedAfter` and sort ascending, with a comment
+        // asserting "the server interprets the value as the lower bound for
+        // startTime". Measured against a live engine, it does not: a
+        // `startedAfter` of 2030 returns the same 3162 rows as no filter, and an
+        // entirely invented parameter returns 200 with everything. So the feed
+        // re-read all of history every tick while its watermark advanced and its
+        // logs read as incremental.
+        //
+        // The same parameter IS honoured on historic-process-instances, so this
+        // is a property of this collection rather than of the engine -- which is
+        // why sending it looked reasonable and stayed wrong.
+        //
+        // `sort=startTime&order=desc` IS honoured. Newest-first lets the CALLER
+        // stop as soon as it reaches something it already has, which is the only
+        // bound available once a server-side one is off the table.
+        var url = $"service/history/historic-activity-instances?sort=startTime&order=desc&start={start}&size={size}";
 
         using var response = await _httpClient.GetAsync(url, cancellationToken);
         await EnsureSuccessAsync(response, "page through historic activity instances");

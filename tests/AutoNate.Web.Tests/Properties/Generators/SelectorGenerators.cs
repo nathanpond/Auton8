@@ -30,11 +30,13 @@ internal static class SelectorGenerators
     /// <summary>The actor every generated selector and evaluator shares.</summary>
     public static readonly Guid ActorUserId = new("11111111-2222-3333-4444-555555555555");
 
-    // Tags both paths implement. `candidateuser` and `candidategroup` are
-    // deliberately excluded here and exercised separately: the in-memory path
-    // supplies no facts for them at all, which is a known divergence rather
-    // than something for the shared property to trip over on every run. See
-    // SelectorGrammarProperties.The_known_candidate_tag_divergence_still_holds.
+    // Tags both paths implement -- which, as of #581, is all of them.
+    //
+    // `candidateuser` and `candidategroup` used to be excluded here as a known
+    // divergence. They were not a divergence so much as a pair of tags backed by
+    // nothing: the task projection writes empty arrays unconditionally, so they
+    // matched nothing in SQL and denied everything in memory. They are no longer
+    // advertised or compiled, so there is nothing left to exclude.
     private static readonly string[] SharedTags = ["processkey", "definitionkey", "assignee"];
 
     private static Gen<ValueNode> ValueFor(string tag) => tag switch

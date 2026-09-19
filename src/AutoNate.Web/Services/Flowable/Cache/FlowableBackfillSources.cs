@@ -156,9 +156,10 @@ public sealed class FlowableHistoryBackfillSource(
         var pageSize = Math.Max(1, options.Value.HistoryPageSize);
         while (!cancellationToken.IsCancellationRequested)
         {
-            // null watermark = from the beginning.
+            // Everything, to the end -- a backfill's whole job is to ignore the
+            // windowing that keeps a tick cheap (#590).
             var page = await flowable.GetHistoricActivityEventsAsync(
-                start, pageSize, null, cancellationToken);
+                start, pageSize, cancellationToken);
             if (page.Count == 0) yield break;
 
             foreach (var ev in page)

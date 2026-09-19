@@ -145,8 +145,19 @@ public interface IFlowableClient
     // workflow_event_log_cache. `sinceUtc` filters to entries that started after
     // the given time — null means "page from the beginning". Sorted by start
     // time ascending so the consumer can advance a watermark deterministically.
+    /// <summary>
+    /// Historic activity events, <b>newest first</b> (#590).
+    /// </summary>
+    /// <remarks>
+    /// There is no time filter, and that is measured rather than assumed:
+    /// Flowable ignores <c>startedAfter</c> on this collection — a value of 2030
+    /// returns every row — while honouring it on
+    /// <c>historic-process-instances</c>. A caller wanting only new events stops
+    /// paging when it reaches one it already has; the descending sort is what
+    /// makes that possible.
+    /// </remarks>
     Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
-        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default);
+        int start, int size, CancellationToken cancellationToken = default);
 
     // Fan-out helper for "tasks assigned to anyone in this set." Used when a
     // supervisor needs to see tasks for the people they supervise without

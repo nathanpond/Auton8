@@ -9120,3 +9120,107 @@ discovery rather than arithmetic.
 **Transferable:** a test that only fails in one environment is a test whose
 condition is incidental. Forcing the condition is what turns "it broke on CI" into
 "it is covered".
+
+## M5 execution — #590 (the history feed's watermark does nothing)
+
+- **Decision:** drop `startedAfter` entirely and bound the tick by the **ordering**
+  instead — newest-first, stopping at the first event older than the watermark.
+  **Why:** measured, twice: `startedAfter` on `historic-activity-instances`
+  returns all 3162 rows whether the value is 2020 or 2030, while the same
+  parameter IS honoured on `historic-process-instances`. A query string the server
+  ignores, next to a comment asserting it does not, is worse than no filter — it
+  made the feed look incremental in code, in logs and in `projection_watermarks`
+  while it replayed all of history every 60 seconds. `sort=startTime&order=desc`
+  is honoured, which is the only bound left.
+  **Issue:** #590
+
+- **Decision:** the stop is on **strictly older**, so the boundary second is
+  re-read every tick.
+  **Why:** several activities can start in the same millisecond. Stopping at
+  older-or-equal would silently drop any a previous tick had not reached, and the
+  feed would look healthy while losing events. The projection is idempotent on
+  `event_id`, so a repeat is a no-op and a miss is permanent — that is the cheap
+  direction to be wrong in.
+  **Issue:** #590
+
+- **Root cause of why no test caught it: the stub was more capable than the
+  server.** `StubFlowableClient.GetHistoricActivityEventsAsync` took a `sinceUtc`
+  and **honoured** it, so every assertion written against it confirmed what the
+  code *believed* Flowable did. The stub now behaves as the engine does —
+  descending, unfiltered, caller stops — and the tests assert on **pages fetched
+  and rows emitted** rather than on the URL. Asserting a parameter was *sent* is
+  what let this ship.
+  **Issue:** #590
+
+- **A mutation survived and bought a fourth test.** Changing the stop from `<` to
+  `<=` passed all three original facts: none could observe an event being lost at
+  the boundary, because page counts are identical either way. Making the tick
+  return how many events it emitted made the difference observable, and the new
+  fact kills that mutation.
+  **Issue:** #590
+
+## M5 execution — #581 (candidateuser / candidategroup withdrawn)
+
+- **Decision:** removed from the advertised tag set **and** from the compiler,
+  rather than supplied as in-memory facts.
+  **Why:** the issue framed this as a divergence — compiled in SQL, absent in
+  memory. Measured, it is worse: **they are backed by nothing on either path.**
+  `FlowableTaskProjection.MapRow` writes `Array.Empty<string>()` for both columns
+  unconditionally, because candidate enrichment needs a follow-up Flowable call
+  per task — the comment at the top of that file has said so all along. On a real
+  database: **8,040 task rows, zero with a non-empty candidate list.** So
+  `[candidateuser=alice]` matched nothing in SQL and denied everything in memory.
+  Supplying facts in memory would have fixed the divergence and left both readings
+  equally meaningless.
+  **Cost if wrong:** a stored grant naming either tag now fails to compile instead
+  of silently matching nothing — which is the intent. The columns stay; dropping
+  them is a schema change, and re-advertising is the easy half once enrichment
+  exists.
+  **Issue:** #581
+
+- **Consequence, taken deliberately:** `CompileArrayContains` existed only for
+  these two tags and is now dead, including #574's array-wildcard branch and its
+  fact. That work was correct; the tags turn out to be unbacked. Dead code kept
+  "for later" is how a compiler accumulates predicates nobody can satisfy.
+  `The_known_candidate_tag_divergence_still_holds` was **inverted**, not deleted —
+  it pinned a divergence that no longer exists, the same way #574's wildcard pin
+  was inverted rather than dropped.
+  **Issue:** #581
+
+- **The pin goes DOWN, 2849 → 2848.** House style is that a shrinking tier is a
+  failure unless it is deliberate and visible. This one is deliberate, and the
+  ledger paragraph in `tests/tiers.env` says which fact went and why.
+  **Issue:** #581
+
+## M5 execution — #585 (an unloadable plugin is a 400, not a 500)
+
+- **Decision:** catch broadly around the whole of `PluginRuntime.EnableAsync`,
+  not around an enumerated set of loader exceptions.
+  **Why:** the inner try already covered `LoadFromAssemblyPath`, which is where
+  most corrupt assemblies fail — that is why the endpoint usually returned 400.
+  It did not cover the two dozen lines before it (resolving the entry path,
+  constructing the load context), and the outer try had only a `finally`, so a
+  failure there escaped as a 500. The criterion asks for *any* exception, and the
+  loader's exception type for corrupt input is not contractual: a catch list
+  tuned to the failures seen so far is how this shipped.
+  **Issue:** #585
+
+- **Decision:** `OperationCanceledException` is rethrown rather than reported as a
+  plugin fault.
+  **Why:** a cancelled request is not a broken plugin, and recording `last_error`
+  for one would put a shutdown in the plugin's history.
+  **Honestly unasserted.** A mutation removing this carve-out survives: the gate's
+  `WaitAsync` throws *before* the try, so a pre-cancelled token never reaches it,
+  and triggering cancellation mid-load deterministically would need a seam in the
+  runtime that exists only for the test. Recorded rather than covered by a test
+  that would not mean what it says.
+  **Issue:** #585
+
+- **A vacuous test caught before it counted.** The complement's first version
+  looked for the sample plugin next to the test assembly, did not find it (it is
+  copied to `test-plugins/SamplePlugin/`), and **returned early** — passing while
+  asserting nothing. A missing sample now *fails* with the path it looked in,
+  because the plugin is genuinely there and its absence would mean the test had
+  stopped checking. With the path fixed, the mutation that makes every enable
+  report failure kills it.
+  **Issue:** #585
