@@ -47,6 +47,25 @@ export const executionTasksQueryKey = (id: string) => ["executions", "tasks", id
 export const ASSIGNED_TASKS_QUERY_KEY = ["tasks", "assigned-to-me"] as const;
 export const TEAM_TASKS_QUERY_KEY = ["tasks", "assigned-to-team"] as const;
 
+/**
+ * The home panels' own keys (#268).
+ *
+ * MyTasksPanel and TeamTasksPanel do not query the two keys above. They merge
+ * workflow tasks with assigned RECORDS, so they hold their own cache entries
+ * under `["home", …]`, which share no prefix with `["tasks", …]` and are
+ * therefore untouched by invalidating those.
+ *
+ * They live HERE, next to the mutations that have to invalidate them, rather
+ * than in the panels that read them. #259 fixed the staleness by invalidating
+ * from inside `MyTasksPanel.completeFromModal`, which was correct for that one
+ * call site and left `TaskFormPage` -- the page the same panel navigates to for
+ * a Page-mode task -- with the identical mismatch. A key a mutation must know
+ * about cannot be a private detail of one component, or the next call site
+ * inherits the bug by default.
+ */
+export const HOME_MY_TASKS_QUERY_KEY = ["home", "my-tasks"] as const;
+export const HOME_TEAM_TASKS_QUERY_KEY = ["home", "team-tasks"] as const;
+
 export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
     queryKey: EXECUTIONS_QUERY_KEY,
@@ -183,6 +202,11 @@ export function useCompleteTask() {
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
+      // The home panels too (#268) -- every caller, not whichever one last had
+      // the bug reported against it. Completing a task always makes both lists
+      // wrong, wherever the completion was triggered from.
+      qc.invalidateQueries({ queryKey: HOME_MY_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: HOME_TEAM_TASKS_QUERY_KEY });
     }
   });
 }

@@ -1751,6 +1751,8 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
             // #107: silence becomes a refusal with a reason.
             errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
+            // #578: more than one pool deploys a definition Auton8 can never see.
+            errors.AddRange(BuildMultiPoolParticipantErrors(document));
             // #158: a conditional start event is legal only inside an event
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
@@ -4057,6 +4059,57 @@ public static partial class WorkflowBpmnXml
     // ENGINE axis, not its studio axis: an element Flowable runs deploys even while
     // the studio still lists it as coming soon, because "we have not built the
     // property editor yet" is not a reason to reject a hand-authored diagram.
+    /// <summary>
+    /// More than one pool is refused, because only one of them would survive (#578).
+    /// </summary>
+    /// <remarks>
+    /// <para>A two-pool collaboration used to publish <b>silently</b>. Pool,
+    /// Participant, Lane and Message Flow are all <c>engine: annotation</c> in
+    /// <c>bpmn-support.json</c>, which that manifest documents as "Deploys and
+    /// carries no execution semantics by design — never refused", so
+    /// <c>BuildUnsupportedElementErrors</c> let the diagram through. Flowable then
+    /// accepted a deployment containing two process definitions while
+    /// <c>DeployProcessAsync</c> read the result back by process key, which
+    /// resolves exactly one. The second definition existed in the engine,
+    /// appeared in no <c>workflow_models</c> row, and was unreachable from every
+    /// Auton8 surface.</para>
+    ///
+    /// <para><b>This refuses the SHAPE, not the elements.</b> The manifest is not
+    /// touched and those rows keep their classification: a lone pool, a lane, a
+    /// message flow inside one process all still publish. What is refused is the
+    /// arrangement that produces a definition nothing can reach — which is why the
+    /// count is of participants rather than of any element the manifest names.</para>
+    ///
+    /// <para>It sits with the other publish validations, so it runs before
+    /// anything is deployed. There is no partial deployment to roll back because
+    /// none is ever made.</para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildMultiPoolParticipantErrors(XDocument document)
+    {
+        var participants = document.Descendants(BpmnNamespace + "participant").ToList();
+        if (participants.Count <= 1)
+        {
+            return Array.Empty<string>();
+        }
+
+        // Named, because a second pool can be collapsed or off-screen and
+        // "multi-pool is not supported" alone leaves an author hunting for it.
+        var names = participants
+            .Select(p => p.Attribute("name")?.Value
+                         ?? p.Attribute("id")?.Value
+                         ?? "(unnamed pool)")
+            .ToList();
+
+        return new[]
+        {
+            $"This diagram has {participants.Count} pools ({string.Join(", ", names)}). "
+            + "Publishing a multi-pool collaboration is not supported yet: only one pool's "
+            + "process would be reachable afterwards, and the others would be deployed to the "
+            + "engine where Auton8 could not see or manage them. "
+            + "Publish one pool per workflow for now."
+        };
+    }
+
     private static IReadOnlyList<string> BuildUnsupportedElementErrors(
         XDocument document,
         BpmnSupportManifest support)

@@ -4,6 +4,10 @@ import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { Badge, Button, Group, Paper, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
 import { listTeamAssignedTasks } from "@/api/executions";
+import {
+  HOME_MY_TASKS_QUERY_KEY,
+  HOME_TEAM_TASKS_QUERY_KEY
+} from "@/hooks/useExecutions";
 import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { FlowableTaskSummary } from "@/types/flowable";
@@ -12,7 +16,8 @@ import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance"
 import UserBadge from "@/pages/records/UserBadge";
 
 const COLUMN_WIDTHS = ["26%", "12%", "16%", "14%", "10%", "14%", "8%"];
-const QUERY_KEY = ["home", "team-tasks"] as const;
+// From the hooks module, so the completion mutation can invalidate it (#268).
+const QUERY_KEY = HOME_TEAM_TASKS_QUERY_KEY;
 
 export default function TeamTasksPanel() {
   const { data: statusAppearance = [] } = useStatusAppearance();
@@ -22,7 +27,7 @@ export default function TeamTasksPanel() {
   // supervisor edge. Reassignments may move work in or out of the actor's
   // own queue so MyTasks is invalidated alongside.
   const queryKeys = useMemo(
-    () => [QUERY_KEY, ["home", "my-tasks"] as const],
+    () => [QUERY_KEY, HOME_MY_TASKS_QUERY_KEY],
     [],
   );
   useInvalidateOnChannels(["tasks:supervisees-of-me"], queryKeys);

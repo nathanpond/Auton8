@@ -20,10 +20,24 @@ public sealed record PrepareWorkflowRequest(
     WorkflowModel Model,
     IReadOnlyList<WorkflowElementSnapshot> ElementSnapshots);
 
+/// <param name="Prepared">
+/// Whether <paramref name="Model"/> is the NORMALIZED model, or the client's own
+/// payload handed straight back.
+///
+/// It exists because the studio needs the two failure classes apart (#234). A
+/// draft save stores whatever the author has half-built, so validation errors do
+/// not stop it; but when the XML could not be read at all there is nothing
+/// normalized to store, and saving the raw payload would put a diagram in the
+/// database that the studio cannot reopen. Errors alone cannot tell those apart
+/// -- both arrive as a non-empty <see cref="Errors"/> list -- and the caller
+/// cannot infer it from the model, because the unprepared one is a valid-looking
+/// WorkflowModel with the client's XML still in it.
+/// </param>
 public sealed record PrepareWorkflowResponse(
     WorkflowModel Model,
     IReadOnlyList<string> Warnings,
-    IReadOnlyList<string> Errors);
+    IReadOnlyList<string> Errors,
+    bool Prepared = true);
 
 public static class WorkflowEndpoints
 {
@@ -189,10 +203,14 @@ public static class WorkflowEndpoints
             }
             catch (Exception exception)
             {
+                // The XML did not survive normalization, so there is no prepared
+                // model -- the one going back is the request's own. Prepared:false
+                // is what tells save not to store it (#234).
                 return Results.Ok(new PrepareWorkflowResponse(
                     request.Model,
                     Array.Empty<string>(),
-                    new[] { exception.Message }));
+                    new[] { exception.Message },
+                    Prepared: false));
             }
 
             var validation = WorkflowBpmnXml.ValidateProcess(preparedXml);

@@ -9224,3 +9224,108 @@ condition is incidental. Forcing the condition is what turns "it broke on CI" in
   stopped checking. With the path fixed, the mutation that makes every enable
   report failure kills it.
   **Issue:** #585
+
+## M5 execution — #578, the multi-pool refusal (2026-09-19)
+
+**What the issue asked for**: a workflow with more than one pool must be refused
+at publish, because Auton8 deploys one process per model and Flowable would take
+only the first participant's process — silently, with the rest of the diagram
+gone. A refusal at publish is the honest version of that.
+
+**Where the check went.** `WorkflowBpmnXml.ValidateProcess`, alongside the other
+publish-blocking rules, counting `bpmn:participant` descendants and naming every
+pool in one error rather than one error per pool. Naming them matters: an author
+with three pools wants to know which three, and a per-pool error list reads as
+three separate problems.
+
+**A stale claim fixed in passing (Rule 1).** The studio's "Coming soon" note on
+the Collaboration palette rows said publishing one *"is refused until its story
+lands"*. That was false for every row it covered — nothing refused anything. It
+now says what is actually true.
+
+**Issue:** #578
+
+## M5 execution — #234, save and publish stop sharing a bar (2026-09-19)
+
+**The decision the issue asked for.** Its three options were: save ignores errors,
+split the set, or document the status quo. Taking **option 2**, with the split
+drawn at *what would corrupt the stored model*: a draft holds almost anything an
+author has half-built; it must not hold something the studio cannot reopen.
+
+Option 1 as written would store whatever the client sent when normalization
+failed outright — the one case where there is no prepared model at all.
+
+**Why it needed a contract change, small as it is.** The two failure classes were
+indistinguishable in the response: both arrive as a non-empty `Errors` list, and
+both carry a `WorkflowModel` that looks fine — in the unreadable case it is the
+request's own model handed back. So `PrepareWorkflowResponse` gained
+`Prepared` (defaulting true; only the `catch` sets it false). Additive, one
+consumer, and it is the server that knows the answer.
+
+**Why this was never chosen.** #225 moved the full validation set onto `/publish`,
+which was right for the API. Save went through the same `prepareAndStore` call, so
+every rule promoted to a publish refusal became a save refusal in the same commit —
+each new rule joining the set without anyone deciding. The fix is at that root:
+`prepareAndStore` now takes a mode, and a new publish rule affects publish.
+
+**The complement, deliberately kept.** Errors are still *reported* on save. A
+version that let the draft through by discarding the diagnostics would pass "the
+author can save" while making the studio quieter about real problems — the
+opposite of what #159 and #163 exist for.
+
+**Evidence.** Two backend facts pin the flag in both directions (a readable
+diagram that breaks a rule IS prepared; unreadable XML is not) — one direction
+alone passes against a constant. One E2E spec drives the studio with a single
+diagram and asserts *two verdicts on it*: Save stores it (and the stored model
+really contains the element), Publish refuses it and never POSTs. Mutation-checked
+both ways: removing `Prepared: false` kills 1 of 2 backend facts; making
+`prepareAndStore` bail unconditionally kills the E2E, and its failure message
+shows the exact shape of the original bug — `/api/workflows/prepare` POSTed, no
+save POST at all.
+
+**A method correction worth recording.** The E2E's first form read the request
+counter once, immediately after the "Saved" status appeared, and failed against a
+save that had demonstrably happened: Playwright dispatches `Request` events over
+its own connection, so the DOM can update before the event reaches the test
+process. The counter is now polled, and the publish-side zero waits first — an
+immediate zero there would have meant "not yet", not "refused".
+
+**A stale comment fixed in passing.** `WorkflowPaletteTests` explained that it
+reads `/prepare` rather than the stored model *because* a refusal at prepare also
+refused the save. True when written; #234 is exactly what makes it false.
+
+**Issue:** #234
+
+## M5 execution — #268, the fix moves to where the keys are (2026-09-19)
+
+**What the issue found.** #259's staleness fix was correct and landed at one of
+**two** call sites. `MyTasksPanel.completeFromModal` invalidated the panel's own
+keys after completing; `TaskFormPage` — the page that same panel navigates to for
+a `userFormMode="page"` task — carried the identical mismatch untouched. So the
+reported bug survived on a path the fixed component dispatches to.
+
+**The fix is structural, not another patch.** `HOME_MY_TASKS_QUERY_KEY` and
+`HOME_TEAM_TASKS_QUERY_KEY` moved out of the two panels and into
+`hooks/useExecutions.ts`, next to the mutations that have to invalidate them;
+`useCompleteTask` now invalidates them itself, and both panels import the
+constants they used to declare. A key a mutation must know about cannot be a
+private detail of one component, or the next call site inherits the bug by
+default — which is exactly what happened here.
+
+The per-call-site patch in `completeFromModal` is gone rather than left as
+belt-and-braces. Two places doing the same invalidation is how one of them
+quietly stops being necessary and nobody notices when it breaks.
+
+**Test choice.** The new E2E drives the path that had **no** coverage —
+Page mode — rather than re-asserting the modal path #259 already covers. It
+navigates back to `/home` client-side on purpose: a full reload would rebuild the
+query cache and pass against the broken code. Mutation-checked: removing the two
+`invalidateQueries` calls fails it with the row still present after 20s.
+
+Two additive seeder capabilities, both small and both needed by that path:
+`CreateAndPublishWorkflowAsync` can now set `flowable:userFormMode` /
+`userFormShortCode`, and `CreateFormAsync` takes optional JSX — the server's
+default form code renders a heading with no submit control, so a test that has to
+submit has to bring its own form.
+
+**Issue:** #268

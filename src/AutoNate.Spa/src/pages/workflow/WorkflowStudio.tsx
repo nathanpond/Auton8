@@ -1048,7 +1048,30 @@ export default function WorkflowStudio() {
     }
   };
 
-  const prepareAndStore = async (): Promise<{
+  /**
+   * Prepare the diagram, and decide whether validation errors are fatal (#234).
+   *
+   * SAVE AND PUBLISH WANT DIFFERENT BARS. They used to share one: every
+   * publish-time refusal also refused a draft save, so an author who dropped an
+   * ad-hoc subprocess on the canvas and hit Save before configuring it could not
+   * store their work. The symptom was indirect -- the studio showed the
+   * validation error and the POST simply never happened.
+   *
+   * It was inherited rather than chosen. #225 moved the full validation set onto
+   * /publish, which was right for the API, and because save went through the same
+   * call every rule promoted to a publish refusal silently became a save refusal
+   * too. Each new rule joined that set without anyone deciding.
+   *
+   * The split is drawn at what would CORRUPT THE STORED MODEL. A draft should
+   * hold almost anything an author has half-built; it should not hold something
+   * that cannot be read back. So on save, errors are fatal only when prepare
+   * produced no usable model -- otherwise the work is stored and the errors are
+   * still shown, because a save that swallowed the diagnostics would be quieter
+   * about real problems, which is the opposite of what #159 and #163 are for.
+   */
+  const prepareAndStore = async (
+    mode: "save" | "publish"
+  ): Promise<{
     prepared: WorkflowModel;
     response: PrepareWorkflowResponse;
   } | null> => {
@@ -1064,16 +1087,26 @@ export default function WorkflowStudio() {
       elementSnapshots: snap.snapshots
     });
     setWarnings(response.warnings);
+
     if (response.errors.length > 0) {
       setError(response.errors.join(" "));
-      return null;
+
+      // Publish is the gate: every error is fatal.
+      if (mode === "publish") return null;
+
+      // Save is not. The only fatal case is having nothing storable: prepare
+      // could not normalize the XML, so the model in hand is the payload we
+      // sent, and storing it would put a diagram in the database the studio
+      // cannot reopen.
+      if (!response.prepared) return null;
     }
+
     return { prepared: response.model, response };
   };
 
   const onSave = () =>
     runBusy("saving the workflow draft", async () => {
-      const prep = await prepareAndStore();
+      const prep = await prepareAndStore("save");
       if (!prep) return;
       const saved = await saveWorkflow(prep.prepared);
       qc.setQueryData(workflowQueryKey(saved.id), saved);
@@ -1087,7 +1120,7 @@ export default function WorkflowStudio() {
 
   const onPublish = () =>
     runBusy("publishing the workflow model", async () => {
-      const prep = await prepareAndStore();
+      const prep = await prepareAndStore("publish");
       if (!prep) return;
       const result = await publishMutation.mutateAsync(prep.prepared);
       setCurrentModel(result.model);
@@ -5391,9 +5424,22 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
               </h3>
               <span className="workflow-bpmn-types-count">{count(comingSoon)}</span>
             </header>
+            {/*
+              #578: this used to end at "publishing one is refused until its story
+              lands", which was false for every Collaboration row. Pool, Lane and
+              Message Flow are `engine: annotation` in bpmn-support.json -- they
+              deploy and carry no execution semantics, and are never refused on
+              their own. An author was told a guard existed that did not, and a
+              two-pool diagram published silently into a definition Auton8 could
+              never see again.
+            */}
             <p className="workflow-bpmn-types-note">
               Flowable runs these. The studio has no property editor for them yet, so
-              publishing one is refused until its story lands.
+              publishing one is refused until its story lands — except the
+              collaboration shapes (pools, lanes, message flows), which deploy and
+              carry no execution semantics. Publishing a diagram with more than one
+              pool is refused: only one pool&rsquo;s process would be reachable
+              afterwards.
             </p>
             {comingSoon.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">

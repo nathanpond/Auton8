@@ -391,9 +391,16 @@ public sealed class WorkflowPaletteTests : E2ETestBase
         // The studio serialises the diagram and POSTs it to /prepare before it
         // will save, so this is bpmn-js's own output -- the evidence wanted here
         // -- and it is available whether or not the diagram then passes
-        // validation. It has to be: an ad-hoc sub-process with no activities in it
-        // is correctly refused at prepare, so a save-then-read assertion could
-        // never see the element that #163 shipped.
+        // validation.
+        //
+        // That last part used to be load-bearing: an ad-hoc sub-process with no
+        // activities in it is refused at prepare, and a refusal at prepare also
+        // refused the SAVE, so a save-then-read assertion could never see the
+        // element #163 shipped. #234 split those bars -- a draft save now stores
+        // work a publish would refuse -- so reading the stored model would work
+        // today. Reading /prepare is still the shorter path to bpmn-js's output
+        // and does not depend on which bar the studio applies, which is why it
+        // stays.
         var prepared = new List<string>();
         session.Page.Request += (_, request) =>
         {
