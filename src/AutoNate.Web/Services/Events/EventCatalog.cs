@@ -1088,6 +1088,29 @@ public static class EventCatalog
                     "An admin deleted an execution.",
                     "Fires from DELETE /api/executions/{processInstanceId}.",
                     ["resource: { processInstanceId }."]),
+                // #172. Jobs and timers. The two mutations are mutations on
+                // someone else's process, so they belong on the record next to
+                // cancel and move-state above; the read is here for the same
+                // reason the other view events are -- a subscriber watching who
+                // looked at what should not have a hole shaped like "jobs".
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.JobRetried,
+                    "An operator put a failed or dead-lettered job back in front of the engine.",
+                    "Fires from POST /api/executions/{processInstanceId}/jobs/{jobId}/retry. "
+                    + "Records what was ASKED FOR, not the outcome: for a dead-lettered job the "
+                    + "engine performs a move back to the executable queue, and whether the step "
+                    + "then succeeds arrives separately on the execution's own stream.",
+                    ["resource: { processInstanceId, jobId }. details: { queue } — which of the engine's four job collections it was in."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.JobRescheduled,
+                    "An operator changed when a timer job will fire.",
+                    "Fires from POST /api/executions/{processInstanceId}/jobs/{jobId}/reschedule.",
+                    ["resource: { processInstanceId, jobId }. details: { dueAtUtc } — the new due time."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.JobsViewed,
+                    "Someone read the jobs and timers for an execution, or the cross-execution stuck list.",
+                    "Fires from GET /api/executions/{processInstanceId}/jobs and GET /api/executions/jobs.",
+                    ["resource: { processInstanceId } for one execution, null for the stuck list. details: { resultCount, deadLetteredOnly }."]),
                 new EventCatalogEntry(
                     WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionsBulkDeleted,
                     "An admin bulk-deleted all executions (used during signal-event debugging).",

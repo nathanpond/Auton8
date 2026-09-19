@@ -37,6 +37,9 @@ export function StuckJobsPanel() {
   // rendered as a reassuring zero.
   if (error) {
     return (
+      // role="alert" IS right here, and it is the only place on this panel it is:
+      // "we could not ask" is a failure the operator must not read past, where
+      // "three things are stuck" is a condition they will come back to.
       <Alert color="red" variant="light" role="alert" title="Stuck work could not be read">
         The workflow engine did not answer, so it is not known whether anything is
         stuck. This is <strong>not</strong> the same as nothing being stuck.{" "}
@@ -53,7 +56,23 @@ export function StuckJobsPanel() {
   }
 
   return (
-    <Alert color="red" variant="light" title={`${jobs.length} stuck ${jobs.length === 1 ? "job" : "jobs"}`}>
+    // role="status", NOT Mantine's default role="alert".
+    //
+    // Stuck work is a standing CONDITION, not an event: it is true on every load
+    // of this page until someone acts on it. An assertive region would interrupt
+    // whatever a screen-reader user was reading, every single time they came
+    // back — and ExecutionFreshnessIndicatorTests asserts no alert banner on this
+    // page for precisely that reason. It caught this.
+    //
+    // The colour still says "red", which is how a sighted reader sees urgency;
+    // the role says "announce when you get to it", which is how everyone else
+    // should.
+    <Alert
+      color="red"
+      variant="light"
+      role="status"
+      title={`${jobs.length} stuck ${jobs.length === 1 ? "job" : "jobs"}`}
+    >
       <Group justify="space-between" align="center" wrap="nowrap">
         <Text size="sm">
           These steps have exhausted their retries. Nothing will run them until someone

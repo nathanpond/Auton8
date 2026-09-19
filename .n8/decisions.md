@@ -9611,3 +9611,38 @@ Pointing both gates at one action fails both theories of the independence test.
 FULL_LOCAL 476 → 482.
 
 **Issue:** #172
+
+## M5 execution — what the full slim gate caught that targeted runs did not (2026-09-19)
+
+Two defects in #172's work, both found by running `make test-slim` rather than the
+tests I had written. Recorded because the lesson is about method, not about jobs.
+
+**1. Three new audit event types with no `EventCatalog` entry.**
+`WorkflowEventCatalogParityTests` failed on CI, naming all three: *"published but
+not in the EventCatalog, so they are invisible on the Events admin page and
+undiscoverable by subscribers"*. The guard is right and I had not run it — I ran
+the authorization invariants and the new tests, not the suite. The exec skill says
+run the **full** suite; this is what it is for.
+
+**2. `StuckJobsPanel` broke #109's test — and would have shipped on a clean
+database.** The panel rendered a Mantine `<Alert>`, which defaults to
+`role="alert"`, on the executions list page.
+`ExecutionFreshnessIndicatorTests.A_stopped_feed_reads_as_not_updating_without_posing_as_an_error`
+asserts no alert banner is visible there, and it failed — **only because the dev
+database had stuck jobs left over from this story's own E2E runs.** On a clean
+database the panel renders nothing and the test passes.
+
+Fixed with `role="status"`: stuck work is a standing *condition*, true on every
+load until someone acts, so an assertive region would interrupt a screen-reader
+user every time they came back. The genuine failure state — "we could not ask" —
+keeps `role="alert"`.
+
+**The pattern is now three deep** (#597's freshness indicator, this story's jobs
+empty state, this story's stuck panel), each caught by a different accident, and
+the third by leftover test data. Measured: **135 of 151** `<Alert>`s in the SPA
+declare no role at all. Filed as **#602** with the rule that would prevent a
+fourth — every `<Alert>` states its role explicitly, guarded by a source scan in
+the shape of `dead-theme-classes.test.ts`.
+
+**Slim result after both fixes:** backend **2870 passed, 0 failed, 0 skipped**, at
+its pin.
