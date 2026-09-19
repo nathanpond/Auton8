@@ -8421,3 +8421,88 @@ so that nesting is meaningful rather than a workaround.
   evaluator, which is what #575 was for — but the two stories together should not
   be read as promising a guarantee neither makes.
   **Issue:** #577 ← #575
+
+## Ad-hoc
+
+**The execution cache cannot serve the executions UI as three planned stories assume (2026-09-18).** _— reconciled by /n8-replan 2026-09-18_
+
+`workflow_execution_cache` has no `name` column and no `workflow_model_name`
+column. `WorkflowExecutionSummary` — what every execution read returns today —
+carries both, and the SPA renders both: `WorkflowExecutions.tsx:217` uses
+`row.original.name ?? row.original.id` as the list's primary label, and `:431`
+searches over `name` and `workflowModelName`. `FlowableExecutionProjection.MapRow`
+drops them; they are not columns and not in `auth_tags`, which holds only
+processkey, definitionkey, startedby and status.
+
+**Why it deviates from the plan.** #104 ("serve every execution read from the
+cache"), #108 ("serve the executions list from the cache") and, downstream of
+whatever #104 settles, #579 all assume the cache can stand in for the live read.
+For authorization facts it can — that is what M5's first four stories just
+finished making true. For *display* it cannot: serving the list from the cache
+today would replace every run's name with its Flowable id, silently, and break
+search over names. `/{id}/tasks` fails the same way through
+`FlowableTaskSummary.ProcessInstanceName`, which `workflow_task_cache` does not
+carry either, so it cannot be recovered by joining the two cache tables.
+
+**What it implies.** Two columns, a `CurrentProjectionVersion` bump so existing
+rows are re-projected rather than served with nulls, and a backfill — otherwise
+every pre-existing run shows an id until the next poll touches it. That is the
+same "empty-looking list after a cutover" shape #108's backfill AC already names
+for a different reason. Filed as **#583** with acceptance criteria.
+
+**Milestones/issues likely affected:** M5 — #104, #108, #579, and #109 insofar as
+it describes what the list shows. The first four M5 stories (#574–#577, merged in
+#582) are unaffected: they concern authorization facts, none of which is a display
+field.
+
+**Recommendation:** `/n8-replan M5` before executing #104, so #583 is sequenced
+ahead of the three stories that depend on it rather than discovered inside one of
+them.
+
+
+## Replan — M5, second pass (2026-09-18)
+
+**Cause.** The ad-hoc entry above: `workflow_execution_cache` has no `name` or
+`workflow_model_name` column, while the executions UI renders both. Found on the
+first line of #104's implementation, before any endpoint changed.
+
+**Strengthened during the replan.** `FlowableClient.cs:365-366` already populates
+both fields on the `WorkflowExecutionSummary` the poll emits, and
+`FlowableExecutionPollingFeed.cs:30` hands those summaries straight to the
+projection, which discards them. So the fix needs no new Flowable call — two
+columns, two lines in `MapRow`, a `CurrentProjectionVersion` bump and a backfill.
+That is why #583 is sequenced as its own small story rather than absorbed into
+#104: it is cheap, and every story downstream needs it.
+
+**Issues touched.**
+
+- **#583** — promoted out of `needs-triage` to a sequenced `feature`. Body rewritten
+  with real acceptance criteria, including the complement that "never had a name"
+  and "not yet projected" must be distinguishable in the data rather than both
+  rendering as an id.
+- **#581** — promoted out of `needs-triage` to an M5 `bug`. Owner's decision, asked
+  and answered: fix it in M5 rather than carrying the pin forward. It is #576's
+  defect class on `candidateuser`/`candidategroup`.
+- **#104** — AC amended (a contract change). Gains a dependency on #583, and the
+  route inventory verified during the aborted first attempt is recorded in the body
+  so it is not re-derived: `/children` and `/adhoc` are out structurally, four
+  history/diagram routes are out pending sibling read-throughs, `/tasks` is in only
+  after #583. The `blocked` label is removed — it is an ordinary dependency now.
+- **#108** — AC amended. Its two evaluator-divergence gates are **ticked with
+  evidence** rather than left reading as pending, since #574–#577 merged in #582. A
+  new gate on #583 takes their place.
+- **#579**, **#19** — notes only, no AC change. #576 changed the fact set #579's
+  third AC refers to; #19 re-verified as still true and now has a named closer.
+- **#109**, **#172**, **#173** — checked and **unaffected**. #109 makes no claims
+  about list content; the other two write their cache AC to accommodate either
+  answer.
+
+**Epic AC: unaffected, checked explicitly.** Epic #40's criteria are about BPMN
+elements executing on the engine, not about the executions read model. Nothing in
+this replan touches them.
+
+**Dependency order after this replan:** #583 → #104 → #108 → #579. #581 is
+independent.
+
+**Not rewritten:** #574–#577 are closed and merged. They concern authorization
+facts, none of which is a display field, so #583 does not reach them.
