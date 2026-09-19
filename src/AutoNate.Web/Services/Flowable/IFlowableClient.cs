@@ -30,6 +30,21 @@ public interface IFlowableClient
 
     Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Every execution Flowable will yield, up to <paramref name="maxPages"/>
+    /// pages per collection (#588).
+    /// </summary>
+    /// <remarks>
+    /// The bound is a parameter because the two callers want different answers:
+    /// the poll runs every 60 seconds and must stay cheap, while the backfill is a
+    /// one-shot operator action whose job is to ignore that windowing. With a
+    /// single constant and no paging, the cache could never hold more than the 200
+    /// most recent instances — so #108's list could not show more however well its
+    /// query was written.
+    /// </remarks>
+    Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
+        int maxPages, CancellationToken cancellationToken = default);
+
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -106,6 +121,24 @@ public interface IFlowableClient
     // Used by the projection-framework polling feed to seed the workflow_task_cache
     // without per-user fan-out. `start` is 0-based; `size` caps each page.
     Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(int start, int size, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finished tasks, newest-completed first (#586).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Ordered, not filtered by time, and that is a measured
+    /// constraint.</b> Flowable ignores <c>finishedAfter</c> on this endpoint —
+    /// verified against a live engine: a <c>finishedAfter</c> of 2030 returns the
+    /// same rows as no filter at all, and an entirely invented parameter returns
+    /// 200 with everything. So a time watermark cannot be pushed to the server,
+    /// and a caller that tried would look correct while reprocessing all of
+    /// history.</para>
+    ///
+    /// <para><c>sort=endTime&amp;order=desc</c> IS honoured, which is what makes a
+    /// bounded sweep possible: walk newest-first and stop once a page tells you
+    /// nothing new.</para>
+    /// </remarks>
+    Task<IReadOnlyList<FlowableFinishedTask>> GetFinishedTasksAsync(int start, int size, CancellationToken cancellationToken = default);
 
     // Paged enumeration of historic activity instances across every process.
     // Used by the projection-framework history feed to populate the append-only

@@ -15,6 +15,7 @@ namespace AutoNate.Web.Services.Flowable.Cache;
 public sealed class FlowableExecutionPollingFeed : PeriodicPollingFeed<WorkflowExecutionSummary>
 {
     private readonly IFlowableClient _flowable;
+    private readonly FlowableCacheOptions _options;
 
     public FlowableExecutionPollingFeed(
         IFlowableClient flowable,
@@ -23,11 +24,15 @@ public sealed class FlowableExecutionPollingFeed : PeriodicPollingFeed<WorkflowE
         : base("flowable.exec.poll", options.Value.ExecutionPollInterval, logger)
     {
         _flowable = flowable;
+        _options = options.Value;
     }
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
     {
-        var instances = await _flowable.GetWorkflowExecutionsAsync(cancellationToken);
+        // Bounded per tick (#588). See FlowableCacheOptions.ExecutionPollMaxPages
+        // for why the ceiling lives here and not in the client.
+        var instances = await _flowable.GetWorkflowExecutionsAsync(
+            _options.ExecutionPollMaxPages, cancellationToken);
         foreach (var instance in instances)
         {
             if (string.IsNullOrWhiteSpace(instance.Id)) continue;

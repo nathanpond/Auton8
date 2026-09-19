@@ -32,7 +32,9 @@ namespace AutoNate.Web.Services.Flowable.Cache;
 // This is the same set the live feed sees, so a rebuild restores the cache to
 // what steady-state polling would have produced — it does not resurrect
 // instances aged out of Flowable itself.
-public sealed class FlowableExecutionBackfillSource(IFlowableClient flowable)
+public sealed class FlowableExecutionBackfillSource(
+    IFlowableClient flowable,
+    IOptions<FlowableCacheOptions> options)
     : IProjectionBackfillSource<WorkflowExecutionSummary>
 {
     public string ProjectionName => "flowable.workflow_execution_cache";
@@ -40,7 +42,11 @@ public sealed class FlowableExecutionBackfillSource(IFlowableClient flowable)
     public async IAsyncEnumerable<ChangeEvent<WorkflowExecutionSummary>> EnumerateAllAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var instances = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+        // No practical ceiling (#588): a backfill exists to ignore the windowing
+        // that keeps a tick cheap, which is what lets the cache hold more than the
+        // most recent page.
+        var instances = await flowable.GetWorkflowExecutionsAsync(
+            options.Value.ExecutionBackfillMaxPages, cancellationToken);
         foreach (var instance in instances)
         {
             if (string.IsNullOrWhiteSpace(instance.Id)) continue;

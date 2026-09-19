@@ -241,64 +241,66 @@ public sealed class FlowableClient(
         };
     }
 
-    public async Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
+        CancellationToken cancellationToken = default) =>
+        GetWorkflowExecutionsAsync(maxPages: 1, cancellationToken);
+
+    /// <summary>
+    /// Every execution Flowable will yield, up to <paramref name="maxPages"/>
+    /// pages per collection (#588).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The bound is a parameter, not a constant, because the two callers
+    /// want different answers.</b> The polling feed runs every 60 seconds and must
+    /// stay cheap; the backfill is a one-shot operator action whose entire job is
+    /// to ignore the windowing that keeps a tick cheap. A single constant served
+    /// one of them badly: at `size=200` with no paging, the cache could never hold
+    /// more than the 200 most recent instances, so #108's list could not show more
+    /// however well its query was written.</para>
+    ///
+    /// <para><c>maxPages: 1</c> is the default so every existing caller keeps the
+    /// behaviour it had.</para>
+    ///
+    /// <para><b>Why not a time watermark.</b> `historic-process-instances` does
+    /// honour `startedAfter`, but the poll needs instances whose STATUS changed as
+    /// well as ones that started, and the two cannot be expressed in one query.
+    /// More to the point, the three enrichment collections would still have to
+    /// cover whatever the spine returned. Paging with an explicit ceiling is the
+    /// mechanism that bounds the tick without pretending to be incremental --
+    /// and `historic-activity-instances` ignores `startedAfter` outright (#590),
+    /// so an incremental design there would be a no-op that looked like one.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
+        int maxPages,
+        CancellationToken cancellationToken = default)
     {
-        // Four independent Flowable collections — kick them off concurrently
-        // so the wall-clock for the list page is bounded by the slowest, not
-        // the sum. Each response is consumed only after the merge below, so
-        // overlapping the fetches is safe.
-        var historicTask = _httpClient.GetAsync(
-            $"service/history/historic-process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
-            cancellationToken);
-        var runtimeTask = _httpClient.GetAsync(
-            $"service/runtime/process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
-            cancellationToken);
-        var tasksTask = _httpClient.GetAsync(
-            $"service/runtime/tasks?sort=createTime&order=desc&size={WorkflowExecutionQuerySize}",
-            cancellationToken);
-        var activitiesTask = _httpClient.GetAsync(
-            $"service/history/historic-activity-instances?sort=startTime&order=desc&size={WorkflowExecutionActivityQuerySize}",
-            cancellationToken);
+        if (maxPages < 1) maxPages = 1;
 
-        HttpResponseMessage? historicResponse = null;
-        HttpResponseMessage? runtimeResponse = null;
-        HttpResponseMessage? tasksResponse = null;
-        HttpResponseMessage? activitiesResponse = null;
-        try
+        // Four independent Flowable collections -- kick them off concurrently so
+        // the wall-clock is bounded by the slowest, not the sum. Each collection
+        // pages independently: they have different lengths, and a short page on
+        // one says nothing about the others.
+        var historicFetch = PageCollectionAsync<FlowableHistoricProcessInstanceResponse>(
+            "service/history/historic-process-instances?sort=startTime&order=desc",
+            WorkflowExecutionQuerySize, maxPages, "query historic process instances", cancellationToken);
+        var runtimeFetch = PageCollectionAsync<FlowableProcessInstanceResponse>(
+            "service/runtime/process-instances?sort=startTime&order=desc",
+            WorkflowExecutionQuerySize, maxPages, "query runtime process instances", cancellationToken);
+        var tasksFetch = PageCollectionAsync<FlowableTaskResponse>(
+            "service/runtime/tasks?sort=createTime&order=desc",
+            WorkflowExecutionQuerySize, maxPages, "query runtime tasks", cancellationToken);
+        var activitiesFetch = PageCollectionAsync<FlowableHistoricActivityInstanceResponse>(
+            "service/history/historic-activity-instances?sort=startTime&order=desc",
+            WorkflowExecutionActivityQuerySize, maxPages, "query historic activity instances", cancellationToken);
+
+        await Task.WhenAll(historicFetch, runtimeFetch, tasksFetch, activitiesFetch);
+
+        var historicPayload = new FlowableListResponse<FlowableHistoricProcessInstanceResponse> { Data = await historicFetch };
+        var runtimePayload = new FlowableListResponse<FlowableProcessInstanceResponse> { Data = await runtimeFetch };
+        var tasksPayload = new FlowableListResponse<FlowableTaskResponse> { Data = await tasksFetch };
+        var activitiesPayload = new FlowableListResponse<FlowableHistoricActivityInstanceResponse> { Data = await activitiesFetch };
+
         {
-            try
-            {
-                await Task.WhenAll(historicTask, runtimeTask, tasksTask, activitiesTask);
-            }
-            catch
-            {
-                // WhenAll waits for every task to finish before throwing, so
-                // each task is .IsCompleted here. Reclaim responses that
-                // succeeded before we let the original exception propagate.
-                // await on a completed-successfully task returns synchronously
-                // — it's just the way to get the value without tripping the
-                // VSTHRD103 analyzer for .Result.
-                if (historicTask.IsCompletedSuccessfully) (await historicTask).Dispose();
-                if (runtimeTask.IsCompletedSuccessfully) (await runtimeTask).Dispose();
-                if (tasksTask.IsCompletedSuccessfully) (await tasksTask).Dispose();
-                if (activitiesTask.IsCompletedSuccessfully) (await activitiesTask).Dispose();
-                throw;
-            }
-
-            historicResponse = await historicTask;
-            runtimeResponse = await runtimeTask;
-            tasksResponse = await tasksTask;
-            activitiesResponse = await activitiesTask;
-
-            await EnsureSuccessAsync(historicResponse, "query historic process instances");
-            await EnsureSuccessAsync(runtimeResponse, "query runtime process instances");
-            await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
-            await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
-
-            var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
-            var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
-            var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
-            var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
             var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(historicPayload.Data, cancellationToken);
 
             var lastActivityByProcessInstanceId = activitiesPayload.Data
@@ -380,13 +382,41 @@ public sealed class FlowableClient(
                 .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
                 .ToArray();
         }
-        finally
+    }
+
+    // Pages one Flowable collection, stopping at a short page.
+    //
+    // A page that comes back FULL is not assumed to be the end -- that is how a
+    // collection of exactly `pageSize` rows would truncate silently -- and a page
+    // that comes back SHORT is not treated as a failure: it is how Flowable says
+    // "that is all". Both directions are asserted by tests, because getting
+    // either backwards produces a plausible-looking wrong answer.
+    //
+    // A failed page THROWS rather than returning what it has. A partial result
+    // that reads as complete is the silent-truncation shape this story exists to
+    // end, so the caller is told rather than handed a short list (#588).
+    private async Task<List<T>> PageCollectionAsync<T>(
+        string urlWithoutPaging,
+        int pageSize,
+        int maxPages,
+        string what,
+        CancellationToken cancellationToken)
+    {
+        var all = new List<T>();
+        for (var page = 0; page < maxPages; page++)
         {
-            historicResponse?.Dispose();
-            runtimeResponse?.Dispose();
-            tasksResponse?.Dispose();
-            activitiesResponse?.Dispose();
+            var url = $"{urlWithoutPaging}&start={page * pageSize}&size={pageSize}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessAsync(response, what);
+
+            var payload = await DeserializeAsync<FlowableListResponse<T>>(response, cancellationToken);
+            if (payload.Data.Count == 0) break;
+
+            all.AddRange(payload.Data);
+            if (payload.Data.Count < pageSize) break;
         }
+
+        return all;
     }
 
     private Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
@@ -1093,6 +1123,33 @@ public sealed class FlowableClient(
                 EndTime = a.EndTime,
                 DurationMs = a.DurationInMillis,
                 DeleteReason = a.DeleteReason
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<FlowableFinishedTask>> GetFinishedTasksAsync(
+        int start, int size, CancellationToken cancellationToken = default)
+    {
+        if (size <= 0) return Array.Empty<FlowableFinishedTask>();
+        if (start < 0) start = 0;
+
+        // `finished=true` and the sort are both honoured; a time filter is not.
+        // See IFlowableClient.GetFinishedTasksAsync for the measurements.
+        var url = $"service/history/historic-task-instances"
+                  + $"?finished=true&sort=endTime&order=desc&start={start}&size={size}";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "page through finished tasks");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricTaskResponse>>(
+            response, cancellationToken);
+
+        return payload.Data
+            .Where(task => !string.IsNullOrWhiteSpace(task.Id))
+            .Select(task => new FlowableFinishedTask
+            {
+                Id = task.Id!,
+                EndedAtUtc = task.EndTime,
+                ProcessInstanceId = task.ProcessInstanceId
             })
             .ToArray();
     }
@@ -2608,6 +2665,10 @@ public sealed class FlowableClient(
     private sealed class FlowableHistoricTaskResponse
     {
         public string? Id { get; init; }
+
+        // Present on the wire; verified against a live engine's payload, which
+        // carries processInstanceId and processDefinitionId alongside endTime.
+        public string? ProcessInstanceId { get; init; }
 
         public string? Name { get; init; }
 

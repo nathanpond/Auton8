@@ -8720,3 +8720,104 @@ these questions of.
 elements executing on the engine, not the executions read model.
 
 **Order after this replan:** #586 → #104; #588 → #108; #109 last.
+
+## M5 execution — #586 (the task cache learns a task finished)
+
+- **Decision:** completion is read from Flowable's **history** as a positive fact,
+  not inferred from a task's absence in a runtime sweep.
+  **Why:** the cheaper design is unsound here, for a specific reason rather than a
+  stylistic one. The polling feed emits into a channel the projection drains
+  **asynchronously**, so when a runtime sweep finishes its own upserts may not have
+  been applied yet — rows would be marked complete for missing a sweep whose
+  results had not landed. Reading history means a partial or failed sweep can only
+  do less, never something wrong, which satisfies the story's complement by
+  construction.
+  **Issue:** #586
+
+- **Measured, not recalled — and it changed the design.** Probed the live engine
+  before writing the client call:
+  - `historic-task-instances?finished=true` → 119 rows (honoured);
+  - `&bogusParamCheck=1` → 588, i.e. everything — **unknown parameters are silently
+    ignored and still return 200**;
+  - `&finishedAfter=2030-01-01` → 119, the same as no filter — **ignored**;
+  - the POST `query/historic-task-instances` form ignores it too, though it does
+    apply `taskName` (0 rows for a nonsense name), so the body is being read;
+  - `sort=endTime&order=desc` → **honoured**.
+
+  A `finishedAfter` watermark — which is what I was about to write from memory —
+  would have returned 200 with unfiltered results and reprocessed all of history on
+  every tick, looking correct throughout. Only comparing counts exposes it.
+  **Consequence:** no server-side time filter, so the sweep is bounded by the sort
+  instead: walk newest-first, stop when a page marks nothing.
+  **Issue:** #586
+
+- **Decision:** a targeted `UPDATE` rather than an upsert through the projection.
+  **Why:** the historic payload is a different shape from the runtime one, and
+  building a full row from it would blank columns the runtime projection owns —
+  the failure #583 found in `FlowableReadThrough`. `ChangeOp` was deliberately not
+  extended either: it is a two-value enum shared by every projection, and growing
+  it to carry "completed" would touch all of them for one cache's benefit.
+  **Issue:** #586
+
+- **Method failure, caught and worth recording.** Two of the first three mutations
+  reported "survived". One of them had **not applied at all** — the search string's
+  indentation did not match the file (`SET status = 'completed'`, not
+  `status = 'completed'`), so the edit was a no-op and the green run was evidence
+  of nothing. The mutation harness now asserts the file actually changed (`cmp`)
+  before running, and prints `MUTATION DID NOT APPLY` otherwise.
+  **The other survivor was real and exposed a bad test.** Removing the stop
+  condition changed nothing, because the test seeded a single finished task: a
+  1-row page is shorter than the 200-row default, so the short-page break fired
+  first and the assertion held for the wrong reason. The test now forces
+  `TaskPageSize=2` and seeds three, so only the stop condition can end the sweep.
+  With that fixed, all three mutations apply and all three are killed.
+  **Issue:** #586
+
+## M5 execution — #588 (page the execution fetch)
+
+- **Decision:** the page ceiling is a **parameter**, not a constant, and the two
+  callers pass different values — `ExecutionPollMaxPages = 5` for the poll,
+  `ExecutionBackfillMaxPages = 10_000` for the backfill.
+  **Why:** the story offered watermark / page ceiling / backfill-does-the-sweep.
+  The two callers genuinely want different answers: the poll runs every 60s and
+  must stay cheap, the backfill is a one-shot operator action whose job is to
+  ignore that windowing. One constant served one of them badly — which is how the
+  200 cap became a property of the read model rather than of a request.
+  `maxPages: 1` is the default, so all six existing callers keep their behaviour.
+  **Issue:** #588
+
+- **Decision:** not a time watermark, and the reason is measured.
+  `historic-process-instances` does honour `startedAfter` (a 2030 value returns 0,
+  versus 475 unfiltered), so a watermark was genuinely available for the spine.
+  It was still rejected: the poll needs instances whose STATUS changed as well as
+  ones that started, which is two queries rather than one, and the three
+  enrichment collections would still have to cover whatever the spine returned.
+  Decisively, `historic-activity-instances` **ignores** `startedAfter` — 3162 rows
+  whether the value is 2020 or 2030 — so an incremental design there would have
+  been a no-op that looked like one. Filed separately as **#590**, because the
+  history feed already ships that no-op today.
+  **Issue:** #588
+
+- **Decision:** a failed page **throws** rather than returning what it has.
+  **Why:** a short list is indistinguishable, to the caller, from a collection that
+  really ended there — and the caller is the projection, which would then write a
+  cache quietly missing rows. That is the silent-truncation shape this story
+  exists to end, so the caller is told.
+  **Issue:** #588
+
+- **Measured, per the story's criterion**, against the local engine (475 historic
+  instances, more than the 200 cap):
+  - **before** (`maxPages: 1`, today): spine 200 of 475, runtime 200 of 354, tasks
+    200 of 469, activities 2000 of 3162 — ~0.12s sequential;
+  - **after** (`maxPages: 5`): 475, 354, 469, 3162 — all of each — ~0.30s
+    sequential. The client fans the four collections out concurrently, so real
+    wall-clock is bounded by the slowest rather than the sum.
+  **Issue:** #588
+
+- **Method note:** the mutation harness now asserts the edit applied before
+  trusting a survival, after #586 produced a false "survived" from a no-op edit.
+  All four #588 mutations applied and all four were killed, each with the blast
+  radius it should have: stopping after page one kills 4, treating a full page as
+  the end kills 4, ignoring `maxPages` kills exactly the bound test, and swallowing
+  a failed page kills exactly the truncation test.
+  **Issue:** #588
