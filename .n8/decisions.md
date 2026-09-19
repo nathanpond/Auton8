@@ -9700,3 +9700,169 @@ should happen.
 a `make test-slim` output. Untracked, and `/trx/` is gitignored now.
 
 **Issue:** #232
+
+## M5 — four owner decisions, taken 2026-09-19
+
+Asked as four questions after the first batch merged; all four answered. Recorded
+here in full because during an autonomous run this log is the only window into
+which calls were the owner's and which were mine.
+
+### 1. `Pool / Participant` becomes `engine: "executes"` (#169)
+
+The epic-level question #169's own replan flagged for the owner rather than
+deciding. Chosen because the manifest's job is to say what the engine does with an
+element, and after #169 the engine deploys a pool as a definition — `annotation`
+would be the false one, and its current reason (*"no instance ever enters it, so no
+run can prove it"*) becomes untrue the moment the story ships, so it had to be
+rewritten either way.
+
+**What it commits to**, written on #169 so the story does not rediscover it: the
+row moves on **both** axes; `BpmnSupportManifestTests.The_engine_axis_agrees_with_the_inventory_or_declares_why_not`
+needs a declared departure with its reason, as #218's complex-gateway flip did; the
+reason is digest-pinned (#380) so `bpmn-reason-baseline.tsv` regenerates in the same
+commit; and the departure's reason should say **what is different about it**, because
+a pool does not execute the way a user task does — its *contents* do. That is the
+honest form of the claim, and writing it down is what stops `executes` quietly
+widening epic #40's *"every element the studio offers executes"*.
+
+**Ordering recorded, because it matters:** #578 currently refuses a multi-pool
+publish, and that refusal is what makes multi-pool safe today. Nothing relaxes it
+until the split-and-deploy path works — fix save, build deploy, *then* remove the
+refusal, with #578's E2E **inverted rather than deleted**.
+
+#170 and #171 unblocked as dependents.
+
+### 2–4. Three closed-box criteria amended to describe what shipped (#284, #286, #285)
+
+The same shape three times: a closed story's criterion describes work that does not
+exist, while the fallback clause or the prevention design is what actually shipped.
+Amending a closed contract is a retroactive edit, which is why it was the owner's
+call; leaving it would have left three ticked boxes promising things nobody built.
+
+- **#218** (via #284) — the generated default flow and distinguishability. Verified
+  first: `ExpandComplexGateways` *honours* an author-set `default` rather than
+  generating one, and the deployed element stays a `bpmn:complexGateway`, so there is
+  no generated exclusive gateway for the criterion to be about. Now describes the
+  prevention design, guarded by three named tests. Distinguishability is **not**
+  filed as follow-up: nothing needs it, and the hazard is closed.
+- **#115** (via #286) — the variable snapshot. Now says the handler sees current
+  values, names the manifest rows where an author meets the limitation and the test
+  that pins it, and records that snapshotting ourselves was rejected as Auton8
+  reimplementing an execution semantic.
+- **#168** (via #285) — the dead-letter conjunction. Now stops at the engine, where
+  the story's own body already said the operator-facing view belonged. **#172 carries
+  the join** and shipped it in #600 with exactly those assertions.
+
+Every amendment carries its own *why* inline, so a later reader sees the reasoning
+rather than only that the wording changed. Audit trail on each amended issue;
+#284, #285 and #286 closed.
+
+### Sequencing
+
+Next: **finish #110, then #111** — decision tables end to end. #110 is half built
+(schema, validator, generator) and half-building it was the worst available outcome.
+
+## M5 execution — #110, authoring a decision table (2026-09-19)
+
+Unblocked by #106's finding that DMN costs no container.
+
+**The rules are structured data; the DMN is generated at publish.** That is the
+decision everything else follows from. Storing hand-edited XML would make the AC's
+central promise — *"a rule whose cells do not satisfy their types is rejected at
+save with a message naming the cell"* — impossible to enforce, because you cannot
+validate cells you did not model. The published version keeps a copy of what was
+generated, because regenerating on demand would let a later change to the generator
+silently change what a bound process decides.
+
+**A new `EntityKind`, with both registrations the skill says have shipped missing
+five times.** Its own kind rather than an action on SiteConfig, for the reason #112
+gave WorkflowMessage one. Worth noting that this is the **opposite** call from
+#172's jobs three days earlier: a job has no independent existence and its scope is
+its execution, so `/workflowexecution/<id>` already meant the right thing. A
+decision table has both an existence and an owner. Two different answers, each
+argued from the resource rather than from habit.
+
+The enforcement tests hit an **instance-level** route with a concrete id, because a
+kind-level route returns before the instance-handler lookup and would pass with zero
+authorizers registered. Mutation-checked: dropping the `IInstanceAuthorizer` fails
+both, with the "denies everyone but super-admins" symptom.
+
+**Three defects, each found by a layer the others could not see.**
+
+1. **Inputs over HTTP are `JsonElement`.** Every type decision in
+   `FlowableDecisionClient` asks what a value *is*, and a boxed `JsonElement`
+   answers "JsonElement" to all of them — so the declared-type check refused
+   perfectly good calls. Every existing unit test passed CLR values, which is
+   exactly what no HTTP caller ever does. **Found end to end.**
+2. **The unwrap's ternary unified `long` and `double` to `double`**, so every
+   integer reached the engine as a double. Survivable — a DMN number column accepts
+   either — which is why it took a unit test asserting the emitted *type name* to
+   see it at all. **Found in slim, after the E2E had gone green.**
+3. **The engine test could not fail.** Its first form deployed a hand-written copy
+   of what the generator "should" produce, and its own comment claimed it was kept
+   in step by failing when the two diverged. Nothing in it called the generator. It
+   now creates, publishes and evaluates through Auton8's own API, so there is one
+   path and it cannot drift.
+
+The first two are a matched pair worth keeping in mind: the end-to-end test caught
+what the unit tests structurally could not, and the unit test caught what the
+end-to-end test was too forgiving to notice.
+
+**A question the unit tests raise and cannot answer, now settled:** cell text is
+XML-escaped, so `"escalate"` reaches the engine as `&quot;escalate&quot;`. Whether
+FEEL sees the quotes after the parser unescapes them is an engine fact. It does.
+
+**Editor decisions.** A new table starts with one input and one output, because a
+table with neither is refused at save and handing an author an empty grid that
+cannot be saved is a worse first experience than a starting point they edit. Adding
+a column widens every existing rule in the same operation, because otherwise the
+author is fixing damage the editor did. Cells are named by *rule and column*, which
+is how the server's error messages name them, so an author reading "Rule 1, Input 1"
+can find the box it is about.
+
+**Pins:** SLIM_BACKEND 2870 → 2906, FLOWABLE 250 → 252, SLIM_E2E 231 → 233,
+FULL_LOCAL 482 → 486.
+
+**Issue:** #110
+
+## M5 execution — a leak I reintroduced, and the guard that stopped it (2026-09-19)
+
+`make test-slim` failed #110's endpoints on **two** guards at once:
+
+```
+No_endpoint_puts_a_flowable_exception_message_into_a_response
+  DecisionTableEndpoints.cs: $"The engine refused the decision table. {exception.Message}"
+  DecisionTableEndpoints.cs: exception.Message
+
+Every_flowable_catch_that_answers_a_caller_also_logs
+  DecisionTableEndpoints.cs: catch (exception) answers a caller without logging  ×2
+```
+
+A `FlowableRequestException`'s message is the engine's **entire HTTP body** — JDBC
+URLs with passwords, internal hostnames, absolute paths, Java frames. Both catch
+blocks now route through `EngineRefusal.Describe` and log the raw text at Warning,
+as the publish and execution routes have since #350.
+
+**Two things worth recording beyond the fix.**
+
+First, #350 took *three rounds* to fix this on the publish route, and I reproduced
+it on a new one within the hour. That is what makes it a guard's job rather than a
+reviewer's.
+
+Second, and worse: **my own test asserted the defect.**
+`A_refused_deployment_leaves_the_draft_unpublished` ended with
+
+```csharp
+// And the engine's own words reach the author, rather than a generic failure.
+Assert.Contains("the engine hated", …);
+```
+
+I wrote that believing it was the good half — surfacing the engine's reason instead
+of a generic failure. It is now inverted: the response must **not** contain
+`cvc-complex-type` or the engine's phrasing, while the author still learns the
+engine refused it. A test written by the author of the defect encodes the author's
+mistake, which is precisely why this class needs a codebase-wide guard and not a
+per-story assertion.
+
+The completion comment on #110 quoted that assertion approvingly. Corrected on the
+issue rather than left standing.

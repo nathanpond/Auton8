@@ -38,6 +38,16 @@ public static class EntityKinds
 
     public const string Form = "form";
 
+    // #110. Decision tables. Its OWN kind rather than an action on SiteConfig,
+    // for the same reason #112 gave WorkflowMessage one: a decision table is a
+    // distinct resource an author owns, and writing one should be grantable
+    // without also granting unrelated site administration.
+    //
+    // Contrast #172's jobs, which deliberately did NOT get a kind -- a job has no
+    // independent existence and its scope is its execution. A decision table has
+    // both, which is what makes the kind the right shape here.
+    public const string DecisionTable = "decisiontable";
+
     // Generic kind-discriminated outbound integration config (LLM provider api
     // keys today, future SMTP/S3/IdP). Single coarse Manage action gates
     // create/edit/delete/test/set-default; View gates list+read.

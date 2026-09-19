@@ -20,6 +20,11 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<WorkflowExecutionError> WorkflowExecutionErrors { get; set; }
 
+    // #110. Decision tables, in the workflow_models / workflow_model_versions shape.
+    public virtual DbSet<DecisionTable> DecisionTables { get; set; }
+
+    public virtual DbSet<DecisionTableVersion> DecisionTableVersions { get; set; }
+
     public virtual DbSet<WorkflowTaskCompletion> WorkflowTaskCompletions { get; set; }
 
     public virtual DbSet<RecordType> RecordTypes { get; set; }
@@ -198,6 +203,67 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.DefaultVariables)
                 .HasColumnName("default_variables")
                 .HasColumnType("jsonb");
+        });
+
+        modelBuilder.Entity<DecisionTable>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("decision_tables_pkey");
+
+            entity.ToTable("decision_tables");
+
+            entity.HasIndex(e => e.UpdatedAtUtc, "ix_decision_tables_updated_at_utc").IsDescending();
+
+            entity.HasIndex(e => e.DecisionKey, "decision_tables_decision_key_key").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DecisionKey).HasColumnName("decision_key");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.HitPolicy).HasColumnName("hit_policy");
+            entity.Property(e => e.Inputs).HasColumnName("inputs").HasColumnType("jsonb");
+            entity.Property(e => e.Outputs).HasColumnName("outputs").HasColumnType("jsonb");
+            entity.Property(e => e.Rules).HasColumnName("rules").HasColumnType("jsonb");
+            entity.Property(e => e.IsDraft).HasColumnName("is_draft");
+            entity.Property(e => e.DraftVersionNumber).HasColumnName("draft_version_number");
+            entity.Property(e => e.PublishedVersionNumber).HasColumnName("published_version_number");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.LastDeploymentId).HasColumnName("last_deployment_id");
+            entity.Property(e => e.LastDecisionId).HasColumnName("last_decision_id");
+            entity.Property(e => e.LastDecisionKey).HasColumnName("last_decision_key");
+            entity.Property(e => e.LastDecisionVersion).HasColumnName("last_decision_version");
+            entity.Property(e => e.LastDeployedAtUtc).HasColumnName("last_deployed_at_utc");
+        });
+
+        modelBuilder.Entity<DecisionTableVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("decision_table_versions_pkey");
+
+            entity.ToTable("decision_table_versions");
+
+            entity.HasIndex(e => new { e.DecisionTableId, e.VersionNumber },
+                    "decision_table_versions_table_id_version_number_key")
+                .IsUnique();
+
+            entity.HasIndex(e => e.DecisionTableId, "ix_decision_table_versions_decision_table_id");
+
+            entity.HasIndex(e => e.DecisionId, "ix_decision_table_versions_decision_id");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DecisionTableId).HasColumnName("decision_table_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.DecisionKey).HasColumnName("decision_key");
+            entity.Property(e => e.HitPolicy).HasColumnName("hit_policy");
+            entity.Property(e => e.Inputs).HasColumnName("inputs").HasColumnType("jsonb");
+            entity.Property(e => e.Outputs).HasColumnName("outputs").HasColumnType("jsonb");
+            entity.Property(e => e.Rules).HasColumnName("rules").HasColumnType("jsonb");
+            entity.Property(e => e.DmnXml).HasColumnName("dmn_xml");
+            entity.Property(e => e.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(e => e.DecisionId).HasColumnName("decision_id");
+            entity.Property(e => e.DecisionDefinitionKey).HasColumnName("decision_definition_key");
+            entity.Property(e => e.DecisionVersion).HasColumnName("decision_version");
+            entity.Property(e => e.PublishedAtUtc).HasColumnName("published_at_utc");
         });
 
         modelBuilder.Entity<WorkflowModelVersion>(entity =>

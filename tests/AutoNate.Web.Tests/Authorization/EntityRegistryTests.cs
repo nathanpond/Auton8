@@ -12,7 +12,7 @@ public sealed class EntityRegistryTests
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(22, kinds.Count);
+        Assert.Equal(23, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -34,6 +34,17 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.WorkflowSignal, kinds);
         Assert.Contains(EntityKinds.Plugin, kinds);
         Assert.Contains(EntityKinds.Form, kinds);
+        // #110. Its own kind rather than an action on SiteConfig, for the reason
+        // WorkflowMessage got one: a decision table is a distinct resource an
+        // author owns, and writing one should be grantable without also granting
+        // unrelated site administration.
+        //
+        // Contrast #172's jobs, which deliberately did NOT get a kind -- a job has
+        // no independent existence and its scope is its execution, so
+        // /workflowexecution/<id> already means the right thing for it. A decision
+        // table has both an existence and an owner, which is what makes the kind
+        // the right shape here rather than a habit.
+        Assert.Contains(EntityKinds.DecisionTable, kinds);
         Assert.Contains(EntityKinds.ExternalConnection, kinds);
         Assert.Contains(EntityKinds.SystemIssue, kinds);
         Assert.Contains(EntityKinds.SiteConfig, kinds);

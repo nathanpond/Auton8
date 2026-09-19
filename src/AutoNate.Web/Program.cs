@@ -368,6 +368,11 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Pipeline>(
         EntityKinds.Pipeline, p => p.Id));
+// #110. Path-only, and the entity type advertises no tags to match -- a tag with
+// no compiler behind it is a grant that parses and matches nothing.
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DecisionTable>(
+        EntityKinds.DecisionTable, t => t.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -378,6 +383,7 @@ builder.Services.AddScoped<IInstanceAuthorizer, WorkflowModelInstanceAuthorizer>
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowTaskInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowExecutionInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, FormInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, DecisionTableInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, UserInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, ExternalConnectionInstanceAuthorizer>();
 // These five had selector compilers (above) but no instance handler, so every
@@ -1057,6 +1063,8 @@ builder.Services.Configure<FormOptions>(o =>
 });
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GlobalMaxRequestBodyBytes);
 builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Decisions.IDecisionTableStore,
+    AutoNate.Web.Services.Decisions.EfCoreDecisionTableStore>();
 builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
 builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();
 builder.Services.AddScoped<IRecordEdgeTypeStore, EfCoreRecordEdgeTypeStore>();
@@ -1713,6 +1721,9 @@ app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
 app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
+// #110. Mapped here so AuthorizationGatePresenceTests can walk it -- an unmapped
+// group passes the invariant by being invisible.
+app.MapDecisionTableEndpoints();
 app.MapExternalConnectionEndpoints();
 app.MapIdentityProviderEndpoints();
 app.MapFederatedSignInEndpoints();

@@ -4,6 +4,8 @@ import ProtectedRoute from "@/shell/ProtectedRoute";
 
 import WorkflowExecutions from "@/pages/workflow-executions/WorkflowExecutions";
 import ExecutionPage from "@/pages/workflow-executions/ExecutionPage";
+import DecisionTablesList from "@/pages/admin/config/decisions/DecisionTablesList";
+import DecisionTableEditor from "@/pages/admin/config/decisions/DecisionTableEditor";
 import RecordTypeList from "@/pages/record-types/RecordTypeList";
 import RecordTypeEditor from "@/pages/record-types/RecordTypeEditor";
 import RecordList from "@/pages/records/RecordList";
@@ -265,6 +267,11 @@ export const APP_ROUTES: AppRoute[] = [
         element: template(a.templateKey)
       })),
       { path: "forms/:id", element: protect(<FormEditor />) },
+      // #110. Hard-routed children rather than template anchors: these are two
+      // pages of one editor, not a configuration surface a menu item points at,
+      // and the list is reached from the editor's Back button as well as a menu.
+      { path: "decision-tables", element: protect(<DecisionTablesList />) },
+      { path: "decision-tables/:id", element: protect(<DecisionTableEditor />) },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.

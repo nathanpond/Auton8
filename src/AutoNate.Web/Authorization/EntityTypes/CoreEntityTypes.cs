@@ -27,7 +27,7 @@ public static class CoreEntityTypes
         {
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, WorkflowMessage!, WorkflowSignal!, Plugin!,
-            Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
+            Form!, DecisionTable!, ExternalConnection!, SystemIssue!, SiteConfig!,
             IdentityProvider!,
             Project!, Cabinet!, Notebook!, Page!, Document!, Folder!
         });
@@ -225,6 +225,25 @@ public static class CoreEntityTypes
             Actions.Delete, Actions.Publish
         },
         tags: new[] { "shortcode", "siteAvailable", "draft", "published" });
+
+    // #110. Decision tables.
+    //
+    // No TAGS advertised, deliberately. A tag is a promise that a selector can
+    // filter on it, and the compiler registered for this kind is path-only -- so
+    // `[key=routing]` would parse and match nothing, which is worse than an
+    // explicit "unknown tag" refusal. #576 and #581 both removed tags for exactly
+    // this reason; advertising one before a compiler understands it is how a grant
+    // comes to mean something it cannot mean.
+    public static EntityTypeDefinition DecisionTable { get; } = new(
+        kind: EntityKinds.DecisionTable,
+        clrType: typeof(object),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.Create, Actions.Edit,
+            Actions.Delete, Actions.Publish
+        },
+        tags: Array.Empty<string>());
 
     // Outbound integration config registered through the External Connections
     // admin page. Manage gates write paths (create/edit/delete/test/set-default);

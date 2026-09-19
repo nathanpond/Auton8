@@ -217,6 +217,41 @@ public sealed class FormInstanceAuthorizer : IInstanceAuthorizer
     }
 }
 
+// #110. EntityKinds.DecisionTable instance gating.
+//
+// This registration and the selector compiler beside it are the pair the
+// add-permission-gate skill records as having shipped MISSING five times. Without
+// this one, Authorizer returns "no instance handler for kind 'decisiontable'" and
+// every RequirePermission endpoint denies everyone but super-admins -- silently,
+// with no startup error -- while under Authorization:DryRun=true it does the
+// opposite and allows everyone.
+public sealed class DecisionTableInstanceAuthorizer : IInstanceAuthorizer
+{
+    private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
+
+    public DecisionTableInstanceAuthorizer(IDbContextFactory<AutoNateDbContext> dbFactory)
+    {
+        _dbFactory = dbFactory;
+    }
+
+    public string Kind => EntityKinds.DecisionTable;
+
+    public async Task<bool> ExistsAndAuthorizedAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        string targetId,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(targetId, out var id)) return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.DecisionTables.AsNoTracking().Where(t => t.Id == id);
+        var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
+        return await visible.AnyAsync(cancellationToken);
+    }
+}
+
 // EntityKinds.User instance gating. The scaffolded LocalUser row has both a
 // long surrogate `Id` and the Guid identity used everywhere else in the
 // authorization layer (UserId column). Filter on UserId so the predicate

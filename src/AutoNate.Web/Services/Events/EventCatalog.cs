@@ -1088,6 +1088,40 @@ public static class EventCatalog
                     "An admin deleted an execution.",
                     "Fires from DELETE /api/executions/{processInstanceId}.",
                     ["resource: { processInstanceId }."]),
+                // #110. Decision tables. A published table decides business
+                // outcomes, and deleting one can stop a deployed process working,
+                // so both are on the record -- as is the try-it evaluation, which
+                // is someone asking the engine a question with data they chose.
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTableSaved,
+                    "An author created or edited a decision table draft.",
+                    "Fires from POST /api/decision-tables and PUT /api/decision-tables/{id}.",
+                    ["resource: { id, decisionKey, name }. details: { ruleCount, inputCount, outputCount }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTablePublished,
+                    "An author published a decision table, deploying it to the DMN engine.",
+                    "Fires from POST /api/decision-tables/{id}/publish, after the engine accepted the deployment.",
+                    ["resource: { id, decisionKey, name }. details: { versionNumber, decisionId, decisionVersion }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTableDeleted,
+                    "An author deleted a decision table and its published versions.",
+                    "Fires from DELETE /api/decision-tables/{id}.",
+                    ["resource: { id, decisionKey, name }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTableListViewed,
+                    "Someone read the list of decision tables.",
+                    "Fires from GET /api/decision-tables.",
+                    ["resource: null. details: { resultCount }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTableViewed,
+                    "Someone opened one decision table.",
+                    "Fires from GET /api/decision-tables/{id}.",
+                    ["resource: { id, decisionKey }."]),
+                new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.DecisionTableTested,
+                    "Someone evaluated a decision table against sample inputs from the try-it panel.",
+                    "Fires from POST /api/decision-tables/{id}/test. Goes through the same evaluation path a process uses, so what is recorded here is what a process would have got.",
+                    ["resource: { id, decisionKey }. details: { inputCount, matched, matchedRuleCount }."]),
                 // #172. Jobs and timers. The two mutations are mutations on
                 // someone else's process, so they belong on the record next to
                 // cancel and move-state above; the read is here for the same
