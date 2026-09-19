@@ -81,7 +81,18 @@ public sealed class FlowableReadThrough : IFlowableReadThrough
             StartUserId = live.StartUserId,
             CurrentStep = live.ActivityId,
             StartedAtUtc = cached?.StartTime is { } st ? new DateTimeOffset(DateTime.SpecifyKind(st, DateTimeKind.Utc)) : null,
-            LastActivityAtUtc = DateTimeOffset.UtcNow
+            LastActivityAtUtc = DateTimeOffset.UtcNow,
+
+            // #583. The projection's upsert writes EVERY column, so anything not
+            // set here is written as null over whatever the poll had put there.
+            //
+            // `Name` the runtime instance does carry, so it is authoritative.
+            // `WorkflowModelName` it does not -- FlowableProcessInstanceSummary
+            // has no such field -- so it is carried forward from the cached row
+            // rather than blanked. That is the one place these two write paths
+            // differ, and it is named here rather than left to emerge as a name
+            // that disappears whenever a detail view goes stale.
+            WorkflowModelName = cached?.WorkflowModelName
         };
 
         await _projection.ApplyAsync(new[]

@@ -42,6 +42,20 @@ public sealed class FlowableCacheOptions
 
     public int CurrentProjectionVersion { get; set; } = 1;
 
+    // #583. The execution cache versions independently of the other three.
+    //
+    // CurrentProjectionVersion is shared by the execution, task, history and
+    // variable projections, so bumping it to mark a change in ONE of them
+    // relabels the other three, whose shape did not change. It is also never
+    // compared anywhere -- nothing re-projects on a version change; BackfillRunner
+    // says as much ("the shadow-rename path will land when the first version bump
+    // is needed in anger"). So the shared field cannot carry this meaning.
+    //
+    // This one does, and carries exactly one: a version-2 row was written by code
+    // that knows about `name`. That is what lets a null name be read as "this run
+    // has no name" rather than "this row predates the column".
+    public int ExecutionProjectionVersion { get; set; } = 2;
+
     // When the execution projection sees an instance it hasn't cached
     // before, also synchronously fetch that instance's runtime tasks and
     // run them through the task projection — same batch, same DbContext.

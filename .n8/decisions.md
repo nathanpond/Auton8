@@ -8506,3 +8506,60 @@ independent.
 
 **Not rewritten:** #574–#577 are closed and merged. They concern authorization
 facts, none of which is a display field, so #583 does not reach them.
+
+## M5 execution — #583 (the execution cache learns the run's name)
+
+- **Decision (deviation from this story's own AC2):** `CurrentProjectionVersion`
+  was **not** bumped. A new per-projection `ExecutionProjectionVersion` was added
+  instead, defaulting to 2.
+  **Why:** the AC said bumping it would cause rows written by the previous version
+  to be re-projected. It would not. `CurrentProjectionVersion` is written into
+  rows and **never compared** anywhere — nothing re-projects on a version change,
+  and `BackfillRunner`'s own comment says the mechanism is unbuilt ("the
+  shadow-rename path will land when the first version bump is needed in anger").
+  It is also one option shared by the execution, task, history and variable
+  projections, so bumping it to mark a change in one relabels three whose shape
+  did not change. The AC described a mechanism that does not exist; I wrote that
+  AC yesterday, so this is a planning failure of mine, logged rather than ticked.
+  **What the new field buys:** `projection_version = 2` means exactly one thing —
+  written by code that knows about `name` — which is what makes the "never had a
+  name" vs "not yet projected" complement checkable *in the data* rather than by
+  inference.
+  **Issue:** #583
+
+- **Decision (deviation from AC3):** no backfill was run or wired.
+  **Why:** `FlowableExecutionBackfillSource` calls the **same**
+  `GetWorkflowExecutionsAsync` the poll calls, and the poll upserts **every**
+  instance it returns on **every** tick — not only new ones. So once `MapRow`
+  writes the columns, every instance the poll covers gains its name within one
+  poll interval with no backfill; a backfill would re-emit an identical set. AC3's
+  second branch therefore applies, and the statement is precise: an id in place of
+  a name, for at most one poll interval, only for rows the poll has not revisited.
+  The admin Rebuild button remains for an operator who wants it immediately.
+  **Issue:** #583
+
+- **Rule 1 fix, inside scope:** `FlowableReadThrough` would have **blanked**
+  `workflow_model_name`.
+  **Why it mattered:** the projection's upsert writes every column, so anything
+  the read-through leaves unset is written as null over what the poll put there.
+  `FlowableProcessInstanceSummary` carries `Name` but has no model-name field at
+  all, so a detail view going stale would have silently erased the model name. The
+  cached value is now carried forward, the way `StartedAtUtc` already was. This is
+  the one place the two write paths differ and it is named in code.
+  **Evidence:** the mutation that removes the carry-forward kills exactly one test
+  — the one written for it — and nothing else.
+  **Issue:** #583
+
+- **Decision:** an empty or whitespace name is normalized to SQL NULL.
+  **Why:** a run with no name and a run named `""` are the same thing to a reader,
+  and the UI's `name ?? id` fallback only fires on null — an empty string would
+  render as a blank label rather than the id.
+  **Issue:** #583
+
+- **Self-caught error worth recording:** the first version of the DDL edit
+  introduced a junk column (`record_id_placeholder_unused BOOLEAN NULL`) from a
+  bad replacement string. Caught by reading the command's own output rather than
+  by a test, and removed before anything was built. The reason it was catchable is
+  the rule about reading output unconditionally rather than gating on the exit
+  code — the edit "succeeded".
+  **Issue:** #583
