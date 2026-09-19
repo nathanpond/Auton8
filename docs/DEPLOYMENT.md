@@ -287,6 +287,40 @@ These have working defaults but are typically tuned per-environment.
 - **`Logging:LogLevel:*`** — production deployments typically want `Default=Warning` with `AutoNate=Information`; lift specific namespaces to `Debug` only when investigating an incident.
 - **`Nats:Url`** — only needed when the JetStream provisioner runs against an external NATS cluster instead of the Dapr-bundled one. Leave unset (or empty) and the app skips JetStream provisioning entirely.
 
+### Execution freshness: what you are trading, and the three knobs
+
+The executions view reads `workflow_execution_cache`, not Flowable. That is what
+makes it fast and what makes one answer serve both the list and the authorization
+decision — but it means the page shows a moment that has already passed. These
+three settings decide how far past, and how loudly the UI says so.
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `FlowableCache:ExecutionPollInterval` | `00:01:00` | How often the cache is refreshed from Flowable. **This is the real staleness bound** — everything else only describes it. |
+| `FlowableCache:ReadThroughFreshness` | `00:00:30` | The target the UI measures against. A view older than this says so distinctly rather than showing a timestamp the user has to interpret. |
+| `FlowableCache:StaleFeedIntervalMultiplier` | `3` | How many missed poll intervals before the view reports **not updating** instead of merely stale. At the default poll, a three-minute window. |
+
+**The trade.** Shortening the poll interval makes the list more current and costs
+Flowable more: each tick pages four collections, bounded by
+`FlowableCache:ExecutionPollMaxPages` (default 5, so up to 1000 instances per
+tick). Lengthening it is cheaper and the page says so honestly — the indicator
+reports the real age rather than hiding it. There is no setting that makes the
+data current for free; the point of showing the age is that you do not have to
+pretend otherwise.
+
+**On the multiplier, specifically.** One missed tick is a hiccup — a slow
+Flowable, a redeploy, a GC pause. Three is a pattern. Set it lower and an
+operator sees "not updating" during ordinary blips, which is the cry-wolf that
+gets an indicator ignored; set it much higher and a genuinely stalled feed goes
+unreported for longer than anyone watching a stuck process would accept.
+
+**"Not updating" is not the same as "stale", and the difference is load-bearing.**
+`last_sync_at` on a cache row only advances when a poll *succeeds*, so a feed that
+has stopped and a system where nothing is happening look identical from the rows
+alone. The feed writes a heartbeat after each successful sweep, and that is what
+separates them. If you see *not updating*, the data will not get newer on its own
+— check Flowable's reachability and the app's logs for the execution feed.
+
 ### Runtime data and writeable paths
 
 - **`/data/`** (the runtime data root, set with `Data__Root`) is auto-created on startup and holds user uploads, persisted plugins, public `/files` assets, and per-plugin scratch state. **The deployment must mount writeable storage here** — typically a persistent volume sized for the plugin and uploads workload. The volume is gitignored (see `.gitignore`); its content is the runtime's source of truth between restarts.

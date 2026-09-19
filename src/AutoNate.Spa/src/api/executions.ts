@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { ExecutionFreshness } from "@/lib/executionFreshness";
 import {
   FlowableTaskSummary,
   ProcessVariableUpdate,
@@ -7,6 +8,14 @@ import {
   WorkflowExecutionLogEntry,
   WorkflowExecutionSummary
 } from "@/types/flowable";
+
+/** How current the executions view is, and whether it is still updating (#594). */
+export async function getExecutionFreshness(
+  signal?: AbortSignal
+): Promise<ExecutionFreshness> {
+  const { data } = await api.get<ExecutionFreshness>("/api/executions/freshness", { signal });
+  return data;
+}
 
 export async function listExecutions(signal?: AbortSignal): Promise<WorkflowExecutionSummary[]> {
   const { data } = await api.get<WorkflowExecutionSummary[]>("/api/executions", { signal });

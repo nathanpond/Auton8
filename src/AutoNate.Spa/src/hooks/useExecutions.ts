@@ -1,5 +1,6 @@
 import type { AdhocSubProcessState } from "@/api/executions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { describeFreshness, type ExecutionFreshness } from "@/lib/executionFreshness";
 import {
   addExecutionVariables,
   cancelExecution,
@@ -11,6 +12,7 @@ import {
   getExecutionDiagram,
   getExecutionHistory,
   getExecutionLog,
+  getExecutionFreshness,
   getExecutionTasks,
   getTaskFormConfig,
   listExecutions,
@@ -49,6 +51,30 @@ export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
     queryKey: EXECUTIONS_QUERY_KEY,
     queryFn: ({ signal }) => listExecutions(signal)
+  });
+}
+
+export const EXECUTION_FRESHNESS_QUERY_KEY = ["executions", "freshness"] as const;
+
+/**
+ * How current the executions view is (#109).
+ *
+ * THE REFETCH INTERVAL COMES FROM THE SERVER'S OWN POLL INTERVAL, not from a
+ * number chosen here. That is the sixth acceptance criterion -- nothing polls
+ * more aggressively than the configured interval just to make the indicator look
+ * better -- and taking it from the response is what makes the criterion
+ * structural rather than a promise. `describeFreshness` applies a floor so a
+ * server reporting zero cannot turn this into a busy loop.
+ */
+export function useExecutionFreshness() {
+  return useQuery<ExecutionFreshness>({
+    queryKey: EXECUTION_FRESHNESS_QUERY_KEY,
+    queryFn: ({ signal }) => getExecutionFreshness(signal),
+    refetchInterval: (query) =>
+      describeFreshness(query.state.data, Date.now()).refetchIntervalMs,
+    // Not in the background: a hidden tab does not need to know, and polling it
+    // is exactly the over-asking the criterion forbids.
+    refetchIntervalInBackground: false
   });
 }
 
