@@ -47,32 +47,51 @@ public sealed class ExecutionStatusFactTests
         Assert.Equal(WorkflowExecutionStatuses.Active, facts["status"]);
     }
 
+    /// <summary>
+    /// The instance authorizer supplies `status` from the cache row (#576, then #579).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This assertion was rewritten, not weakened.</b> #576 made this
+    /// path supply <c>status</c> by INFERRING it from
+    /// <c>FlowableProcessInstanceSummary.Suspended</c>, because the runtime shape
+    /// the authorizer read carries no status string and anything that endpoint
+    /// returns is still running. Only two states were reachable: suspended and
+    /// active.</para>
+    ///
+    /// <para>#579 moved the authorizer onto <c>IFlowableReadThrough</c>, so it now
+    /// reads <c>workflow_execution_cache</c>, which carries the projection's
+    /// normalized status. The inference is gone and so is its two-state ceiling —
+    /// <c>completed</c>, <c>cancelled</c> and <c>terminated</c> are reachable on
+    /// this path for the first time. The old test could not have expressed that,
+    /// which is why it is replaced rather than adjusted.</para>
+    /// </remarks>
     [Fact]
-    public void The_instance_authorizer_supplies_status_from_the_suspension_flag()
+    public void The_instance_authorizer_supplies_status_from_the_cache_row()
     {
-        // FlowableProcessInstanceSummary comes from the RUNTIME endpoint and
-        // carries no status string, only `Suspended`. Anything it returns is
-        // still running, so these two are the only reachable states — not an
-        // approximation of a richer value.
-        var running = FlowableInstanceAuthorizers_BuildFacts(suspended: false);
-        var suspended = FlowableInstanceAuthorizers_BuildFacts(suspended: true);
+        var completed = WorkflowExecutionInstanceAuthorizer.BuildFacts(
+            Row("exec-done", WorkflowExecutionStatuses.Completed));
+        var active = WorkflowExecutionInstanceAuthorizer.BuildFacts(
+            Row("exec-live", WorkflowExecutionStatuses.Active));
 
-        Assert.Equal(WorkflowExecutionStatuses.Active, running["status"]);
-        Assert.Equal(WorkflowExecutionStatuses.Suspended, suspended["status"]);
+        Assert.Equal(WorkflowExecutionStatuses.Completed, completed["status"]);
+        Assert.Equal(WorkflowExecutionStatuses.Active, active["status"]);
 
-        // The complement that matters: the two states are actually different.
-        // A builder hardcoding "active" would satisfy the first assertion alone.
-        Assert.NotEqual(running["status"], suspended["status"]);
+        // The complement that matters, and the one the old suspension-flag
+        // version could not make: a terminal state is now distinguishable here.
+        // Before #579 every instance this path saw was active or suspended.
+        Assert.NotEqual(active["status"], completed["status"]);
     }
 
-    private static IReadOnlyDictionary<string, string?> FlowableInstanceAuthorizers_BuildFacts(bool suspended) =>
-        WorkflowExecutionInstanceAuthorizer.BuildFacts(new FlowableProcessInstanceSummary
-        {
-            Id = "exec-1",
-            ProcessDefinitionId = "onboarding:1:1",
-            StartUserId = "alice",
-            Suspended = suspended
-        });
+    private static WorkflowExecutionCache Row(string id, string status) => new()
+    {
+        FlowableInstanceId = id,
+        ProcessDefinitionKey = "onboarding",
+        ProcessDefinitionId = "onboarding:1:1",
+        Status = status,
+        StartedBy = "alice",
+        StartTime = DateTime.UtcNow,
+        LastSyncAtUtc = DateTime.UtcNow
+    };
 
     /// <summary>
     /// A `[status=…]` grant selects the same rows in SQL as in memory, and

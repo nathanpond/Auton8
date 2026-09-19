@@ -8506,3 +8506,146 @@ independent.
 
 **Not rewritten:** #574–#577 are closed and merged. They concern authorization
 facts, none of which is a display field, so #583 does not reach them.
+
+## M5 execution — #583 (the execution cache learns the run's name)
+
+- **Decision (deviation from this story's own AC2):** `CurrentProjectionVersion`
+  was **not** bumped. A new per-projection `ExecutionProjectionVersion` was added
+  instead, defaulting to 2.
+  **Why:** the AC said bumping it would cause rows written by the previous version
+  to be re-projected. It would not. `CurrentProjectionVersion` is written into
+  rows and **never compared** anywhere — nothing re-projects on a version change,
+  and `BackfillRunner`'s own comment says the mechanism is unbuilt ("the
+  shadow-rename path will land when the first version bump is needed in anger").
+  It is also one option shared by the execution, task, history and variable
+  projections, so bumping it to mark a change in one relabels three whose shape
+  did not change. The AC described a mechanism that does not exist; I wrote that
+  AC yesterday, so this is a planning failure of mine, logged rather than ticked.
+  **What the new field buys:** `projection_version = 2` means exactly one thing —
+  written by code that knows about `name` — which is what makes the "never had a
+  name" vs "not yet projected" complement checkable *in the data* rather than by
+  inference.
+  **Issue:** #583
+
+- **Decision (deviation from AC3):** no backfill was run or wired.
+  **Why:** `FlowableExecutionBackfillSource` calls the **same**
+  `GetWorkflowExecutionsAsync` the poll calls, and the poll upserts **every**
+  instance it returns on **every** tick — not only new ones. So once `MapRow`
+  writes the columns, every instance the poll covers gains its name within one
+  poll interval with no backfill; a backfill would re-emit an identical set. AC3's
+  second branch therefore applies, and the statement is precise: an id in place of
+  a name, for at most one poll interval, only for rows the poll has not revisited.
+  The admin Rebuild button remains for an operator who wants it immediately.
+  **Issue:** #583
+
+- **Rule 1 fix, inside scope:** `FlowableReadThrough` would have **blanked**
+  `workflow_model_name`.
+  **Why it mattered:** the projection's upsert writes every column, so anything
+  the read-through leaves unset is written as null over what the poll put there.
+  `FlowableProcessInstanceSummary` carries `Name` but has no model-name field at
+  all, so a detail view going stale would have silently erased the model name. The
+  cached value is now carried forward, the way `StartedAtUtc` already was. This is
+  the one place the two write paths differ and it is named in code.
+  **Evidence:** the mutation that removes the carry-forward kills exactly one test
+  — the one written for it — and nothing else.
+  **Issue:** #583
+
+- **Decision:** an empty or whitespace name is normalized to SQL NULL.
+  **Why:** a run with no name and a run named `""` are the same thing to a reader,
+  and the UI's `name ?? id` fallback only fires on null — an empty string would
+  render as a blank label rather than the id.
+  **Issue:** #583
+
+- **Self-caught error worth recording:** the first version of the DDL edit
+  introduced a junk column (`record_id_placeholder_unused BOOLEAN NULL`) from a
+  bad replacement string. Caught by reading the command's own output rather than
+  by a test, and removed before anything was built. The reason it was catchable is
+  the rule about reading output unconditionally rather than gating on the exit
+  code — the edit "succeeded".
+  **Issue:** #583
+
+## M5 execution — #104 blocked (2026-09-18)
+
+**Blocker.** The one route #104 had scoped in — `/{processInstanceId}/tasks` —
+cannot be served from `workflow_task_cache`, because that table never learns a
+task completed. `FlowableTaskProjection.MapRow` writes `CompletedTime = null` and
+`Status = "active"` unconditionally, no producer emits `ChangeOp.Delete` for a
+task, and the poll lists only runtime tasks — so a completed task stops appearing
+and its row is orphaned in the `active` state until retention deletes it by
+process age, 2555 days later. Filed as **#586**.
+
+**Why it is a live defect and not only a blocker.** `FlowsQueryEntity.cs:293-295`
+already filters `Status == "active" && CompletedTime == null` and takes the oldest
+match as the current step. That filter cannot exclude any row, so `CURRENTSTEP()`
+reports an instance's first task forever once it completes. The filter reads as
+correctness.
+
+**The question put to the owner**, with options: sequence #586 ahead (recommended
+— it is worth doing on its own merits and is the only option that leaves #104
+meaning its title); re-scope #104 onto #579's caller; or close #104 and let #108
+and #579 carry the read-model work.
+
+**Not blocking #108.** The #108 → #104 edge was wired for the read-model framing.
+With #583 landed, #108's actual needs are met — execution rows carrying names, and
+a selector compiler that agrees with the in-memory evaluator — and it does not
+touch the task cache. Proceeding there.
+
+**Pattern worth naming.** This is the second story in a row whose premise held for
+authorization facts and failed for the question the endpoint actually asks. #583
+was "the cache has no name"; #586 is "the cache cannot tell open from closed".
+Both were found on the first line of implementation, not in planning, because both
+are absences — a column that is not there, a delete that is never emitted — and
+the planning simulations read what the code does rather than what it omits.
+
+## M5 execution — #579 (a single execution is authorized from the cache)
+
+- **Decision:** `WorkflowExecutionInstanceAuthorizer` takes `IFlowableReadThrough`
+  instead of `IFlowableClient`, making it the first consumer of that interface and
+  **closing #19** — which #104 was going to close and now cannot.
+  **Why:** the read-through is cache-first, reads through on miss or staleness, and
+  returns the cached row when the live call throws. Every
+  `RequirePermission(..., "processInstanceId")` gate previously carried a hard
+  per-request dependency on the engine.
+  **Issue:** #579
+
+- **Decision:** facts are built from the cache row's columns, and `processkey` is
+  taken from `ProcessDefinitionKey` rather than re-derived.
+  **Why:** the projection already ran `ExtractProcessKey` when it wrote the row, so
+  taking the column cannot drift from what the list path computes. Parity with
+  `ExecutionEndpoints.BuildFacts` is asserted by a test rather than assumed.
+  **Issue:** #579
+
+- **Supersession, recorded not silent:** #576's
+  `The_instance_authorizer_supplies_status_from_the_suspension_flag` was
+  **rewritten**, not deleted. #576 had to infer status from
+  `FlowableProcessInstanceSummary.Suspended` because the runtime shape carries no
+  status string, which capped that path at two reachable states. Reading the cache
+  row gives it the projection's normalized status, so `completed`, `cancelled` and
+  `terminated` are reachable there for the first time — something the old test
+  could not express, which is why it was replaced rather than adjusted.
+  **Issue:** #579 supersedes part of #576
+
+- **Decision:** a cache miss while Flowable is unreachable **refuses**.
+  **Why:** with no row there are no facts, so no selector can be evaluated.
+  Admitting on absent evidence is exactly the failure #577 closed on the query
+  path. The story had to state which answer this case gets; this is it.
+  **Issue:** #579
+
+- **Method failure caught by mutation, worth recording.** The first version of
+  these tests seeded `last_sync_at = NOW()`, so the read-through served straight
+  from cache and **never called Flowable at all** — two tests named "with Flowable
+  unreachable" never reached the throwing stub and would have passed with the
+  degradation path broken. The mutation that makes `FlowableReadThrough` rethrow
+  killed only the cache-miss test, which is how it was found. The helper now ages
+  the row past `ReadThroughFreshness`, and the same mutation now kills three of
+  four. A comment in that helper had asserted the opposite; it was wrong and is
+  corrected in place.
+  **Issue:** #579
+
+- **Vacuity caught by the complement.** `AutoNateWebApplicationFactory` defaults to
+  `Authorization:Enabled=false`, so `IsAuthorizedAsync` returns true for
+  everything. The permitted-actor test passed vacuously; the complement failed and
+  exposed it. Both now run with enforcement on via `extraConfig` — and
+  `AuthorizationOptions`' own startup validator rejected `"Full"`, insisting on
+  lower-case `"full"`, which is the guard working as designed.
+  **Issue:** #579

@@ -36,7 +36,10 @@ public sealed class FlowableExecutionProjection : IProjection<WorkflowExecutionS
 
     public string Name => "flowable.workflow_execution_cache";
 
-    public int Version => _options.CurrentProjectionVersion;
+    // #583: the execution cache versions independently -- see
+    // FlowableCacheOptions.ExecutionProjectionVersion for why the shared field
+    // could not carry this.
+    public int Version => _options.ExecutionProjectionVersion;
 
     public Type SourceType => typeof(WorkflowExecutionSummary);
 
@@ -88,12 +91,14 @@ public sealed class FlowableExecutionProjection : IProjection<WorkflowExecutionS
                     process_definition_version, business_key, tenant_id, status,
                     start_time, end_time, duration_ms, started_by,
                     current_activity_id, current_activity_name, record_id,
+                    name, workflow_model_name,
                     auth_tags, projection_version, last_sync_at)
                 VALUES (
                     {row.FlowableInstanceId}, {row.ProcessDefinitionKey}, {row.ProcessDefinitionId},
                     {row.ProcessDefinitionVersion}, {row.BusinessKey}, {row.TenantId}, {row.Status},
                     {row.StartTime}, {row.EndTime}, {row.DurationMs}, {row.StartedBy},
                     {row.CurrentActivityId}, {row.CurrentActivityName}, {row.RecordId},
+                    {row.Name}, {row.WorkflowModelName},
                     {row.AuthTagsJson}::jsonb, {row.ProjectionVersion}, {row.LastSyncAtUtc})
                 ON CONFLICT (flowable_instance_id) DO UPDATE SET
                     process_definition_key     = EXCLUDED.process_definition_key,
@@ -109,6 +114,8 @@ public sealed class FlowableExecutionProjection : IProjection<WorkflowExecutionS
                     current_activity_id        = EXCLUDED.current_activity_id,
                     current_activity_name      = EXCLUDED.current_activity_name,
                     record_id                  = EXCLUDED.record_id,
+                    name                       = EXCLUDED.name,
+                    workflow_model_name        = EXCLUDED.workflow_model_name,
                     auth_tags                  = EXCLUDED.auth_tags,
                     projection_version         = EXCLUDED.projection_version,
                     last_sync_at               = EXCLUDED.last_sync_at
@@ -231,9 +238,22 @@ public sealed class FlowableExecutionProjection : IProjection<WorkflowExecutionS
             StartedBy = src.StartUserId,
             CurrentActivityId = null,
             CurrentActivityName = src.CurrentStep,
+
+            // #583. Both arrive on the summary the poll emits
+            // (FlowableClient.cs:365-366) and were dropped here, which is why
+            // the executions list could not be served from this table -- it
+            // renders `name ?? id`, so every run would have shown its id.
+            //
+            // Normalized to null rather than kept as "": a run with no name and
+            // a run named "" are the same thing to a reader, and one
+            // representation is easier to assert on than two.
+            Name = string.IsNullOrWhiteSpace(src.Name) ? null : src.Name,
+            WorkflowModelName = string.IsNullOrWhiteSpace(src.WorkflowModelName)
+                ? null
+                : src.WorkflowModelName,
             RecordId = null,
             AuthTagsJson = JsonSerializer.Serialize(authTags),
-            ProjectionVersion = _options.CurrentProjectionVersion,
+            ProjectionVersion = _options.ExecutionProjectionVersion,
             LastSyncAtUtc = now
         };
     }

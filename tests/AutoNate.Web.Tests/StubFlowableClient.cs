@@ -120,10 +120,18 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(count);
     }
 
+    // Set to make GetProcessInstanceAsync throw, standing in for Flowable being
+    // unreachable (#579). Distinct from an absent entry on purpose: returning
+    // null means "the engine says this instance does not exist", which
+    // FlowableReadThrough treats as a deletion and clears the cache row for.
+    // Throwing means "we could not ask", which is the degradation path.
+    public Exception? GetProcessInstanceThrows { get; set; }
+
     public Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"GetInstance:{processInstanceId}");
+        if (GetProcessInstanceThrows is not null) throw GetProcessInstanceThrows;
         InstancesById.TryGetValue(processInstanceId, out var summary);
         return Task.FromResult(summary);
     }

@@ -46,6 +46,8 @@ public partial class AutoNateDbContext
             entity.Property(e => e.StartedBy).HasColumnName("started_by");
             entity.Property(e => e.CurrentActivityId).HasColumnName("current_activity_id");
             entity.Property(e => e.CurrentActivityName).HasColumnName("current_activity_name");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.WorkflowModelName).HasColumnName("workflow_model_name");
             entity.Property(e => e.RecordId).HasColumnName("record_id");
             entity.Property(e => e.AuthTagsJson).HasColumnName("auth_tags").HasColumnType("jsonb");
             entity.Property(e => e.ProjectionVersion).HasColumnName("projection_version");

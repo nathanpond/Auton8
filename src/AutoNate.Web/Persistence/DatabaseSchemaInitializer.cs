@@ -3477,10 +3477,27 @@ internal static class DatabaseSchemaInitializer
             current_activity_id TEXT NULL,
             current_activity_name TEXT NULL,
             record_id BIGINT NULL,
+            -- #583. The run's display name and its model's name. Both arrive on
+            -- WorkflowExecutionSummary from the poll and were discarded by
+            -- MapRow until now, so the executions list had to read live Flowable
+            -- to render `name ?? id`.
+            --
+            -- NULL means one of two things, and projection_version tells them
+            -- apart: on a version-2 row, NULL means the run genuinely has no
+            -- name in Flowable; on a version-1 row it means the row has not been
+            -- re-projected yet.
+            name TEXT NULL,
+            workflow_model_name TEXT NULL,
             auth_tags JSONB NOT NULL DEFAULT '{{}}'::jsonb,
             projection_version INT NOT NULL DEFAULT 1,
             last_sync_at TIMESTAMPTZ NOT NULL
         );
+
+        ALTER TABLE workflow_execution_cache
+            ADD COLUMN IF NOT EXISTS name TEXT NULL;
+
+        ALTER TABLE workflow_execution_cache
+            ADD COLUMN IF NOT EXISTS workflow_model_name TEXT NULL;
 
         CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_started_by
             ON workflow_execution_cache (started_by);

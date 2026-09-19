@@ -3,6 +3,8 @@ using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Flowable.Cache;
+using AutoNate.Web.Persistence.Scaffolded;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Authorization.Evaluator;
@@ -90,14 +92,24 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
 
 public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
 {
-    private readonly IFlowableClient _flowable;
+    private readonly IFlowableReadThrough _readThrough;
     private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
 
+    // #579. Was IFlowableClient, which made every
+    // RequirePermission(..., "processInstanceId") gate a per-request round trip
+    // to the engine -- so a single-execution read failed the whole page whenever
+    // Flowable was unreachable, and the list authorized from the cache while
+    // single reads authorized from live Flowable. Two sources of truth for one
+    // decision.
+    //
+    // IFlowableReadThrough is cache-first, reads through on miss or staleness,
+    // and returns the cached row when the live call throws. This is its first
+    // consumer, which closes #19.
     public WorkflowExecutionInstanceAuthorizer(
-        IFlowableClient flowable,
+        IFlowableReadThrough readThrough,
         IDbContextFactory<AutoNateDbContext> dbFactory)
     {
-        _flowable = flowable;
+        _readThrough = readThrough;
         _dbFactory = dbFactory;
     }
 
@@ -115,7 +127,13 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
             return false;
         }
 
-        var instance = await _flowable.GetProcessInstanceAsync(targetId, cancellationToken);
+        // Null means one of two things, and both answer the same way:
+        //   * no such instance -- the read-through asked Flowable and got nothing;
+        //   * a cache miss while Flowable is unreachable -- no row, no way to ask.
+        // The second is the interesting one. With no facts, no selector can be
+        // evaluated, and admitting on absent evidence is exactly the failure #577
+        // closed on the other path. So it refuses.
+        var instance = await _readThrough.GetInstanceAsync(targetId, cancellationToken);
         if (instance is null)
         {
             return false;
@@ -134,7 +152,7 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
 
         return await authorizer.IsAuthorizedAsync(
             actor, Kind, action,
-            ast => evaluator.Matches(ast, instance.Id, facts),
+            ast => evaluator.Matches(ast, instance.FlowableInstanceId, facts),
             cancellationToken);
     }
 
@@ -143,26 +161,29 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
     // assignee field (assignees live on tasks). Reintroduce only if IFlowableClient
     // gains a way to enumerate the instance's task assignees up front.
     // internal for the same reason as the twin in ExecutionEndpoints (#576).
-    internal static IReadOnlyDictionary<string, string?> BuildFacts(Models.FlowableProcessInstanceSummary instance) =>
+    internal static IReadOnlyDictionary<string, string?> BuildFacts(WorkflowExecutionCache instance) =>
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["processkey"] = ExtractProcessKey(instance.ProcessDefinitionId),
-            ["definitionkey"] = instance.ProcessDefinitionId,
-            ["startedby"] = instance.StartUserId,
-
-            // `status` (#576). FlowableProcessInstanceSummary carries no status
-            // string -- only `Suspended` -- because it comes from the RUNTIME
-            // instance endpoint. Anything that endpoint returns is still
-            // running, so the only two states reachable here are suspended and
-            // active, and that is not an approximation of a richer value: a
-            // completed instance is not in the collection being filtered.
+            // Read from the cache row's own columns (#579).
             //
-            // The strings come from the shared normalizer's vocabulary rather
-            // than being spelled out, so this cannot drift from what the
-            // projection writes into the status column.
-            ["status"] = instance.Suspended
-                ? WorkflowExecutionStatuses.Suspended
-                : WorkflowExecutionStatuses.Active
+            // `processkey` is NOT re-derived here: the projection already ran
+            // ExtractProcessKey when it wrote the row, so taking the column
+            // cannot drift from what the list path computes. Parity with
+            // ExecutionEndpoints.BuildFacts is asserted by a test rather than
+            // assumed.
+            ["processkey"] = instance.ProcessDefinitionKey,
+            ["definitionkey"] = instance.ProcessDefinitionId,
+            ["startedby"] = instance.StartedBy,
+
+            // `status` comes straight off the row, and that is a real
+            // improvement rather than a translation. #576 had to INFER status
+            // here from FlowableProcessInstanceSummary.Suspended, because the
+            // runtime shape carries no status string and anything that endpoint
+            // returns is still running. The cache column is the projection's
+            // normalized value, so completed, cancelled and terminated are now
+            // reachable on this path -- states the suspension inference could
+            // not express at all.
+            ["status"] = instance.Status
         };
 
     private static string? ExtractProcessKey(string? processDefinitionId)
