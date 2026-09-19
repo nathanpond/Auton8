@@ -8649,3 +8649,74 @@ the planning simulations read what the code does rather than what it omits.
   `AuthorizationOptions`' own startup validator rejected `"Full"`, insisting on
   lower-case `"full"`, which is the guard working as designed.
   **Issue:** #579
+
+## Ad-hoc
+
+**The execution cache cannot answer the questions M5's phase 2 asks it (2026-09-18).**
+_— reconciled by /n8-replan 2026-09-18 (third pass)_
+
+Four separate times now, a story in "one source of truth for executions" has
+stopped on the first line of implementation because `workflow_execution_cache` or
+`workflow_task_cache` could not express what the endpoint needed:
+
+1. **No `name` or `workflow_model_name` column**, while the list renders
+   `name ?? id` as its primary label. Fixed by **#583**; the data was already
+   arriving from the poll and `MapRow` discarded it.
+2. **No way to tell an open task from a completed one.**
+   `FlowableTaskProjection.MapRow` writes `CompletedTime = null` and
+   `Status = "active"` unconditionally, and no producer ever emits
+   `ChangeOp.Delete` for a task. Filed as **#586**. It is a live defect, not only
+   a blocker: `FlowsQueryEntity.cs:293-295` filters for open tasks with a
+   predicate that cannot exclude a row, so `CURRENTSTEP()` reports an instance's
+   first task forever.
+3. **A status vocabulary the SPA does not share.** The cache stores `active`,
+   `completed`, `cancelled`; `WorkflowExecutions.tsx:191-194` compares against
+   `"Running"`, `"Complete"`, `"Cancelled"`, `"Errored"`. In scope for #108, cheap,
+   and recorded there so it is not rediscovered.
+4. **A 200-row ceiling imposed by its only filler.**
+   `GetWorkflowExecutionsAsync` issues four fixed `size=200` queries with no
+   paging, and both the poll and the backfill call it. Filed as **#588**.
+
+**Why planning missed three of the four.** They are *absences* — a column that is
+not there, a delete that is never emitted, a fetch that does not page. The
+executor simulations that caught six false premises during the first M5 replan
+read what the code *does*. None of these is a thing the code does.
+
+**Owner's decisions, 2026-09-18:** sequence #586 ahead of #104; page the fetch as
+its own story (#588) ahead of #108, keeping the "show everything" decision intact.
+
+**Milestones/issues affected:** M5 — #104, #108, #109 (blocked by inheritance),
+plus the new #586 and #588. #583, #579 and #19 are done and merged in #587. The
+first four M5 stories (#574–#577) are untouched: they concern authorization facts,
+and none of these four gaps is one.
+
+## Replan — M5, third pass (2026-09-18)
+
+**Cause.** The entry above: two execution blockers and the pattern behind them.
+Not drift — the plan did not age, it was written against a cache nobody had asked
+these questions of.
+
+**Issues touched.**
+
+- **#588** — created. Pages the execution fetch. The acceptance criteria put the
+  real design work where it belongs: the *bound*, so a steady-state tick stays
+  cheap and only the first sweep is expensive. Three mechanisms are laid out
+  (watermark, page ceiling, backfill-does-the-sweep) for the executor to choose
+  and justify.
+- **#586** — out of triage, sequenced ahead of #104.
+- **#585** — out of triage and **milestoned**; it had none. Kept as a product
+  defect rather than a test fix, because the flake is the test reporting that the
+  endpoint's exception mapping is narrower than the assembly loader's behaviour.
+- **#108** — AC5 **rewritten**: its "run the backfill" branch was impossible, and
+  its other branch described the truncation AC4 exists to end. AC4 annotated with
+  why it was unsatisfiable before #588. `needs-owner-action` cleared.
+- **#104** — `needs-owner-action` cleared, `blocked` kept. Recorded that its AC6
+  is already delivered (#579 closed #19) and that its remaining scope is one route
+  and a guard — smaller than its title, said plainly rather than discovered a
+  third time.
+- **#109** — `blocked` by inheritance. No AC change; they are still right.
+
+**Epic AC: unaffected, checked explicitly.** Epic #40's criteria are about BPMN
+elements executing on the engine, not the executions read model.
+
+**Order after this replan:** #586 → #104; #588 → #108; #109 last.
