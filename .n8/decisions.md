@@ -9032,3 +9032,91 @@ author and executor. Recorded rather than assumed on that account.**
   heartbeat's age kills the stalled-feed test; taking the newest sync instead of
   the oldest kills the asOf test.
   **Issue:** #594
+
+## M5 execution — #109 (execution staleness made visible)
+
+- **Decision:** the decision logic lives in a pure module (`src/lib/executionFreshness.ts`),
+  not in the component.
+  **Why:** `vite.config.ts` runs vitest with `environment: "node"`, so there is no
+  DOM and a component that computes its own state cannot be tested at all. The
+  alternative was standing up jsdom and testing-library inside a UI story, which is
+  new test infrastructure smuggled in under a feature. The component now renders a
+  state it did not compute, and the computation — which is where the edges are — is
+  unit-tested properly.
+  **Issue:** #109
+
+- **Decision:** three states, and `not-updating` wins over `stale`.
+  **Why:** "the data is a minute old" and "the data has stopped arriving" are
+  different things to someone watching a process; collapsing them tells an operator
+  with a stalled feed that the system is merely a little behind. A stalled feed
+  whose rows happen to be recent is still stalled — the rows will not get newer —
+  so the precedence runs that way.
+  **Issue:** #109
+
+- **Decision (AC6, closed structurally rather than promised):** the refetch interval
+  is read from the server's own `pollIntervalSeconds`.
+  **Why:** the criterion forbids polling harder "just to make the indicator look
+  better". Taking the number from the response means the client *cannot* — there is
+  no local knob to turn. A 5-second floor stops a server reporting `0` from turning
+  it into a busy loop, and the two directions are separate tests: one asserts the
+  server's number is used, the other that the floor holds regardless.
+  **Issue:** #109
+
+- **Decision:** one persistent live region, `polite`, always rendered.
+  **Why:** a live region announces changes to its *contents*; one that appears at
+  the same moment as its text may never be announced at all, because the assistive
+  technology has nothing to compare against. So the container is always there and
+  only the sentence changes. `polite` rather than `assertive` because interrupting
+  whatever the user is reading to say the data is a minute old would be worse than
+  useless.
+  **Issue:** #109
+
+- **Decision:** an in-page element, not a toast.
+  **Why:** CLAUDE.md's rule decides it — this is a condition belonging to the page,
+  still true after a reload, not transient feedback on an action the user just took.
+  **Issue:** #109
+
+- **Two verification failures of mine, both caught rather than trusted:**
+  1. The three E2E specs passed in **1 second**, implausible for Playwright tests
+     that navigate and tab sixty times. Mutating an assertion killed exactly the
+     live-region test in 462 ms, so they do drive a real browser — they were merely
+     fast against a warm app. Green was not evidence; the mutation was.
+  2. The pin check ran **unfiltered**. zsh's `eval` choked on the `&` in
+     `RequiresService!=Flowable&...`, so the "slim" discovery returned **471** —
+     every test in the project — and would have "confirmed" any pin I chose.
+     Quoted properly it is **227**, matching the pin, with `FULL_LOCAL` at 466 and
+     the identity `227 + 238 + 4 - 3 = 466` holding.
+  **Issue:** #109
+
+## M5 execution — #109, CI red and the defect behind it (2026-09-19)
+
+**CI failed on an existing test, not mine**, and it was right to.
+`WorkflowOverrideTests.WorkflowExecutionsPage_RendersForSeededAdmin` asserts no
+`role="alert"` is visible on the executions page — its comment says so explicitly:
+*"if useExecutions() threw we'd see a red Alert with role='alert'. The flash slot
+uses role='status' for success, so this only catches the failure case."*
+
+**Rule 1 fix.** Mantine's `Alert` defaults to `role="alert"`, so my not-updating
+indicator made a **status masquerade as an error banner** — and nested an
+assertive live region inside the polite one above it, meaning a state change would
+interrupt whatever the user was reading. The opposite of what the container exists
+for. The Alert now carries `role="presentation"`; the container owns announcement.
+
+**The more useful finding is why it was invisible locally.** The dev app had
+polled, so the indicator always read *fresh* here and the not-updating branch never
+rendered. CI has no heartbeat, so it did. My local suite was green and proved
+nothing — and reverting the fix locally *still* passed, which is how I found that
+out rather than assuming the fix worked.
+
+So the fix is not just the role. A fourth E2E spec **forces** the state by deleting
+the feed's watermark (`POST /api/admin/projections/feeds/{feed}/reset-watermark`)
+and asserts both that the indicator reads "not updating" and that it does not wear
+`role="alert"`. With that in place, reverting the role kills **two** tests locally —
+the new spec and the pre-existing one — where before it killed neither.
+
+**Pins:** SLIM_E2E 227 → 228, FULL_LOCAL 466 → 467, both verified against real
+discovery rather than arithmetic.
+
+**Transferable:** a test that only fails in one environment is a test whose
+condition is incidental. Forcing the condition is what turns "it broke on CI" into
+"it is covered".

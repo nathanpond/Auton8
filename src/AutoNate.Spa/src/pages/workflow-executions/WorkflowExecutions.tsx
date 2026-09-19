@@ -68,6 +68,7 @@ import ExecutionLog from "./ExecutionLog";
 import ProcessVariablesPanel from "./ProcessVariablesPanel";
 import ReassignTaskModal from "./ReassignTaskModal";
 import { describeError as describeErrorUtil, formatTimestamp as formatTimestampUtil } from "./utils";
+import { ExecutionFreshnessIndicator } from "./ExecutionFreshnessIndicator";
 import "./WorkflowExecutions.css";
 
 
@@ -391,6 +392,10 @@ export default function WorkflowExecutions() {
           >
             Refresh
           </Button>
+          <ExecutionFreshnessIndicator
+            onRefresh={() => void refetch()}
+            refreshDisabled={isLoading}
+          />
           {isLoading && (
             <Text size="sm" c="dimmed">
               Loading executions...
