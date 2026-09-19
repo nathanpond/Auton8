@@ -9,6 +9,26 @@ public sealed class FlowableCacheOptions
     // poll frequency can drop without sacrificing freshness.
     public TimeSpan ExecutionPollInterval { get; set; } = TimeSpan.FromSeconds(60);
 
+    // #588. How many pages of each execution collection one POLL tick may fetch.
+    //
+    // The poll used to fetch a single fixed page of 200 with no paging at all,
+    // which put a hard ceiling on what the cache could ever hold -- the list
+    // reading it could not show more however well its query was written. Paging
+    // without a ceiling would swap that for an unbounded tick that re-walks all
+    // of history every 60 seconds as history grows.
+    //
+    // Five pages is 1000 instances per tick: enough that the cap stops being the
+    // thing a user notices, small enough that a tick stays predictable. The
+    // BACKFILL is the path with no ceiling -- see ExecutionBackfillMaxPages --
+    // because it is a one-shot operator action, which is exactly the division the
+    // projection framework's design already assumes.
+    public int ExecutionPollMaxPages { get; set; } = 5;
+
+    // #588. The backfill's ceiling. Deliberately large rather than unbounded: a
+    // runaway loop against an engine with a pathological dataset should end, and
+    // a number that can be raised in configuration is better than one that cannot.
+    public int ExecutionBackfillMaxPages { get; set; } = 10_000;
+
     public TimeSpan TaskPollInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     // Variables are fetched per active instance, so this interval bounds

@@ -8772,3 +8772,52 @@ elements executing on the engine, not the executions read model.
   `TaskPageSize=2` and seeds three, so only the stop condition can end the sweep.
   With that fixed, all three mutations apply and all three are killed.
   **Issue:** #586
+
+## M5 execution — #588 (page the execution fetch)
+
+- **Decision:** the page ceiling is a **parameter**, not a constant, and the two
+  callers pass different values — `ExecutionPollMaxPages = 5` for the poll,
+  `ExecutionBackfillMaxPages = 10_000` for the backfill.
+  **Why:** the story offered watermark / page ceiling / backfill-does-the-sweep.
+  The two callers genuinely want different answers: the poll runs every 60s and
+  must stay cheap, the backfill is a one-shot operator action whose job is to
+  ignore that windowing. One constant served one of them badly — which is how the
+  200 cap became a property of the read model rather than of a request.
+  `maxPages: 1` is the default, so all six existing callers keep their behaviour.
+  **Issue:** #588
+
+- **Decision:** not a time watermark, and the reason is measured.
+  `historic-process-instances` does honour `startedAfter` (a 2030 value returns 0,
+  versus 475 unfiltered), so a watermark was genuinely available for the spine.
+  It was still rejected: the poll needs instances whose STATUS changed as well as
+  ones that started, which is two queries rather than one, and the three
+  enrichment collections would still have to cover whatever the spine returned.
+  Decisively, `historic-activity-instances` **ignores** `startedAfter` — 3162 rows
+  whether the value is 2020 or 2030 — so an incremental design there would have
+  been a no-op that looked like one. Filed separately as **#590**, because the
+  history feed already ships that no-op today.
+  **Issue:** #588
+
+- **Decision:** a failed page **throws** rather than returning what it has.
+  **Why:** a short list is indistinguishable, to the caller, from a collection that
+  really ended there — and the caller is the projection, which would then write a
+  cache quietly missing rows. That is the silent-truncation shape this story
+  exists to end, so the caller is told.
+  **Issue:** #588
+
+- **Measured, per the story's criterion**, against the local engine (475 historic
+  instances, more than the 200 cap):
+  - **before** (`maxPages: 1`, today): spine 200 of 475, runtime 200 of 354, tasks
+    200 of 469, activities 2000 of 3162 — ~0.12s sequential;
+  - **after** (`maxPages: 5`): 475, 354, 469, 3162 — all of each — ~0.30s
+    sequential. The client fans the four collections out concurrently, so real
+    wall-clock is bounded by the slowest rather than the sum.
+  **Issue:** #588
+
+- **Method note:** the mutation harness now asserts the edit applied before
+  trusting a survival, after #586 produced a false "survived" from a no-op edit.
+  All four #588 mutations applied and all four were killed, each with the blast
+  radius it should have: stopping after page one kills 4, treating a full page as
+  the end kills 4, ignoring `maxPages` kills exactly the bound test, and swallowing
+  a failed page kills exactly the truncation test.
+  **Issue:** #588

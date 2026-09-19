@@ -30,6 +30,21 @@ public interface IFlowableClient
 
     Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Every execution Flowable will yield, up to <paramref name="maxPages"/>
+    /// pages per collection (#588).
+    /// </summary>
+    /// <remarks>
+    /// The bound is a parameter because the two callers want different answers:
+    /// the poll runs every 60 seconds and must stay cheap, while the backfill is a
+    /// one-shot operator action whose job is to ignore that windowing. With a
+    /// single constant and no paging, the cache could never hold more than the 200
+    /// most recent instances — so #108's list could not show more however well its
+    /// query was written.
+    /// </remarks>
+    Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
+        int maxPages, CancellationToken cancellationToken = default);
+
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     /// <summary>

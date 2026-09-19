@@ -173,9 +173,19 @@ internal sealed class StubFlowableClient : IFlowableClient
     public List<WorkflowExecutionSummary> Executions { get; } = new();
 
     public Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        GetWorkflowExecutionsAsync(maxPages: 1, cancellationToken);
+
+    /// <summary>Records the page ceiling it was asked for (#588).</summary>
+    /// <remarks>
+    /// The call is recorded WITH the ceiling, so a test can assert that the poll
+    /// and the backfill ask for different amounts of work — which is the whole
+    /// reason the bound is a parameter rather than a constant.
+    /// </remarks>
+    public Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
+        int maxPages, CancellationToken cancellationToken = default)
     {
-        Calls.Add("ListExecutions");
+        Calls.Add($"ListExecutions:{maxPages}");
         return Task.FromResult<IReadOnlyList<WorkflowExecutionSummary>>(Executions.ToArray());
     }
 

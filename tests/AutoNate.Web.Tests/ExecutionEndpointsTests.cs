@@ -22,7 +22,13 @@ public sealed class ExecutionEndpointsTests
 
         Assert.NotNull(executions);
         Assert.Empty(executions);
-        Assert.Contains("ListExecutions", factory.FlowableStub.Calls);
+        // "ListExecutions:1" -- the stub records the page ceiling the caller asked
+        // for (#588). This endpoint still asks for ONE page, which is today's
+        // behaviour preserved by the `maxPages: 1` default; the poll feed and the
+        // backfill are the two callers that ask for more. Asserting the ceiling
+        // rather than the bare call means a change to what this endpoint fetches
+        // shows up here instead of silently.
+        Assert.Contains("ListExecutions:1", factory.FlowableStub.Calls);
     }
 
     [Fact]
