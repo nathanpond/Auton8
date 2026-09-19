@@ -107,6 +107,24 @@ public interface IFlowableClient
     // without per-user fan-out. `start` is 0-based; `size` caps each page.
     Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(int start, int size, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Finished tasks, newest-completed first (#586).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Ordered, not filtered by time, and that is a measured
+    /// constraint.</b> Flowable ignores <c>finishedAfter</c> on this endpoint —
+    /// verified against a live engine: a <c>finishedAfter</c> of 2030 returns the
+    /// same rows as no filter at all, and an entirely invented parameter returns
+    /// 200 with everything. So a time watermark cannot be pushed to the server,
+    /// and a caller that tried would look correct while reprocessing all of
+    /// history.</para>
+    ///
+    /// <para><c>sort=endTime&amp;order=desc</c> IS honoured, which is what makes a
+    /// bounded sweep possible: walk newest-first and stop once a page tells you
+    /// nothing new.</para>
+    /// </remarks>
+    Task<IReadOnlyList<FlowableFinishedTask>> GetFinishedTasksAsync(int start, int size, CancellationToken cancellationToken = default);
+
     // Paged enumeration of historic activity instances across every process.
     // Used by the projection-framework history feed to populate the append-only
     // workflow_event_log_cache. `sinceUtc` filters to entries that started after

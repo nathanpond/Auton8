@@ -1097,6 +1097,33 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<FlowableFinishedTask>> GetFinishedTasksAsync(
+        int start, int size, CancellationToken cancellationToken = default)
+    {
+        if (size <= 0) return Array.Empty<FlowableFinishedTask>();
+        if (start < 0) start = 0;
+
+        // `finished=true` and the sort are both honoured; a time filter is not.
+        // See IFlowableClient.GetFinishedTasksAsync for the measurements.
+        var url = $"service/history/historic-task-instances"
+                  + $"?finished=true&sort=endTime&order=desc&start={start}&size={size}";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "page through finished tasks");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricTaskResponse>>(
+            response, cancellationToken);
+
+        return payload.Data
+            .Where(task => !string.IsNullOrWhiteSpace(task.Id))
+            .Select(task => new FlowableFinishedTask
+            {
+                Id = task.Id!,
+                EndedAtUtc = task.EndTime,
+                ProcessInstanceId = task.ProcessInstanceId
+            })
+            .ToArray();
+    }
+
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(int start, int size, CancellationToken cancellationToken = default)
     {
         if (size <= 0) return Array.Empty<FlowableTaskSummary>();
@@ -2608,6 +2635,10 @@ public sealed class FlowableClient(
     private sealed class FlowableHistoricTaskResponse
     {
         public string? Id { get; init; }
+
+        // Present on the wire; verified against a live engine's payload, which
+        // carries processInstanceId and processDefinitionId alongside endTime.
+        public string? ProcessInstanceId { get; init; }
 
         public string? Name { get; init; }
 

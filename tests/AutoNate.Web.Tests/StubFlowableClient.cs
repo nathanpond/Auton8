@@ -120,6 +120,37 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(count);
     }
 
+    /// <summary>Finished tasks the completion sweep will page through (#586).</summary>
+    /// <remarks>
+    /// Ordered newest-completed first by the stub, because the real endpoint is
+    /// queried with `sort=endTime&amp;order=desc` and the sweep's stop condition
+    /// depends on that order being real rather than incidental.
+    /// </remarks>
+    public List<FlowableFinishedTask> FinishedTasks { get; } = new();
+
+    /// <summary>Set to make GetFinishedTasksAsync throw mid-sweep (#586).</summary>
+    public Exception? GetFinishedTasksThrows { get; set; }
+
+    /// <summary>Page index (0-based) at which GetFinishedTasksAsync throws (#586).</summary>
+    public int GetFinishedTasksThrowsOnPage { get; set; }
+
+    public Task<IReadOnlyList<FlowableFinishedTask>> GetFinishedTasksAsync(
+        int start, int size, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"GetFinishedTasks:{start}:{size}");
+        if (GetFinishedTasksThrows is not null && start / Math.Max(1, size) == GetFinishedTasksThrowsOnPage)
+        {
+            throw GetFinishedTasksThrows;
+        }
+
+        var ordered = FinishedTasks
+            .OrderByDescending(t => t.EndedAtUtc ?? DateTimeOffset.MinValue)
+            .Skip(start)
+            .Take(size)
+            .ToArray();
+        return Task.FromResult<IReadOnlyList<FlowableFinishedTask>>(ordered);
+    }
+
     // Set to make GetProcessInstanceAsync throw, standing in for Flowable being
     // unreachable (#579). Distinct from an absent entry on purpose: returning
     // null means "the engine says this instance does not exist", which

@@ -100,6 +100,28 @@ public sealed record class FlowableTaskSummary
     public DateTimeOffset? DueDate { get; init; }
 }
 
+/// <summary>
+/// A task Flowable's history says has finished, and when (#586).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Deliberately narrow. The completion sweep marks an existing cache row rather
+/// than upserting one, so it needs the identity and the end time and nothing
+/// else — and building a full <see cref="FlowableTaskSummary"/> from a historic
+/// payload would invite exactly the failure #583 found in the read-through,
+/// where an upsert assembled from a partial source blanked columns another
+/// writer had filled.
+/// </para>
+/// </remarks>
+public sealed record class FlowableFinishedTask
+{
+    public string Id { get; init; } = string.Empty;
+
+    public DateTimeOffset? EndedAtUtc { get; init; }
+
+    public string? ProcessInstanceId { get; init; }
+}
+
 public sealed record class WorkflowExecutionSummary
 {
     public string Id { get; set; } = string.Empty;

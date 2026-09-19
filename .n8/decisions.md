@@ -8720,3 +8720,55 @@ these questions of.
 elements executing on the engine, not the executions read model.
 
 **Order after this replan:** #586 → #104; #588 → #108; #109 last.
+
+## M5 execution — #586 (the task cache learns a task finished)
+
+- **Decision:** completion is read from Flowable's **history** as a positive fact,
+  not inferred from a task's absence in a runtime sweep.
+  **Why:** the cheaper design is unsound here, for a specific reason rather than a
+  stylistic one. The polling feed emits into a channel the projection drains
+  **asynchronously**, so when a runtime sweep finishes its own upserts may not have
+  been applied yet — rows would be marked complete for missing a sweep whose
+  results had not landed. Reading history means a partial or failed sweep can only
+  do less, never something wrong, which satisfies the story's complement by
+  construction.
+  **Issue:** #586
+
+- **Measured, not recalled — and it changed the design.** Probed the live engine
+  before writing the client call:
+  - `historic-task-instances?finished=true` → 119 rows (honoured);
+  - `&bogusParamCheck=1` → 588, i.e. everything — **unknown parameters are silently
+    ignored and still return 200**;
+  - `&finishedAfter=2030-01-01` → 119, the same as no filter — **ignored**;
+  - the POST `query/historic-task-instances` form ignores it too, though it does
+    apply `taskName` (0 rows for a nonsense name), so the body is being read;
+  - `sort=endTime&order=desc` → **honoured**.
+
+  A `finishedAfter` watermark — which is what I was about to write from memory —
+  would have returned 200 with unfiltered results and reprocessed all of history on
+  every tick, looking correct throughout. Only comparing counts exposes it.
+  **Consequence:** no server-side time filter, so the sweep is bounded by the sort
+  instead: walk newest-first, stop when a page marks nothing.
+  **Issue:** #586
+
+- **Decision:** a targeted `UPDATE` rather than an upsert through the projection.
+  **Why:** the historic payload is a different shape from the runtime one, and
+  building a full row from it would blank columns the runtime projection owns —
+  the failure #583 found in `FlowableReadThrough`. `ChangeOp` was deliberately not
+  extended either: it is a two-value enum shared by every projection, and growing
+  it to carry "completed" would touch all of them for one cache's benefit.
+  **Issue:** #586
+
+- **Method failure, caught and worth recording.** Two of the first three mutations
+  reported "survived". One of them had **not applied at all** — the search string's
+  indentation did not match the file (`SET status = 'completed'`, not
+  `status = 'completed'`), so the edit was a no-op and the green run was evidence
+  of nothing. The mutation harness now asserts the file actually changed (`cmp`)
+  before running, and prints `MUTATION DID NOT APPLY` otherwise.
+  **The other survivor was real and exposed a bad test.** Removing the stop
+  condition changed nothing, because the test seeded a single finished task: a
+  1-row page is shorter than the 200-row default, so the short-page break fired
+  first and the assertion held for the wrong reason. The test now forces
+  `TaskPageSize=2` and seeds three, so only the stop condition can end the sweep.
+  With that fixed, all three mutations apply and all three are killed.
+  **Issue:** #586
