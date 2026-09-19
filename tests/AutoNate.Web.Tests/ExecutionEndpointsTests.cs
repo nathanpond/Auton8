@@ -22,13 +22,17 @@ public sealed class ExecutionEndpointsTests
 
         Assert.NotNull(executions);
         Assert.Empty(executions);
-        // "ListExecutions:1" -- the stub records the page ceiling the caller asked
-        // for (#588). This endpoint still asks for ONE page, which is today's
-        // behaviour preserved by the `maxPages: 1` default; the poll feed and the
-        // backfill are the two callers that ask for more. Asserting the ceiling
-        // rather than the bare call means a change to what this endpoint fetches
-        // shows up here instead of silently.
-        Assert.Contains("ListExecutions:1", factory.FlowableStub.Calls);
+        // INVERTED AGAIN, and this is the third source this assertion has had.
+        //
+        // It asserted the bare call ("ListExecutions"), then the page ceiling
+        // ("ListExecutions:1") when #588 made the ceiling a parameter, and now
+        // that #108 serves the list from SQL over the cache it asserts the
+        // endpoint does NOT reach for Flowable at all. Each step kept the
+        // assertion pointed at where the answer actually comes from, rather than
+        // deleting it and leaving the change unasserted.
+        Assert.DoesNotContain(
+            factory.FlowableStub.Calls,
+            call => call.StartsWith("ListExecutions", StringComparison.Ordinal));
     }
 
     [Fact]

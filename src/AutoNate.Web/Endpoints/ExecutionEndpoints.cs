@@ -26,62 +26,44 @@ public static class ExecutionEndpoints
         var executions = app.MapGroup("/api/executions")
             .RequireAuthorization();
 
+        // SERVED BY ONE SQL QUERY OVER THE CACHE (#108).
+        //
+        // This used to fetch from Flowable, authorize in memory, then slice the
+        // page client-side. Two defects rode together in that: the fetch was
+        // capped at 200 so the list SILENTLY TRUNCATED (#588 removed the cap),
+        // and authorization ran after the fetch, so the page was sliced from a
+        // set filtered by a different evaluator than a SQL query would use.
         executions.MapGet("/", async (
             HttpContext http,
-            IFlowableClient flowable,
             IAuthorizer authorizer,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var rawList = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
-            var list = await FilterVisibleExecutionsAsync(
-                rawList, http.User, authorizer, dbFactory, cancellationToken);
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var rows = await ExecutionListQuery.BuildAsync(
+                db, authorizer, http.User, search: null, status: null, workflowModelId: null,
+                cancellationToken);
+
+            var items = (await ExecutionListQuery.Order(rows, sort: null, descending: true)
+                    .ToListAsync(cancellationToken))
+                .Select(ExecutionListQuery.ToSummary)
+                .ToArray();
+
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionListViewed,
                 WorkflowResourceKinds.Execution,
                 resource: null,
-                details: new { resultCount = list.Count },
+                details: new { resultCount = items.Length },
                 cancellationToken);
-            if (list.Count == 0)
-            {
-                return Results.Ok(list);
-            }
 
-            // List<string> (not string[]) so EF Core's expression interpreter
-            // binds to List<T>.Contains instead of the newer ReadOnlySpan<T>
-            // Contains overload, which the funcletizer can't translate.
-            var ids = list.Select(execution => execution.Id).ToList();
+            return Results.Ok(items);
+        }).AuthorizedInHandler("filters via ExecutionListQuery (WorkflowExecution, View) pushed into SQL");
 
-            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-            var erroredInstanceIds = await db.WorkflowExecutionErrors.AsNoTracking()
-                .Where(e => ids.Contains(e.ProcessInstanceId))
-                .Select(e => e.ProcessInstanceId)
-                .Distinct()
-                .ToListAsync(cancellationToken);
-
-            if (erroredInstanceIds.Count == 0)
-            {
-                return Results.Ok(list);
-            }
-
-            // "Errored" wins over Running/Complete in the UI: a process with any
-            // failed job is still actionable but no longer healthy. Cancelled
-            // wins over Errored — operator intent supersedes a stale failure.
-            var erroredSet = new HashSet<string>(erroredInstanceIds, StringComparer.Ordinal);
-            var projected = list
-                .Select(execution => execution.Status == "Cancelled" || !erroredSet.Contains(execution.Id)
-                    ? execution
-                    : execution with { Status = "Errored" })
-                .ToArray();
-            return Results.Ok(projected);
-        }).AuthorizedInHandler("filters via FilterVisibleExecutionsAsync(WorkflowExecution, View)");
-
-        // Paged variant — same { items, totalCount } shape the SPA's
-        // DataTable expects. The flowable client returns the full list per
-        // call so we filter/sort/page in-memory; switching to a flowable-side
-        // page query would mean upgrading the client and its REST mapping.
+        // Paged variant. Filtering happens BEFORE paging, which is what makes the
+        // page correct rather than merely fast: reversing them slices a page out
+        // of the unfiltered set.
         executions.MapGet("/page", async (
             int? page,
             int? pageSize,
@@ -91,92 +73,28 @@ public static class ExecutionEndpoints
             string? status,
             string? workflowModelId,
             HttpContext http,
-            IFlowableClient flowable,
             IAuthorizer authorizer,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var unfiltered = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
-            var rawList = await FilterVisibleExecutionsAsync(
-                unfiltered, http.User, authorizer, dbFactory, cancellationToken);
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var rows = await ExecutionListQuery.BuildAsync(
+                db, authorizer, http.User, q, status, workflowModelId, cancellationToken);
 
-            // Compute Errored overlay the same way the unpaged endpoint does.
-            IReadOnlyList<WorkflowExecutionSummary> withStatus;
-            if (rawList.Count == 0)
-            {
-                withStatus = rawList;
-            }
-            else
-            {
-                var ids = rawList.Select(e => e.Id).ToList();
-                await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-                var erroredInstanceIds = await db.WorkflowExecutionErrors.AsNoTracking()
-                    .Where(e => ids.Contains(e.ProcessInstanceId))
-                    .Select(e => e.ProcessInstanceId)
-                    .Distinct()
-                    .ToListAsync(cancellationToken);
-                var erroredSet = new HashSet<string>(erroredInstanceIds, StringComparer.Ordinal);
-                withStatus = rawList
-                    .Select(execution => execution.Status == "Cancelled" || !erroredSet.Contains(execution.Id)
-                        ? execution
-                        : execution with { Status = "Errored" })
-                    .ToList();
-            }
-
-            IEnumerable<WorkflowExecutionSummary> filtered = withStatus;
-            if (!string.IsNullOrWhiteSpace(q))
-            {
-                var needle = q.Trim();
-                filtered = filtered.Where(e =>
-                    (e.Name ?? string.Empty).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                    e.Id.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                    (e.WorkflowModelName ?? string.Empty).Contains(needle, StringComparison.OrdinalIgnoreCase));
-            }
-            if (!string.IsNullOrWhiteSpace(status))
-            {
-                filtered = filtered.Where(e =>
-                    string.Equals(e.Status, status, StringComparison.OrdinalIgnoreCase));
-            }
-            if (!string.IsNullOrWhiteSpace(workflowModelId))
-            {
-                // The flowable summary only carries WorkflowModelName, so this
-                // filter matches by name. The query param keeps the SPA-side
-                // contract aligned with /api/users/page.
-                filtered = filtered.Where(e =>
-                    string.Equals(e.WorkflowModelName, workflowModelId, StringComparison.OrdinalIgnoreCase));
-            }
-
-            var materialized = filtered.ToList();
-            var totalCount = materialized.Count;
+            // COUNT over the filtered set, without materialising it.
+            var totalCount = await rows.CountAsync(cancellationToken);
 
             var desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
-            // Tie-break on Id so paging is stable when the sort key has dupes.
-            IEnumerable<WorkflowExecutionSummary> ordered = (sort, desc) switch
-            {
-                ("name", true) => materialized.OrderByDescending(e => e.Name ?? string.Empty).ThenBy(e => e.Id),
-                ("name", false) => materialized.OrderBy(e => e.Name ?? string.Empty).ThenBy(e => e.Id),
-                ("workflowModel", true) => materialized.OrderByDescending(e => e.WorkflowModelName ?? string.Empty).ThenBy(e => e.Id),
-                ("workflowModel", false) => materialized.OrderBy(e => e.WorkflowModelName ?? string.Empty).ThenBy(e => e.Id),
-                ("status", true) => materialized.OrderByDescending(e => e.Status).ThenBy(e => e.Id),
-                ("status", false) => materialized.OrderBy(e => e.Status).ThenBy(e => e.Id),
-                ("startedAtUtc", false) => materialized.OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue).ThenBy(e => e.Id),
-                _ => materialized.OrderByDescending(e => e.StartedAtUtc ?? DateTimeOffset.MinValue).ThenBy(e => e.Id)
-            };
+            var ordered = ExecutionListQuery.Order(rows, sort, desc);
 
             var pageIndex = Math.Max(0, page ?? 0);
             var size = pageSize ?? 25;
-            IEnumerable<WorkflowExecutionSummary> sliced;
-            if (size > 0)
-            {
-                sliced = ordered.Skip(pageIndex * size).Take(size);
-            }
-            else
-            {
-                sliced = Array.Empty<WorkflowExecutionSummary>();
-            }
 
-            var items = sliced.ToArray();
+            var items = size > 0
+                ? (await ordered.Skip(pageIndex * size).Take(size).ToListAsync(cancellationToken))
+                    .Select(ExecutionListQuery.ToSummary).ToArray()
+                : Array.Empty<WorkflowExecutionSummary>();
 
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
@@ -196,7 +114,7 @@ public static class ExecutionEndpoints
                 cancellationToken);
 
             return Results.Ok(new { items, totalCount });
-        }).AuthorizedInHandler("filters via FilterVisibleExecutionsAsync(WorkflowExecution, View)");
+        }).AuthorizedInHandler("filters via ExecutionListQuery (WorkflowExecution, View) pushed into SQL");
 
         executions.MapGet("/{processInstanceId}/diagram", async (
             string processInstanceId,
@@ -1271,45 +1189,6 @@ public static class ExecutionEndpoints
 
     public sealed record GatewayChoiceDto(string FlowId, string Label, string? Description);
 
-    // Filters the raw Flowable execution list down to the rows the actor can
-    // View. We evaluate each row's facts in-memory against the actor's grants,
-    // mirroring the WorkflowExecutionInstanceAuthorizer logic but driven by
-    // the facts already on the summary so we don't pay N Flowable round-trips.
-    private static async Task<IReadOnlyList<WorkflowExecutionSummary>> FilterVisibleExecutionsAsync(
-        IReadOnlyList<WorkflowExecutionSummary> executions,
-        ClaimsPrincipal actor,
-        IAuthorizer authorizer,
-        IDbContextFactory<AutoNateDbContext> dbFactory,
-        CancellationToken cancellationToken)
-    {
-        if (executions.Count == 0) return executions;
-
-        var actorIdRaw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(actorIdRaw, out var actorId))
-        {
-            return Array.Empty<WorkflowExecutionSummary>();
-        }
-
-        var outboundEdges = await ActorOutboundUserEdges.LoadAsync(dbFactory, actorId, cancellationToken);
-        var evaluator = new InMemorySelectorEvaluator(actorId, outboundEdges);
-
-        var visible = new List<WorkflowExecutionSummary>(executions.Count);
-        foreach (var execution in executions)
-        {
-            var facts = BuildFacts(execution);
-            var allowed = await authorizer.IsAuthorizedAsync(
-                actor,
-                EntityKinds.WorkflowExecution,
-                Actions.View,
-                ast => evaluator.Matches(ast, execution.Id, facts),
-                cancellationToken);
-            if (allowed)
-            {
-                visible.Add(execution);
-            }
-        }
-        return visible;
-    }
 
     // internal so the #576 tests can assert the PRODUCTION fact builder supplies
     // `status`. A test that rebuilt the dictionary itself would pass while this

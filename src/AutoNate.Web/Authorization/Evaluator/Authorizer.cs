@@ -35,8 +35,7 @@ public sealed class Authorizer : IAuthorizer
 
     // Per-request grant cache. Authorizer is registered scoped, so this lives
     // exactly as long as _actorContext above. Per-row loops (e.g.
-    // ExecutionEndpoints.FilterVisibleExecutionsAsync, FlowableInstance
-    // authorizers) call IsAuthorizedAsync with the same (kind, action) for
+    // FlowableInstance authorizers) call IsAuthorizedAsync with the same (kind, action) for
     // every row — without this cache each iteration would re-query
     // permission_grants and re-parse every selector returned. Cache key
     // includes the actor's UserId so a stray "different principal" call
