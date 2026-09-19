@@ -9513,3 +9513,28 @@ change; asked on #286.
 **Pins:** FLOWABLE 245 → 246, FULL_LOCAL 475 → 476.
 
 **Issue:** #286
+
+## M5 blockers raised — #284, #285, #286's criterion (2026-09-19)
+
+Three issues whose remaining work is a decision about what a **closed box** means.
+Each asks for the owner's word in its own body; §3's blocker path applies, and
+none of them holds up anything else in M5.
+
+- **#284** — #218 shipped prevention (publish refuses an author condition on a
+  route; the route contract refuses null) rather than the generated default flow
+  and distinguishability its criterion describes. Verified before filing: no
+  exclusive gateway is generated at all, so the criterion has no subject.
+  Recommended: amend the criterion to describe the prevention; file
+  distinguishability separately only if it is wanted for its own sake.
+- **#285** — #168's conjunction is still unverifiable here. Re-measured: the
+  `autonate-flowable-dapr` container exists but the fixture runs with
+  `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true` and no `workflow_execution_errors`
+  row appears. Recommended: re-word the criterion to stop at the engine and let
+  **#172** carry the join, since its AC already requires the same arrow and would
+  give the environment work a home instead of a fourth tier.
+- **#286** — the criterion half only; the pin and the manifest note shipped.
+
+Recorded together because they share a shape worth naming: **the executable work
+in each was done, and what remains is a contract edit on a closed story.** Doing
+those silently is how a milestone reads as delivered while its record drifts —
+which is the failure this milestone has spent the week correcting.
