@@ -12,6 +12,7 @@ using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Flowable.Cache;
 using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
@@ -540,19 +541,79 @@ public static class ExecutionEndpoints
             return Results.Ok(merged);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        // SERVED FROM THE CACHE (#104), not from a live Flowable call.
+        //
+        // Two things had to land first, and both were found by this story
+        // stopping on its first line:
+        //   * #583 -- workflow_execution_cache had no `name` column, and this
+        //     DTO carries ProcessInstanceName, which the task modals render;
+        //   * #586 -- workflow_task_cache never learned a task finished, so
+        //     serving from it would have returned every task the instance ever
+        //     had, all labelled active.
+        //
+        // The instance is resolved through IFlowableReadThrough BEFORE the query:
+        // on a cache miss that reads through and populates the row, and the
+        // execution projection coalesces that instance's tasks in the same batch
+        // (CoalesceTasksOnNewInstance), so a run started seconds ago has its
+        // tasks here rather than an empty list. A 404 means the engine says there
+        // is no such instance, or there is no cached row and no way to ask.
         executions.MapGet("/{processInstanceId}/tasks", async (
             string processInstanceId,
-            IFlowableClient flowable,
+            IFlowableReadThrough readThrough,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var tasks = await flowable.GetTasksByProcessInstanceAsync(processInstanceId, cancellationToken);
+            var instance = await readThrough.GetInstanceAsync(processInstanceId, cancellationToken);
+            if (instance is null)
+            {
+                return Results.NotFound();
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+            // The open-task predicate #586 made load-bearing. Before it, both
+            // clauses matched every row.
+            var rows = await db.WorkflowTaskCache.AsNoTracking()
+                .Where(t => t.FlowableInstanceId == processInstanceId
+                         && t.Status == "active"
+                         && t.CompletedTime == null)
+                .OrderBy(t => t.CreatedTime)
+                .ThenBy(t => t.FlowableTaskId)
+                .ToListAsync(cancellationToken);
+
+            var tasks = rows
+                .Select(t => new FlowableTaskSummary
+                {
+                    Id = t.FlowableTaskId,
+                    Name = t.Name ?? string.Empty,
+                    TaskDefinitionKey = t.TaskDefinitionKey,
+                    Assignee = t.Assignee,
+                    ProcessInstanceId = t.FlowableInstanceId,
+                    ProcessInstanceName = instance.Name,
+                    ProcessDefinitionId = instance.ProcessDefinitionId,
+
+                    // Left null ON PURPOSE. The live path does not set it either
+                    // (FlowableClient.GetTasksByProcessInstanceAsync), and filling
+                    // it from workflow_model_name would be an improvement -- and an
+                    // unrequested content change in a story whose job is to change
+                    // where the answer comes from, not what it says.
+                    ProcessDefinitionName = null,
+
+                    CreatedAtUtc = new DateTimeOffset(
+                        DateTime.SpecifyKind(t.CreatedTime, DateTimeKind.Utc)),
+                    DueDate = t.DueDate is { } due
+                        ? new DateTimeOffset(DateTime.SpecifyKind(due, DateTimeKind.Utc))
+                        : null
+                })
+                .ToArray();
+
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionTasksViewed,
                 WorkflowResourceKinds.Execution,
                 resource: new { processInstanceId },
-                details: new { resultCount = tasks.Count },
+                details: new { resultCount = tasks.Length },
                 cancellationToken);
             return Results.Ok(tasks);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
