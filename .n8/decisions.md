@@ -9480,3 +9480,36 @@ to ignore warnings.
 **Pins:** SLIM_BACKEND 2864 → 2868, FLOWABLE 243 → 245, FULL_LOCAL 473 → 475.
 
 **Issue:** #229
+
+## M5 execution — #286, the compensation-variable trap, pinned and moved (2026-09-19)
+
+Two of the issue's three asks are done; the third is a blocker by its own words.
+
+**Pinned.** `A_handler_reads_the_current_variable_value_not_the_value_at_completion`
+deploys `paymentId='A'` → compensable step → overwrite to `'B'` → throw, and
+asserts the handler read **`B`**. The assertion is on the *value*, not on the
+handler having run: the point is that a future Flowable which starts snapshotting
+— or stops running the handler — becomes visible. `CompensationExecutionTests` had
+four facts and none touched variables, so the limitation could have changed in
+either direction and the ledger entry would have quietly become wrong.
+
+**Moved.** The note is now in `bpmn-support.json`'s `reason` for all four
+compensation rows, which the studio's BPMN types panel renders. A behaviour author
+now meets it where they are choosing the element, not in `.n8/decisions.md`.
+
+**An existing guard did its job, and it is worth recording that it did.**
+`BpmnSupportManifestTests.Every_reason_is_still_the_one_that_was_measured` failed
+on the edit, naming all four rows and their digests — #380's baseline working
+exactly as designed. The baseline was regenerated with
+`AUTONATE_REGENERATE_REASON_BASELINE=1`, and its diff is **exactly those four
+rows**, which is the evidence that the note went where it was meant to and nowhere
+else.
+
+**Blocked, and why it is not a judgment call.** The third ask — rewrite #115's
+criterion to say what is true — changes what a closed box means on a closed story.
+The issue asks for the owner's word and the exec rules reserve that class of
+change; asked on #286.
+
+**Pins:** FLOWABLE 245 → 246, FULL_LOCAL 475 → 476.
+
+**Issue:** #286

@@ -509,4 +509,101 @@ public sealed class CompensationExecutionTests : E2ETestBase
         </bpmn:definitions>
         """;
 
+    /// <summary>
+    /// A handler sees CURRENT variable values, not values as at completion (#286).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #115's criterion asked for values as at the compensated activity's
+    /// completion. Flowable 8.0.0 does not snapshot: measured with a probe
+    /// deployed straight to the engine, a handler reading <c>paymentId</c> after a
+    /// later step overwrote it saw the <b>new</b> value.
+    /// </para>
+    /// <para>
+    /// This is a trap with teeth. A handler written to reverse a payment reads the
+    /// payment id to reverse, and after any later write it will reverse the
+    /// <em>wrong one</em> — silently, and plausibly, because the handler ran and
+    /// reported success.
+    /// </para>
+    /// <para>
+    /// <b>The test asserts the behaviour as it is, and endorses nothing.</b> It
+    /// exists so a future Flowable that starts snapshotting — or stops running the
+    /// handler at all — is visible, because until now the limitation lived only in
+    /// the decision ledger and nothing would have noticed it changing in either
+    /// direction. The note an author meets is in the BPMN support manifest's
+    /// <c>reason</c> for the compensation rows, which the studio surfaces.
+    /// </para>
+    /// <para>
+    /// Whether #115's criterion should be reworded to say this is the owner's
+    /// call, and is asked on #286 rather than assumed here.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_handler_reads_the_current_variable_value_not_the_value_at_completion()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cmpvar{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, VariableSnapshotDiagram(key));
+
+        var instance = await StartAsync(api, key);
+        await EventuallyAsync(api, instance, n => n.Contains("Take payment"), "the compensable step");
+        await CompleteFirstTaskAsync(api, instance, "Take payment");
+
+        var variables = await EventuallyVariablesAsync(api, instance,
+            v => v.ContainsKey("handlerSaw"),
+            "the compensation handler to record what it read");
+
+        // The overwrite happened between the compensable step completing and the
+        // throw, so 'A' is the value as at completion and 'B' is the current one.
+        Assert.Equal("B", variables["paymentId"]);
+
+        // What the handler actually read. If this ever comes back 'A', Flowable
+        // has started snapshotting and the manifest note is out of date -- which
+        // is the whole reason this assertion is on the VALUE rather than on the
+        // handler merely having run.
+        Assert.Equal("B", variables["handlerSaw"]);
+    }
+
+    private static string VariableSnapshotDiagram(string key) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Undo the wrong payment" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="setA" />
+            <bpmn:scriptTask id="setA" name="Record payment A"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('paymentId', 'A');</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:sequenceFlow id="f1" sourceRef="setA" targetRef="t1" />
+            <bpmn:userTask id="t1" name="Take payment" />
+            <bpmn:sequenceFlow id="f2" sourceRef="t1" targetRef="setB" />
+            <bpmn:scriptTask id="setB" name="Record payment B"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('paymentId', 'B');</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:sequenceFlow id="f3" sourceRef="setB" targetRef="throw" />
+            <bpmn:intermediateThrowEvent id="throw" name="Undo the payment">
+              <bpmn:compensateEventDefinition />
+            </bpmn:intermediateThrowEvent>
+            <bpmn:sequenceFlow id="f4" sourceRef="throw" targetRef="after" />
+            <bpmn:userTask id="after" name="After compensation" />
+            <bpmn:sequenceFlow id="f5" sourceRef="after" targetRef="done" />
+            <bpmn:endEvent id="done" />
+
+            <bpmn:boundaryEvent id="b1" attachedToRef="t1">
+              <bpmn:compensateEventDefinition />
+            </bpmn:boundaryEvent>
+            <bpmn:scriptTask id="h1" name="Refund payment" isForCompensation="true"
+                             scriptFormat="javascript" autonate:runAs="workflowAuthor">
+              <bpmn:script>variables.set('handlerSaw', variables.get('paymentId'));</bpmn:script>
+            </bpmn:scriptTask>
+            <bpmn:association id="a1" sourceRef="b1" targetRef="h1" associationDirection="One" />
+          </bpmn:process>
+          {{Di(key, "s", "setA", "t1", "setB", "throw", "after", "done", "h1")}}
+        </bpmn:definitions>
+        """;
 }
