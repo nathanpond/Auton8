@@ -9761,3 +9761,66 @@ rather than only that the wording changed. Audit trail on each amended issue;
 
 Next: **finish #110, then #111** — decision tables end to end. #110 is half built
 (schema, validator, generator) and half-building it was the worst available outcome.
+
+## M5 execution — #110, authoring a decision table (2026-09-19)
+
+Unblocked by #106's finding that DMN costs no container.
+
+**The rules are structured data; the DMN is generated at publish.** That is the
+decision everything else follows from. Storing hand-edited XML would make the AC's
+central promise — *"a rule whose cells do not satisfy their types is rejected at
+save with a message naming the cell"* — impossible to enforce, because you cannot
+validate cells you did not model. The published version keeps a copy of what was
+generated, because regenerating on demand would let a later change to the generator
+silently change what a bound process decides.
+
+**A new `EntityKind`, with both registrations the skill says have shipped missing
+five times.** Its own kind rather than an action on SiteConfig, for the reason #112
+gave WorkflowMessage one. Worth noting that this is the **opposite** call from
+#172's jobs three days earlier: a job has no independent existence and its scope is
+its execution, so `/workflowexecution/<id>` already meant the right thing. A
+decision table has both an existence and an owner. Two different answers, each
+argued from the resource rather than from habit.
+
+The enforcement tests hit an **instance-level** route with a concrete id, because a
+kind-level route returns before the instance-handler lookup and would pass with zero
+authorizers registered. Mutation-checked: dropping the `IInstanceAuthorizer` fails
+both, with the "denies everyone but super-admins" symptom.
+
+**Three defects, each found by a layer the others could not see.**
+
+1. **Inputs over HTTP are `JsonElement`.** Every type decision in
+   `FlowableDecisionClient` asks what a value *is*, and a boxed `JsonElement`
+   answers "JsonElement" to all of them — so the declared-type check refused
+   perfectly good calls. Every existing unit test passed CLR values, which is
+   exactly what no HTTP caller ever does. **Found end to end.**
+2. **The unwrap's ternary unified `long` and `double` to `double`**, so every
+   integer reached the engine as a double. Survivable — a DMN number column accepts
+   either — which is why it took a unit test asserting the emitted *type name* to
+   see it at all. **Found in slim, after the E2E had gone green.**
+3. **The engine test could not fail.** Its first form deployed a hand-written copy
+   of what the generator "should" produce, and its own comment claimed it was kept
+   in step by failing when the two diverged. Nothing in it called the generator. It
+   now creates, publishes and evaluates through Auton8's own API, so there is one
+   path and it cannot drift.
+
+The first two are a matched pair worth keeping in mind: the end-to-end test caught
+what the unit tests structurally could not, and the unit test caught what the
+end-to-end test was too forgiving to notice.
+
+**A question the unit tests raise and cannot answer, now settled:** cell text is
+XML-escaped, so `"escalate"` reaches the engine as `&quot;escalate&quot;`. Whether
+FEEL sees the quotes after the parser unescapes them is an engine fact. It does.
+
+**Editor decisions.** A new table starts with one input and one output, because a
+table with neither is refused at save and handing an author an empty grid that
+cannot be saved is a worse first experience than a starting point they edit. Adding
+a column widens every existing rule in the same operation, because otherwise the
+author is fixing damage the editor did. Cells are named by *rule and column*, which
+is how the server's error messages name them, so an author reading "Rule 1, Input 1"
+can find the box it is about.
+
+**Pins:** SLIM_BACKEND 2870 → 2906, FLOWABLE 250 → 252, SLIM_E2E 231 → 233,
+FULL_LOCAL 482 → 486.
+
+**Issue:** #110
