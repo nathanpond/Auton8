@@ -9087,3 +9087,36 @@ author and executor. Recorded rather than assumed on that account.**
      Quoted properly it is **227**, matching the pin, with `FULL_LOCAL` at 466 and
      the identity `227 + 238 + 4 - 3 = 466` holding.
   **Issue:** #109
+
+## M5 execution — #109, CI red and the defect behind it (2026-09-19)
+
+**CI failed on an existing test, not mine**, and it was right to.
+`WorkflowOverrideTests.WorkflowExecutionsPage_RendersForSeededAdmin` asserts no
+`role="alert"` is visible on the executions page — its comment says so explicitly:
+*"if useExecutions() threw we'd see a red Alert with role='alert'. The flash slot
+uses role='status' for success, so this only catches the failure case."*
+
+**Rule 1 fix.** Mantine's `Alert` defaults to `role="alert"`, so my not-updating
+indicator made a **status masquerade as an error banner** — and nested an
+assertive live region inside the polite one above it, meaning a state change would
+interrupt whatever the user was reading. The opposite of what the container exists
+for. The Alert now carries `role="presentation"`; the container owns announcement.
+
+**The more useful finding is why it was invisible locally.** The dev app had
+polled, so the indicator always read *fresh* here and the not-updating branch never
+rendered. CI has no heartbeat, so it did. My local suite was green and proved
+nothing — and reverting the fix locally *still* passed, which is how I found that
+out rather than assuming the fix worked.
+
+So the fix is not just the role. A fourth E2E spec **forces** the state by deleting
+the feed's watermark (`POST /api/admin/projections/feeds/{feed}/reset-watermark`)
+and asserts both that the indicator reads "not updating" and that it does not wear
+`role="alert"`. With that in place, reverting the role kills **two** tests locally —
+the new spec and the pre-existing one — where before it killed neither.
+
+**Pins:** SLIM_E2E 227 → 228, FULL_LOCAL 466 → 467, both verified against real
+discovery rather than arithmetic.
+
+**Transferable:** a test that only fails in one environment is a test whose
+condition is incidental. Forcing the condition is what turns "it broke on CI" into
+"it is covered".

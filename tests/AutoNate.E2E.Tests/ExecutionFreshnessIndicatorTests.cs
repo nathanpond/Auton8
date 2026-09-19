@@ -75,6 +75,49 @@ public sealed class ExecutionFreshnessIndicatorTests : E2ETestBase
     /// rather than by <c>FocusAsync()</c>, which would prove the element can hold
     /// focus without proving a user can get there.
     /// </remarks>
+    /// <summary>
+    /// With the feed's heartbeat gone, the view says "not updating" — and does
+    /// NOT masquerade as an error banner (#109).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The state is forced, not waited for.</b> The first version of this
+    /// suite never exercised this branch locally — the dev app had polled, so the
+    /// indicator always read fresh — and CI hit it only because its environment had
+    /// no heartbeat. That made a real defect visible on CI and invisible here, and
+    /// left a green local run proving nothing. Deleting the watermark makes the
+    /// condition deterministic in both places.</para>
+    ///
+    /// <para><b>The second assertion is the one that failed on CI.</b> Mantine's
+    /// <c>Alert</c> defaults to <c>role="alert"</c>, and on this page that role
+    /// already means "an error banner is showing" —
+    /// <c>WorkflowOverrideTests.WorkflowExecutionsPage_RendersForSeededAdmin</c>
+    /// asserts none is visible. A status indicator wearing that role both broke
+    /// that check and nested an assertive live region inside the polite one, so a
+    /// state change would interrupt whatever the user was reading.</para>
+    /// </remarks>
+    [Fact]
+    public async Task A_stopped_feed_reads_as_not_updating_without_posing_as_an_error()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var api = session.Page.APIRequest;
+
+        var reset = await api.PostAsync(
+            "/api/admin/projections/feeds/flowable.exec.poll/reset-watermark");
+        Assert.True(reset.Ok, $"Resetting the watermark failed: {reset.Status}");
+
+        await page.GotoAsync("/workflow-executions");
+
+        var stopped = page.GetByTestId("execution-freshness-stopped");
+        await stopped.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Assert.Contains("not updating", (await stopped.InnerTextAsync()).ToLowerInvariant());
+
+        // It is a status, not an error. `role="alert"` on this page is reserved
+        // for a genuine failure banner.
+        Assert.NotEqual("alert", await stopped.GetAttributeAsync("role"));
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
+    }
+
     [Fact]
     public async Task The_refresh_control_is_reachable_and_operable_by_keyboard()
     {

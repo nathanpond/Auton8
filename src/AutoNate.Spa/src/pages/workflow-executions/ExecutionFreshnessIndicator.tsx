@@ -58,6 +58,17 @@ export function ExecutionFreshnessIndicator({ onRefresh, refreshDisabled }: Prop
           variant="light"
           py={4}
           px="sm"
+          // NOT role="alert", which is Mantine's default for Alert.
+          //
+          // Two things were wrong with the default. It nests an ASSERTIVE live
+          // region inside the polite one above, so a state change would interrupt
+          // whatever the user is reading -- the opposite of what the container is
+          // for. And `role="alert"` on this page already means "an error banner is
+          // showing": WorkflowOverrideTests asserts none is visible, and this
+          // indicator made a status masquerade as one. That test caught it.
+          //
+          // The container owns announcement; this element is presentation.
+          role="presentation"
           data-testid="execution-freshness-stopped"
         >
           <Text size="sm">{message}</Text>
