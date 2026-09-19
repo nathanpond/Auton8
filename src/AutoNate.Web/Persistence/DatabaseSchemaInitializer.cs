@@ -4001,6 +4001,81 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // #110. Decision tables, in the shape of workflow_models / workflow_model_versions.
+    //
+    // The same shape because the problem is the same one, and the story says so:
+    // changing a table must not silently change what already-running processes
+    // decide. A draft is edited freely; publishing creates an immutable version;
+    // a process binds to a version.
+    //
+    // The RULES ARE STRUCTURED DATA, not DMN XML, and the DMN is generated at
+    // publish. Storing hand-edited XML would make "a rule whose cells do not
+    // satisfy their declared types is rejected at save" impossible to enforce --
+    // you cannot validate cells you did not model. It also means the generated
+    // DMN can change with the engine without every stored table needing a
+    // migration.
+    //
+    // JSONB rather than child tables for inputs/outputs/rules: they are edited,
+    // versioned and published as one unit, and nothing queries into them. Child
+    // tables would buy referential integrity for a document that is never
+    // partially read.
+    private const string DecisionTablesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS decision_tables (
+            id UUID PRIMARY KEY,
+            decision_key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            hit_policy TEXT NOT NULL DEFAULT 'FIRST',
+            inputs JSONB NOT NULL DEFAULT '[]'::jsonb,
+            outputs JSONB NOT NULL DEFAULT '[]'::jsonb,
+            rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+            is_draft BOOLEAN NOT NULL DEFAULT TRUE,
+            draft_version_number INTEGER NOT NULL DEFAULT 1,
+            published_version_number INTEGER NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_deployment_id TEXT NULL,
+            last_decision_id TEXT NULL,
+            last_decision_key TEXT NULL,
+            last_decision_version INTEGER NULL,
+            last_deployed_at_utc TIMESTAMPTZ NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_decision_tables_updated_at_utc
+            ON decision_tables (updated_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS decision_table_versions (
+            id UUID PRIMARY KEY,
+            decision_table_id UUID NOT NULL REFERENCES decision_tables (id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            decision_key TEXT NOT NULL,
+            hit_policy TEXT NOT NULL,
+            inputs JSONB NOT NULL,
+            outputs JSONB NOT NULL,
+            rules JSONB NOT NULL,
+            dmn_xml TEXT NOT NULL,
+            deployment_id TEXT NOT NULL,
+            decision_id TEXT NOT NULL,
+            decision_definition_key TEXT NOT NULL,
+            decision_version INTEGER NOT NULL,
+            published_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS decision_table_versions_table_id_version_number_key
+            ON decision_table_versions (decision_table_id, version_number);
+
+        CREATE INDEX IF NOT EXISTS ix_decision_table_versions_decision_table_id
+            ON decision_table_versions (decision_table_id);
+
+        -- What a deployed process binds to. #111 resolves a business rule task's
+        -- reference through this, so republishing a table cannot change what an
+        -- already-deployed definition decides.
+        CREATE INDEX IF NOT EXISTS ix_decision_table_versions_decision_id
+            ON decision_table_versions (decision_id);
+        """;
+
     private const string SignInMethodsSchemaSql =
         """
         -- #94. Records that a provider has actually worked at least once.
@@ -4469,6 +4544,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceConstraintsSql), GroupMemberProvenanceConstraintsSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProviderGroupMappingsSchemaSql), IdentityProviderGroupMappingsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(SignInMethodsSchemaSql), SignInMethodsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DecisionTablesSchemaSql), DecisionTablesSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the
