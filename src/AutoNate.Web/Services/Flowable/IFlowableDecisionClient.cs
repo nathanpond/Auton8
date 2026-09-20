@@ -37,6 +37,19 @@ public interface IFlowableDecisionClient
         string decisionKey, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deploys <paramref name="dmnXml"/> under <paramref name="decisionKey"/> only
+    /// if no decision with that key exists yet (#111).
+    /// </summary>
+    /// <remarks>
+    /// The pinned copy a process binds to is immutable by construction — the key
+    /// carries the version — so deploying it twice would produce version 2 of
+    /// something that must only ever have one. Every publish of every process
+    /// referencing the same table version therefore lands on one deployment.
+    /// </remarks>
+    Task<DecisionDefinitionSummary> EnsureDecisionAsync(
+        string decisionKey, string dmnXml, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Evaluates a decision against <paramref name="inputs"/>.
     /// </summary>
     /// <remarks>

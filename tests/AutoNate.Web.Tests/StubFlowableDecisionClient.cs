@@ -24,7 +24,13 @@ public sealed class StubFlowableDecisionClient : IFlowableDecisionClient
 {
     private int _version;
 
-    /// <summary>Every call, in order: <c>Deploy:key</c>, <c>Evaluate:key</c>.</summary>
+    // PER KEY, because #111 asks "does a decision with THIS key exist yet" and a
+    // single counter answers yes for every key once any key has been deployed --
+    // which would make `EnsureDecisionAsync` skip every pinned deployment and the
+    // slim tests agree with an engine that does not behave that way.
+    private readonly Dictionary<string, int> _versionsByKey = new(StringComparer.Ordinal);
+
+    /// <summary>Every call, in order: <c>Deploy:key</c>, <c>Ensure:key</c>, <c>Evaluate:key</c>.</summary>
     public List<string> Calls { get; } = [];
 
     /// <summary>The DMN of each deployment, so a test can assert what was sent.</summary>
@@ -45,6 +51,7 @@ public sealed class StubFlowableDecisionClient : IFlowableDecisionClient
 
         DeployedXml.Add(dmnXml);
         _version++;
+        _versionsByKey[decisionKey] = _versionsByKey.GetValueOrDefault(decisionKey) + 1;
 
         return Task.FromResult(new DecisionDeploymentInfo
         {
@@ -58,10 +65,25 @@ public sealed class StubFlowableDecisionClient : IFlowableDecisionClient
 
     public Task<DecisionDefinitionSummary?> GetLatestDecisionAsync(
         string decisionKey, CancellationToken cancellationToken = default) =>
-        Task.FromResult<DecisionDefinitionSummary?>(_version == 0
-            ? null
-            : new DecisionDefinitionSummary(
-                $"{decisionKey}:{_version}:stub", decisionKey, decisionKey, _version, $"dep-{_version}"));
+        Task.FromResult<DecisionDefinitionSummary?>(
+            _versionsByKey.TryGetValue(decisionKey, out var version)
+                ? new DecisionDefinitionSummary(
+                    $"{decisionKey}:{version}:stub", decisionKey, decisionKey, version, $"dep-{version}")
+                : null);
+
+    public async Task<DecisionDefinitionSummary> EnsureDecisionAsync(
+        string decisionKey, string dmnXml, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"Ensure:{decisionKey}");
+
+        var existing = await GetLatestDecisionAsync(decisionKey, cancellationToken);
+        if (existing is not null) return existing;
+
+        var deployment = await DeployDecisionAsync(decisionKey, dmnXml, cancellationToken);
+        return new DecisionDefinitionSummary(
+            deployment.DecisionId, deployment.DecisionKey, decisionKey,
+            deployment.DecisionVersion, deployment.DeploymentId);
+    }
 
     public Task<DecisionEvaluationResult> EvaluateAsync(
         string decisionKey,

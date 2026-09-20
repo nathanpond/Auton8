@@ -4246,8 +4246,33 @@ function BusinessRuleTaskModal({
         <Text size="sm" c="dimmed">
           Run a decision table when the workflow reaches this step. The table&apos;s outputs
           become process variables, so a gateway after this step can branch on what it
-          decided.
+          decided. The version of the table that is published now is locked in when you
+          publish this workflow &mdash; republishing the table will not change what this
+          step decides, so a process already running cannot change behaviour underneath
+          you.
         </Text>
+
+        {/* #111. The same two consequences of pinning that a call activity has
+            to spell out, for the same reason: neither is guessable from the
+            diagram, and the second is where a table change silently fails to
+            arrive.
+
+            role="presentation", NOT Mantine's default role="alert" (#602): this
+            is standing reference text that is here every time the modal opens,
+            and announcing it assertively would interrupt a screen-reader user
+            mid-sentence to tell them something that has not changed. */}
+        <Alert color="blue" variant="light" role="presentation" title="Two things to know">
+          <Text size="sm">
+            <strong>To pick up a newer version of the table, publish this workflow again.</strong>{" "}
+            That is the only way to move this step forward &mdash; which is deliberate, but it
+            does mean a fix to a shared table reaches workflows only as each is republished.
+          </Text>
+          <Text size="sm" mt="xs">
+            <strong>If the table cannot decide, this step fails rather than guessing.</strong>{" "}
+            The run stops here and the failure appears on the execution with the reason, instead
+            of carrying on with the variable unset.
+          </Text>
+        </Alert>
 
         <Group gap="xs" wrap="wrap">
           <Code>{editor.id}</Code>

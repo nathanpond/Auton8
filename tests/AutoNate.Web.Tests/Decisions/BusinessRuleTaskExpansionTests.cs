@@ -1,4 +1,6 @@
 using System.Xml.Linq;
+using AutoNate.Web.Models;
+using AutoNate.Web.Services.Decisions;
 using AutoNate.Web.Services.Workflow;
 using Xunit;
 
@@ -153,5 +155,159 @@ public sealed class BusinessRuleTaskExpansionTests
         Assert.Single(expanded.Descendants(Bpmn + "businessRuleTask"));
         Assert.Empty(expanded.Descendants(Bpmn + "serviceTask"));
         Assert.Empty(expanded.Descendants(Flowable + "field"));
+    }
+
+    [Fact]
+    public void The_deployed_task_is_async_so_a_failed_evaluation_is_visible()
+    {
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(Diagram("invoiceRouting")));
+
+        // MEASURED, both ways, on the live engine. Synchronously a failing
+        // decision throws out of the start call -- HTTP 500, transaction rolled
+        // back, no instance and no history for anyone to open. Asynchronously it
+        // becomes a job carrying the engine's message, which is the surface every
+        // other failing step already lands in (#172).
+        Assert.Equal(
+            "true",
+            expanded.Descendants(Bpmn + "serviceTask").Single()
+                .Attribute(Flowable + "async")?.Value);
+    }
+
+    // ── Version binding (#111) ──────────────────────────────────────────────
+
+    [Fact]
+    public void Every_configured_task_is_reported_with_its_element_id_label_and_key()
+    {
+        var found = WorkflowBpmnXml.ExtractBusinessRuleTaskDecisions(Diagram("invoiceRouting"));
+
+        var one = Assert.Single(found);
+        Assert.Equal("decide", one.ElementId);
+        // The label, because the publish refusal has to name something an author
+        // can find on the canvas.
+        Assert.Equal("Route the invoice", one.Label);
+        Assert.Equal("invoiceRouting", one.DecisionKey);
+    }
+
+    [Fact]
+    public void An_unconfigured_task_is_NOT_reported_as_a_reference_to_resolve()
+    {
+        // Its refusal is BuildBusinessRuleTaskErrors'. Reporting it here too would
+        // hand an author two different sentences about one element.
+        Assert.Empty(WorkflowBpmnXml.ExtractBusinessRuleTaskDecisions(Diagram(decisionKey: null)));
+    }
+
+    [Fact]
+    public void Publish_pins_the_deployed_copy_to_the_version_published_now()
+    {
+        var pinned = WorkflowBpmnXml.PinBusinessRuleTaskDecisions(
+            Diagram("invoiceRouting"),
+            new Dictionary<string, string> { ["invoiceRouting"] = "invoiceRouting-v3" });
+
+        var expanded = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(pinned));
+
+        Assert.Equal(
+            "invoiceRouting-v3",
+            expanded.Descendants(Flowable + "field")
+                .Single(f => (string?)f.Attribute("name") == "decisionTableReferenceKey")
+                .Value);
+
+        // AND THE STORED DIAGRAM IS UNTOUCHED. Pinning applies to the deployed
+        // copy; an author reopening this workflow must still see the table they
+        // picked, and the next publish must resolve the key afresh rather than
+        // re-pinning a pin.
+        Assert.Equal(
+            "invoiceRouting",
+            XDocument.Parse(Diagram("invoiceRouting"))
+                .Descendants(Bpmn + "businessRuleTask").Single()
+                .Attribute(AutoNate + "decisionKey")!.Value);
+    }
+
+    [Fact]
+    public void A_key_the_publish_did_not_resolve_is_left_exactly_as_written()
+    {
+        // The complement of the test above, and the one that matters: a pin map
+        // that silently rewrote keys it had no entry for would bind processes to
+        // tables nobody resolved. Publish refuses an unresolved key before it
+        // reaches here, so anything left over must pass through unchanged.
+        var pinned = WorkflowBpmnXml.PinBusinessRuleTaskDecisions(
+            Diagram("invoiceRouting"),
+            new Dictionary<string, string> { ["somethingElse"] = "somethingElse-v1" });
+
+        Assert.Equal(
+            "invoiceRouting",
+            XDocument.Parse(pinned).Descendants(Bpmn + "businessRuleTask").Single()
+                .Attribute(AutoNate + "decisionKey")!.Value);
+    }
+
+    [Fact]
+    public void A_pinned_key_names_the_table_and_the_version()
+    {
+        Assert.Equal("invoiceRouting-v3", DecisionTableDmn.PinnedKey("invoiceRouting", 3));
+    }
+
+    [Fact]
+    public void No_key_an_author_can_write_can_collide_with_a_pinned_one()
+    {
+        // The reason the separator is a hyphen and not `__v`. With `__v`, a table
+        // genuinely called `invoiceRouting__v1` would occupy the pinned name of
+        // `invoiceRouting` version 1 -- and `EnsureDecisionAsync`, finding a
+        // decision already deployed under that key, would bind the process to the
+        // wrong table without deploying anything or saying a word.
+        //
+        // Asserted through the VALIDATOR rather than against a regex copied here,
+        // so tightening or loosening the key rule moves this test with it.
+        var pinned = DecisionTableDmn.PinnedKey("invoiceRouting", 1);
+
+        var collidingTable = new DecisionTableModel
+        {
+            DecisionKey = pinned,
+            Name = "Collision",
+            HitPolicy = "FIRST",
+            Inputs = [new DecisionColumn("i1", "Amount", "amount", "number")],
+            Outputs = [new DecisionColumn("o1", "Route", "route", "string")],
+            Rules = [new DecisionRule("r1", [""], ["\"escalate\""])]
+        };
+
+        Assert.Contains(
+            DecisionTableValidator.Validate(collidingTable),
+            e => e.Contains("not a usable decision key", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Rekeying_a_published_version_changes_its_identity_and_nothing_else()
+    {
+        var table = new DecisionTableModel
+        {
+            Id = Guid.NewGuid(),
+            DecisionKey = "invoiceRouting",
+            Name = "Invoice routing",
+            HitPolicy = "FIRST",
+            Inputs = [new DecisionColumn("i1", "Amount", "amount", "number")],
+            Outputs = [new DecisionColumn("o1", "Route", "route", "string")],
+            Rules = [new DecisionRule("r1", ["> 10000"], ["\"escalate\""])]
+        };
+
+        var rekeyed = XDocument.Parse(
+            DecisionTableDmn.Rekey(DecisionTableDmn.Generate(table), "invoiceRouting-v3"));
+
+        var dmn = rekeyed.Root!.Name.Namespace;
+        var decision = rekeyed.Root.Elements(dmn + "decision").Single();
+
+        // Flowable takes the decision KEY from this attribute, so it is the whole
+        // mechanism. `defs_` and `dt_` move with it only because two deployments
+        // sharing an id is the sort of thing that works until it does not.
+        Assert.Equal("invoiceRouting-v3", (string?)decision.Attribute("id"));
+        Assert.Equal("defs_invoiceRouting-v3", (string?)rekeyed.Root.Attribute("id"));
+        Assert.Equal(
+            "dt_invoiceRouting-v3",
+            (string?)decision.Elements(dmn + "decisionTable").Single().Attribute("id"));
+
+        // AND THE RULES ARE THE SAME RULES. A re-key that touched a cell would
+        // bind a process to a table deciding something nobody published, which is
+        // the failure version binding exists to prevent arriving by the back door.
+        var entries = decision.Descendants(dmn + "text").Select(t => t.Value).ToList();
+        Assert.Contains("> 10000", entries);
+        Assert.Contains("\"escalate\"", entries);
+        Assert.Contains("amount", entries);
     }
 }

@@ -30,11 +30,22 @@ internal sealed class StubFlowableClient : IFlowableClient
     /// </remarks>
     public FlowableRequestException? DeployThrows { get; set; }
 
+    /// <summary>
+    /// Every model handed to <see cref="DeployProcessAsync"/>, in order.
+    /// </summary>
+    /// <remarks>
+    /// The DEPLOYED copy, which is not the stored one: publish expands and pins
+    /// before deploying, and #111's version binding is only observable here.
+    /// </remarks>
+    public List<WorkflowModel> DeployedModels { get; } = [];
+
     public Task<WorkflowDeploymentInfo> DeployProcessAsync(
         WorkflowModel model, CancellationToken cancellationToken = default)
     {
         Calls.Add($"Deploy:{model.ProcessKey}");
         if (DeployThrows is not null) throw DeployThrows;
+
+        DeployedModels.Add(model);
 
         return Task.FromResult(new WorkflowDeploymentInfo
         {

@@ -9932,3 +9932,85 @@ established by reading — and polls the stored row second.
 FULL_LOCAL 486 → 489.
 
 **Issue:** #111
+
+## M5 execution — #111's version binding, measured into a different design (2026-09-19)
+
+The story's binding AC — *"the process binds to the decision table **version**
+published at deployment time, so republishing the table does not change what an
+already-deployed process definition decides"* — was recorded as met in the first
+completion comment on #111. **It was not.** The expansion wrote the author's bare
+decision key into `decisionTableReferenceKey`, and Flowable resolves a bare key to
+the LATEST version at run time. Measured, by writing the test the story's own test
+plan asked for: an already-deployed definition, started with the same amount after
+its table was republished with a different threshold, took the other branch.
+
+That is the second claim in that comment I have had to withdraw, and both came
+from reasoning about a mechanism instead of running it. The store even carried a
+`GetVersionByDecisionIdAsync` whose doc-comment said *"#111 resolves a business
+rule task's reference through this"* — nothing called it. It is deleted here
+rather than left as a sentence that describes work nobody did.
+
+**The two Flowable-native escapes are both unreachable over REST on this image,
+and both were probed before anything was built:**
+
+- A `.dmn` riding in the BPMN deployment. It is accepted and stored as a
+  *resource*; `dmn-repository/decisions?key=…` returns nothing. The process
+  engine in this image has no DMN deployer wired into its deployment pipeline.
+- A `parentDeploymentId` on the DMN deployment, which is what
+  `DmnActivityBehavior.applyParentDeployment` reads. The DMN REST API ignores the
+  form field and stamps the deployment's own id.
+
+**So the version goes in the key.** Publish resolves each referenced table's
+currently-published version, deploys that version's own stored DMN under
+`{key}-v{n}` if it is not there already, and points the deployed copy at that
+name. This is the same shape #113 chose for call activities — resolve now, pin the
+deployed copy, leave the stored diagram saying what the author picked — and the
+AC asked for consistency with it explicitly. The author's bare key keeps meaning
+"latest", so the try-it panel and every existing reader are untouched.
+
+The stored bytes are re-keyed rather than the table regenerated: a table's current
+draft is not its published version, and regenerating from the model would bind a
+process to rules nobody published.
+
+**`flowable:async="true"` on the expanded task**, for the AC about runtime
+failures. Measured both ways: synchronously, a decision whose expression fails
+throws out of the start call — HTTP 500, transaction rolled back, no instance and
+no history, so nobody but the caller ever learns anything. Asynchronously the same
+failure is a retrying job carrying the engine's own sentence, which is the surface
+#172 built and where every other failing step already lands. The cost is that a
+start returns before the decision is made; that is what the AC buys.
+
+**The "deleted table" AC falls out of the same resolution.** A key that names no
+published table — never published, or published and then deleted — is refused at
+publish, naming the key and the element, with nothing deployed.
+
+**Two guards that had to move with it:**
+
+- `StubFlowableDecisionClient` tracked one global version counter, so
+  `GetLatestDecisionAsync` answered *yes* for every key once any key had been
+  deployed. Under `EnsureDecisionAsync` that would have skipped every pinned
+  deployment and left the slim tests agreeing with an engine that behaves
+  differently. It is per-key now.
+- The live oracle's new DMN-rewrite check asserted the deployed key equals the
+  authored one. That is now false ON PURPOSE, so it asserts the author's key plus
+  a version pin instead — which still fails for a different table, and also fails
+  for a rewrite that dropped the pin and left the process following whatever is
+  published next.
+
+**The pin separator is a hyphen, and that is load-bearing.** The first draft used
+`__v`, which an author CAN write: `DecisionTableValidator` allows underscores, so a
+table genuinely called `foo__v1` would occupy the pinned name of `foo` version 1 —
+and `EnsureDecisionAsync`, finding a decision already deployed there, would bind
+the process to the wrong table without deploying anything or saying a word. A DMN
+id is an NCName and allows a hyphen; the key pattern does not. Guarded through the
+validator rather than against a regex copied into the test, so tightening the key
+rule moves the guard with it.
+
+**Pins:** SLIM_BACKEND 2913 → 2923, FLOWABLE 255 → 258, FULL_LOCAL 490 → 493.
+
+**Filed, not fixed:** #604 — completing a task leaves `workflow_task_cache` stale,
+and the engine's 404 on the stale id surfaces as a 500. Found because the oracle's
+`Multi-Instance (Sequential)` cell fails on it; reproduced on `master` @ `b4daede`,
+so it is not this branch's doing and is out of #111's scope.
+
+**Issue:** #111

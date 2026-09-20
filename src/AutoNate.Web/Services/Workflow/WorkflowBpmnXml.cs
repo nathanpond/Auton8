@@ -235,6 +235,90 @@ public static partial class WorkflowBpmnXml
     }
 
     /// <summary>
+    /// Every business rule task's element id, label and decision key (#111).
+    /// </summary>
+    /// <remarks>
+    /// The label comes back too because the publish refusal has to name the
+    /// element an author can find on the canvas. An id is what the code needs and
+    /// the name is what a person looks for.
+    /// </remarks>
+    public static IReadOnlyList<(string ElementId, string Label, string DecisionKey)>
+        ExtractBusinessRuleTaskDecisions(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return [];
+
+        XDocument document;
+        try { document = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return []; }
+
+        var found = new List<(string, string, string)>();
+        foreach (var task in document.Descendants(BpmnNamespace + "businessRuleTask"))
+        {
+            var elementId = task.Attribute("id")?.Value;
+            var key = task.Attribute(ScriptTaskIdentity.AutoNateNamespace + "decisionKey")?.Value;
+
+            // A task with no key is BuildBusinessRuleTaskErrors' refusal, not
+            // this one's. Reporting it twice would hand an author two sentences
+            // about one element.
+            if (string.IsNullOrWhiteSpace(elementId) || string.IsNullOrWhiteSpace(key)) continue;
+
+            found.Add((elementId!, ElementLabel(task), key!.Trim()));
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Rewrites each business rule task's decision key to the pinned key of the
+    /// table version published right now (#111).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The direct analogue of <see cref="PinCallActivityTargets"/>, for the same
+    /// reason and with the same shape: Flowable resolves the reference to the
+    /// LATEST version at run time — measured, by republishing a table under a
+    /// running definition and watching it change its mind — and a running process
+    /// must not change behaviour underneath its owner.
+    /// </para>
+    /// <para>
+    /// Applied to the DEPLOYED copy only, BEFORE the expansion that turns the
+    /// element into a DMN service task, so the pinned key is what lands in the
+    /// <c>decisionTableReferenceKey</c> field. The stored diagram keeps the key
+    /// the author picked, which is what the studio shows them and what the next
+    /// publish resolves afresh.
+    /// </para>
+    /// </remarks>
+    public static string PinBusinessRuleTaskDecisions(
+        string xml, IReadOnlyDictionary<string, string> pinnedKeysByAuthoredKey)
+    {
+        ArgumentNullException.ThrowIfNull(pinnedKeysByAuthoredKey);
+
+        if (string.IsNullOrWhiteSpace(xml) || pinnedKeysByAuthoredKey.Count == 0) return xml;
+
+        var document = XDocument.Parse(xml);
+        var changed = false;
+
+        foreach (var task in document.Descendants(BpmnNamespace + "businessRuleTask"))
+        {
+            var attribute = task.Attribute(ScriptTaskIdentity.AutoNateNamespace + "decisionKey");
+            var key = attribute?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!pinnedKeysByAuthoredKey.TryGetValue(key!, out var pinned)) continue;
+
+            task.SetAttributeValue(ScriptTaskIdentity.AutoNateNamespace + "decisionKey", pinned);
+            changed = true;
+        }
+
+        if (!changed) return xml;
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
     /// A business rule task becomes a DMN service task in the deployed copy (#111).
     /// </summary>
     /// <remarks>
@@ -279,6 +363,22 @@ public static partial class WorkflowBpmnXml
             task.Name = BpmnNamespace + "serviceTask";
 
             task.SetAttributeValue(FlowableNamespace + "type", "dmn");
+
+            // ASYNC, SO A FAILED EVALUATION IS VISIBLE (#111).
+            //
+            // Measured on the running engine, both ways. Synchronous, a decision
+            // whose expression fails throws out of the start call: HTTP 500,
+            // transaction rolled back, NO instance and NO history -- the author
+            // who started it gets an error page and anyone else gets nothing at
+            // all. Asynchronous, the same failure becomes a retrying job carrying
+            // the engine's own message ("DMN decision with key X execution failed
+            // ... activity 'decide'"), which is the surface #172 built and the one
+            // every other failing step already lands in.
+            //
+            // The same reasoning, and the same attribute, as the behaviour bridge
+            // (#112). The cost is that a process start returns before the decision
+            // is made; the AC's "not as a silent stall" is what buys it.
+            task.SetAttributeValue(FlowableNamespace + "async", "true");
 
             // The authoring attribute moves into the field extension the engine
             // reads, and is then STRIPPED from the deployed copy. Leaving it

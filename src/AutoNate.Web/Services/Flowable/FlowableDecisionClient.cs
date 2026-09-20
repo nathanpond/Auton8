@@ -84,6 +84,28 @@ public sealed class FlowableDecisionClient(HttpClient httpClient, IMemoryCache c
         };
     }
 
+    public async Task<DecisionDefinitionSummary> EnsureDecisionAsync(
+        string decisionKey, string dmnXml, CancellationToken cancellationToken = default)
+    {
+        var existing = await GetLatestDecisionAsync(decisionKey, cancellationToken);
+        if (existing is not null) return existing;
+
+        // Not cached, and not guarded against a concurrent publish of the same
+        // pair. Two processes binding the same table version at the same instant
+        // would deploy it twice and produce versions 1 and 2 of the pinned key;
+        // both are byte-identical copies of one published version, so `latest`
+        // still evaluates the same rules and no process decides differently. A
+        // lock here would cost more than the duplicate it prevents.
+        var deployment = await DeployDecisionAsync(decisionKey, dmnXml, cancellationToken);
+
+        return new DecisionDefinitionSummary(
+            deployment.DecisionId,
+            deployment.DecisionKey,
+            decisionKey,
+            deployment.DecisionVersion,
+            deployment.DeploymentId);
+    }
+
     public async Task<DecisionDefinitionSummary?> GetLatestDecisionAsync(
         string decisionKey, CancellationToken cancellationToken = default)
     {

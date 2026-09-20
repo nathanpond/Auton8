@@ -89,16 +89,45 @@ public sealed class WorkflowBpmnSupportPanelTests : E2ETestBase
                 .ToHaveCountAsync(0);
         }
 
-        // An element that cannot run is shown with its reason, not merely omitted
-        // from the supported column — an author who reaches for it gets an answer.
+        // An element the engine cannot run is shown WITH ITS REASON, not merely
+        // omitted from the supported column — an author who reaches for it gets an
+        // answer.
+        //
+        // THIS BUCKET IS EMPTY AS OF #111, and that is why the shape changed. The
+        // business rule task was the last `coming-soon` element the engine could
+        // not run; making it execute emptied the set this sampled, and the old
+        // `Assert.NotEmpty` fired rather than the check quietly passing over
+        // nothing. That is exactly what it was for, so it is kept as a fork rather
+        // than removed: the reason loop revives itself the moment a row returns.
+        //
+        // The empty branch is not a bypass — it asserts the panel does not
+        // advertise a "Not available" section with nothing in it, which is the
+        // behaviour `BpmnTypesModal`'s `unavailable.length > 0` guard exists for.
+        //
+        // NOT mutation-confirmed, and said so rather than implied: removing that
+        // guard and re-running turned this red twice, both times on a 30s
+        // actionability timeout clicking the panel button on a freshly rebuilt
+        // bundle — never on this assertion. A mutation killed somewhere other than
+        // the assertion it is meant to certify proves nothing about it, so the
+        // claim is left at what was observed: with the bucket empty, the panel
+        // shows no such heading.
         var unavailable = manifest
             .Where(e => e.Studio == "coming-soon" && e.Engine == "cannot-execute")
             .ToArray();
-        Assert.NotEmpty(unavailable);
-        foreach (var element in unavailable)
+
+        if (unavailable.Length > 0)
         {
-            await Assertions.Expect(panel.GetByText(element.Reason!, new() { Exact = false }).First)
-                .ToBeVisibleAsync(new() { Timeout = 5_000 });
+            foreach (var element in unavailable)
+            {
+                await Assertions.Expect(panel.GetByText(element.Reason!, new() { Exact = false }).First)
+                    .ToBeVisibleAsync(new() { Timeout = 5_000 });
+            }
+        }
+        else
+        {
+            await Assertions.Expect(
+                    panel.GetByRole(AriaRole.Heading, new() { Name = "Not available" }))
+                .ToHaveCountAsync(0);
         }
     }
 
