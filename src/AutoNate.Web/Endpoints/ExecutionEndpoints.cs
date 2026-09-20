@@ -989,10 +989,27 @@ public static class ExecutionEndpoints
         executions.MapPost("/{processInstanceId}/cancel", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> cacheDbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.CancelWorkflowExecutionAsync(processInstanceId, cancellationToken);
+
+            // #609. Marked from the POSITIVE FACT of the cancellation, not read
+            // back: a cancelled instance is gone from the engine's RUNTIME, so
+            // the read-through that serves the start path would find nothing and
+            // delete the row -- and the list is supposed to keep showing it, as
+            // cancelled. The poll reconciles the rest from history.
+            await using (var cacheDb = await cacheDbFactory.CreateDbContextAsync(cancellationToken))
+            {
+                await cacheDb.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE workflow_execution_cache
+                       SET status = {WorkflowExecutionStatuses.Cancelled},
+                           end_time = COALESCE(end_time, {DateTime.UtcNow})
+                     WHERE flowable_instance_id = {processInstanceId}
+                    """, cancellationToken);
+            }
+
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionCancelled,
@@ -1007,10 +1024,23 @@ public static class ExecutionEndpoints
         executions.MapDelete("/{processInstanceId}", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> cacheDbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.DeleteWorkflowExecutionAsync(processInstanceId, cancellationToken);
+
+            // #609. The row goes with it. Unlike cancel, absence IS the intended
+            // end state here, and it is a positive fact rather than an inference:
+            // this caller just deleted it and the engine agreed.
+            await using (var cacheDb = await cacheDbFactory.CreateDbContextAsync(cancellationToken))
+            {
+                await cacheDb.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE FROM workflow_execution_cache
+                     WHERE flowable_instance_id = {processInstanceId}
+                    """, cancellationToken);
+            }
+
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionDeleted,
