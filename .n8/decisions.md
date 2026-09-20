@@ -10186,3 +10186,67 @@ names the rule. Worth an audit emphasis rather than a fourth patch.
 **Pins:** SLIM_BACKEND 2925 → 2929. E2E unchanged — four existing specs fixed.
 
 **Issue:** #609
+
+## M5 execution — four owner decisions, taken 2026-09-20
+
+Asked after the full-local tier came back green (backend 2929/2929, E2E 493/493,
+every count at its pin). All four answered with the recommendation.
+
+**1. #222's start case: document the gap, do not invent a home for it.** When a
+step fails synchronously on *start*, Flowable rolls the transaction back — no
+instance, no history, nothing to attach an error to. The story will fix the case
+where an instance DOES exist (a step failing on the transition out of a task the
+caller just completed) and state the start case where the next reader meets it,
+rather than widening what `workflow_execution_errors` means or stamping async
+broadly to make every failure produce a job. Rejected alternatives recorded
+because the second is tempting and changes execution semantics for every diagram.
+
+**2. The write-through pattern: an audit emphasis, not a fourth patch.** Added as
+item **K** to `.n8/memory/audit-performance-checklist.md`, deliberately next to
+item D (a cache with explicit invalidation from store mutations) because K is D's
+inverse and the more dangerous half: D goes stale slowly, K is wrong the instant
+the caller looks. It carries the three things that cost time to learn — the poll
+interval is not the fix, the right mechanism differs per write, and absence is
+never evidence.
+
+**3. #608: fixed now rather than left triaged.** A gate that fails for reasons
+unrelated to the change under review trains everyone to re-run rather than read,
+which is how a real red gets waved through.
+
+**4. Story order: #222, then #173/#231, then the collaboration block.** #222 is
+planned and scouted by #111's async work. #173 also got easier — the task list is
+no longer a minute stale, which is most of what a multi-instance progress view
+reads.
+
+## M5 execution — #608, and a cause that was confirmed rather than guessed (2026-09-20)
+
+Filed with the cause *placed*, not proven: every test app shared
+`src/AutoNate.Web/data/plugins` while each had its own database. Reading
+`PluginHostedService` settled it —
+**`SweepOrphanFoldersAsync` enumerates the root on startup and deletes every
+folder whose GUID is not in its OWN database.** Per-app databases plus a shared
+directory is not untidiness, it is one app deleting another's uploads.
+
+Each factory now gets its own plugin root, for the same reason it gets its own
+database, cleaned up best-effort on disposal.
+
+**The guard forces the race rather than hoping for it.** A second factory is
+started between the upload and the enable, so the sweep is guaranteed to run
+against a database that has never heard of the plugin. The existing tests pass on
+a machine where the race does not land — which is how this survived two green CI
+runs, and why "it passed nine times" would have been no evidence at all.
+
+**Mutation-checked against the observed failure, not a proxy.** Restoring the
+shared root reproduces the production string byte for byte:
+`Entry assembly not found at '.../data/plugins/<guid>/AutoNate.Web.Tests.SamplePlugin.dll'`
+— the same sentence seen locally during the #111 full-local run and on CI shard 9
+of PR #607.
+
+**And a correction.** I told the user that first failure was environmental,
+caused by my own concurrent rebuild. It was not, and I had no evidence for it;
+the shared mutable path is exactly the kind of thing that invites a convenient
+explanation.
+
+**Pins:** SLIM_BACKEND 2929 → 2930.
+
+**Issue:** #608

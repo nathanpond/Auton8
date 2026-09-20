@@ -30,6 +30,31 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     /// </remarks>
     private readonly Action<IServiceCollection>? _configureServices;
 
+    /// <summary>
+    /// This factory's own plugin directory (#608).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every app used to share one — <c>IDataPaths.PluginsRoot</c>, i.e.
+    /// <c>src/AutoNate.Web/data/plugins</c> — while each got its own DATABASE. That
+    /// pairing is what made it a bug rather than merely untidy:
+    /// <c>PluginHostedService.SweepOrphanFoldersAsync</c> enumerates the root on
+    /// startup and deletes every folder whose GUID is not in <i>its own</i>
+    /// database, so one factory starting up removed another's freshly uploaded
+    /// plugin and <c>A_loadable_plugin_still_enables</c> failed with "Entry
+    /// assembly not found". Intermittent, because it needed two factories alive at
+    /// once — which xUnit's parallelism makes routine but not certain.
+    /// </para>
+    /// <para>
+    /// Measured twice before it was believed: once locally during a full-local run,
+    /// once on GitHub on a PR whose diff was the workflow task cache. The first was
+    /// misdiagnosed as a local rebuild racing the directory, which is the diagnosis
+    /// a shared mutable path invites.
+    /// </para>
+    /// </remarks>
+    private readonly string _pluginRoot =
+        Path.Combine(Path.GetTempPath(), "autonate-test-plugins", Guid.NewGuid().ToString("N"));
+
     private AutoNateWebApplicationFactory(
         PostgresTestDatabase database,
         IReadOnlyDictionary<string, string?>? extraConfig,
@@ -126,6 +151,10 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 // Flowable is not exercised by these tests, but the options binding
                 // requires a section to exist.
                 ["Flowable:BaseUrl"] = "http://localhost/flowable",
+                // #608. Per factory, for the same reason the database is: the
+                // plugin host sweeps this directory against its own database on
+                // startup, so a shared one means each app deletes the others'.
+                ["Plugins:Folder"] = _pluginRoot,
                 // Default tests to authorization-off so appsettings.Development.json
                 // (which a dev may have flipped on) doesn't change their semantics.
                 // Tests that need enforcement opt in via extraConfig.
@@ -229,6 +258,15 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
             {
                 await _database.DisposeAsync();
             }
+
+            // #608. Best-effort: a stranded temp directory is untidy, where a
+            // stranded database is a resource leak the suite once reached 1,680 of.
+            try
+            {
+                if (Directory.Exists(_pluginRoot)) Directory.Delete(_pluginRoot, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 }
