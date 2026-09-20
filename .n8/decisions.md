@@ -10143,3 +10143,46 @@ leaving the list.
 rather than adding any.
 
 **Issue:** #604
+
+## M5 execution — #609, the same defect on the sibling cache (2026-09-20)
+
+#604 took full-local from **24 failures to 4**. The four survivors were all
+`WorkflowExecutionTests` — the executions *list* — and all four were in the
+original 24, so not a regression: the same shape on `workflow_execution_cache`
+rather than `workflow_task_cache`.
+
+**One root cause, three writes.** Starting, cancelling and deleting an execution
+all called the engine, published an audit event, and never touched the cache the
+list is served from. `ExecutionPollInterval` is a minute, so a person who started
+a workflow could not see it, and everything that acts on a row — open, cancel,
+delete — had no row to act on.
+
+**The three are not the same fix, and that is the part worth recording:**
+
+- *Start* reuses `FlowableReadThrough.GetInstanceAsync`, the write-through that
+  already existed and that the start path simply never called. It also coalesces
+  the new instance's tasks on the way past.
+- *Cancel* does **not**. A cancelled instance is gone from the engine's RUNTIME,
+  so the same read-through would find nothing and DELETE the row — and the list
+  is supposed to keep showing it, as cancelled. Marked from the positive fact of
+  the cancellation instead, with the poll reconciling the rest from history.
+- *Delete* removes the row, where absence IS the intended end state and is a
+  positive fact rather than an inference — this caller deleted it and the engine
+  agreed.
+
+Reaching for one mechanism for all three would have quietly deleted every
+cancelled execution from the list.
+
+**Evidence.** `WorkflowExecutionTests` 4 failed/2 passed → **6/6**, and the run
+fell from 44s to 4s. The start guard is mutation-checked: removing the projection
+call gives `Assert.NotNull() Failure: Value is null`.
+
+**The pattern, now visible three times.** #604 (task completion), #604 again (any
+task the engine creates), #609 (execution writes): **a write that does not update
+the projection it will be read back from.** That is one design gap, not five bugs,
+and the next surface with a cache in front of it will have it too unless somebody
+names the rule. Worth an audit emphasis rather than a fourth patch.
+
+**Pins:** SLIM_BACKEND 2925 → 2929. E2E unchanged — four existing specs fixed.
+
+**Issue:** #609

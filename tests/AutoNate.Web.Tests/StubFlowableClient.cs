@@ -117,8 +117,19 @@ internal sealed class StubFlowableClient : IFlowableClient
         {
             throw StartProcessInstanceThrows;
         }
-        return Task.FromResult(new FlowableProcessInstanceSummary { Name = name });
+        return Task.FromResult(StartedInstance ?? new FlowableProcessInstanceSummary { Name = name });
     }
+
+    /// <summary>
+    /// What <see cref="StartProcessInstanceAsync"/> returns, when a test needs the
+    /// started instance to have an id (#609).
+    /// </summary>
+    /// <remarks>
+    /// The default carries only the name, which was enough while nothing did
+    /// anything with the instance afterwards. #609 projects it, and a projection
+    /// keyed on an empty id proves nothing.
+    /// </remarks>
+    public FlowableProcessInstanceSummary? StartedInstance { get; set; }
 
     // Tests can seed this to assert the count-based auto-naming flow.
     public Dictionary<string, int> InstanceCountsByDefinitionKey { get; } = new();

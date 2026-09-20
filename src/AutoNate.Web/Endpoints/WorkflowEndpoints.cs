@@ -10,6 +10,7 @@ using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Decisions;
+using AutoNate.Web.Services.Flowable.Cache;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
@@ -528,7 +529,9 @@ public static class WorkflowEndpoints
             StartInstanceRequest? request,
             IFlowableClient flowable,
             IWorkflowModelStore store,
+            IFlowableReadThrough readThrough,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             // Caller can pass an explicit Name (richer call sites will). When
@@ -550,6 +553,36 @@ public static class WorkflowEndpoints
                 name,
                 mergedVariables,
                 cancellationToken);
+
+            // #609. STARTING IS A WRITE, so the caller's next read shows it.
+            //
+            // The executions list is served from `workflow_execution_cache` and
+            // nothing here wrote to it, so a person who started a workflow did
+            // not see it for up to `ExecutionPollInterval` -- a minute -- and
+            // everything that acts on a row had no row to act on. Measured: four
+            // full-local specs, all of them "start it, then find it in the list".
+            //
+            // `GetInstanceAsync` is the write-through that already exists; the
+            // start path simply never called it. It also coalesces the new
+            // instance's tasks on the way past, which is what puts a freshly
+            // started flow's first task in front of whoever started it.
+            //
+            // Best-effort, like the audit publish below it: the instance is
+            // already running, and failing the call now would report failure for
+            // work that succeeded. The poll remains the safety net.
+            try
+            {
+                await readThrough.GetInstanceAsync(instance.Id, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                loggerFactory.CreateLogger("AutoNate.Web.WorkflowStart").LogWarning(
+                    exception,
+                    "Started {ProcessInstanceId} but could not project it; the execution poll "
+                    + "will pick it up on its next tick.",
+                    instance.Id);
+            }
+
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ModelStarted,
