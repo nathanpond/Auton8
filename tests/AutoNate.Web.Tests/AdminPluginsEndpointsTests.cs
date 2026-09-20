@@ -210,6 +210,55 @@ public sealed class AdminPluginsEndpointsTests
     }
 
     /// <summary>
+    /// A second app starting up does not delete this one's plugin (#608).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The race, forced rather than hoped for.</b> Every test app used to share
+    /// one plugin directory while each had its own database, and
+    /// <c>PluginHostedService.SweepOrphanFoldersAsync</c> deletes every folder in
+    /// that directory whose GUID is not in <i>its own</i> database. So a second
+    /// factory starting up removed the first's freshly uploaded plugin, and
+    /// <c>A_loadable_plugin_still_enables</c> failed with "Entry assembly not
+    /// found" — intermittently, because it needed two factories alive at once.
+    /// </para>
+    /// <para>
+    /// That is why this test exists rather than a re-run: the tests above pass on
+    /// a machine where the race does not happen to land, which is exactly how this
+    /// survived two green CI runs and was then misdiagnosed as a local rebuild.
+    /// Here the second factory is started deliberately, between the upload and the
+    /// enable, so the sweep is guaranteed to run against a database that has never
+    /// heard of this plugin.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Another_app_starting_up_does_not_sweep_away_this_ones_plugin()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var uploadResponse = await UploadAsync(client, SamplePluginZip(), "sample.zip");
+        uploadResponse.EnsureSuccessStatusCode();
+        var created = await uploadResponse.Content.ReadFromJsonAsync<PluginListItem>();
+
+        // A SECOND APP, with its own database, whose plugin host sweeps on start.
+        // Creating the client is what forces the host to start.
+        await using (var other = await AutoNateWebApplicationFactory.CreateAsync())
+        {
+            _ = other.CreateClient();
+
+            var enableResponse = await client.PostAsync(
+                $"/api/admin/plugins/{created!.Id}/enable", content: null);
+
+            Assert.True(
+                enableResponse.IsSuccessStatusCode,
+                "A second app's orphan sweep must not reach this app's plugin directory; got "
+                + $"{enableResponse.StatusCode}: {await enableResponse.Content.ReadAsStringAsync()}");
+        }
+    }
+
+    /// <summary>
     /// The built sample plugin, as an uploadable zip.
     /// </summary>
     /// <remarks>
