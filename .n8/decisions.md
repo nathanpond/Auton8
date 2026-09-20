@@ -10027,3 +10027,54 @@ and the engine's 404 on the stale id surfaces as a 500. Found because the oracle
 so it is not this branch's doing and is out of #111's scope.
 
 **Issue:** #111
+
+## M5 execution — #111 merged, and the tier that proves execution is red (2026-09-19)
+
+#111 merged as PR #605 with CI 24/24 green. The story is complete: every AC, both
+directions of version binding, the deleted-table refusal, and runtime failures on
+the execution rather than as a 500 with no instance.
+
+**What the full-local run then showed, and why it stops the milestone rather than
+just this story.** `make test-full-local` ended **backend 2922/2923, E2E 469/493 —
+24 failures**, with `Tier integrity ok: nothing skipped, every count at its pin`.
+Nothing has gone missing; 24 specs are failing.
+
+Measured, in this order, so the conclusion is not inferred:
+
+1. **Not this branch.** `SubProcessExecutionTests` + `CompensationExecutionTests`
+   in isolation: **7 failed / 16 passed on `milestone/m5-business-rule-task`** and
+   **7 failed / 16 passed on `master` @ `b4daede`** — same specs, same counts,
+   same stack.
+2. **Not my machine.** Every container healthy. Deployed a two-user-task process
+   straight to Flowable, completed task 1 over the engine's own REST: task 2
+   appeared immediately. The engine advances fine.
+3. **Auton8's projection.** `GET /api/executions/{id}/tasks` serves from
+   `workflow_task_cache`; `POST /api/tasks/{taskId}/complete` calls the engine,
+   records the completion and publishes an audit event, and **never touches the
+   cache**. The row keeps `Status = "active"`, `CompletedTime = null`, and the
+   successor the engine created is not projected until the next sweep —
+   `TaskPollInterval: "00:01:00"`, with `ReadThroughFreshness: "00:00:30"` so even
+   a re-read inside the window returns the stale row. Specs that complete a task
+   and wait 30–45s for the next one cannot pass.
+
+That is a user-facing defect, not only a test one: someone completing a task in
+the UI sees the finished task listed as current for up to a minute.
+
+**Why it was invisible until now.** Slim stands up no engine, so none of these 24
+specs run on GitHub; full-local is the only tier that executes them and it is not
+in the merge gate. CLAUDE.md already says this in as many words — *"no BPMN element
+is proven to execute in slim"* — and this is the first time the cost has been
+paid in full.
+
+**Not fixed here.** It is outside #111 and the exec rule is that a separate problem
+gets its own issue rather than an inline fix: **#604**, now `sev:high` with the
+measurement above. The fix is a design choice about when the projection refreshes
+— read-your-own-write on completion versus a shorter poll — and it touches the
+caching architecture, which is Rule 4 territory and the user's call.
+
+**What it means for the rest of M5.** #173, #231, #169/#170/#171, #78/#79, #327
+and #222 are all workflow-execution stories. They remain implementable — CI is
+green and is the merge gate — but until #604 is fixed their verification tier is
+ambiently red, which is the condition in which a real regression hides.
+
+**Issues:** #111 (closed), #604 (open, sev:high)
