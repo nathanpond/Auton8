@@ -148,7 +148,7 @@ public sealed class WorkflowEndpointsTests
                               targetNamespace="http://autonate.dev/workflows">
               <bpmn:process id="legacy_flow" name="Legacy Flow" isExecutable="true">
                 <bpmn:startEvent id="StartEvent_1" />
-                <bpmn:businessRuleTask id="Task_1" name="Two of three" />
+                <bpmn:transaction id="Task_1" name="Two of three" />
                 <bpmn:endEvent id="EndEvent_1" />
               </bpmn:process>
             </bpmn:definitions>
@@ -171,13 +171,22 @@ public sealed class WorkflowEndpointsTests
         Assert.NotNull(result);
 
         // Publishing is refused, and the author is told which element and why.
-        // #218 rebased this fixture off the complex gateway, which now publishes.
-        Assert.Contains(result.Errors, e => e.Contains("Business Rule Task", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("Two of three", StringComparison.Ordinal));
+        // #218 rebased this fixture off the complex gateway; #111 rebases it again
+        // off the business rule task, for the same reason both times -- the
+        // element started publishing. Transaction is `withdrawn` as well as
+        // `cannot-execute`, so no story is queued to make it run.
+        // Matched on the unsupported-element phrasing as well as the name, for the
+        // same reason `ValidateProcess_RefusesAnElementTheEngineCannotRun` is:
+        // "any error mentioning Transaction" is satisfied by whatever else an
+        // empty transaction trips, and a predicate that loose is how a rebased
+        // fixture stays green while proving nothing.
+        Assert.Contains(result.Errors, e => e.Contains("cannot be deployed", StringComparison.Ordinal)
+                                            && e.Contains("Transaction", StringComparison.Ordinal)
+                                            && e.Contains("Two of three", StringComparison.Ordinal));
 
         // And the diagram comes back intact, so the studio still renders it. If
         // validation ever stripped or rejected the payload, this is what would fail.
-        Assert.Contains("businessRuleTask", result.Model.BpmnXml, StringComparison.Ordinal);
+        Assert.Contains("transaction", result.Model.BpmnXml, StringComparison.Ordinal);
         Assert.Contains("Two of three", result.Model.BpmnXml, StringComparison.Ordinal);
     }
 
@@ -539,11 +548,12 @@ public sealed class WorkflowEndpointsTests
         await PrimeAuthAsync(client);
 
         var id = Guid.NewGuid();
-        // A business rule task: cannot-execute in the manifest because the DMN
-        // engine is absent from the image, so no diagram can fix it.
+        // A transaction: cannot-execute AND withdrawn, so no diagram can fix it
+        // and no story is queued to make it run. Rebased here by #111, which made
+        // the business rule task this used to carry publishable.
         var xml = SimpleBpmn.Replace(
             "</bpmn:process>",
-            "<bpmn:businessRuleTask id=\"brt\" name=\"Decide\" /></bpmn:process>",
+            "<bpmn:transaction id=\"tx\" name=\"Take the payment\" /></bpmn:process>",
             StringComparison.Ordinal);
 
         var model = new WorkflowModel
@@ -555,7 +565,7 @@ public sealed class WorkflowEndpointsTests
         var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
 
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("Business Rule Task", await response.Content.ReadAsStringAsync(),
+        Assert.Contains("Transaction", await response.Content.ReadAsStringAsync(),
             StringComparison.Ordinal);
 
         // And it never reached the engine. Asserting the 400 alone would pass for

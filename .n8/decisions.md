@@ -9866,3 +9866,164 @@ per-story assertion.
 
 The completion comment on #110 quoted that assertion approvingly. Corrected on the
 issue rather than left standing.
+
+## M5 execution — #111, and the AC that was not available (2026-09-19)
+
+**Step 0 paid for itself immediately.** The restructured `add-bpmn-element` skill
+says to probe the engine before anything else and to treat #103's verdict as a
+hypothesis. Doing that contradicted this story's own acceptance criterion within
+the hour.
+
+The AC said the studio change was *"a single edit to the BPMN support manifest"*.
+It was not, and the reason is sharper than #105 recorded:
+
+- `BusinessRuleParseHandler` has **exactly one path**, to
+  `createBusinessRuleTaskActivityBehavior`, which needs KIE/Drools. KIE is absent
+  from the image. So a `bpmn:businessRuleTask` **fails to deploy** — HTTP 500,
+  `NoClassDefFoundError org/kie/api/runtime/rule/AgendaFilter` — rather than
+  failing at run time. The behaviour is resolved while parsing, before any
+  instance exists.
+- `flowable:type="dmn"` is **never consulted** on that element.
+  `createDmnActivityBehavior` takes a `ServiceTask` or a `SendTask`.
+- So a one-line manifest edit would have marked it executable and it would still
+  have thrown. #105's reason was right about the element; it was wrong only in
+  conflating the **KIE engine** with the **DMN engine**, which #106 proved is
+  present and working.
+
+**The shape is Path B — publish-time expansion**, the milestone's dominant pattern.
+The author draws the element BPMN means; the deployed copy carries
+`serviceTask flowable:type="dmn"` with a `decisionTableReferenceKey` field
+extension; the stored diagram keeps what was drawn. Probed end to end before
+building: same table, same field extension, one element name changed, and the
+expanded form wrote `route = "big"` into a process variable.
+
+**The manifest row moved on BOTH axes**, with a declared departure — the same
+treatment `Complex Gateway` got in #218, and for the same reason: it executes *by
+expansion*. That cost six guards, exactly as the replan predicted: the reason
+digest, the deny-key literal, the not-offered theory, the engine tally, the
+bucket list, and the coming-soon membership. Each one is a place the claim is
+written down, which is why they all fired.
+
+**`A_refusal_names_the_offending_element_in_the_diagram` was rebased a SECOND
+time** — #218 moved it off a complex gateway, #111 moves it off a business rule
+task. The pattern is worth naming rather than fixing again: **every story that
+makes an element executable orphans whatever fixture used it as "the refused
+one", and the test stays green while testing nothing**, because it finds some
+other error and matches on it. Rebased onto `Transaction`, which is `withdrawn`
+as well as `cannot-execute`, so no story is queued to make it run — and the
+predicate now matches "cannot be deployed" rather than the element's name, since
+an empty transaction also trips the start-event rule.
+
+**A skill correction, in the same commit.** My own restructure said the editor
+state clearing is N×N and to match 16 `set*Editor(null)` sites. That is stale:
+#159/#163/#166 replaced it with a single `clearEditors()`, whose own comment says
+"adding one means adding it here and nowhere else". The old advice would have had
+me make 16 edits, 15 of them wrong. Found by using the skill on a real story,
+which is exactly the cold-test value the restructure could not give itself.
+
+**A test that read too early, corrected.** The studio round trip first read the
+stored model immediately after the status text appeared, and failed against a save
+that then succeeded. The probe that found it also produced the finding that
+matters: `autonate:decisionKey` **is** in what bpmn-js serialised. It now asserts
+`/prepare`'s body first — bpmn-js's own output, which is the claim that cannot be
+established by reading — and polls the stored row second.
+
+**Pins:** SLIM_BACKEND 2906 → 2913, FLOWABLE 252 → 254, SLIM_E2E 233 → 234,
+FULL_LOCAL 486 → 489.
+
+**Issue:** #111
+
+## M5 execution — #111's version binding, measured into a different design (2026-09-19)
+
+The story's binding AC — *"the process binds to the decision table **version**
+published at deployment time, so republishing the table does not change what an
+already-deployed process definition decides"* — was recorded as met in the first
+completion comment on #111. **It was not.** The expansion wrote the author's bare
+decision key into `decisionTableReferenceKey`, and Flowable resolves a bare key to
+the LATEST version at run time. Measured, by writing the test the story's own test
+plan asked for: an already-deployed definition, started with the same amount after
+its table was republished with a different threshold, took the other branch.
+
+That is the second claim in that comment I have had to withdraw, and both came
+from reasoning about a mechanism instead of running it. The store even carried a
+`GetVersionByDecisionIdAsync` whose doc-comment said *"#111 resolves a business
+rule task's reference through this"* — nothing called it. It is deleted here
+rather than left as a sentence that describes work nobody did.
+
+**The two Flowable-native escapes are both unreachable over REST on this image,
+and both were probed before anything was built:**
+
+- A `.dmn` riding in the BPMN deployment. It is accepted and stored as a
+  *resource*; `dmn-repository/decisions?key=…` returns nothing. The process
+  engine in this image has no DMN deployer wired into its deployment pipeline.
+- A `parentDeploymentId` on the DMN deployment, which is what
+  `DmnActivityBehavior.applyParentDeployment` reads. The DMN REST API ignores the
+  form field and stamps the deployment's own id.
+
+**So the version goes in the key.** Publish resolves each referenced table's
+currently-published version, deploys that version's own stored DMN under
+`{key}-v{n}` if it is not there already, and points the deployed copy at that
+name. This is the same shape #113 chose for call activities — resolve now, pin the
+deployed copy, leave the stored diagram saying what the author picked — and the
+AC asked for consistency with it explicitly. The author's bare key keeps meaning
+"latest", so the try-it panel and every existing reader are untouched.
+
+The stored bytes are re-keyed rather than the table regenerated: a table's current
+draft is not its published version, and regenerating from the model would bind a
+process to rules nobody published.
+
+**`flowable:async="true"` on the expanded task**, for the AC about runtime
+failures. Measured both ways: synchronously, a decision whose expression fails
+throws out of the start call — HTTP 500, transaction rolled back, no instance and
+no history, so nobody but the caller ever learns anything. Asynchronously the same
+failure is a retrying job carrying the engine's own sentence, which is the surface
+#172 built and where every other failing step already lands. The cost is that a
+start returns before the decision is made; that is what the AC buys.
+
+**The "deleted table" AC falls out of the same resolution.** A key that names no
+published table — never published, or published and then deleted — is refused at
+publish, naming the key and the element, with nothing deployed.
+
+**Two guards that had to move with it:**
+
+- `StubFlowableDecisionClient` tracked one global version counter, so
+  `GetLatestDecisionAsync` answered *yes* for every key once any key had been
+  deployed. Under `EnsureDecisionAsync` that would have skipped every pinned
+  deployment and left the slim tests agreeing with an engine that behaves
+  differently. It is per-key now.
+- The live oracle's new DMN-rewrite check asserted the deployed key equals the
+  authored one. That is now false ON PURPOSE, so it asserts the author's key plus
+  a version pin instead — which still fails for a different table, and also fails
+  for a rewrite that dropped the pin and left the process following whatever is
+  published next.
+
+**The pin separator is a hyphen, and that is load-bearing.** The first draft used
+`__v`, which an author CAN write: `DecisionTableValidator` allows underscores, so a
+table genuinely called `foo__v1` would occupy the pinned name of `foo` version 1 —
+and `EnsureDecisionAsync`, finding a decision already deployed there, would bind
+the process to the wrong table without deploying anything or saying a word. A DMN
+id is an NCName and allows a hyphen; the key pattern does not. Guarded through the
+validator rather than against a regex copied into the test, so tightening the key
+rule moves the guard with it.
+
+**A tier boundary I got wrong, caught by CI on its first run.**
+`BusinessRuleTaskStudioTests` shipped untraited in `fb64eca`, on the argument that
+the round trip is a property of the vendored bpmn-js bundle and needs a browser
+rather than an engine. That is true of what the test *proves* and false of what it
+needs to *set up*: the picker lists only published tables, and publishing one
+deploys DMN to Flowable. It passed on this machine, where the engine happens to be
+running, and failed `Connection refused (localhost:8080)` the first time GitHub
+executed it — slim stands up Postgres, NATS and Redis, and no engine. Now
+`RequiresService=Flowable`. The bundle property keeps its slim guard on GitHub
+through the vitest case `business-rule-task-round-trip.test.js`, which drives
+bpmn-js directly.
+
+**Pins:** SLIM_BACKEND 2913 → 2923, FLOWABLE 255 → 259, SLIM_E2E 234 → 233,
+FULL_LOCAL 490 → 493.
+
+**Filed, not fixed:** #604 — completing a task leaves `workflow_task_cache` stale,
+and the engine's 404 on the stale id surfaces as a 500. Found because the oracle's
+`Multi-Instance (Sequential)` cell fails on it; reproduced on `master` @ `b4daede`,
+so it is not this branch's doing and is out of #111's scope.
+
+**Issue:** #111

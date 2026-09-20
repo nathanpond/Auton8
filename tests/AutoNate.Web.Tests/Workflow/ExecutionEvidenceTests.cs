@@ -210,6 +210,7 @@ public sealed class ExecutionEvidenceTests
         (string Name, string Effect)[] obliged =
         [
             ("Ad-Hoc Sub-Process", "instance-waits"),
+            ("Business Rule Task", "variable-written"),
             ("Call Activity", "task-appears"),
             ("Compensation Boundary", "variable-written"),
             ("Compensation Marker", "variable-written"),

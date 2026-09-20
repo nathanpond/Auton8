@@ -492,12 +492,12 @@
     {
       "name": "Business Rule Task",
       "category": "Tasks",
-      "studio": "coming-soon",
-      "engine": "cannot-execute",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "businessRuleTask",
       "eventDefinition": null,
-      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) — see #105.",
-      "evidence": "NoClassDefFoundError org/kie/api — rules engine absent from the image (#105)"
+      "reason": "#111: executes BY EXPANSION. The element itself cannot deploy — BusinessRuleParseHandler resolves the KIE/Drools behaviour at DEPLOYMENT time and KIE is absent from the image, so a raw bpmn:businessRuleTask is HTTP 500 with NoClassDefFoundError org/kie/api/runtime/rule/AgendaFilter, not a run-time surprise. flowable:type=\"dmn\" is never consulted on this element; Flowable's DMN integration hangs off createDmnActivityBehavior(ServiceTask). So publish rewrites the deployed copy into a bpmn:serviceTask carrying flowable:type=\"dmn\", flowable:async=\"true\" and a decisionTableReferenceKey field extension, and the authored diagram keeps the business rule task. The referenced key is VERSION-PINNED in the deployed copy (key-vN): Flowable resolves a bare decision key to the latest version at run time, and neither escape it offers -- a .dmn in the process deployment, a parentDeploymentId on the DMN deployment -- is reachable over REST on this image. The async stamp is what turns a failing evaluation from a 500 on start with no instance into a job an operator can see. Note the DMN engine IS in the image (#106) — it is the KIE/Drools engine that is absent, which the previous reason conflated.",
+      "evidence": "deployed and started: businessRuleTask refused at deploy (NoClassDefFoundError org/kie/api); the expanded serviceTask wrote route='big' into a process variable; an already-deployed definition kept deciding the old way after its table was republished while one deployed afterwards read the new version; a failing evaluation appeared as a retrying job carrying the engine's message"
     },
     {
       "name": "Call Activity",

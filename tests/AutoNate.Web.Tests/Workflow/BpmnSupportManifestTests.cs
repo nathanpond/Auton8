@@ -108,11 +108,17 @@ public sealed class BpmnSupportManifestTests
             // it produces is deployable. #316 had withdrawn it because nothing in the
             // studio could write that key. The engine axis never moved -- the engine
             // always ran a correctly configured send task.
-            ["studio:supported"] = 48,
+            // 48/6 and 51/9 until #111 made Business Rule Task authorable and
+            // executable BY EXPANSION. Both axes moved on one row: the raw element
+            // is refused at DEPLOY (NoClassDefFoundError org/kie/api -- KIE is
+            // absent from the image, the DMN engine is NOT, which the old reason
+            // conflated), so publish rewrites the deployed copy into a
+            // flowable:type=dmn service task. Same shape as Complex Gateway (#218).
+            ["studio:supported"] = 49,
             ["studio:withdrawn"] = 15,
-            ["studio:coming-soon"] = 6,
-            ["engine:executes"] = 51,
-            ["engine:cannot-execute"] = 9,
+            ["studio:coming-soon"] = 5,
+            ["engine:executes"] = 52,
+            ["engine:cannot-execute"] = 8,
             ["engine:annotation"] = 9,
         };
 
@@ -184,9 +190,24 @@ public sealed class BpmnSupportManifestTests
             "Intermediate Throw (Message)", "Loop Marker", "Manual Task", "Message Boundary",
             "Message End", "Message Start Event", "Task (Generic)", "Transaction",
         ];
+        // Business Rule Task left this list in #111. The guard's own words are the
+        // right bar to answer: "an element moving INTO supported is a claim that an
+        // author can configure it and it runs." Both halves hold, and both were
+        // measured rather than assumed.
+        //
+        // An author configures it: the studio writes autonate:decisionKey, and a
+        // task with none is refused at prepare naming the element.
+        //
+        // And it runs -- BY EXPANSION, which is the part worth stating. The raw
+        // element cannot deploy at all (NoClassDefFoundError org/kie/api; KIE is
+        // absent from the image, the DMN engine is NOT), so publish rewrites the
+        // deployed copy into a flowable:type=dmn service task. Probed end to end:
+        // the expanded form wrote route='big' into a process variable, and
+        // BusinessRuleTaskExecutionTests asserts a gateway after it takes the path
+        // the table chose.
         string[] expectedComingSoon =
         [
-            "Business Rule Task", "Data Input", "Data Output", "Lane",
+            "Data Input", "Data Output", "Lane",
             "Message Flow", "Pool / Participant",
         ];
 
@@ -271,7 +292,11 @@ public sealed class BpmnSupportManifestTests
             ["Cancel End"] = "#220",
             ["Transaction"] = "#220",
             ["Boundary Event (None)"] = "#282",
-            ["Business Rule Task"] = "DMN",
+            // Business Rule Task was here until #111 made it executable BY
+            // EXPANSION. This dictionary is keyed on the cannot-execute/withdrawn
+            // set and the test compares BOTH key sets, so a row that becomes
+            // executable must leave -- which is what makes a silent move
+            // impossible in either direction.
             ["Loop Marker"] = "#159",
         };
 
@@ -352,8 +377,8 @@ public sealed class BpmnSupportManifestTests
         int Count(string engine) =>
             inScope.Count(e => e!["engine"]!.GetValue<string>() == engine);
 
-        // "37 of the 54 execute; 9 are BPMN artifacts with no execution semantics
-        // by design; 8 cannot execute."
+        // "38 of the 54 execute; 9 are BPMN artifacts with no execution semantics
+        // by design; 7 cannot execute."
         //
         // Was 43 / 3 / 8 until #325 AC5. Six rows moved from `executes` to
         // `annotation` by owner decision -- Pool / Participant, Lane, Message
@@ -365,9 +390,14 @@ public sealed class BpmnSupportManifestTests
         // This is a published coverage claim, so the number moving is the point:
         // a reader who saw "43 execute" and now sees 37 should be able to find
         // out why, and this comment is where they look.
-        Assert.Equal(37, Count("executes"));
+        // #111 moved Business Rule Task from cannot-execute to executes: 37 -> 38
+        // and 8 -> 7. It executes BY EXPANSION, like Complex Gateway -- the raw
+        // element is refused at DEPLOY (KIE is absent from the image; the DMN
+        // engine is not), so publish rewrites the deployed copy into a
+        // flowable:type=dmn service task.
+        Assert.Equal(38, Count("executes"));
         Assert.Equal(9, Count("annotation"));
-        Assert.Equal(8, Count("cannot-execute"));
+        Assert.Equal(7, Count("cannot-execute"));
     }
 
     /// <summary>
@@ -701,11 +731,27 @@ public sealed class BpmnSupportManifestTests
             //
             //   Send Task      — an author supplies `type`/`operationRef` and it
             //                    runs. Author-fixable, so: executes.
-            //   Business Rule  — the DMN engine is absent from the image
-            //                    (NoClassDefFoundError org/kie/api). No diagram
-            //                    can fix that, so: cannot-execute, until #105.
             ["Send Task"] = (BpmnSupportManifest.EngineExecutes, "An author supplies type/operationRef and it runs, so the gap is configuration, not the engine."),
-            ["Business Rule Task"] = (BpmnSupportManifest.EngineCannotExecute, "The DMN engine is absent from the image (NoClassDefFoundError org/kie/api); no diagram can fix that, until #105."),
+
+            // #111. This entry read `cannot-execute`, "the DMN engine is absent
+            // from the image ... until #105". Two corrections, both measured.
+            //
+            // The DMN engine is NOT absent. #106 proved it ships enabled on this
+            // image and answers on /flowable-rest/dmn-api/. What is absent is
+            // KIE/Drools — a different engine — and the old reason conflated them.
+            //
+            // And the failure is at DEPLOY, not at run time. BusinessRuleParseHandler
+            // has exactly one path and resolves the KIE behaviour while parsing, so
+            // a raw bpmn:businessRuleTask is HTTP 500 before any instance exists.
+            // `flowable:type="dmn"` is never consulted on the element;
+            // createDmnActivityBehavior takes a ServiceTask.
+            //
+            // So the departure is the same shape as Complex Gateway's below: the
+            // element executes by EXPANSION. Publish rewrites the deployed copy into
+            // a DMN service task and the authored diagram keeps what was drawn.
+            // Probed end to end first: same table, same field extension, one element
+            // name changed, and the expanded form wrote route='big' into a variable.
+            ["Business Rule Task"] = (BpmnSupportManifest.EngineExecutes, "#111: the raw element is refused at DEPLOY (NoClassDefFoundError org/kie/api -- KIE is absent, the DMN engine is not), so publish expands it into a flowable:type=dmn service task. Executes by expansion."),
 
             // #218. rows.json records "DEPLOYS BUT DOES NOTHING", and that
             // verdict is wrong in a way worth stating rather than quietly
@@ -958,9 +1004,9 @@ public sealed class BpmnSupportManifestTests
                                     targetNamespace="http://autonate.dev/workflows">
                     <bpmn:process id="p" isExecutable="true">
                       <bpmn:startEvent id="s" />
-                      <bpmn:businessRuleTask id="rules" name="Score it">
+                      <bpmn:transaction id="rules" name="Score it">
                         <bpmn:multiInstanceLoopCharacteristics isSequential="false" />
-                      </bpmn:businessRuleTask>
+                      </bpmn:transaction>
                       <bpmn:endEvent id="e" />
                     </bpmn:process>
                   </bpmn:definitions>
@@ -968,7 +1014,10 @@ public sealed class BpmnSupportManifestTests
 
         var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
 
-        Assert.Contains(errors, error => error.Contains("Business Rule Task", StringComparison.Ordinal));
+        // Rebased off Business Rule Task by #111, which made that element
+        // executable. Transaction is the durable stand-in: `withdrawn` as well as
+        // `cannot-execute`, so no story is queued to make it run.
+        Assert.Contains(errors, error => error.Contains("Transaction", StringComparison.Ordinal));
     }
 
     // ── #160: link events ───────────────────────────────────────────────────
@@ -1068,28 +1117,42 @@ public sealed class BpmnSupportManifestTests
         // "Validation failed" tells an author nothing about which of forty
         // elements to look at.
         //
-        // #218 rebased this fixture. It used a complex gateway, which now
-        // publishes — leaving the test green while testing nothing. Business Rule
-        // Task is the right replacement: it is cannot-execute for a reason no
-        // diagram can fix (the DMN engine is absent from the image), so it stays
-        // refused until #105 puts the engine there.
+        // REBASED TWICE NOW, and the pattern is worth naming rather than just
+        // fixing again. #218 moved it off a complex gateway when that element
+        // started publishing; #111 moves it off Business Rule Task for the same
+        // reason. Each story that makes an element executable orphans whatever
+        // fixture was using it as "the refused one", and the test stays GREEN
+        // while testing nothing -- it would find some other error and match on it.
+        //
+        // Transaction is the durable choice. It is `withdrawn` on the studio axis
+        // as well as `cannot-execute`, so no story is queued to make it run: the
+        // element needs a compensation-and-cancel protocol Auton8 does not model,
+        // and nothing in M4 or M5 proposes to. A `supported` element that merely
+        // has not been built yet is exactly the wrong fixture here, because the
+        // story that builds it inherits this breakage.
         var xml = """
                   <?xml version="1.0" encoding="UTF-8"?>
                   <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                                     targetNamespace="http://autonate.dev/workflows">
                     <bpmn:process id="p" isExecutable="true">
                       <bpmn:startEvent id="s" />
-                      <bpmn:businessRuleTask id="brt" name="Decide the discount" />
+                      <bpmn:transaction id="tx" name="Take the payment" />
                       <bpmn:endEvent id="e" />
                     </bpmn:process>
                   </bpmn:definitions>
                   """;
 
+        // Matched on the REFUSAL specifically. An empty transaction also trips the
+        // "a subprocess needs a start event" rule, and a predicate of "any error
+        // mentioning Transaction" would be satisfied by that one -- which would
+        // leave this test green while the refusal it exists for had stopped
+        // firing. That is the same shape of silent pass the rebase above is about.
         var error = Assert.Single(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
-            e => e.Contains("Business Rule Task", StringComparison.Ordinal));
+            e => e.Contains("cannot be deployed", StringComparison.Ordinal));
 
-        Assert.Contains("Decide the discount", error, StringComparison.Ordinal);
+        Assert.Contains("Transaction", error, StringComparison.Ordinal);
+        Assert.Contains("Take the payment", error, StringComparison.Ordinal);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -1459,7 +1522,10 @@ public sealed class BpmnSupportManifestTests
         string[] cannotExecute =
         [
             "Boundary Event (None)",
-            "Business Rule Task",
+            // Business Rule Task left this list in #111: it executes by expansion
+            // now, like Complex Gateway. This guard exists so a row moving between
+            // buckets is a visible edit rather than a tally shifting by one, which
+            // is exactly what that move was.
             "Cancel Boundary",
             "Cancel End",
             "Compensation Start Event",

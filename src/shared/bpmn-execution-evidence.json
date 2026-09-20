@@ -629,6 +629,16 @@
       ]
     },
     {
+      "name": "Business Rule Task",
+      "localName": "businessRuleTask",
+      "eventDefinition": null,
+      "declaredEffect": "variable-written",
+      "liveEngineTestsMentioningIt": [
+        "BusinessRuleTaskExecutionTests",
+        "BusinessRuleTaskStudioTests"
+      ]
+    },
+    {
       "name": "Complex Gateway",
       "localName": "complexGateway",
       "eventDefinition": null,

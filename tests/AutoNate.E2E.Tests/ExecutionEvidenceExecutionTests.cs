@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(49, DeclaredEffects().Count);
+        Assert.Equal(50, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -574,6 +574,15 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
             await PublishAsync(api, $"{key}r", receiver);
         }
 
+        // AND A BUSINESS RULE TASK NEEDS A PUBLISHED TABLE (#111). Same shape as
+        // the callee above: the element points at something Auton8 refuses the
+        // diagram without, so the dependency is published first and named by the
+        // process key rather than shared, so two cells never race for one table.
+        if (string.Equals(name, "Business Rule Task", StringComparison.Ordinal))
+        {
+            await PublishDecisionTableAsync(api, DecisionKeyFor(key));
+        }
+
         // A SELF-STARTING ELEMENT HAS NO CALLER (#522).
         //
         // A Timer, Message, Signal or Conditional START event is not reached by
@@ -818,6 +827,20 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         var wasRewritten = !isMarkerRow && !string.Equals(
             deployed!.Name.LocalName, declaredLocalName, StringComparison.Ordinal);
 
+        // WHICH REWRITE, READ FROM THE DEPLOYED FORM (#111). Two publish rewrites
+        // now produce a <serviceTask>: the message send (#112) and the DMN
+        // expansion. The checks below are different -- a send owes a behaviour
+        // key, a decision owes a table key -- so something has to choose between
+        // them, and #454's answer stands: read it from the XML the engine holds,
+        // not from a list keyed on element name. A list would need editing the
+        // next time an element learns to execute by expansion, which is exactly
+        // the edit nobody makes.
+        var isDmnRewrite = wasRewritten
+            && deployed!.Name.LocalName == "serviceTask"
+            && string.Equals(
+                deployed.Attributes().FirstOrDefault(a => a.Name.LocalName == "type")?.Value,
+                "dmn", StringComparison.Ordinal);
+
         // NOT `return` (#463). Everything from here to the effect observation is
         // a check on the PUBLISH REWRITE; the effect observation is the point of
         // the cell. An early return in this stretch skips it, which is head 5b of
@@ -825,7 +848,64 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // first draft of the marker branch above did exactly that.
         if (!isMarkerRow && !isAttributeRow && (declaredEventDefinition is not null || wasRewritten))
         {
-            if (deployed.Name.LocalName == "serviceTask")
+            if (isDmnRewrite)
+            {
+                // THE TABLE, NOT A TABLE (#111) -- the demand #454 made of the
+                // send rewrite, made of this one. A DMN service task pointing at
+                // some other published table deploys, runs, writes variables and
+                // decides nothing the author asked for; `variable-written` cannot
+                // tell the two apart, because a wrong table still writes.
+                //
+                // The expectation comes from the AUTHORED diagram's own attribute
+                // rather than from `DecisionKeyFor`, so a diagram that stopped
+                // configuring the element fails here instead of agreeing with a
+                // constant.
+                var authoredKey = XDocument.Parse(xml).Descendants()
+                    .Where(e => (string?)e.Attribute("id") == "Ev_1")
+                    .SelectMany(e => e.Attributes())
+                    .Where(a => a.Name.LocalName == "decisionKey")
+                    .Select(a => a.Value)
+                    .FirstOrDefault();
+
+                Assert.True(
+                    !string.IsNullOrWhiteSpace(authoredKey),
+                    $"{name}: the authored diagram names no decision key on 'Ev_1', so there is "
+                    + "nothing for the deployed form to be checked against (#111).");
+
+                var deployedKey = deployed.Descendants()
+                    .Where(e => e.Name.LocalName == "field"
+                                && (string?)e.Attribute("name") == "decisionTableReferenceKey")
+                    .SelectMany(field => field.Descendants()
+                        .Where(child => child.Name.LocalName == "string"))
+                    .Select(child => child.Value.Trim())
+                    .FirstOrDefault();
+
+                // THE AUTHOR'S TABLE, AT A PINNED VERSION (#111). The deployed key
+                // is not the authored one and must not be: publish resolves the
+                // table's currently-published version and points the deployed copy
+                // at a key naming that version, because Flowable would otherwise
+                // resolve the bare key to whatever is latest when the instance
+                // runs. So the check is the author's key plus a version pin --
+                // which still fails for a rewrite pointing at a different table,
+                // and fails for one that dropped the pin and left the process
+                // following the latest publish.
+                const string PinSeparator = "-v";
+
+                var pin = deployedKey is not null && authoredKey is not null
+                          && deployedKey.StartsWith(authoredKey + PinSeparator, StringComparison.Ordinal)
+                    ? deployedKey[(authoredKey.Length + PinSeparator.Length)..]
+                    : null;
+
+                Assert.True(
+                    pin is not null && pin.Length > 0 && pin.All(char.IsAsciiDigit),
+                    $"{name}: Auton8 rewrote this into a DMN <serviceTask> evaluating "
+                    + $"'{deployedKey ?? "(nothing)"}' where the author wrote '{authoredKey}'. "
+                    + $"Expected '{authoredKey}-v<n>' — this element's table, at the version "
+                    + "published when the process was. A bare key follows whatever is published "
+                    + "later, and a different key is a different table wearing this one's shape "
+                    + "(#111, #454).");
+            }
+            else if (deployed.Name.LocalName == "serviceTask")
             {
                 // The message rewrite (#112) replaces the event definition with a
                 // behaviour delegate, so there is nothing else left to check.
@@ -944,7 +1024,13 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // `wasRewritten` is exactly the distinction: the send rows are authored as
         // an endEvent, a sendTask or an intermediateThrowEvent and come back as a
         // serviceTask. A behaviour task is authored as one and stays one.
-        if (wasRewritten && deployed.Name.LocalName == "serviceTask")
+        // AND NOT WHERE THE REWRITE WAS A DECISION (#111). `wasRewritten &&
+        // serviceTask` was the send rewrite's signature until a second rewrite
+        // produced the same tag; without this the Business Rule Task row fails
+        // with "the engine recorded `sendMessageResult = '(nothing)'`" -- a
+        // correct observation about a send that was never meant to happen, which
+        // is the shape #535 already fixed once from the other side.
+        if (wasRewritten && !isDmnRewrite && deployed.Name.LocalName == "serviceTask")
         {
             var sent = await VariableValueAsync(api, instance, "sendMessageResult");
 
@@ -1695,6 +1781,16 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // expansion, not a description of what the expansion produces -- and
         // taking it for the latter is what predicted the wrong value here.
         [("complexGateway", null)] = "scriptTask",
+
+        // #111, measured the same way: the cell failed with "ran, but as a
+        // 'serviceTask' rather than a 'businessRuleTask'". Publish expands the
+        // element into a DMN service task because BusinessRuleParseHandler
+        // resolves a KIE/Drools behaviour at DEPLOY time and KIE is not in the
+        // image, so `businessRuleTask` is a name the engine never records here.
+        // Being in this table is what makes `serviceTask` the ONLY acceptable
+        // answer for this row (#446) -- a raw businessRuleTask reaching the
+        // engine would now fail the cell rather than pass it as an alternative.
+        [("businessRuleTask", null)] = "serviceTask",
     };
 
 
@@ -1784,7 +1880,12 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
 
                 if (!completed.Ok)
                 {
-                    return new(false, $"could not complete the first task: {completed.Status}");
+                    // WITH THE BODY. A bare status is undiagnosable -- this cell
+                    // reported "could not complete the first task: 500" and the
+                    // reason lived only in a log nobody keeps.
+                    return new(false,
+                        $"could not complete the first task: {completed.Status} "
+                        + $"{await completed.TextAsync()}");
                 }
 
                 for (var attempt = 0; attempt < 20; attempt++)
@@ -2464,6 +2565,22 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<sequenceFlow id="f2" sourceRef="Doer_1" targetRef="End_1"/>"""
                 + """<association id="Assoc_1" associationDirection="One" sourceRef="Ev_1" targetRef="Undo_1"/>"""),
 
+            // EXPANDED AT PUBLISH, LIKE THE MESSAGE ROWS (#111). The author draws
+            // the element BPMN means for this; the deployed copy is a
+            // <serviceTask flowable:type="dmn"> carrying the decision key as a
+            // field extension, because BusinessRuleParseHandler resolves a
+            // KIE/Drools behaviour at DEPLOY time and KIE is not in the image.
+            //
+            // So the table is the write. `proof` is not set by a script here --
+            // it is the decision table's own OUTPUT COLUMN, so the engine
+            // attributes the variable update to Ev_1 itself and the observer's
+            // "who wrote it, according to the engine" (#452) is answering about
+            // the DMN evaluation rather than about a neighbouring script. A
+            // diagram that ran the table and then had a script copy the result
+            // would prove the copy.
+            "Business Rule Task" => Wrap("", Linear(
+                $"""<businessRuleTask id="Ev_1" name="decide" autonate:decisionKey="{DecisionKeyFor(key)}"/>""")),
+
             "Script Task" => Wrap("", Linear(Script)),
             "Receive Task" => Wrap("", Linear("""<receiveTask id="Ev_1" name="wait"/>""")),
 
@@ -2968,6 +3085,74 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
           </bpmndi:BPMNDiagram>
         </definitions>
         """;
+
+    /// <summary>The decision key the Business Rule Task row's table is published under.</summary>
+    /// <remarks>
+    /// Derived from the process key rather than fixed, so a repeat run, a retry,
+    /// or a parallel collection never evaluates a table some other run rewrote.
+    /// `key` is already a letter followed by hex, which is what the decision-key
+    /// validator accepts.
+    /// </remarks>
+    private static string DecisionKeyFor(string key) => $"{key}d";
+
+    /// <summary>
+    /// A one-rule table whose only output column is `proof` (#111).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The blank input entry is DMN's "any": the rule fires on every input, so the
+    /// cell cannot fail for the uninteresting reason that no rule matched --
+    /// which the engine reports identically to a type mismatch (measured in #106).
+    /// </para>
+    /// <para>
+    /// The output column is named `proof` on purpose. Flowable writes a DMN
+    /// decision's outputs as process variables attributed to the activity that
+    /// evaluated it, so the observer's engine-side attribution question — "which
+    /// activity instance wrote this?" — is answered by `Ev_1` itself. Nothing in
+    /// this diagram copies the result, because a copy is what would be proved.
+    /// </para>
+    /// <para>
+    /// Published through Auton8's own API rather than deployed to the engine
+    /// directly. A hand-deployed DMN would prove that Flowable can run a decision
+    /// table, which nobody doubted; what is in question is whether a table an
+    /// author created in Auton8 is the one a business rule task they drew
+    /// evaluates.
+    /// </para>
+    /// </remarks>
+    private static async Task PublishDecisionTableAsync(IAPIRequestContext api, string decisionKey)
+    {
+        var created = await api.PostAsync("/api/decision-tables/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                decisionKey,
+                name = "probe",
+                hitPolicy = "FIRST",
+                inputs = new[]
+                {
+                    new { id = "in_1", label = "Amount", name = "amount", typeRef = "number" }
+                },
+                outputs = new[]
+                {
+                    new { id = "out_1", label = "Proof", name = "proof", typeRef = "string" }
+                },
+                rules = new object[]
+                {
+                    new { id = "r1", inputEntries = new[] { "" }, outputEntries = new[] { "\"ran\"" } }
+                }
+            }
+        });
+        Assert.True(created.Ok,
+            $"Creating the decision table failed: {created.Status} {await created.TextAsync()}");
+
+        using var body = JsonDocument.Parse(await created.TextAsync());
+        var id = body.RootElement.GetProperty("id").GetString()!;
+
+        var published = await api.PostAsync($"/api/decision-tables/{id}/publish",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(published.Ok,
+            $"Publishing the decision table failed: {published.Status} {await published.TextAsync()}");
+    }
 
 
     private readonly record struct RuntimeTask(string Id, string Owner);

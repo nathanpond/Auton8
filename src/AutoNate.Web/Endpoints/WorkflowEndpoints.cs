@@ -9,6 +9,7 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Decisions;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
@@ -266,6 +267,8 @@ public static class WorkflowEndpoints
             WorkflowModel model,
             IWorkflowModelStore store,
             IFlowableClient flowable,
+            IDecisionTableStore decisionTables,
+            IFlowableDecisionClient decisionEngine,
             IAuditEventPublisher auditPublisher,
             IAuthorizer authorizer,
             IOptions<WorkflowBehaviorOptions> behaviorOptions,
@@ -361,6 +364,73 @@ public static class WorkflowEndpoints
                 definitionIdsByKey[calledKey] = child.Id;
             }
 
+            // #111. The same pinning, for decision tables.
+            //
+            // Flowable resolves a DMN service task's `decisionTableReferenceKey`
+            // to the LATEST version of that key at run time -- measured, by
+            // republishing a table under an already-deployed definition and
+            // watching it decide the other way. Neither escape the engine offers
+            // is reachable over REST (see `DecisionTableDmn.PinnedKey`), so the
+            // version goes in the key: the version published right now is
+            // deployed under a key that names it, and the deployed copy points
+            // there.
+            //
+            // A key naming no table, or a table with nothing published -- which is
+            // what a DELETED table looks like from here -- is refused now rather
+            // than deployed. Flowable accepts such a diagram and fails only when
+            // an instance reaches the step.
+            //
+            // A pinned copy deployed here outlives a publish that is then refused
+            // for some later reason, which is deliberate rather than tidy: it is a
+            // byte-identical copy of a published version under a key naming that
+            // version, so the next publish of any process binding to it finds it
+            // and deploys nothing. Cleaning it up would mean deleting something a
+            // concurrent publish may have just bound to.
+            var decisionRefs = WorkflowBpmnXml.ExtractBusinessRuleTaskDecisions(model.BpmnXml);
+            var pinnedDecisionKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (_, label, decisionKey) in decisionRefs)
+            {
+                if (pinnedDecisionKeys.ContainsKey(decisionKey)) continue;
+
+                var snapshot = await decisionTables.GetPublishedSnapshotAsync(decisionKey, cancellationToken);
+                if (snapshot is null)
+                {
+                    unresolved.Add(
+                        $"The step '{label}' runs the decision table '{decisionKey}', and no " +
+                        "published table has that key. It may have been deleted, or never " +
+                        "published. Publish that table first, or pick a different one \u2014 published " +
+                        "as-is, this process fails when it reaches that step rather than now.");
+                    continue;
+                }
+
+                var pinned = DecisionTableDmn.PinnedKey(snapshot.DecisionKey, snapshot.VersionNumber);
+
+                try
+                {
+                    await decisionEngine.EnsureDecisionAsync(
+                        pinned, DecisionTableDmn.Rekey(snapshot.DmnXml, pinned), cancellationToken);
+                }
+                catch (FlowableRequestException exception)
+                {
+                    // The raw body carries engine internals, so it goes to the log
+                    // and the author gets a sentence (#350).
+                    loggerFactory.CreateLogger("AutoNate.Web.WorkflowPublish").LogWarning(
+                        exception,
+                        "Flowable refused the pinned copy of decision table {DecisionKey} version "
+                        + "{Version}. Caller was told: {Described}",
+                        snapshot.DecisionKey, snapshot.VersionNumber,
+                        EngineRefusal.Describe(exception, "this decision table"));
+
+                    unresolved.Add(
+                        $"The step '{label}' runs the decision table '{decisionKey}', and the " +
+                        "engine would not accept the published version of it. " +
+                        EngineRefusal.Describe(exception, "this decision table"));
+                    continue;
+                }
+
+                pinnedDecisionKeys[decisionKey] = pinned;
+            }
+
             if (unresolved.Count > 0)
             {
                 return Results.BadRequest(new { errors = unresolved });
@@ -380,7 +450,13 @@ public static class WorkflowEndpoints
             {
                 BpmnXml = WorkflowBpmnXml.StampCallbackBaseUrl(
                     WorkflowBpmnXml.PinCallActivityTargets(
-                        WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml),
+                        // #111 INSIDE the expansion, not after it: the expansion
+                        // moves `autonate:decisionKey` into the field extension
+                        // and strips the attribute, so pinning afterwards would
+                        // have nothing left to rewrite.
+                        WorkflowBpmnXml.ExpandForDeployment(
+                            WorkflowBpmnXml.PinBusinessRuleTaskDecisions(
+                                model.BpmnXml, pinnedDecisionKeys)),
                         definitionIdsByKey),
                     // #223. Unset in production; nothing is stamped and the engine
                     // uses its own configured callback URL.

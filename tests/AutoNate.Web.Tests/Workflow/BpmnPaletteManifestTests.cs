@@ -242,10 +242,11 @@ public sealed class BpmnPaletteManifestTests
         // palette.js reads. Deliberately a literal: every other guard here derives
         // its expectation from this same file, so a deleted key deletes the
         // assertion that wants it (#365, #374).
+        // `bpmn-icon-business-rule` and `bpmn-icon-business-rule-task` were here
+        // until #111 and are deliberately gone: the element is offered now, so a
+        // deny key for it would withhold what the manifest says is supported.
         string[] expected =
         [
-            "bpmn-icon-business-rule",
-            "bpmn-icon-business-rule-task",
             "bpmn-icon-end-event-cancel",
             "bpmn-icon-end-event-message",
             "bpmn-icon-intermediate-event-catch-cancel",
@@ -390,7 +391,6 @@ public sealed class BpmnPaletteManifestTests
     [Theory]
     [InlineData("create.end-event-cancel", "Cancel End")]
     [InlineData("create.transaction", "Transaction")]
-    [InlineData("create.business-rule-task", "Business Rule Task")]
     [InlineData("create.manual-task", "Manual Task")]
     [InlineData("create.task", "Task (Generic)")]
     [InlineData("append.boundary-cancel", "Cancel Boundary")]
@@ -417,6 +417,11 @@ public sealed class BpmnPaletteManifestTests
     [InlineData("create.intermediate-throw-compensation", "Intermediate Throw (Compensation)")]
     [InlineData("create.user-task", "User Task")]
     [InlineData("create.complex-gateway", "Complex Gateway")]
+    // #111. Moved here from the not-offered theory above, which is the whole
+    // visible effect of the story on the palette: the element an author draws is
+    // now reachable, and publish rewrites the deployed copy into a DMN service
+    // task. Same shape as Complex Gateway one line up, and for the same reason.
+    [InlineData("create.business-rule-task", "Business Rule Task")]
     [InlineData("create.event-sub-process", "Event Sub-Process")]
     [InlineData("append.boundary-compensation", "Compensation Boundary")]
     public void A_supported_element_is_offered(string entryId, string elementName)

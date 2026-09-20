@@ -1180,7 +1180,7 @@ public sealed class WorkflowBpmnXmlTests
                                              targetNamespace="http://autonate.dev/workflows">
                              <bpmn:process id="warning_flow" name="Warning Flow" isExecutable="true">
                                <bpmn:startEvent id="StartEvent_1" />
-                               <bpmn:businessRuleTask id="BusinessRuleTask_1" name="Decide" />
+                               <bpmn:transaction id="Transaction_1" name="Take the payment" />
                                <bpmn:exclusiveGateway id="Gateway_1" />
                                <bpmn:subProcess id="SubProcess_1" triggeredByEvent="true" />
                                <bpmn:participant id="Participant_1" processRef="warning_flow" />
@@ -1190,10 +1190,22 @@ public sealed class WorkflowBpmnXmlTests
 
         var result = WorkflowBpmnXml.ValidateProcess(xml);
 
-        // The business rule task is refused, and the message says why rather
-        // than merely rejecting.
-        Assert.Contains(result.Errors, e => e.Contains("Business Rule Task", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("rules engine", StringComparison.OrdinalIgnoreCase));
+        // REBASED BY #111, off a business rule task, which now publishes -- the
+        // third fixture in this suite to move for that reason (#218 moved two
+        // others off the complex gateway). The pattern: every story that makes an
+        // element executable orphans whatever fixture used it as "the refused
+        // one", and the test stays GREEN while testing nothing, because some
+        // other error in the same diagram satisfies the predicate.
+        //
+        // Transaction is the durable choice: `withdrawn` as well as
+        // `cannot-execute`, so no story is queued to make it run.
+        //
+        // The unsupported-element refusal is matched on its own phrasing rather
+        // than on the element's name, because an empty transaction also trips the
+        // start-event rule -- and "any error mentioning Transaction" would be
+        // satisfied by that one.
+        Assert.Contains(result.Errors, e => e.Contains("cannot be deployed", StringComparison.Ordinal)
+                                            && e.Contains("Transaction", StringComparison.Ordinal));
 
         // The complement, which is the half that would have caught the old bug:
         // elements the engine DOES run must not be refused. An assertion that

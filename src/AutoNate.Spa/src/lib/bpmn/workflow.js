@@ -720,6 +720,13 @@ function describeBusinessObject(businessObject) {
     description.callOutputs = callActivity.callOutputs;
   }
 
+  // #111. Present only on a business rule task, so onRequestConfigure can route
+  // on `$type` AND key presence -- merging it unconditionally would send every
+  // bpmn:Task-shaped element to the decision modal.
+  if (businessObject?.$type === "bpmn:BusinessRuleTask") {
+    description.decisionKey = readAutoNateAttribute(businessObject, "decisionKey") ?? "";
+  }
+
   const signalEvent = describeSignalElement(businessObject);
   if (signalEvent) {
     // #156. Present only on signal-carrying events.
@@ -967,6 +974,39 @@ function describeCallActivity(businessObject) {
     callInputs: mappings("in"),
     callOutputs: mappings("out")
   };
+}
+
+/**
+ * #111. Writes the decision table an author picked.
+ *
+ * An `autonate:` attribute via `$attrs`, not a typed moddle property or a child
+ * element: bpmn-js loads no Flowable moddle extension here, so a raw prefixed
+ * attribute in `$attrs` is the only shape proven to survive a studio round trip.
+ * Publish moves it into the `decisionTableReferenceKey` field extension the engine
+ * reads, and strips it from the deployed copy.
+ */
+export function updateBusinessRuleTaskProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling) throw new Error("The BPMN modeler is not ready.");
+  if (!payload?.id) throw new Error("No element id was supplied.");
+
+  const element = elementRegistry.get(payload.id);
+  if (!element) throw new Error(`No element '${payload.id}' in the diagram.`);
+  if (element.businessObject?.$type !== "bpmn:BusinessRuleTask") {
+    throw new Error(
+      `'${payload.id}' is a ${element.businessObject?.$type}, not a business rule task. ` +
+        "Drop a business rule task to choose a decision table."
+    );
+  }
+
+  writeAutoNateAttribute(element.businessObject, "decisionKey", payload.decisionKey ?? "");
+
+  // Through `modeling`, so a command reaches the command stack. Writing only to
+  // $attrs leaves commandStack.changed unfired, the studio's dirty flag false,
+  // and the edit silently lost on reload.
+  modeling.updateProperties(element, { name: payload.name ?? element.businessObject.name ?? "" });
 }
 
 // #113. Writes the chosen workflow key and the variable mappings.

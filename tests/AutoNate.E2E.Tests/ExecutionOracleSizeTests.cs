@@ -37,7 +37,7 @@ public sealed class ExecutionOracleSizeTests
     {
         // Moves with `obliged` in ExecutionEvidenceTests, which names the same
         // set. Both are edited together or one of them fails.
-        const int Cells = 49;
+        const int Cells = 50;
 
         var actual = ExecutionEvidenceExecutionTests.DeclaredEffects().Count;
 

@@ -1,5 +1,6 @@
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 using AutoNate.Web.Models;
 
 namespace AutoNate.Web.Services.Decisions;
@@ -85,6 +86,84 @@ public static class DecisionTableDmn
         builder.AppendLine("</definitions>");
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The engine key a published VERSION is deployed under, so a process can bind
+    /// to that version and not to whatever is latest (#111).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable resolves a DMN service task's <c>decisionTableReferenceKey</c> to
+    /// the LATEST version of that key at run time, and nothing in the element's
+    /// field extensions selects a version. Measured, not assumed: the two escapes
+    /// Flowable offers for exactly this — a <c>.dmn</c> riding in the process
+    /// deployment, and a <c>parentDeploymentId</c> on the DMN deployment — are
+    /// both unreachable here. The process engine in the pinned image has no DMN
+    /// deployer (a <c>.dmn</c> in a BPMN deployment becomes a resource and no
+    /// decision), and the DMN REST API ignores a <c>parentDeploymentId</c> form
+    /// field, stamping the deployment's own id instead. Both were probed against
+    /// the running engine before this existed.
+    /// </para>
+    /// <para>
+    /// So the version goes in the key. A second copy of the version's own DMN is
+    /// deployed under this name the first time a process binds to it, and the
+    /// deployed BPMN points here; the authored diagram keeps the author's key, and
+    /// the table's own key still means "latest", which is what the try-it panel
+    /// and every existing reader rely on.
+    /// </para>
+    /// <para>
+    /// <b>A hyphen, and that is the load-bearing part.</b> A DMN id is an NCName,
+    /// which allows one; <see cref="DecisionTableValidator"/>'s key pattern does
+    /// not — an author's key is a letter followed by letters, digits and
+    /// underscores. So no author can write a key that collides with another
+    /// table's pinned name. The first draft used <c>__v</c>, which they can:
+    /// a table genuinely called <c>foo__v1</c> would occupy the pinned key of
+    /// <c>foo</c> version 1, and <see cref="IFlowableDecisionClient.EnsureDecisionAsync"/>
+    /// would find it already deployed and bind the process to the wrong table
+    /// without deploying anything or saying a word.
+    /// </para>
+    /// </remarks>
+    public static string PinnedKey(string decisionKey, int versionNumber) =>
+        $"{decisionKey}-v{versionNumber}";
+
+    /// <summary>
+    /// Re-keys a published version's stored DMN so it can be deployed under its
+    /// pinned key (#111).
+    /// </summary>
+    /// <remarks>
+    /// The stored bytes are re-keyed rather than the table regenerated. A table's
+    /// current draft is not its published version, and regenerating from the model
+    /// would bind a process to rules nobody published — which is the failure
+    /// versioning exists to prevent, arriving by the back door.
+    /// </remarks>
+    public static string Rekey(string dmnXml, string pinnedKey)
+    {
+        var document = XDocument.Parse(dmnXml);
+        var root = document.Root
+            ?? throw new InvalidOperationException("The stored DMN has no root element.");
+
+        root.SetAttributeValue("id", $"defs_{pinnedKey}");
+
+        // Flowable takes the decision KEY from the <decision> id, so this single
+        // attribute is what the whole mechanism turns on. `GetLatestDecisionAsync`
+        // after the deploy is what proves it landed rather than being accepted and
+        // quietly not parsed (#106's finding about the file extension).
+        foreach (var decision in root.Elements(root.Name.Namespace + "decision"))
+        {
+            decision.SetAttributeValue("id", pinnedKey);
+
+            foreach (var table in decision.Elements(root.Name.Namespace + "decisionTable"))
+            {
+                table.SetAttributeValue("id", $"dt_{pinnedKey}");
+            }
+        }
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
     }
 
     /// <summary>

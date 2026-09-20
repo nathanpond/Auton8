@@ -225,10 +225,13 @@ for an error end event that is a *direct child* of the scope holding the handler
    configure will fail.
 3. An apply handler calling `workflow.update<Element>Properties(handle, payload)`.
 
-**The state clearing is N×N, not 1×N.** Clear every other editor in your branch *and*
-add `set<YourEditor>(null)` to every existing branch, including `selectWorkflow`. Grep
-`set[A-Za-z]*Editor(null)` and match the distinct count exactly — **16** at the time of
-writing, and it moves with every editor added.
+**The state clearing is ONE line, and this entry used to say otherwise.** It was
+N×N — every branch cleared every other editor — which grew quadratically and left
+two modals open the one time a branch forgot. #159/#163/#166 replaced it with a
+single `clearEditors()` called at the top of `onRequestConfigure`. So: add
+`set<YourEditor>(null)` to `clearEditors` and **nowhere else**, which is what its
+own comment says. Verified against the file on 2026-09-19 while adding #111's
+editor; the old advice would have had you make 16 edits, 15 of them wrong.
 
 Mantine v9 only. `Tooltip` from `@mantine/core`, never a native `title`. Toasts through
 `toast` from `@/components/notifications/toast`. In-page `<Alert>` for conditions

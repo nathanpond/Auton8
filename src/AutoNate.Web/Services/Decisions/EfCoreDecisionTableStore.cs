@@ -170,13 +170,27 @@ public sealed class EfCoreDecisionTableStore(IDbContextFactory<AutoNateDbContext
         return rows.Select(ToVersionSummary).ToList();
     }
 
-    public async Task<DecisionTableVersionSummary?> GetVersionByDecisionIdAsync(
-        string decisionId, CancellationToken cancellationToken = default)
+    public async Task<PublishedDecisionSnapshot?> GetPublishedSnapshotAsync(
+        string decisionKey, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.DecisionTableVersions.AsNoTracking()
-            .SingleOrDefaultAsync(v => v.DecisionId == decisionId, cancellationToken);
-        return row is null ? null : ToVersionSummary(row);
+
+        var table = await db.DecisionTables.AsNoTracking()
+            .SingleOrDefaultAsync(t => t.DecisionKey == decisionKey, cancellationToken);
+
+        if (table?.PublishedVersionNumber is not { } published) return null;
+
+        // The version row, not the table row. The table carries the DRAFT's rules
+        // once it has been edited since publishing, and binding a process to those
+        // would hand it rules nobody published.
+        var version = await db.DecisionTableVersions.AsNoTracking()
+            .SingleOrDefaultAsync(
+                v => v.DecisionTableId == table.Id && v.VersionNumber == published,
+                cancellationToken);
+
+        if (version is null || string.IsNullOrWhiteSpace(version.DmnXml)) return null;
+
+        return new PublishedDecisionSnapshot(table.DecisionKey, version.VersionNumber, version.DmnXml);
     }
 
     private static DecisionTableModel ToModel(DecisionTable row) => new()

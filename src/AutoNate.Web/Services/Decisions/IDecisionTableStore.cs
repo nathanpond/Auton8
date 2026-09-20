@@ -38,16 +38,23 @@ public interface IDecisionTableStore
         Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The version a deployed process is bound to, by the engine's decision id.
+    /// The published version a process publishing NOW would bind to, with the DMN
+    /// that version was deployed from (#111).
     /// </summary>
     /// <remarks>
-    /// #111 resolves a business rule task's reference through this, which is what
-    /// makes republishing a table unable to change what an already-deployed
-    /// definition decides.
+    /// Returns <c>null</c> when the key names no table, or names one with nothing
+    /// published — the two cases that must be refused at publish rather than
+    /// discovered when an instance reaches the step.
     /// </remarks>
-    Task<DecisionTableVersionSummary?> GetVersionByDecisionIdAsync(
-        string decisionId, CancellationToken cancellationToken = default);
+    Task<PublishedDecisionSnapshot?> GetPublishedSnapshotAsync(
+        string decisionKey, CancellationToken cancellationToken = default);
 }
+
+/// <summary>The exact bytes a process binds to, and the version number they are (#111).</summary>
+public sealed record PublishedDecisionSnapshot(
+    string DecisionKey,
+    int VersionNumber,
+    string DmnXml);
 
 public sealed record DecisionTableVersionSummary(
     Guid Id,
