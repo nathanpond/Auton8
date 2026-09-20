@@ -10250,3 +10250,64 @@ explanation.
 **Pins:** SLIM_BACKEND 2929 → 2930.
 
 **Issue:** #608
+
+## M5 execution — #222, and a measurement that halved the story (2026-09-20)
+
+**The story had no AC**, so they were derived onto the issue before any code, and
+the first one was the measurement the issue itself asked for: *"no
+`workflow_execution_errors` row appeared within 45 seconds … it is not
+established. Worth confirming before treating it as a second defect."*
+
+**Confirmed, and it is NOT a defect.** A failing DMN evaluation surfaced within
+seconds carrying `errorMessage: "Could not resolve function 'bogusFunction'"` —
+the root cause rather than the wrapper — attributed to the author's own `decide`
+element, with the stack alongside. So the issue's second observation was
+environmental and **#222 is only the synchronous gap**. That probe is kept as a
+guard rather than deleted: it is the path the surface was built for and nothing
+else asserted it end to end.
+
+**What is actually still synchronous, measured rather than assumed.** Publish
+already force-asyncs everything that runs code — script tasks (with a comment that
+is #222's concern verbatim), DMN tasks, send tasks, the complex-gateway routing
+script. What is left is an expression evaluated inline during a TRANSITION, and a
+sequence-flow condition is exactly that. Probed: completing a task whose gateway
+condition throws returns 500, leaves the instance alive with three history rows,
+**none of them errored**, and `/jobs` empty. No job, so nothing the recorder's one
+event type could ever hear.
+
+**The activity is the one the operator acted on, and the engine's message is NOT
+parsed.** The message does name the failing element (`activity 'split'`), and
+reading it would be more precise and unsafe: the same string carries the author's
+own expression text, so a condition written to contain `activity 'other'` would
+attribute the failure wherever the author liked. `EngineRefusal` already warns
+that caller data reaches these strings and parses them only where it cannot. The
+slim guard embeds `activity 'split'` in the stubbed message on purpose, so it
+fails the moment anyone starts reading it.
+
+**A correction I had to make mid-story.** I first wrote this up as a #350 raw-body
+leak. It is not, and saying so would have been overstating: the app installs no
+exception middleware at all, so an uncaught `FlowableRequestException` produced
+the developer exception page's serialisation in Development and a **bare 500 with
+an empty body** in production. What was wrong everywhere was that the caller
+learned nothing actionable and nothing was recorded — not that secrets escaped.
+
+**Why the existing guard missed it.** `NoEndpointReturnsARawEngineMessageTests`
+scans for endpoints that *put* the message into a response. This route never
+mentioned the message; it had no catch at all. A rule about what catches write
+cannot see a route with no catch.
+
+**The start case is documented, not invented (owner decision).** On a failing
+start the engine rolls everything back and `historic-process-instances` shows no
+instance — nothing to attach to. A row keyed on the definition instead was
+considered and declined: it widens what the table means for a case the caller is
+already being told about. The gap is written at the start endpoint, where the next
+reader meets it.
+
+**A startup failure of my own, worth recording.** `WorkflowExecutionErrorRecorder`
+was registered with `AddHostedService<T>`, which registers only `IHostedService` —
+so injecting the concrete type took the app down at boot with exit 134 rather than
+failing at the call site. Now one singleton serving both roles.
+
+**Pins:** SLIM_BACKEND 2930 → 2932, FLOWABLE 259 → 261, FULL_LOCAL 493 → 495.
+
+**Issue:** #222

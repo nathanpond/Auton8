@@ -81,6 +81,87 @@ public sealed class WorkflowExecutionErrorRecorder(
         }
     }
 
+    /// <summary>
+    /// Records a failure that never became a job, so never became an event (#222).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why a second writer exists at all.</b> Everything above is fed by
+    /// <c>job.execution.failed</c>, and <b>a step that fails synchronously
+    /// produces no job</b> — so it could never reach this table however long you
+    /// waited. Measured: a gateway whose condition expression throws takes down
+    /// the API call that triggered it, the engine rolls back to the last wait
+    /// state, and the instance is left with three history rows and not one of them
+    /// errored.
+    /// </para>
+    /// <para>
+    /// <b>The instance surviving is what makes this fixable.</b> On a failing
+    /// <i>start</i> the engine rolls the whole thing back and there is no instance
+    /// and no history — nothing to attach an error to, and that gap is documented
+    /// at the call site rather than papered over with an invented row.
+    /// </para>
+    /// <para>
+    /// <b>The activity is the one the caller acted on, NOT one parsed out of the
+    /// engine's message.</b> The message does name the failing element —
+    /// <c>activity 'split'</c> — and reading it would be more precise and less
+    /// safe: the same string carries the author's own expression text, so a
+    /// condition written to contain <c>activity 'something'</c> would attribute
+    /// the failure to an element of the author's choosing. <see cref="EngineRefusal"/>
+    /// already warns that caller data reaches these strings and parses them only
+    /// where it cannot. Attributing to the task the operator completed is both
+    /// unspoofable and where they are already looking; the message says the
+    /// transition out of it is what failed.
+    /// </para>
+    /// </remarks>
+    public async Task RecordSynchronousFailureAsync(
+        string processInstanceId,
+        string activityId,
+        string message,
+        string? stackTrace,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processInstanceId) || string.IsNullOrWhiteSpace(activityId))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            dbContext.WorkflowExecutionErrors.Add(new WorkflowExecutionError
+            {
+                Id = Guid.NewGuid(),
+                ProcessInstanceId = processInstanceId,
+                ActivityId = activityId,
+                ErrorMessage = message,
+                ErrorStackTrace = stackTrace,
+
+                // Named so an operator reading the row can tell it apart from one
+                // the engine's own event produced -- the two have different
+                // reliability, and pretending otherwise would hide that this one
+                // exists only because somebody happened to be holding the request.
+                RawFlowableEventType = SynchronousEventType,
+                OccurredAtUtc = DateTime.UtcNow
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Swallowed for the same reason the handler above swallows: the
+            // caller is already being told their action failed, and failing to
+            // RECORD that is not worth turning into a second, different failure.
+            _logger.LogError(
+                exception,
+                "Failed to record a synchronous workflow failure for processInstanceId={ProcessInstanceId} "
+                + "activityId={ActivityId}.",
+                processInstanceId,
+                activityId);
+        }
+    }
+
+    /// <summary>What <c>raw_flowable_event_type</c> carries for a row this class synthesised.</summary>
+    public const string SynchronousEventType = "autonate.synchronous.failure";
+
     private static WorkflowExecutionError? TryBuildRow(string payload)
     {
         using var document = JsonDocument.Parse(payload);

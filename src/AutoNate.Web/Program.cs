@@ -282,7 +282,15 @@ builder.Services.AddDaprPubSubClient((sp, b) =>
 builder.Services.AddSingleton<DaprStreamingSubscriber>();
 builder.Services.AddSingleton<IDaprStreamingSubscriber>(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
-builder.Services.AddHostedService<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>();
+// #222. ONE instance, two roles. `AddHostedService<T>` registers only
+// IHostedService, so the concrete type could not be injected -- and asking for it
+// took the app down at startup rather than at the call site, which is the failure
+// mode DI validation is for. It still subscribes to the bus for
+// `job.execution.failed`; the endpoints now also hand it the synchronous failures
+// that never become a job and so never become an event.
+builder.Services.AddSingleton<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>();
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>());
 builder.Services.AddSingleton<AutoNate.Web.Services.Workflow.WorkflowTaskCompletionRecorder>();
 // #604. Read-your-own-write on task completion: the completed row is marked and
 // the instance's open tasks re-projected in the same request, so the caller's
