@@ -1223,6 +1223,7 @@ public static class ExecutionEndpoints
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
             WorkflowTaskCacheRefresher cacheRefresher,
+            WorkflowExecutionErrorRecorder errorRecorder,
             IAuditEventPublisher auditPublisher,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -1235,6 +1236,11 @@ public static class ExecutionEndpoints
                 when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return StaleTask(taskId, exception, loggerFactory);
+            }
+            catch (FlowableRequestException exception)
+            {
+                return await SynchronousStepFailureAsync(
+                    taskId, exception, errorRecorder, cacheRefresher, loggerFactory, cancellationToken);
             }
 
             // #604. Before the audit event, because this is what makes the
@@ -1492,6 +1498,86 @@ public static class ExecutionEndpoints
         if (string.IsNullOrEmpty(processDefinitionId)) return null;
         var sep = processDefinitionId.IndexOf(':');
         return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
+    }
+
+    /// <summary>
+    /// A step that failed synchronously, made visible on the execution (#222).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>WorkflowExecutionErrorRecorder</c> listens for one event type,
+    /// <c>job.execution.failed</c>, and that is the ONLY thing feeding the red
+    /// node on the diagram and <c>isErrored</c> in the history. <b>A step that
+    /// fails synchronously produces no job</b>, so it could never arrive there —
+    /// the failure took down the API call that caused it and left no trace on the
+    /// execution at all.
+    /// </para>
+    /// <para>
+    /// <b>Measured, both halves.</b> A gateway whose condition throws on the
+    /// transition out of a completed task leaves the instance alive with three
+    /// history rows and none of them errored, and no job to find. The ASYNC path,
+    /// by contrast, works and is now guarded — publish force-asyncs script tasks,
+    /// DMN tasks, send tasks and the complex-gateway routing script precisely so
+    /// their failures become jobs. What is left synchronous is the expressions
+    /// evaluated inline during a transition.
+    /// </para>
+    /// <para>
+    /// <b>And the caller gets a sentence rather than whatever the environment
+    /// decides.</b> This path had no catch at all. The app installs no exception
+    /// middleware, so what an uncaught <c>FlowableRequestException</c> produced
+    /// depended entirely on where it ran: in Development the developer exception
+    /// page serialised the engine's whole body — problem text, ids, a Java stack —
+    /// and in production a bare 500 with an empty body. <b>Stated precisely
+    /// because it is tempting to call the first one a production leak and it is
+    /// not:</b> the dev page is not on in production. What was wrong everywhere is
+    /// that a caller learned nothing actionable and nothing was recorded.
+    /// </para>
+    /// <para>
+    /// <c>NoEndpointReturnsARawEngineMessageTests</c> could not catch this: it
+    /// scans for endpoints that <i>put</i> the message into a response, and this
+    /// one never mentioned the message at all. A route with no catch is invisible
+    /// to a rule about what catches write.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> SynchronousStepFailureAsync(
+        string taskId,
+        FlowableRequestException exception,
+        WorkflowExecutionErrorRecorder errorRecorder,
+        WorkflowTaskCacheRefresher cacheRefresher,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var described = EngineRefusal.Describe(exception, "this step");
+
+        loggerFactory.CreateLogger("AutoNate.Web.WorkflowTasks").LogWarning(
+            exception,
+            "Completing task {TaskId} failed in the engine. Caller was told: {Described}",
+            taskId, described);
+
+        // The instance and the activity come from the cache rather than from the
+        // engine's message -- see RecordSynchronousFailureAsync for why parsing
+        // that message would be both more precise and spoofable by an author.
+        var owner = await cacheRefresher.OwnerOfAsync(taskId, cancellationToken);
+        if (owner is { } found)
+        {
+            await errorRecorder.RecordSynchronousFailureAsync(
+                found.InstanceId,
+                found.ActivityId,
+                $"Completing this step failed: {exception.Message}",
+                exception.StackTrace,
+                cancellationToken);
+        }
+
+        return Results.Json(
+            new
+            {
+                error = described,
+                code = "step_failed",
+                taskId
+            },
+            statusCode: exception.IsCallerError
+                ? StatusCodes.Status400BadRequest
+                : StatusCodes.Status502BadGateway);
     }
 
     /// <summary>

@@ -53,6 +53,35 @@ public sealed class WorkflowTaskCacheRefresher(
     private readonly IDbContextFactory<AutoNateDbContext> _dbContextFactory = dbContextFactory;
     private readonly ILogger<WorkflowTaskCacheRefresher> _logger = logger;
 
+    /// <summary>Which instance and activity a cached task belongs to (#222).</summary>
+    /// <remarks>
+    /// The task-scoped routes are addressed by task alone and never learn either.
+    /// The cache is the only place that still knows once the engine has rolled the
+    /// completion back, and it is unspoofable, which the engine's own message is
+    /// not.
+    /// </remarks>
+    public async Task<(string InstanceId, string ActivityId)?> OwnerOfAsync(
+        string taskId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(taskId)) return null;
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var row = await db.WorkflowTaskCache.AsNoTracking()
+            .Where(t => t.FlowableTaskId == taskId)
+            .Select(t => new { t.FlowableInstanceId, t.TaskDefinitionKey })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (row is null
+            || string.IsNullOrWhiteSpace(row.FlowableInstanceId)
+            || string.IsNullOrWhiteSpace(row.TaskDefinitionKey))
+        {
+            return null;
+        }
+
+        return (row.FlowableInstanceId, row.TaskDefinitionKey!);
+    }
+
     /// <summary>
     /// The instance's open tasks, read live when the cache is past its freshness
     /// window (#604).

@@ -548,6 +548,27 @@ public static class WorkflowEndpoints
             var model = await store.GetByProcessKeyAsync(processKey, cancellationToken);
             var mergedVariables = MergeDefaultVariables(model?.DefaultVariables, request?.Variables);
 
+            // #222. A STEP THAT FAILS SYNCHRONOUSLY ON START LEAVES NOTHING BEHIND,
+            // and that is documented here rather than papered over.
+            //
+            // Measured against Flowable 8.0.0: an unmarked step that throws takes
+            // this call down with it, and `history/historic-process-instances`
+            // then shows NO INSTANCE AT ALL -- the engine rolled the whole thing
+            // back. So unlike the task-completion path, where the instance
+            // survives and the failure is recorded against it, there is no
+            // instance here to attach an error to and no honest row to write. The
+            // caller's response is the only place the failure exists.
+            //
+            // Inventing a row keyed on the definition instead was considered and
+            // declined by the owner: it would widen what workflow_execution_errors
+            // means for a case the caller is already being told about.
+            //
+            // The exposure is small and shrinking: publish force-asyncs everything
+            // that runs code -- script tasks, DMN tasks, send tasks, the
+            // complex-gateway routing script -- precisely so their failures become
+            // jobs. What is left is an expression evaluated inline during a
+            // transition, and on start there is no transition out of a wait state
+            // for one to fail on.
             var instance = await flowable.StartProcessInstanceAsync(
                 processKey,
                 name,
