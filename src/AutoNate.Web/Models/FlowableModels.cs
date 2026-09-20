@@ -256,7 +256,56 @@ public sealed record class WorkflowExecutionHistoryEvent
     // Useful when an activity errored, retried, then succeeded — the row
     // looks "completed" but the retry count tells the real story.
     public int? ErrorCount { get; init; }
+
+    // #173. Set only on the ONE row a multi-instance activity collapses into.
+    // Null everywhere else, which is what keeps an ordinary repeated activity
+    // rendering as the several rows it is.
+    public MultiInstanceProgress? MultiInstance { get; init; }
 }
+
+/// <summary>
+/// How far a multi-instance activity has got, as one row (#173).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Which activities are multi-instance comes from the DIAGRAM, not the
+/// engine's history.</b> Measured on Flowable 8.0.0: a parallel multi-instance
+/// user task with cardinality 3 reports three historic rows with the same
+/// activityId and the same activityType, and <b>no</b> <c>multiInstanceBody</c>
+/// row — indistinguishable from a loop that ran three times or an activity that
+/// was retried. Grouping on "several rows share an id" would have collapsed
+/// ordinary repeated activities into a progress row they never earned.
+/// </para>
+/// <para>
+/// The engine does model it, in the EXECUTION TREE — a body execution whose
+/// children carry the same activityId — but that is runtime only, and a finished
+/// multi-instance still has to render 5/5. <c>multiInstanceLoopCharacteristics</c>
+/// on the element survives completion and is Auton8's own data.
+/// </para>
+/// </remarks>
+/// <param name="Total">
+/// The instance count. From <c>loopCardinality</c> where the author wrote a
+/// literal one; otherwise the number of instances the engine actually created,
+/// because a collection-driven multi-instance has no cardinality to read.
+/// </param>
+/// <param name="Completed">Instances the engine has ended.</param>
+/// <param name="Active">Instances still running.</param>
+/// <param name="Failed">
+/// Instances with a recorded failure. Surfaced on the COLLAPSED row so an
+/// operator scanning a list sees that something needs attention without
+/// expanding every row, which is the AC this exists for.
+/// </param>
+/// <param name="IsSequential">
+/// Sequential runs one instance at a time, so "which is running and how many
+/// remain" is a different question from a parallel one's, and the view asks it
+/// differently.
+/// </param>
+public sealed record MultiInstanceProgress(
+    int Total,
+    int Completed,
+    int Active,
+    int Failed,
+    bool IsSequential);
 
 // One row in the Execution Log tab. Either a variable change or a task
 // lifecycle event (created / claimed / completed / cancelled). The Kind
