@@ -495,6 +495,7 @@ public static class ExecutionEndpoints
         executions.MapGet("/{processInstanceId}/tasks", async (
             string processInstanceId,
             IFlowableReadThrough readThrough,
+            WorkflowTaskCacheRefresher taskReadThrough,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
@@ -507,6 +508,17 @@ public static class ExecutionEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
+            // #604. THIS IS A DETAIL VIEW, so it reads through when the rows are
+            // past the same freshness window the instance above just used.
+            //
+            // Cached alone, it was a minute stale in the one place a caller is
+            // watching for change: a timer firing, a boundary event, an ad-hoc
+            // activity starting, or the successor to a task they just completed.
+            // Measured -- 24 of 493 full-local specs, every one of them waiting
+            // 30-45s on a 60s poll.
+            var live = await taskReadThrough.ReadThroughOpenTasksAsync(
+                processInstanceId, db, cancellationToken);
+
             // The open-task predicate #586 made load-bearing. Before it, both
             // clauses matched every row.
             var rows = await db.WorkflowTaskCache.AsNoTracking()
@@ -516,6 +528,22 @@ public static class ExecutionEndpoints
                 .OrderBy(t => t.CreatedTime)
                 .ThenBy(t => t.FlowableTaskId)
                 .ToListAsync(cancellationToken);
+
+            // The live answer is authoritative for "open right now" when there is
+            // one. The cached rows still answer when the window was fresh, or
+            // when the engine could not be reached -- and a row the engine no
+            // longer lists is filtered out HERE rather than marked complete in
+            // the cache, because its absence says it is not open and says nothing
+            // about when it finished (#586).
+            if (live is not null)
+            {
+                var open = live
+                    .Where(t => !string.IsNullOrWhiteSpace(t.Id))
+                    .Select(t => t.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                rows = rows.Where(r => open.Contains(r.FlowableTaskId)).ToList();
+            }
 
             var tasks = rows
                 .Select(t => new FlowableTaskSummary
@@ -858,10 +886,25 @@ public static class ExecutionEndpoints
             HttpContext http,
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
+            WorkflowTaskCacheRefresher cacheRefresher,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+            try
+            {
+                await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception)
+                when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return StaleTask(taskId, exception, loggerFactory);
+            }
+
+            // This route names the instance, so the refresher does not have to
+            // find it in a cache that may never have seen the task.
+            await cacheRefresher.AfterTaskCompletedAsync(
+                taskId, cancellationToken, processInstanceId);
 
             var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!string.IsNullOrWhiteSpace(actorId))
@@ -1149,10 +1192,24 @@ public static class ExecutionEndpoints
             HttpContext http,
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
+            WorkflowTaskCacheRefresher cacheRefresher,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+            try
+            {
+                await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception)
+                when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return StaleTask(taskId, exception, loggerFactory);
+            }
+
+            // #604. Before the audit event, because this is what makes the
+            // caller's next read show their own write.
+            await cacheRefresher.AfterTaskCompletedAsync(taskId, cancellationToken);
 
             var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!string.IsNullOrWhiteSpace(actorId))
@@ -1405,6 +1462,47 @@ public static class ExecutionEndpoints
         if (string.IsNullOrEmpty(processDefinitionId)) return null;
         var sep = processDefinitionId.IndexOf(':');
         return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
+    }
+
+    /// <summary>
+    /// A task the engine no longer has is a CONFLICT, not a server fault (#604).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Flowable answers <c>404 Could not find a task with id '…'</c> when the id
+    /// is one it has already finished. Uncaught, that reached the caller as
+    /// <b>500</b>, which tells a UI nothing it can act on — and a stale task id
+    /// is an ordinary, expected race for any client that polls a projection:
+    /// someone else completed it, or the list was read a moment ago.
+    /// </para>
+    /// <para>
+    /// <b>409, not 404.</b> The route exists and the caller was entitled to it;
+    /// what has changed is the state underneath them, and the right thing for a
+    /// client to do is re-read the list rather than treat the address as wrong.
+    /// </para>
+    /// <para>
+    /// The engine's own body never reaches the caller (#350) — it carries JDBC
+    /// URLs, hostnames and Java frames. It goes to the log; the caller gets a
+    /// sentence naming the task and what to do about it.
+    /// </para>
+    /// </remarks>
+    private static IResult StaleTask(
+        string taskId, FlowableRequestException exception, ILoggerFactory loggerFactory)
+    {
+        loggerFactory.CreateLogger("AutoNate.Web.WorkflowTasks").LogWarning(
+            exception,
+            "Task {TaskId} was already finished when a completion arrived for it.",
+            taskId);
+
+        return Results.Json(
+            new
+            {
+                error = $"Task '{taskId}' is no longer open — it has already been completed or "
+                    + "cancelled. Refresh the task list and try again.",
+                code = "task_not_open",
+                taskId
+            },
+            statusCode: StatusCodes.Status409Conflict);
     }
 
     private static async Task<string?> ResolveBpmnXmlForProcessDefinitionAsync(

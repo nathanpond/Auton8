@@ -284,6 +284,10 @@ builder.Services.AddSingleton<IDaprStreamingSubscriber>(sp => sp.GetRequiredServ
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddHostedService<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Workflow.WorkflowTaskCompletionRecorder>();
+// #604. Read-your-own-write on task completion: the completed row is marked and
+// the instance's open tasks re-projected in the same request, so the caller's
+// next read is not the minute-old one the poll left behind.
+builder.Services.AddScoped<AutoNate.Web.Services.Flowable.Cache.WorkflowTaskCacheRefresher>();
 builder.Services.AddSingleton<AutoNate.Web.Persistence.DbConnectionFailureLoggingInterceptor>();
 builder.Services.AddDbContextFactory<AutoNateDbContext>((sp, options) =>
 {

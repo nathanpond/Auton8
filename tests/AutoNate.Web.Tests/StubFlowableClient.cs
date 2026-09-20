@@ -352,10 +352,25 @@ internal sealed class StubFlowableClient : IFlowableClient
     // populate this dictionary keyed by process instance id. Default empty.
     public Dictionary<string, List<FlowableTaskSummary>> TasksByProcess { get; } = new();
 
+    /// <summary>
+    /// Set to make the task fetch throw, as the real client does when the engine
+    /// is unreachable (#604).
+    /// </summary>
+    /// <remarks>
+    /// "Flowable is down" used to be modelled by <see cref="GetProcessInstanceThrows"/>
+    /// alone, which was enough while `/{id}/tasks` never asked the engine for the
+    /// task list. Now it does, so a fixture that leaves this call answering
+    /// normally is not modelling an unreachable engine -- it is modelling an
+    /// engine that is up and reports no tasks, which is a different thing and the
+    /// opposite assertion.
+    /// </remarks>
+    public Exception? GetTasksByProcessInstanceThrows { get; set; }
+
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"TasksByInstance:{processInstanceId}");
+        if (GetTasksByProcessInstanceThrows is not null) throw GetTasksByProcessInstanceThrows;
         TasksByProcess.TryGetValue(processInstanceId, out var tasks);
         return Task.FromResult<IReadOnlyList<FlowableTaskSummary>>(
             (IReadOnlyList<FlowableTaskSummary>?)tasks ?? Array.Empty<FlowableTaskSummary>());
@@ -430,12 +445,24 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(list);
     }
 
+    /// <summary>
+    /// Set to make <see cref="CompleteTaskAsync"/> throw as the real client does
+    /// for a task the engine has already finished (#604).
+    /// </summary>
+    /// <remarks>
+    /// Flowable answers `404 Could not find a task with id '…'`, and without a way
+    /// to drive that the 409 branch could not be tested at all -- which is how it
+    /// reached callers as a 500 in the first place.
+    /// </remarks>
+    public FlowableRequestException? CompleteThrows { get; set; }
+
     public Task CompleteTaskAsync(
         string taskId,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default)
     {
         Calls.Add($"CompleteTask:{taskId}");
+        if (CompleteThrows is not null) throw CompleteThrows;
         return Task.CompletedTask;
     }
 
