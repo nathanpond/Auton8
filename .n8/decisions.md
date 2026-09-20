@@ -10311,3 +10311,33 @@ failing at the call site. Now one singleton serving both roles.
 **Pins:** SLIM_BACKEND 2930 → 2932, FLOWABLE 259 → 261, FULL_LOCAL 493 → 495.
 
 **Issue:** #222
+
+## M5 execution — four more owner decisions, taken 2026-09-20
+
+**1. Finish executing before verifying.** Thirteen M5 stories have closed this run
+with none through `/n8-verify`. The stage rules put verification debt above new
+execution, and that was raised rather than assumed; the owner chose one
+verification pass at the end. Recorded because it is a deliberate acceptance of
+risk: a defect in shared machinery — and #604/#609/#222 all touched shared
+machinery — compounds into everything built after it.
+
+**2. The task read-through stays unconditional.** `/{id}/tasks` calls the engine
+on every request. A 1–2s floor was offered and declined in favour of correctness:
+it is a detail view of one instance, the jobs endpoints in the same file already
+read live for the same stated reason, and the list page stays cached. If it ever
+costs, it costs visibly under load rather than silently returning stale data.
+
+**3. #232 closed on #111 as its cold test.** The restructured skill was followed
+on a story it had never seen; its Step 0 probe contradicted that story's own AC
+and turned it from a manifest edit into an expansion, and it exposed the skill's
+own staleness — sixteen `set*Editor(null)` sites that `clearEditors()` had
+replaced. Noted on the issue that the reader was the author, and that what makes
+it a real test is the codebase disagreeing with the skill rather than a re-read.
+
+**4. #173 takes no schema change.** Its AC is conditional — *"WHERE per-instance
+state is stored…"* — and #604's read-through makes storing it unnecessary:
+collapsed progress computes from the activity-history rows the endpoint already
+loads, and per-instance detail is fetched on expand, which the AC wants anyway.
+The alternative was an additive column making progress queryable by the selector
+layer; declined because it adds one more projection that can drift from the
+engine, which is the defect this milestone has now hit three times.
