@@ -11,15 +11,27 @@ using Xunit;
 namespace AutoNate.Web.Tests;
 
 /// <summary>
-/// `/{id}/tasks` is served from the cache (#104).
+/// What `/{id}/tasks` answers, and where the answer comes from (#104, #604).
 /// </summary>
 /// <remarks>
-/// It could not be until two absences were fixed: the cache had no `name` column
-/// for `ProcessInstanceName` (#583), and it never learned a task finished, so it
-/// would have returned every task the instance ever had, labelled active (#586).
+/// <para>
+/// <b>RENAMED from <c>ExecutionTasksFromCacheTests</c> by #604</b>, rather than
+/// left with a name that had stopped being true. #104 moved this route onto the
+/// cache — possible only once the cache had a `name` column for
+/// `ProcessInstanceName` (#583) and had learned that a task finishes (#586).
+/// </para>
+/// <para>
+/// #604 then measured what that cost: the cache is a minute stale, and this is
+/// the one view a caller watches for change — a timer firing, a boundary event,
+/// an ad-hoc activity starting, the successor to a task they just completed. It
+/// was 24 of 493 full-local specs, and a person completing a task in the UI
+/// seeing it still listed for up to a minute. So the route now READS THROUGH on
+/// every call and the cache supplies the shape, which is why the old name would
+/// mislead the next reader rather than merely age.
+/// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class ExecutionTasksFromCacheTests
+public sealed class ExecutionTasksEndpointTests
 {
     [Fact]
     public async Task It_serves_open_tasks_from_the_cache_with_the_instance_name()
@@ -29,17 +41,32 @@ public sealed class ExecutionTasksFromCacheTests
 
         await SeedAsync(factory, "inst-1", instanceName: "Invoice for Acme", taskIds: ["task-a", "task-b"]);
 
+        // What the engine says is open right now. Under #604 this is the
+        // authority for WHICH tasks are returned; the cache still supplies what
+        // each one looks like.
+        factory.FlowableStub.TasksByProcess["inst-1"] =
+        [
+            new FlowableTaskSummary { Id = "task-a", Name = "task-a", ProcessInstanceId = "inst-1", ProcessDefinitionId = "invoice:1:1" },
+            new FlowableTaskSummary { Id = "task-b", Name = "task-b", ProcessInstanceId = "inst-1", ProcessDefinitionId = "invoice:1:1" }
+        ];
+
         var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/executions/inst-1/tasks");
 
         Assert.NotNull(tasks);
         Assert.Equal(["task-a", "task-b"], tasks!.Select(t => t.Id));
+
+        // The CACHE is still what supplies the instance name -- the live task
+        // list carries none, which is why #583 had to land before #104 and is
+        // still the reason both sources are in play.
         Assert.All(tasks, t => Assert.Equal("Invoice for Acme", t.ProcessInstanceName));
         Assert.All(tasks, t => Assert.Equal("inst-1", t.ProcessInstanceId));
 
-        // It did NOT call Flowable for the task list.
-        Assert.DoesNotContain(
+        // It DID ask Flowable. This assertion was inverted by #604 rather than
+        // deleted: "served without asking the engine" was #104's guarantee and is
+        // now precisely the defect, so the inversion is the change, visible here.
+        Assert.Contains(
             factory.FlowableStub.Calls,
-            c => c.StartsWith("GetTasksByProcessInstance", StringComparison.Ordinal));
+            c => c.StartsWith("TasksByInstance:inst-1", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -71,6 +98,12 @@ public sealed class ExecutionTasksFromCacheTests
             Assert.Equal(1, await sweep.RunOnceAsync(CancellationToken.None));
         }
 
+        // The engine lists only the open one, which is what `runtime/tasks` means.
+        factory.FlowableStub.TasksByProcess["inst-2"] =
+        [
+            new FlowableTaskSummary { Id = "task-open", Name = "task-open", ProcessInstanceId = "inst-2", ProcessDefinitionId = "invoice:1:1" }
+        ];
+
         var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/executions/inst-2/tasks");
 
         Assert.NotNull(tasks);
@@ -96,6 +129,13 @@ public sealed class ExecutionTasksFromCacheTests
 
         await SeedAsync(factory, "inst-3", instanceName: "Invoice for Gamma", taskIds: ["task-x"], stale: true);
         factory.FlowableStub.GetProcessInstanceThrows = new HttpRequestException("connection refused");
+
+        // BOTH calls, because #604 made this route ask the engine for the task
+        // list too. Left answering normally, the stub would be modelling an
+        // engine that is UP and reports no tasks -- and this test would pass or
+        // fail for a reason that has nothing to do with the engine being down.
+        factory.FlowableStub.GetTasksByProcessInstanceThrows =
+            new HttpRequestException("connection refused");
 
         var response = await client.GetAsync("/api/executions/inst-3/tasks");
 

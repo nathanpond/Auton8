@@ -10078,3 +10078,68 @@ green and is the merge gate — but until #604 is fixed their verification tier 
 ambiently red, which is the condition in which a real regression hides.
 
 **Issues:** #111 (closed), #604 (open, sev:high)
+
+## M5 execution — #604, and a freshness window that reset its own clock (2026-09-20)
+
+**The fix is two things, and the second one is the one that mattered.**
+
+*Read-your-own-write on completion.* `POST /api/tasks/{taskId}/complete` called
+the engine and never touched `workflow_task_cache`, so the finished row stayed
+`active` and its successor went unprojected until the next poll. A new
+`WorkflowTaskCacheRefresher` marks the row from the positive fact of the
+completion — #586's rule, and the same shape and `completed_time IS NULL` guard
+the sweep writes — then re-projects the instance's open tasks.
+
+**That took the two execution suites from 7 failures to 5, and the two survivors
+named the real scope.** One was a timer handler firing (`"Tasks were: Ongoing
+work"`), one an ad-hoc activity being started. Neither completes anything.
+**Any task the engine creates on its own was invisible until the poll** — a
+minute — while everything watching for it gives up in thirty seconds. Completion
+was just the trigger I happened to find first.
+
+*So `/{id}/tasks` reads through.* It is a detail view, and the jobs endpoints in
+the same file had already settled this question and written down why: the reader
+who opens a single execution is the one who cannot tolerate a staleness
+question. The LIST endpoint stays cached; the distinction is between "how are my
+hundred flows doing" and "what is this one doing right now".
+
+**My own first version of that read-through was broken, and measurably so.** I
+gated it on the newest `last_sync_at` among the instance's rows, mirroring
+`GetInstanceAsync`. But *this method writes that column*: one read-through marked
+the rows fresh for the next thirty seconds, so a caller polling every second got
+cached answers for thirty of them. The timer spec still failed at its 30s budget
+with the rest of the fix in place, which is how it was caught. **A window whose
+clock its own reader resets is not a window.** Removed; it reads through every
+call.
+
+**Nothing is inferred from absence.** The live list decides what is returned, but
+a cached row the engine no longer lists is filtered out of the response rather
+than marked complete — its absence says it is not open and says nothing about
+when it finished. That transition stays with the sweep and the completion path.
+
+**`ExecutionTasksFromCacheTests` renamed to `ExecutionTasksEndpointTests`**, and
+its "it did NOT call Flowable" assertion inverted rather than deleted: that was
+#104's guarantee and is now precisely the defect, so the inversion is the change
+and is visible in the diff. Its unreachable-engine case needed a real fixture —
+"Flowable is down" was modelled by `GetProcessInstanceThrows` alone, which after
+this change models an engine that is UP and reports no tasks, a different thing
+and the opposite assertion.
+
+**Evidence.** SubProcess + Compensation: 7 failed/16 passed → **23/23**, and the
+run fell from 2m46s to 28s because nothing waits out a timeout any more. The
+other eight previously-failing classes: **73/73**. The live-engine oracle,
+including the `Multi-Instance (Sequential)` cell this issue was filed from:
+**67/67**. Both new slim guards mutation-checked — removing the refresher leaves
+`task-first` in the list, removing the catch gives `Expected: Conflict, Actual:
+InternalServerError`.
+
+**Worth recording about the first guard:** with the refresher removed,
+`task-second` still appears — the read-through's first-seen coalesce projects it
+in passing — so the `Contains` half passes against the broken code. Only
+`DoesNotContain` catches it. The assertion that matters is the finished task
+leaving the list.
+
+**Pins:** SLIM_BACKEND 2923 → 2925. E2E unchanged — this fixed 24 existing specs
+rather than adding any.
+
+**Issue:** #604
