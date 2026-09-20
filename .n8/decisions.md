@@ -10006,7 +10006,20 @@ id is an NCName and allows a hyphen; the key pattern does not. Guarded through t
 validator rather than against a regex copied into the test, so tightening the key
 rule moves the guard with it.
 
-**Pins:** SLIM_BACKEND 2913 → 2923, FLOWABLE 255 → 258, FULL_LOCAL 490 → 493.
+**A tier boundary I got wrong, caught by CI on its first run.**
+`BusinessRuleTaskStudioTests` shipped untraited in `fb64eca`, on the argument that
+the round trip is a property of the vendored bpmn-js bundle and needs a browser
+rather than an engine. That is true of what the test *proves* and false of what it
+needs to *set up*: the picker lists only published tables, and publishing one
+deploys DMN to Flowable. It passed on this machine, where the engine happens to be
+running, and failed `Connection refused (localhost:8080)` the first time GitHub
+executed it — slim stands up Postgres, NATS and Redis, and no engine. Now
+`RequiresService=Flowable`. The bundle property keeps its slim guard on GitHub
+through the vitest case `business-rule-task-round-trip.test.js`, which drives
+bpmn-js directly.
+
+**Pins:** SLIM_BACKEND 2913 → 2923, FLOWABLE 255 → 259, SLIM_E2E 234 → 233,
+FULL_LOCAL 490 → 493.
 
 **Filed, not fixed:** #604 — completing a task leaves `workflow_task_cache` stale,
 and the engine's 404 on the stale id surfaces as a 500. Found because the oracle's

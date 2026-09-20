@@ -18,10 +18,23 @@ namespace AutoNate.E2E.Tests;
 /// exists to catch.
 /// </para>
 /// <para>
-/// Untraited: the round trip needs no engine. The execution half is
+/// <b><c>RequiresService=Flowable</c>, and the reason is the FIXTURE, not the
+/// claim.</b> What this proves needs a browser and no engine — the comment above
+/// is unchanged and still right. What it needs to set up is a table the picker
+/// will offer, the picker lists only PUBLISHED tables, and publishing one deploys
+/// DMN to the engine. It shipped untraited, passed on a developer machine where
+/// Flowable happens to be running, and failed the first time CI ever executed it
+/// with <c>Connection refused (localhost:8080)</c> — slim stands up Postgres, NATS
+/// and Redis, and no engine.
+/// </para>
+/// <para>
+/// The bundle property is not lost from the merge gate by the move: the vitest
+/// case <c>business-rule-task-round-trip.test.js</c> drives bpmn-js directly and
+/// runs in slim. This is its end-to-end half, alongside
 /// <c>BusinessRuleTaskExecutionTests</c>.
 /// </para>
 /// </remarks>
+[Trait("RequiresService", "Flowable")]
 [Collection(AutoNateE2ECollection.Name)]
 public sealed class BusinessRuleTaskStudioTests : E2ETestBase
 {
