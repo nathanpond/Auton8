@@ -2604,13 +2604,45 @@ export async function loadReadonlyDiagram(viewerHandle, xml) {
 // animation frame so layout has settled — at import time the container often
 // hasn't reached its final size yet, which causes fit-viewport to size
 // against a stale (smaller) viewport and pin the diagram to the top-left.
+//
+// A FRAME LATER IS A DIFFERENT WORLD (#628). Deferring means this runs after
+// the caller returned, and by then the viewer may have been disposed or its
+// container torn out of the document — bpmn-js's Canvas.getSize() then reads
+// `clientWidth` off an undefined element and throws an unhandled page error,
+// which the E2E ConsoleErrorGuard fails the run on and a user sees as a
+// console exception on an ordinary tab change. It went unnoticed while
+// `/executions/:id` never refetched anything: without a second import there
+// was never a frame in flight to outlive its viewer. Giving that route the
+// detail-channel subscription made it reachable, so the guard lands with it.
+//
+// Nothing to fit is not an error, and it is not silence either — there is no
+// user-visible consequence to report, because the diagram this would have
+// fitted is gone.
 function fitAndCenter(instance) {
   const apply = () => {
-    const canvas = instance.get("canvas");
-    if (typeof canvas.resized === "function") {
-      canvas.resized();
+    let canvas;
+    try {
+      canvas = instance.get("canvas");
+    } catch {
+      // The viewer was destroyed; its injector no longer resolves anything.
+      return;
     }
-    canvas.zoom("fit-viewport", "auto");
+
+    if (!canvas) return;
+
+    // Detached or destroyed: a canvas whose container has left the document
+    // has no size to fit against, and asking for one is what throws.
+    const container = typeof canvas.getContainer === "function" ? canvas.getContainer() : null;
+    if (!container || container.isConnected === false) return;
+
+    try {
+      if (typeof canvas.resized === "function") {
+        canvas.resized();
+      }
+      canvas.zoom("fit-viewport", "auto");
+    } catch {
+      // Disposed between the checks above and here. Same non-event.
+    }
   };
   if (typeof requestAnimationFrame === "function") {
     requestAnimationFrame(apply);

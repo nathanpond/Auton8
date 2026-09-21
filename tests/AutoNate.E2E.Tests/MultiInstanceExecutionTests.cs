@@ -398,6 +398,226 @@ public sealed class MultiInstanceExecutionTests : E2ETestBase
         Assert.True(variables.ContainsKey("scores"));
     }
 
+    // ── #173's a11y half, which #628 found unasserted at every tier ──────────
+    //
+    // #173's AC reads: the expand control is keyboard-operable, the progress is
+    // announced to assistive technology, and the a11y ratchet is not weakened.
+    // The ratchet half held. The other two had no executable coverage anywhere:
+    // this class drove `APIRequest` only, and the SPA's vitest runs
+    // `environment: "node"` with no DOM to assert against. The completion
+    // evidence said "browser-answerable facts stayed for E2E", which implied
+    // they were covered here. They were covered nowhere.
+    //
+    // These three are here rather than in a slim spec because the row does not
+    // exist without a real multi-instance execution behind it. The arithmetic
+    // and the wording live in `multiInstanceProgress.ts` and ARE slim-tested;
+    // what only a browser answers is focus, the ARIA state, and the region.
+
+    /// <summary>
+    /// The expand control is reachable and operable by keyboard (#173, #628).
+    /// </summary>
+    /// <remarks>
+    /// Focus is driven by TABBING rather than by <c>FocusAsync()</c>, which
+    /// would prove the element can hold focus without proving a user can get to
+    /// it. The second Enter is the complement and is the half that matters: a
+    /// control that only ever opens satisfies every assertion above it while
+    /// being half a toggle.
+    /// </remarks>
+    [Fact]
+    public async Task The_multi_instance_expand_control_is_reachable_and_operable_by_keyboard()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var api = page.APIRequest;
+
+        var key = $"mik{Guid.NewGuid():N}"[..20];
+        await OpenCollapsedRowAsync(page, api, key);
+
+        // Located by `aria-controls` rather than by its label, because the label
+        // is "Hide instances" once it is open and a name-based locator would
+        // stop matching the element it just operated.
+        var opener = page.GetByRole(AriaRole.Button, new() { Name = "Show 3 instances" });
+        var panelId = await opener.GetAttributeAsync("aria-controls");
+        Assert.False(string.IsNullOrWhiteSpace(panelId),
+            "The expand control must name the region it controls.");
+
+        var toggle = page.Locator($"[aria-controls='{panelId}']");
+        var panel = page.Locator($"[id='{panelId}']");
+
+        Assert.Equal("false", await toggle.GetAttributeAsync("aria-expanded"));
+
+        var reached = false;
+        for (var i = 0; i < 150 && !reached; i++)
+        {
+            await page.Keyboard.PressAsync("Tab");
+            reached = await toggle.EvaluateAsync<bool>("el => el === document.activeElement");
+        }
+
+        Assert.True(reached,
+            "The multi-instance expand control must be reachable by keyboard alone.");
+
+        await page.Keyboard.PressAsync("Enter");
+
+        await Assertions.Expect(toggle).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(panel).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        // The panel carries the instances, so "expanded" is not just an attribute
+        // flip over an empty box.
+        await Assertions.Expect(panel).ToContainTextAsync("alpha", new() { Timeout = 15_000 });
+
+        await page.Keyboard.PressAsync("Enter");
+
+        await Assertions.Expect(toggle).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(panel).Not.ToBeVisibleAsync();
+    }
+
+    /// <summary>
+    /// The progress reaches assistive technology through a persistent polite
+    /// region (#173, #628).
+    /// </summary>
+    /// <remarks>
+    /// <para>Whether a screen reader speaks is not observable from Playwright —
+    /// the same reasoning <c>ExecutionFreshnessIndicatorTests</c> settled on for
+    /// #109. What IS observable, and what decides it, is that a region with a
+    /// polite live setting carries the whole sentence and SURVIVES the
+    /// interaction. A region torn down and recreated with its text already in it
+    /// is never announced, so the node is marked and required to still be there
+    /// afterwards; a remount loses the mark.</para>
+    /// <para><c>polite</c> rather than <c>assertive</c> is asserted deliberately:
+    /// interrupting whatever the user is reading to say a loop is 2 of 5 done
+    /// would be worse than saying nothing.</para>
+    /// </remarks>
+    [Fact]
+    public async Task The_multi_instance_progress_is_announced_by_a_persistent_polite_region()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var api = page.APIRequest;
+
+        var key = $"mia{Guid.NewGuid():N}"[..20];
+        await OpenCollapsedRowAsync(page, api, key);
+
+        var region = AnnouncementRegion(page);
+        await region.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 15_000 });
+
+        Assert.Equal("status", await region.GetAttributeAsync("role"));
+        Assert.Equal("polite", await region.GetAttributeAsync("aria-live"));
+
+        // The WHOLE sentence, not the bar's number. A screen-reader user gets no
+        // badge layout, so the parts have to be prose rather than adjacency.
+        Assert.Equal("Approve: 0 of 3 complete.", (await region.TextContentAsync())?.Trim());
+
+        await region.EvaluateAsync("el => el.setAttribute('data-e2e-live-region', 'kept')");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Show 3 instances" }).ClickAsync();
+
+        var kept = page.Locator("[data-e2e-live-region='kept']");
+        await Assertions.Expect(kept).ToHaveCountAsync(1);
+        Assert.Equal("Approve: 0 of 3 complete.", (await kept.TextContentAsync())?.Trim());
+    }
+
+    /// <summary>
+    /// The announcement changes IN PLACE when an instance completes (#173, #628).
+    /// </summary>
+    /// <remarks>
+    /// <para>The assertion that makes the previous one mean something. A live
+    /// region rendered already-populated on mount typically announces nothing —
+    /// assistive technology speaks a CHANGE — so "the progress is announced"
+    /// is only true if the sentence can change while the region stays put.</para>
+    /// <para>Waiting long enough cannot fake this. The node is marked before the
+    /// task is completed and the marked node is required to carry the new
+    /// sentence: a remounted row loses the mark and fails here, which is exactly
+    /// the shape that would look announced and be silent.</para>
+    /// <para>This is also why <c>ExecutionContent</c> now carries the detail
+    /// channel subscription itself. It lived in the LIST page, so
+    /// <c>/executions/:id</c> — a real route, linked from Called Workflows —
+    /// never refreshed at all: nothing could change, in the region or anywhere
+    /// else on it.</para>
+    /// </remarks>
+    [Fact]
+    public async Task The_announcement_changes_in_place_when_an_instance_completes()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var api = page.APIRequest;
+
+        var key = $"mic{Guid.NewGuid():N}"[..20];
+        var instance = await OpenCollapsedRowAsync(page, api, key);
+
+        var region = AnnouncementRegion(page);
+        await region.WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 15_000 });
+        Assert.Equal("Approve: 0 of 3 complete.", (await region.TextContentAsync())?.Trim());
+        await region.EvaluateAsync("el => el.setAttribute('data-e2e-live-region', 'kept')");
+
+        var tasks = await EventuallyTasksAsync(api, instance, t => t.Count == 3,
+            "three parallel instances");
+        var completed = await api.PostAsync($"/api/tasks/{tasks[0].Id}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(completed.Ok, await completed.TextAsync());
+
+        await Assertions.Expect(page.Locator("[data-e2e-live-region='kept']"))
+            .ToHaveTextAsync("Approve: 1 of 3 complete.", new() { Timeout = 60_000 });
+    }
+
+    // ---- a11y helpers --------------------------------------------------------
+
+    /// <summary>
+    /// The one visually hidden live region the collapsed row renders. Scoped to
+    /// the execution page so a status region belonging to the shell cannot
+    /// stand in for it.
+    /// </summary>
+    private static ILocator AnnouncementRegion(IPage page) =>
+        page.Locator(".workflow-execution-page [role='status'][aria-live='polite']")
+            .Filter(new() { HasText = "Approve:" });
+
+    /// <summary>
+    /// Publish a parallel three-item approval, start it, wait until the SERVER
+    /// has the collapsed row, then open the History tab.
+    /// </summary>
+    /// <remarks>
+    /// The history query has no refetch interval, so a tab mounted before the
+    /// projection caught up would show an empty history and stay that way. The
+    /// wait is on the API for that reason — it makes the browser half
+    /// deterministic instead of racing a poll.
+    /// </remarks>
+    private static async Task<string> OpenCollapsedRowAsync(IPage page, IAPIRequestContext api, string key)
+    {
+        await PublishAsync(api, key, UserTaskDiagram(key, sequential: false));
+        var instance = await StartAsync(api, key, ["alpha", "beta", "gamma"]);
+        await EventuallyTasksAsync(api, instance, t => t.Count == 3, "three parallel instances");
+
+        await EventuallyMultiInstanceRowAsync(api, instance,
+            progress => progress.GetProperty("total").GetInt32() == 3
+                     && progress.GetProperty("completed").GetInt32() == 0);
+
+        await page.GotoAsync($"/executions/{instance}");
+        await page.GetByRole(AriaRole.Tab, new() { Name = "History" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Show 3 instances" })
+            .WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+
+        return instance;
+    }
+
+    private static async Task EventuallyMultiInstanceRowAsync(
+        IAPIRequestContext api, string instance, Func<JsonElement, bool> until)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (DateTime.UtcNow < deadline)
+        {
+            var rows = await HistoryAsync(api, instance);
+            var row = rows.FirstOrDefault(r => r.GetProperty("activityId").GetString() == "t");
+            if (row.ValueKind == JsonValueKind.Object
+                && row.TryGetProperty("multiInstance", out var progress)
+                && progress.ValueKind == JsonValueKind.Object
+                && until(progress))
+            {
+                return;
+            }
+
+            await Task.Delay(500);
+        }
+
+        Assert.Fail($"The collapsed multi-instance row for '{instance}' never reached the expected progress.");
+    }
+
     private sealed record TaskRow(string Id, string Name, string? Assignee);
 
     private static async Task<List<TaskRow>> TasksAsync(IAPIRequestContext api, string instanceId)
