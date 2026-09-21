@@ -10583,3 +10583,72 @@ zero failures, 12–14s per run.
 **Pins:** FLOWABLE 267 → 268, SLIM_E2E 233 → 240, FULL_LOCAL 501 → 509.
 
 **Issue:** #78, filed #624
+
+## M5 verification fix pass, 2026-09-21
+
+`/n8-verify M5` filed ten `confirmed` bugs, nine of them `sev:high`. Seven are
+fixed here; one is blocked on the owner; two remain.
+
+**The pattern the whole pass turned on.** Six of the ten were **guards that exist
+and do not guard** — a scan whose shape stopped matching the code, an assertion
+that never executes, a mechanism nothing pins, an AC with no test at any tier, a
+property whose generator cannot produce the failing input. In three of the seven
+fixes the new test fires while *every pre-existing test stays green*. That
+contrast is the evidence, and it is the difference between "a guard exists" and
+"a guard guards".
+
+**#626 (Rule 1, security).** A synchronous step failure persisted
+`exception.Message` — the engine's entire HTTP body — and `/history` served it to
+any caller with `WorkflowExecution:View`. Fixed by persisting the sanitised
+sentence. The #350 guard missed it because it scanned only inside
+`FlowableRequestException` catch blocks for `.Message` reaching a *response*; this
+use was in a helper two hops away, exfiltrating through a different endpoint. The
+widening took **three attempts**, each caught by mutation: the first did not fire
+(the sink name sat outside a two-line window), the second flagged the comment
+explaining the fix, the third skips comments as the sibling guard already does.
+
+**#634 (Rule 1, production).** Flowable 404s the *runtime* endpoint for every
+completed instance, and the read-through read that as deletion — 403ing every
+gated route for non-super-admins and making the executions list flap, over 4,894
+rows. A terminal row is now served; deletion stays the poll's job, because the
+poll enumerates and so its absence is a fact rather than an inference.
+
+**#633, #635, #630 (Rule 1, dead guards).** The multi-pool refusal's engine check
+called a route that exists nowhere in `src/` and `continue`d past it; it now asks
+Flowable and asserts `total == 0`. The read-source guard could not see a live read
+behind an injected helper — which #604 had already walked through — nor
+`tasks.MapGet`, nor `IFlowableJobClient`; its vacuity floor had five routes of
+slack. `order=desc`, the sole mechanism bounding the history feed after #590,
+was asserted nowhere.
+
+**#627, #629 (Rule 1).** The multi-instance collapse read the cache without
+reading through, contradicting its own AC. A late poll page could un-complete a
+swept task, and the sweep's early break could then strand it.
+
+**#632 (Rule 2, security).** A deny naming a withdrawn tag failed closed in SQL and
+was silently ignored in memory — a deny that stops denying. Rather than invent a
+rule, both paths now share #577's: the evaluator throws the same exception the
+compiler throws, and the authorizer applies the same asymmetry. The known-tag set
+is read from `CoreEntityTypes` rather than copied, because a second
+hand-maintained list is how the paths drifted apart originally.
+
+**Two aiming errors of my own, both caught only by running the mutation.** The
+#626 guard widening did nothing on its first version. The #630 mutation hit the
+wrong call site — that string appears five times in `FlowableClient` — and
+reported green while proving nothing.
+
+**Blocked:** #631. The in-memory evaluator compares tag values
+case-INsensitively (pinned by a test) and SQL compares case-sensitively; measured,
+`'alice'='ALICE'` is `false` in Postgres. Every fix changes what existing grants
+mean — A widens allows in the list, B narrows single-instance reads into what
+reads as a lockout, C rewrites what an operator typed. A leak and a lockout point
+opposite ways, so the direction is the owner's, exactly as #574's wildcard was.
+
+**Not fixed:** #628 (#173's keyboard/announcement AC has no coverage at any tier)
+and #636 (one bus message starts a workflow twice; cause not established, and the
+tests are `RequiresService=Dapr`, which no pull request has ever run).
+
+**Pins:** SLIM_BACKEND 2951 → 2959, all eight slim — which is the point, since a
+guard that only runs full-local is how six of these survived.
+
+**Issues:** #626, #627, #629, #630, #632, #633, #634, #635
