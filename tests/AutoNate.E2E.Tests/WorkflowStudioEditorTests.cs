@@ -252,6 +252,103 @@ public sealed class WorkflowStudioEditorTests : E2ETestBase
             .ToHaveValueAsync(chosen, new() { Timeout = 15_000 });
     }
 
+    /// <summary>
+    /// E2E-036, the studio half — <b>INVERTED, pending #624</b> (#78).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This asserts a DEFECT, on purpose, and must be flipped when #624 is
+    /// fixed.</b> Inverted rather than deleted, the way this codebase handles a
+    /// refusal it intends to lift: deleting it would throw away the reproduction
+    /// and leave nothing to notice the fix.
+    /// </para>
+    /// <para>
+    /// What should happen: an author sets Behaviour = Form, Render mode = Form
+    /// Page and picks a published form; the choice reaches the stored diagram.
+    /// What happens: it does not. Measured — the <c>Task Name</c> typed into the
+    /// SAME modal in the SAME Apply persists, and both form attributes are gone,
+    /// with no error. A service task's <c>flowable:behaviorKey</c> round-trips
+    /// through this same diagram and save, so it is not flowable attributes in
+    /// general.
+    /// </para>
+    /// <para>
+    /// The three runtime surfaces are unaffected and are proven in
+    /// <c>WorkflowStudioTests</c>, which seeds the mode directly. This is the
+    /// authoring path alone.
+    /// </para>
+    /// <para>
+    /// <b>When #624 lands this test goes red.</b> That is the point. Flip the two
+    /// assertions at the end back to the values the author chose, restore the
+    /// summary above, and delete this paragraph.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_user_tasks_form_mode_is_currently_lost_on_save()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        var seeder = new ApiSeeder(page.APIRequest);
+        var form = await seeder.CreateFormAsync(
+            name: TestNames.Prefixed("mode-form"),
+            shortCode: $"e2e-{TestNames.ShortSlug()}",
+            siteAvailable: true);
+        await seeder.PublishFormAsync(form.Id);
+
+        var (id, name) = await SeedAsync(page, "edusertask", EditorDiagram);
+        await OpenAsync(page, name);
+
+        await ConfigureAsync(page, "approve", "User Task");
+
+        // A name in the same Apply, which is the control: it proves the panel
+        // applied and the save captured the modeller, so the missing attributes
+        // below are not "nothing happened".
+        await page.GetByLabel("Task Name", new() { Exact = true }).FillAsync("Approve it");
+        await page.GetByRole(AriaRole.Radio, new() { Name = "Form", Exact = true }).CheckAsync();
+        await page.GetByLabel("Render mode", new() { Exact = true })
+            .SelectOptionAsync(new SelectOptionValue { Value = "page" });
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Form", Exact = true })
+            .SelectOptionAsync(new SelectOptionValue { Value = form.ShortCode });
+
+        // The panel really is in the state the author set, immediately before
+        // Apply. Without this the test below could be about a control that never
+        // took the value.
+        await Assertions.Expect(page.GetByRole(AriaRole.Radio, new() { Name = "Form", Exact = true }))
+            .ToBeCheckedAsync(new() { Timeout = 5_000 });
+        await Assertions.Expect(page.GetByLabel("Render mode", new() { Exact = true }))
+            .ToHaveValueAsync("page", new() { Timeout = 5_000 });
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Combobox, new() { Name = "Form", Exact = true }))
+            .ToHaveValueAsync(form.ShortCode, new() { Timeout = 5_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog))
+            .ToHaveCountAsync(0, new() { Timeout = 15_000 });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+
+        // THE CONTROL. The save happened and carried this Apply's other field.
+        Assert.True(
+            await WaitForAsync(async () =>
+            {
+                var stored = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+                if (!stored.Ok) return false;
+                using var document = JsonDocument.Parse(await stored.TextAsync());
+                return (document.RootElement.GetProperty("bpmnXml").GetString() ?? "")
+                    .Contains("Approve it", StringComparison.Ordinal);
+            }),
+            "Even the task NAME did not persist, so this test is no longer measuring "
+                + "#624 -- something broke the save itself.");
+
+        // THE DEFECT, pinned. Flip this to Assert.Contains when #624 is fixed.
+        var after = await page.APIRequest.GetAsync($"/api/workflows/{id}");
+        Assert.True(after.Ok, await after.TextAsync());
+        using var stored2 = JsonDocument.Parse(await after.TextAsync());
+        var xml = stored2.RootElement.GetProperty("bpmnXml").GetString() ?? "";
+
+        Assert.DoesNotContain(form.ShortCode, xml, StringComparison.Ordinal);
+        Assert.DoesNotContain("userFormMode", xml, StringComparison.Ordinal);
+    }
+
     /// <summary>Right-click, Configure -- the way an author reaches a panel.</summary>
     /// <remarks>
     /// Selecting an element opens nothing, so a spec that clicked would sit on a
