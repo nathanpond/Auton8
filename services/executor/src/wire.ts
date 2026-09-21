@@ -36,6 +36,21 @@ export interface CodeNodeRequest {
 export interface ScriptTaskResult {
   result: unknown;
   mutations: Record<string, unknown>;
+  // #231. Variables to write with `setVariableLocal` on the nearest ENCLOSING
+  // SCOPE execution, rather than on the process instance.
+  //
+  // A separate bag rather than a scope tag on each entry in `mutations`, so a
+  // script task written before this existed sends the same payload it always
+  // did and the host applies it the same way. "Defaults to today's behaviour"
+  // is then a field being absent, not a default anyone has to remember.
+  //
+  // MEASURED, and the obvious reading is wrong: parallel branches inside a
+  // sequential multi-instance body are SIBLINGS under that body's execution, so
+  // writing local state on the script task's own execution gives every branch
+  // its own copy and an accumulating join never accumulates. The nearest
+  // enclosing scope is shared across one iteration's branches and distinct
+  // across iterations, which is the property #219 needed.
+  localMutations?: Record<string, unknown>;
 }
 
 export interface CodeNodeReply {

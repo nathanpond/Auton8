@@ -85,12 +85,17 @@ import sys as _an8_sys
 
 _an8_vars = __json.loads(__variables_json)
 _an8_mutations = {}
+_an8_local_mutations = {}
 del __variables_json
 
 class _An8Variables:
     def get(self, name):
         # Reads see writes made earlier in this same script, or a set followed
-        # by a get would return the stale snapshot.
+        # by a get would return the stale snapshot. #231: local first, so a
+        # local value shadows the instance-scoped one of the same name, as the
+        # engine's own lookup does.
+        if name in _an8_local_mutations:
+            return _an8_local_mutations[name]
         if name in _an8_mutations:
             return _an8_mutations[name]
         return _an8_vars.get(name)
@@ -99,6 +104,14 @@ class _An8Variables:
         if not isinstance(name, str) or not name:
             raise ValueError("variables.set requires a non-empty variable name.")
         _an8_mutations[name] = value
+        return value
+
+    def set_local(self, name, value):
+        # #231. Scoped to the enclosing block: inside a repeated step each run
+        # gets its own copy, while parallel branches of the SAME run share it.
+        if not isinstance(name, str) or not name:
+            raise ValueError("variables.set_local requires a non-empty variable name.")
+        _an8_local_mutations[name] = value
         return value
 
 variables = _An8Variables()
@@ -161,7 +174,7 @@ def __script():
 ${body}
 
 __result = __script()
-__json.dumps({"result": __result, "mutations": _an8_mutations}, default=str)
+__json.dumps({"result": __result, "mutations": _an8_mutations, "localMutations": _an8_local_mutations}, default=str)
 `;
   }
 

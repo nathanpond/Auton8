@@ -2519,6 +2519,30 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + $"""flowable:behaviorKey="{ProvenBehaviorKey}" """
                 + """flowable:async="true"/>""")),
 
+            // #231 DELIBERATELY LEAVES THIS ON THE SPLIT SHAPE, and says so here
+            // because the AC requires the choice to be visible rather than
+            // implied.
+            //
+            // Ev_1 has ONE incoming flow, so the expansion keeps #218's single
+            // routing script and this cell goes on certifying exactly what it
+            // always did: the element routes a token to the branch the script
+            // chose. That claim did not change, and neither did the three pins.
+            //
+            // Moving it to the accumulating shape would BREAK the observer rather
+            // than strengthen it. `variable-written` requires the writing activity
+            // to be exactly one hop from Ev_1; N accumulators put a generated node
+            // on every inbound edge, so a correct implementation would read as a
+            // failure and the fix would be to loosen the one-hop rule -- weakening
+            // the strictest thing about this oracle to accommodate a shape it was
+            // never asked to prove.
+            //
+            // What proves the accumulating shape instead:
+            // `ComplexGatewayExecutionTests` -- out-of-order arrivals firing the
+            // join ONCE (measured: arrived='in2,in1', fired=True, route='fj'), a
+            // later arrival absorbed without the script being consulted again, and
+            // a withheld branch leaving the join waiting. Those are claims about
+            // accumulation over time, which a single-token oracle cell cannot make
+            // whatever shape it carries.
             "Complex Gateway" => Wrap("",
                 """<startEvent id="Start_1"/>"""
                 + """<complexGateway id="Ev_1" name="Choose" scriptFormat="javascript" autonate:runAs="workflowAuthor">"""

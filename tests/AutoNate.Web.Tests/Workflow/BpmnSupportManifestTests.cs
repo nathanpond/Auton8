@@ -771,7 +771,7 @@ public sealed class BpmnSupportManifestTests
             // conditioned on the result. Spike #155 is not contradicted — it
             // proved no extension point reaches the element, which is why this is
             // done by expansion rather than by a behaviour.
-            ["Complex Gateway"] = (BpmnSupportManifest.EngineExecutes, "#218: re-probed against 8.0.0 -- it evaluates conditions, honours default, and picks a branch. Not inert; the routing is done by expansion."),
+            ["Complex Gateway"] = (BpmnSupportManifest.EngineExecutes, "#218: re-probed against 8.0.0 -- it evaluates conditions, honours default, and picks a branch. Not inert; the routing is done by expansion. #231: the expansion now has TWO shapes -- one routing script for a gateway with one incoming flow, and one accumulator per incoming flow for a gateway with more, which is what lets a join see which branches have arrived and fire once."),
 
             // #159. rows.json says "executes". It does not.
             //

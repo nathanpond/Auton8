@@ -25,7 +25,8 @@ export async function runScriptTask(
     const context = await isolate.createContext();
     await context.global.set("global", context.global.derefInto());
 
-    await context.evalClosure(`globalThis.__state = { variables: JSON.parse($0), mutations: {} };`, [
+    await context.evalClosure(
+      `globalThis.__state = { variables: JSON.parse($0), mutations: {}, localMutations: {} };`, [
       JSON.stringify(request.variables ?? {}),
     ]);
 
@@ -38,16 +39,24 @@ ${registry.buildFacadeSource()}
   const __result = (function () {
 ${request.code}
   })();
-  return JSON.stringify({ result: __result === undefined ? null : __result, mutations: __state.mutations });
+  return JSON.stringify({
+    result: __result === undefined ? null : __result,
+    mutations: __state.mutations,
+    localMutations: __state.localMutations
+  });
 })()`;
 
     const script = await isolate.compileScript(wrapped);
     const rawJson = await script.run(context, { timeout: request.timeoutMs });
     if (typeof rawJson !== "string") {
-      return { result: null, mutations: {} };
+      return { result: null, mutations: {}, localMutations: {} };
     }
     const parsed = JSON.parse(rawJson) as ScriptTaskResult;
-    return { result: parsed.result ?? null, mutations: parsed.mutations ?? {} };
+    return {
+      result: parsed.result ?? null,
+      mutations: parsed.mutations ?? {},
+      localMutations: parsed.localMutations ?? {}
+    };
   } finally {
     isolate.dispose();
   }

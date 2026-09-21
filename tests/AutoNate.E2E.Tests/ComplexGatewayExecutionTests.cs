@@ -167,6 +167,152 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    // ── #231: the accumulating join ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Branches_arriving_out_of_order_fire_the_join_exactly_once()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cgj{Guid.NewGuid():N}"[..20];
+        // "Fire when both have arrived." The script sees the arrivals; deciding
+        // WHETHER to fire is its job, firing ONCE is the engine's.
+        await PublishAsync(api, key, JoinDiagram(key,
+            "return variables.get('autonateArrived').length >= 2 ? 'fj' : 'autonateWait';"));
+
+        var instance = await StartAsync(api, key);
+
+        var open = await EventuallyAsync(api, instance,
+            n => n.Contains("Branch one") && n.Contains("Branch two"), "both branches to open");
+        Assert.Equal(2, open.Count);
+
+        // OUT OF ORDER on purpose: branch two first. A join that only works when
+        // branches arrive in diagram order is not a join.
+        await CompleteByNameAsync(api, instance, "Branch two");
+
+        // One arrival is not enough, and this is the assertion that says the join
+        // WAITED rather than firing early. Without it, "fires on the first
+        // arrival" passes every remaining check in this test.
+        await Task.Delay(3_000);
+        var afterOne = await TaskNamesAsync(api, instance);
+        Assert.DoesNotContain("Joined", afterOne);
+        Assert.Contains("Branch one", afterOne);
+
+        await CompleteByNameAsync(api, instance, "Branch one");
+
+        var joined = await EventuallyAsync(api, instance,
+            n => n.Contains("Joined"), "the join to fire once both arrived");
+
+        // EXACTLY ONE. #219 measured the naive shape producing
+        // ['Enough arrived', 'Enough arrived'] -- two live tokens down one path
+        // from one join -- and a Contains check cannot tell that from this.
+        Assert.Single(joined, n => n == "Joined");
+    }
+
+    [Fact]
+    public async Task A_branch_that_never_arrives_leaves_the_join_waiting()
+    {
+        // The owner's decision, asserted rather than assumed: no timeout, the
+        // join waits, and that is documented behaviour. Without this row,
+        // "fires once both arrived" is equally satisfied by a join that fires on
+        // a timer nobody asked for.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cgw{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, JoinDiagram(key,
+            "return variables.get('autonateArrived').length >= 2 ? 'fj' : 'autonateWait';"));
+
+        var instance = await StartAsync(api, key);
+        await EventuallyAsync(api, instance,
+            n => n.Contains("Branch one") && n.Contains("Branch two"), "both branches to open");
+
+        await CompleteByNameAsync(api, instance, "Branch one");
+
+        // Long enough that a timeout, had one been built, would have fired.
+        await Task.Delay(10_000);
+
+        var names = await TaskNamesAsync(api, instance);
+        Assert.DoesNotContain("Joined", names);
+        Assert.Contains("Branch two", names);
+    }
+
+    [Fact]
+    public async Task A_join_whose_script_always_fires_still_fires_only_once()
+    {
+        // The absorbing half, isolated. This script says "fire" on EVERY arrival,
+        // which is the author mistake the generated fired flag exists to contain:
+        // Auton8 manages the state it invented, the author decides the policy.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"cga{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, JoinDiagram(key, "return 'fj';"));
+
+        var instance = await StartAsync(api, key);
+        await EventuallyAsync(api, instance,
+            n => n.Contains("Branch one") && n.Contains("Branch two"), "both branches to open");
+
+        await CompleteByNameAsync(api, instance, "Branch one");
+        var afterFirst = await EventuallyAsync(api, instance,
+            n => n.Contains("Joined"), "the join to fire on the first arrival");
+        Assert.Single(afterFirst, n => n == "Joined");
+
+        await CompleteByNameAsync(api, instance, "Branch two");
+        await Task.Delay(5_000);
+
+        // Still ONE. The second arrival was absorbed by the generated end event
+        // without the routing script being consulted again.
+        var afterSecond = await TaskNamesAsync(api, instance);
+        Assert.Single(afterSecond, n => n == "Joined");
+    }
+
+    private static async Task CompleteByNameAsync(
+        IAPIRequestContext api, string instanceId, string taskName)
+    {
+        var response = await api.GetAsync($"/api/executions/{instanceId}/tasks");
+        Assert.True(response.Ok, await response.TextAsync());
+        using var document = JsonDocument.Parse(await response.TextAsync());
+
+        var task = document.RootElement.EnumerateArray()
+            .FirstOrDefault(e => e.GetProperty("name").GetString() == taskName);
+        Assert.True(task.ValueKind == JsonValueKind.Object, $"No open task named '{taskName}'.");
+
+        var completed = await api.PostAsync(
+            $"/api/tasks/{task.GetProperty("id").GetString()}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(completed.Ok, $"Completing '{taskName}' failed: {await completed.TextAsync()}");
+    }
+
+    /// <summary>Two branches converging on one complex gateway (#231).</summary>
+    private static string JoinDiagram(string key, string script) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{key}}" name="Joiner" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="split" />
+            <bpmn:parallelGateway id="split" />
+            <bpmn:sequenceFlow id="fs1" sourceRef="split" targetRef="t1" />
+            <bpmn:sequenceFlow id="fs2" sourceRef="split" targetRef="t2" />
+            <bpmn:userTask id="t1" name="Branch one" />
+            <bpmn:userTask id="t2" name="Branch two" />
+            <bpmn:sequenceFlow id="in1" sourceRef="t1" targetRef="cg" />
+            <bpmn:sequenceFlow id="in2" sourceRef="t2" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Enough" scriptFormat="javascript"
+                                 autonate:runAs="workflowAuthor">
+              <bpmn:script>{{script}}</bpmn:script>
+            </bpmn:complexGateway>
+            <bpmn:sequenceFlow id="fj" sourceRef="cg" targetRef="tj" />
+            <bpmn:userTask id="tj" name="Joined" />
+          </bpmn:process>
+          {{Di(key, "s", "split", "t1", "t2", "cg", "tj")}}
+        </bpmn:definitions>
+        """;
+
     private static string Diagram(string key, string script) => $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -355,10 +501,55 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         var key = $"cgr{Guid.NewGuid():N}"[..20];
         await PublishAsync(api, key, Diagram(key, "return 'nowhere';"));
 
+        var startedAt = DateTime.UtcNow;
         var instance = await StartAsync(api, key);
 
         var attempts = await RetriesObservedAsync(instance);
         await EventuallyDeadLetteredAsync(instance);
+        var elapsed = DateTime.UtcNow - startedAt;
+
+        // #237, owned by #231: the half of the criterion that says the job was
+        // RETRIED, asserted at last -- and by elapsed time, which is what this
+        // file's own history says is the only honest signal left.
+        //
+        // The engine's counters provably cannot answer it. Flowable creates the
+        // async job with `retries` already at the executor's budget, before the
+        // first attempt, so the number is 3 whether or not a retry happens; three
+        // successive assertions were each vacuous for that reason. And the
+        // attempt COUNT is not in history either -- measured just now: the
+        // failing node has ZERO historic-activity-instance rows, because Flowable
+        // rolls back the failing transaction including its own history write,
+        // while `s` and `f0` have one row each. There is nothing to count.
+        //
+        // So: a control, measured in the same run against the same engine, is
+        // what one attempt costs right now. Without it the floor below is a
+        // number someone liked.
+        var controlKey = $"cgc{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, controlKey, Diagram(controlKey, "return 'fa';"));
+        var controlStartedAt = DateTime.UtcNow;
+        var controlInstance = await StartAsync(api, controlKey);
+        await EventuallyAsync(api, controlInstance,
+            n => n.Contains("Route A"), "the control's routing script to run once");
+        var oneAttempt = DateTime.UtcNow - controlStartedAt;
+
+        // Asserted FIRST, so that an engine slow enough to invalidate the floor
+        // fails loudly here rather than letting the assertion below pass for the
+        // wrong reason. That inversion is the whole lesson of the three vacuous
+        // versions this replaces.
+        Assert.True(oneAttempt < TimeSpan.FromSeconds(10),
+            $"The control routed in {oneAttempt.TotalSeconds:F1}s. One attempt is supposed to cost " +
+            "about a second; if it now costs ten, the floor below no longer separates a retried job " +
+            "from a terminal one and this assertion is measuring nothing.");
+
+        // MEASURED: 38.6s from start to dead-letter for the retried job, against
+        // ~1s for the control. The floor sits an order of magnitude above one
+        // attempt and a quarter of the observed retried time, so it separates
+        // them without going red when the engine is busy.
+        Assert.True(elapsed > TimeSpan.FromSeconds(10),
+            $"The routing job dead-lettered {elapsed.TotalSeconds:F1}s after the process started, " +
+            $"against {oneAttempt.TotalSeconds:F1}s for one successful attempt. That is a single " +
+            "terminal failure, not a retried one -- so the bound #218's criterion claims is being " +
+            "honoured by a job that never retried at all.");
 
         // #292. The anti-vacuity check, as its own assertion with its own message.
         //

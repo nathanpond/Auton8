@@ -3,6 +3,7 @@ package com.autonate.flowableevents;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +17,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,6 +25,7 @@ import org.flowable.bpmn.model.ExtensionAttribute;
 import org.flowable.bpmn.model.ScriptTask;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
+import org.flowable.engine.impl.persistence.entity.ExecutionEntity;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -336,12 +339,284 @@ class ExecutorScriptTaskActivityBehaviorTests {
         return newExecution("p-1", "e-1", "cg__autonateRoute", Map.of(), element);
     }
 
+    /**
+     * #231. A generated ACCUMULATOR: one node per incoming flow, carrying the
+     * flow id it stands for and the gateway it came from, on a branch execution
+     * under a shared scope.
+     */
+    private static DelegateExecution accumulatorExecution(
+        String allowedRoutes,
+        String arrivingFlow,
+        DelegateExecution scope,
+        Map<String, Object> branchLocals
+    ) {
+        var element = new ScriptTask();
+        element.setId("cg__acc__" + arrivingFlow);
+        for (var pair : List.of(
+            List.of("autonateAllowedRoutes", allowedRoutes),
+            List.of("autonateArrivingFlow", arrivingFlow),
+            List.of("autonateExpandedFrom", "cg"))) {
+            var attribute = new ExtensionAttribute(pair.get(0));
+            attribute.setNamespace("http://flowable.org/bpmn");
+            attribute.setValue(pair.get(1));
+            element.addAttribute(attribute);
+        }
+        return newScopedExecution(
+            "branch-" + arrivingFlow, false, scope, new LinkedHashMap<>(), branchLocals, element);
+    }
+
+    @Test
+    void eachArrivalIsRecordedOnTheSharedScopeAndHandedToTheScript() throws Exception {
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("scope-1", true, null, new LinkedHashMap<>(), scopeLocals);
+
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(
+                captured, 200, "{\"result\":\"autonateWait\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'autonateWait';", "route");
+
+            behavior.runInSandbox(accumulatorExecution("f_out", "f1", scope, new LinkedHashMap<>()));
+            behavior.runInSandbox(accumulatorExecution("f_out", "f2", scope, new LinkedHashMap<>()));
+
+            // Arrivals accumulate on the scope the branches SHARE -- that is the
+            // whole mechanism. On a branch execution each would see only itself.
+            assertEquals("f1,f2", scopeLocals.get("autonateArrived__cg"));
+
+            // ...and the second call handed the script both, so an author can
+            // decide "have enough arrived" at all.
+            var arrived = Mapper.readTree(captured.get()).get("variables").get("autonateArrived");
+            assertEquals(2, arrived.size());
+            assertEquals("f1", arrived.get(0).asText());
+            assertEquals("f2", arrived.get(1).asText());
+        }
+    }
+
+    @Test
+    void oneBranchArrivingTwiceIsCountedOnce() throws Exception {
+        // A join waiting for "three of three" must not be satisfied by one branch
+        // arriving three times. No assertion about the happy path would see this.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("scope-1", true, null, new LinkedHashMap<>(), scopeLocals);
+
+        try (var fixture = HttpFixture.start(
+                new AtomicReference<>(), 200, "{\"result\":\"autonateWait\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'autonateWait';", "route");
+
+            behavior.runInSandbox(accumulatorExecution("f_out", "f1", scope, new LinkedHashMap<>()));
+            behavior.runInSandbox(accumulatorExecution("f_out", "f1", scope, new LinkedHashMap<>()));
+
+            assertEquals("f1", scopeLocals.get("autonateArrived__cg"));
+        }
+    }
+
+    @Test
+    void aWaitAnswerIsAcceptedOnlyOnAnAccumulatingJoin() throws Exception {
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("scope-1", true, null, new LinkedHashMap<>(), scopeLocals);
+
+        try (var fixture = HttpFixture.start(
+                new AtomicReference<>(), 200, "{\"result\":\"autonateWait\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'autonateWait';", "route");
+
+            // Allowed here: the join is still waiting, which is not a failure.
+            behavior.runInSandbox(accumulatorExecution("f_out", "f1", scope, new LinkedHashMap<>()));
+            assertNull(scopeLocals.get("autonateFired__cg"), "waiting must not fire the join");
+
+            // THE COMPLEMENT: the same answer from a SPLIT-only gateway is still
+            // the #218 contract breach it always was. Without this row, "accept
+            // autonateWait" would quietly accept it everywhere and a routing
+            // script's typo would look like a deliberate wait.
+            var plain = routedExecution("f_out");
+            var failure = assertThrows(
+                org.flowable.common.engine.api.FlowableException.class,
+                () -> behavior.runInSandbox(plain));
+            assertTrue(failure.getMessage().contains("not one of its routes"));
+        }
+    }
+
+    @Test
+    void aJoinThatHasFiredAbsorbsTheNextArrivalWithoutCallingTheScript() throws Exception {
+        // #219's measured defect: "after 'Branch two' tasks: ['Enough arrived',
+        // 'Enough arrived']" -- two live tokens down one path from one join.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("scope-1", true, null, new LinkedHashMap<>(), scopeLocals);
+
+        try (var fixture = HttpFixture.start(
+                new AtomicReference<>(), 200, "{\"result\":\"f_out\",\"mutations\":{}}")) {
+            // The fixture already counts; `start` resets it.
+            var calls = HttpFixture.calls;
+            var behavior = newBehavior(fixture.baseUrl(), "return 'f_out';", "route");
+
+            var first = accumulatorExecution("f_out", "f1", scope, new LinkedHashMap<>());
+            behavior.runInSandbox(first);
+            assertEquals(Boolean.TRUE, scopeLocals.get("autonateFired__cg"), "the first route fires the join");
+            assertEquals("f_out", first.getVariable("route"));
+            assertEquals(1, calls.get());
+
+            var second = accumulatorExecution("f_out", "f2", scope, new LinkedHashMap<>());
+            behavior.runInSandbox(second);
+
+            // Absorbed: routed to the wait branch, and the author's script was
+            // NOT consulted -- it already said yes once, and asking again invites
+            // a second yes.
+            assertEquals("autonateWait", second.getVariable("route"));
+            assertEquals(1, calls.get(), "an already-fired join must not call the routing script again");
+        }
+    }
+
     private static ExecutorScriptTaskActivityBehavior newBehavior(
         URI baseUrl, String script, String resultVariable
     ) {
         return new ExecutorScriptTaskActivityBehavior(
             "ScriptTask_1", script, "javascript", resultVariable, null, false,
             HttpClient.newHttpClient(), Mapper, propertiesFor(baseUrl));
+    }
+
+    /**
+     * #231. A fake that can tell a scope from a concurrent branch.
+     *
+     * <p>The {@link DelegateExecution} proxy above cannot: it is not an
+     * {@link ExecutionEntity}, so {@code isScope()} and {@code getParent()} are
+     * not reachable and every walk trivially stops where it started. A test
+     * written against it would pass whether the scoped write landed on the right
+     * execution or the wrong one, which is precisely the claim under test.
+     *
+     * <p>{@code locals} is separate from {@code variables} so the test can assert
+     * WHERE a value landed rather than only that it exists somewhere.
+     */
+    private static DelegateExecution newScopedExecution(
+        String executionId,
+        boolean isScope,
+        DelegateExecution parent,
+        Map<String, Object> variables,
+        Map<String, Object> locals
+    ) {
+        return newScopedExecution(executionId, isScope, parent, variables, locals, null);
+    }
+
+    private static DelegateExecution newScopedExecution(
+        String executionId,
+        boolean isScope,
+        DelegateExecution parent,
+        Map<String, Object> variables,
+        Map<String, Object> locals,
+        Object currentFlowElement
+    ) {
+        return (DelegateExecution) Proxy.newProxyInstance(
+            ExecutionEntity.class.getClassLoader(),
+            new Class<?>[] { ExecutionEntity.class },
+            (proxy, method, args) -> switch (method.getName()) {
+                case "getProcessInstanceId" -> "p-1";
+                case "getId" -> executionId;
+                case "getCurrentActivityId" -> "ScriptTask_1";
+                case "getCurrentFlowElement" -> currentFlowElement;
+                case "isScope" -> isScope;
+                case "getParent" -> parent;
+                case "getVariables" -> new HashMap<>(variables);
+                case "getVariable" -> variables.get((String) args[0]);
+                case "setVariable" -> {
+                    variables.put((String) args[0], args[1]);
+                    yield null;
+                }
+                case "getVariableLocal" -> locals.get((String) args[0]);
+                case "setVariableLocal" -> {
+                    locals.put((String) args[0], args[1]);
+                    yield null;
+                }
+                default -> {
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class) yield false;
+                    if (returnType == int.class) yield 0;
+                    if (returnType == long.class) yield 0L;
+                    if (returnType.isPrimitive()) yield 0;
+                    yield null;
+                }
+            });
+    }
+
+    @Test
+    void aScopedWriteLandsOnTheEnclosingScopeAndNotOnTheBranch() throws Exception {
+        // The tree #231 measured: a concurrent branch under a scope execution.
+        // Parallel branches of one gateway are SIBLINGS under that scope, so a
+        // write that landed on the branch would be private to it and an
+        // accumulating join would never accumulate.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var branchLocals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+
+        var scope = newScopedExecution("scope-1", true, null, shared, scopeLocals);
+        var branch = newScopedExecution("branch-1", false, scope, shared, branchLocals);
+
+        var captured = new AtomicReference<String>();
+        var response = "{\"result\":null,\"mutations\":{},\"localMutations\":{\"arrived\":[\"f1\"]}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(fixture.baseUrl(), "variables.setLocal('arrived', ['f1']);", null);
+
+            behavior.runInSandbox(branch);
+
+            // Asserted as its rendered form, not as a List: `toJavaValue` keeps a
+            // JSON array as a JsonNode, which is pre-existing behaviour shared
+            // with `mutations` and not this change's to alter. WHERE the value
+            // landed is the claim under test.
+            assertNotNull(scopeLocals.get("arrived"),
+                "a scoped write must land on the enclosing scope, which the branches share");
+            assertEquals("[\"f1\"]", String.valueOf(scopeLocals.get("arrived")));
+            // THE COMPLEMENT, and the half that actually fails a wrong
+            // implementation: landing on the branch too would still satisfy the
+            // assertion above while making the value invisible to the sibling.
+            assertTrue(branchLocals.isEmpty(),
+                "a scoped write must NOT land on the branch execution; a sibling branch could not see it");
+            assertTrue(shared.isEmpty(),
+                "a scoped write must not fall back to the process-wide variables");
+        }
+    }
+
+    @Test
+    void aScopedWriteOnAScopeExecutionStaysThere() throws Exception {
+        // The degenerate case: no subprocess, so the execution reached IS a
+        // scope. Without this row, "always walk to the parent" passes the test
+        // above and writes past the process instance on an ordinary process.
+        var locals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("proc-1", true, null, shared, locals);
+
+        var captured = new AtomicReference<String>();
+        var response = "{\"result\":null,\"mutations\":{},\"localMutations\":{\"n\":1}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(fixture.baseUrl(), "variables.setLocal('n', 1);", null);
+
+            behavior.runInSandbox(scope);
+
+            assertEquals(1, locals.get("n"));
+        }
+    }
+
+    @Test
+    void anOrdinaryMutationIsStillProcessWideAlongsideAScopedOne() throws Exception {
+        // The two bags must not be conflated in either direction. A reply
+        // carrying both must put each where it belongs, or "scoped" becomes a
+        // label rather than a behaviour.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var branchLocals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+
+        var scope = newScopedExecution("scope-1", true, null, shared, scopeLocals);
+        var branch = newScopedExecution("branch-1", false, scope, shared, branchLocals);
+
+        var captured = new AtomicReference<String>();
+        var response =
+            "{\"result\":null,\"mutations\":{\"wide\":true},\"localMutations\":{\"narrow\":true}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(
+                fixture.baseUrl(), "variables.set('wide', true);", null);
+
+            behavior.runInSandbox(branch);
+
+            assertEquals(Boolean.TRUE, shared.get("wide"));
+            assertEquals(Boolean.TRUE, scopeLocals.get("narrow"));
+            assertTrue(!shared.containsKey("narrow"), "a scoped write must not become process-wide");
+            assertTrue(!scopeLocals.containsKey("wide"), "a process-wide write must not become scoped");
+        }
     }
 
     private static DelegateExecution newExecution(

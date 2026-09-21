@@ -19,6 +19,7 @@ import org.flowable.bpmn.model.BaseElement;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.flowable.engine.impl.bpmn.behavior.ScriptTaskActivityBehavior;
+import org.flowable.engine.impl.persistence.entity.ExecutionEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +62,26 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
 
     // The variable the routes arrive in on the sandbox side.
     private static final String RoutesVariable = "autonateRoutes";
+
+    // #231. Written onto each generated ACCUMULATOR by the complex-gateway
+    // expansion: the id of the one incoming flow that node stands for. One node
+    // per incoming flow is how a branch's identity is known at all -- #219 chose
+    // it over a field extension precisely because it costs nothing extra.
+    private static final String ArrivingFlowAttribute = "autonateArrivingFlow";
+
+    // The gateway a generated node was expanded from. Shared with #218.
+    private static final String ExpandedFromAttribute = "autonateExpandedFrom";
+
+    // The arrivals so far, as the script sees them: a JSON array of flow ids.
+    private static final String ArrivedVariable = "autonateArrived";
+
+    // #231. The answer a routing script gives when NOT ENOUGH HAS ARRIVED yet.
+    // It has to be a nameable value rather than null, because it travels back
+    // through `resultVariable` and is what the generated exclusive gateway routes
+    // on -- and because `enforceRouteContract` must be able to tell "the author
+    // said wait" from "the author returned nothing by mistake", which is the
+    // whole point of #218's contract.
+    private static final String WaitRoute = "autonateWait";
 
     private final transient HttpClient httpClient;
     private final transient ObjectMapper objectMapper;
@@ -154,6 +175,32 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         var endpointUri = callbackBase.resolve(
             normaliseBasePath(callbackBase) + "api/workflow-script-tasks/execute");
 
+        // #231. The accumulating join, and the half that is Auton8's to manage:
+        // the author's script decides WHETHER to fire; generated state guarantees
+        // it fires ONCE.
+        var arrivingFlow = readGeneratedAttribute(execution, ArrivingFlowAttribute);
+        if (arrivingFlow != null && !arrivingFlow.isBlank()) {
+            var gatewayId = readGeneratedAttribute(execution, ExpandedFromAttribute);
+            var scope = enclosingScope(execution);
+
+            if (Boolean.TRUE.equals(scope.getVariableLocal(firedKey(gatewayId)))) {
+                // A LATER ARRIVAL ON AN ALREADY-FIRED JOIN. The author's script is
+                // not called at all: it already said yes once, and asking again
+                // invites a second yes. #219 measured exactly that defect --
+                // "after 'Branch two'  tasks: ['Enough arrived', 'Enough arrived']"
+                // -- two live tokens down one path from one join.
+                //
+                // The token still has to go somewhere, so it takes the wait route
+                // to the generated end event that absorbs it.
+                if (resultVariable != null && !resultVariable.isBlank()) {
+                    execution.setVariable(resultVariable, WaitRoute);
+                }
+                return;
+            }
+
+            recordArrival(scope, gatewayId, arrivingFlow.trim());
+        }
+
         var response = post(endpointUri, buildRequestBody(execution, correlationId), sharedSecret, correlationId);
         applyResult(execution, response, activityId, correlationId);
     }
@@ -180,6 +227,19 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
             var array = objectMapper.createArrayNode();
             routes.forEach(array::add);
             variables.set(RoutesVariable, array);
+        }
+
+        // #231. The arrivals, handed over the same way and for the same reason:
+        // a routing script deciding "have enough branches arrived" needs to see
+        // which ones have, and putting that in a variable rather than generating
+        // code into the script body keeps execution semantics out of Auton8 --
+        // the line epic #40 draws, and the one #218 already drew for `routes`.
+        var arrivingFlow = readGeneratedAttribute(execution, ArrivingFlowAttribute);
+        if (arrivingFlow != null && !arrivingFlow.isBlank()) {
+            var gatewayId = readGeneratedAttribute(execution, ExpandedFromAttribute);
+            var array = objectMapper.createArrayNode();
+            arrivals(enclosingScope(execution), gatewayId).forEach(array::add);
+            variables.set(ArrivedVariable, array);
         }
 
         body.set("variables", variables);
@@ -273,6 +333,17 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
             }
         }
 
+        // #231. Variables the script wrote with `variables.setLocal`, applied to
+        // the nearest ENCLOSING SCOPE rather than to the process instance.
+        var localMutations = parsed.get("localMutations");
+        if (localMutations != null && localMutations.isObject()) {
+            var scope = enclosingScope(execution);
+            for (Iterator<Map.Entry<String, JsonNode>> it = localMutations.fields(); it.hasNext(); ) {
+                var mutation = it.next();
+                scope.setVariableLocal(mutation.getKey(), toJavaValue(mutation.getValue()));
+            }
+        }
+
         // `resultVariable` is what the studio already writes onto script tasks,
         // so it keeps working unchanged.
         if (resultVariable != null && !resultVariable.isBlank()) {
@@ -281,6 +352,42 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
             enforceRouteContract(execution, value, activityId, correlationId);
             execution.setVariable(resultVariable, value);
         }
+    }
+
+    /**
+     * #231. The execution a block-scoped write belongs on.
+     *
+     * <p><strong>Not this execution.</strong> That is the obvious reading of
+     * "setVariableLocal" and it breaks the feature it was added for. Measured on
+     * Flowable 8.0.0, parallel branches inside a sequential multi-instance body
+     * form this tree:
+     *
+     * <pre>
+     *   process instance
+     *   `- MI container      (activityId=sub)   nrOfInstances
+     *      `- MI body/iteration (activityId=sub) item, loopCounter   &lt;- the scope
+     *         |- branch A    (activityId=ta)
+     *         `- branch B    (activityId=tb)
+     * </pre>
+     *
+     * <p>The branches are <em>siblings</em> under the body execution. A write on
+     * the script task's own execution would therefore give branch A and branch B
+     * each a private copy, and an accumulating join would never accumulate. The
+     * nearest enclosing scope is shared by one iteration's branches and distinct
+     * between iterations, which is exactly the property spike #219 needed when it
+     * found {@code trail = '"x";"y";"z";'} leaking across iterations.
+     *
+     * <p>With no subprocess the walk degenerates correctly: a branch's parent is
+     * then the process instance execution, which is itself a scope.
+     */
+    private DelegateExecution enclosingScope(DelegateExecution execution) {
+        var candidate = execution;
+        while (candidate instanceof ExecutionEntity entity
+            && !entity.isScope()
+            && entity.getParent() != null) {
+            candidate = entity.getParent();
+        }
+        return candidate;
     }
 
     /**
@@ -306,14 +413,94 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         if (routes.isEmpty()) return;
 
         var chosen = value == null ? null : String.valueOf(value);
-        if (chosen != null && routes.contains(chosen)) return;
+
+        // #231. On an accumulating join, "not enough has arrived yet" is a
+        // legitimate answer and must not fail the activity. It is a NAMED value,
+        // not null: a script that returns nothing by mistake is still the defect
+        // #218's contract exists to catch, and collapsing the two would make
+        // every typo look like a deliberate wait.
+        var arrivingFlow = readGeneratedAttribute(execution, ArrivingFlowAttribute);
+        var accumulating = arrivingFlow != null && !arrivingFlow.isBlank();
+        if (accumulating && WaitRoute.equals(chosen)) return;
+
+        if (chosen != null && routes.contains(chosen)) {
+            // FIRING. Recorded on the scope the branches share, so the next
+            // arrival is absorbed rather than firing the join a second time.
+            if (accumulating) {
+                var gatewayId = readGeneratedAttribute(execution, ExpandedFromAttribute);
+                enclosingScope(execution).setVariableLocal(firedKey(gatewayId), Boolean.TRUE);
+            }
+            return;
+        }
 
         throw new FlowableException(
             "Routing script for '" + activityId + "' returned " +
             (value == null ? "null" : "'" + chosen + "'") +
             ", which is not one of its routes " + routes +
             ". A routing script must return one of the route ids it was given" +
+            (readGeneratedAttribute(execution, ArrivingFlowAttribute) == null ? "" :
+                ", or '" + WaitRoute + "' to wait for more branches to arrive") +
             " (correlationId " + correlationId + ").");
+    }
+
+    /** A {@code flowable:} attribute the expansion wrote onto a generated node. */
+    private static String readGeneratedAttribute(DelegateExecution execution, String localName) {
+        var flowElement = execution.getCurrentFlowElement();
+        if (!(flowElement instanceof BaseElement baseElement)) return null;
+        return readFlowableAttribute(baseElement, localName);
+    }
+
+    /**
+     * #231. Where a join's "already fired" flag lives.
+     *
+     * <p>Keyed by GATEWAY, because a process may hold more than one, and scoped
+     * local to the enclosing scope, because a join inside a repeated step must
+     * start each pass unfired. Keying by gateway alone was measured insufficient
+     * in #219 -- every iteration shares the gateway id, so an instance-level flag
+     * left the second pass already satisfied.
+     */
+    private static String firedKey(String gatewayId) {
+        return "autonateFired__" + (gatewayId == null ? "" : gatewayId);
+    }
+
+    private static String arrivedKey(String gatewayId) {
+        return "autonateArrived__" + (gatewayId == null ? "" : gatewayId);
+    }
+
+    /**
+     * The flows that have arrived at this join so far, in arrival order.
+     *
+     * <p>Held as a delimited string rather than a {@code List}: a Flowable
+     * variable holding a collection is a serialized-object variable, which is
+     * a different persistence path and a different failure mode. The script
+     * never sees this encoding -- it is handed a JSON array.
+     */
+    private static List<String> arrivals(DelegateExecution scope, String gatewayId) {
+        var raw = scope.getVariableLocal(arrivedKey(gatewayId));
+        var arrived = new ArrayList<String>();
+        if (raw == null) return arrived;
+
+        for (var part : String.valueOf(raw).split(",")) {
+            var trimmed = part.trim();
+            if (!trimmed.isEmpty()) arrived.add(trimmed);
+        }
+        return arrived;
+    }
+
+    /**
+     * Records that one branch reached the join.
+     *
+     * <p>Idempotent per flow id. A branch that somehow runs its accumulator twice
+     * must not count twice, or a join waiting for "three of three" could fire on
+     * one branch arriving three times -- which no assertion about the happy path
+     * would ever notice.
+     */
+    private static void recordArrival(DelegateExecution scope, String gatewayId, String flowId) {
+        var arrived = arrivals(scope, gatewayId);
+        if (arrived.contains(flowId)) return;
+
+        arrived.add(flowId);
+        scope.setVariableLocal(arrivedKey(gatewayId), String.join(",", arrived));
     }
 
     /** The route ids the expansion wrote onto this script task, if any. */

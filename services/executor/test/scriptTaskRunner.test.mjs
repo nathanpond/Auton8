@@ -139,7 +139,11 @@ test("__state is reachable but exposes nothing the façade does not", async () =
   const out = await runScriptTask(
     request(`return Object.keys(__state).sort().join(",");`, { a: 1 })
   );
-  assert.equal(out.result, "mutations,variables");
+  // #231 added `localMutations`. It is listed here on purpose rather than the
+  // assertion being loosened: this guard exists to force the question when
+  // `__state` grows, and the answer is that `variables.setLocal` exposes it,
+  // exactly as `variables.set` exposes `mutations`.
+  assert.equal(out.result, "localMutations,mutations,variables");
 });
 
 test("a runaway script is stopped by the timeout rather than hanging the executor", async () => {
@@ -175,12 +179,20 @@ test("a newly registered operation becomes reachable without touching the transp
 test("the host API surface is describable as tool definitions", async () => {
   const tools = defaultHostApi().toToolDefinitions();
   const names = tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ["variables_get", "variables_set"]);
+  assert.deepEqual(names, ["variables_get", "variables_set", "variables_setLocal"]);
 
   const set = tools.find((t) => t.name === "variables_set");
   assert.equal(set.parameters.type, "object");
   assert.deepEqual(set.parameters.required, ["name", "value"]);
   assert.ok(set.description.length > 0);
+
+  // #231. Same contract, and a description that says what the scope MEANS --
+  // an author choosing between set and setLocal gets no help from a tool list
+  // where both read "writes a process variable".
+  const setLocal = tools.find((t) => t.name === "variables_setLocal");
+  assert.equal(setLocal.parameters.type, "object");
+  assert.deepEqual(setLocal.parameters.required, ["name", "value"]);
+  assert.match(setLocal.description, /each run gets its own copy/i);
 });
 
 test("tool definitions are generated from the registry, not written twice", async () => {

@@ -23,7 +23,11 @@ public sealed record WorkflowScriptTaskRequest(
 // `resultVariable`.
 public sealed record WorkflowScriptTaskResponse(
     object? Result,
-    IReadOnlyDictionary<string, object?> Mutations);
+    IReadOnlyDictionary<string, object?> Mutations,
+    // #231. Applied by the extension with setVariableLocal on the nearest
+    // enclosing scope. Serialised as `localMutations`; absent when the script
+    // wrote none, which is every script task written before this existed.
+    IReadOnlyDictionary<string, object?>? LocalMutations = null);
 
 public static class WorkflowScriptTaskEndpoints
 {
@@ -63,7 +67,8 @@ public static class WorkflowScriptTaskEndpoints
                     request.Variables ?? new Dictionary<string, object?>(StringComparer.Ordinal),
                     cancellationToken);
 
-                return Results.Ok(new WorkflowScriptTaskResponse(result.Result, result.Mutations));
+                return Results.Ok(new WorkflowScriptTaskResponse(
+                    result.Result, result.Mutations, result.LocalMutations));
             }
             catch (ScriptExecutionException e)
             {
