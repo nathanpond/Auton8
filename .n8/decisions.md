@@ -10500,3 +10500,36 @@ is arguably correct and because re-projecting breaks saved work silently.
 Nothing implemented, nothing pushed. Labelled `blocked` + `needs-owner-action`.
 
 **Issue:** #327
+## Four owner decisions, 2026-09-21
+
+**1. Merges are mine to run.** A Bash permission rule for `gh pr merge` was added
+after the auto-mode classifier refused it as "Merge Without Review". #613 merged at
+`8067de0`. The rule is a standing grant, not a one-off, so green PRs land from here
+without stopping at the gate — which is what makes the `/n8-exec` loop autonomous
+rather than half-autonomous.
+
+**2. #327 — leave the query layer raw.** Map the five read surfaces and the reverse
+direction; the four AQL projection entities keep storing the engine's own id, and
+that boundary gets documented and guarded rather than discovered. Mapping and
+re-projecting would break any saved AQL query filtering on a generated id with no
+warning to whoever wrote it; mapping going-forward-only would leave the column
+meaning two different things depending on when the row was written. The execution
+view and the assistant show the author's id; the query layer is where you reach for
+the engine's own questions, and a raw id is arguably correct there.
+
+**3. #169 — `Pool / Participant` becomes `engine: "executes"`.** Epic #40's call,
+asked 2026-09-19. A pool *is* a deployed definition once the story ships, so
+`executes` is true and `annotation` would leave the manifest's own `reason` false.
+It also makes the element discoverable: the supported panel filters on
+`engine !== "annotation"`, so under the old classification an author could not find
+a feature that works. Costs a declared departure in `BpmnSupportManifestTests` plus
+the `coming-soon` → `supported` flip #107 left undone. #170 and #171 unblocked
+behind it.
+
+**4. Finish #78, then verify M5.** Coverage first, then `/n8-verify` over the
+milestone's closed stories. Verification of roughly fifteen stories has been
+deferred since the run began; this is the second deliberate acceptance of that risk,
+recorded because a defect in shared machinery compounds into everything built after
+it.
+
+**Issues:** #327, #169, #170, #171, #78
