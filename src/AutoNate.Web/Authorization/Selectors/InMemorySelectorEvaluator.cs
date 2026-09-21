@@ -76,8 +76,39 @@ public sealed class InMemorySelectorEvaluator
         }
     }
 
+    /// <summary>
+    /// Tags this evaluator is willing to answer for, or null to answer for any
+    /// (#632).
+    /// </summary>
+    /// <remarks>
+    /// When set, a selector naming a tag outside it throws rather than quietly
+    /// evaluating to false -- see <see cref="EvalTag"/>.
+    /// </remarks>
+    public IReadOnlySet<string>? KnownTags { get; init; }
+
     private bool EvalTag(TagExpr tag, IReadOnlyDictionary<string, string?> facts)
     {
+        // #632. AN UNRECOGNISED TAG IS NOT "NO MATCH".
+        //
+        // #576 and #581 withdrew `tenant`, `candidateuser` and `candidategroup`
+        // from the compilers, and #577 made an uncompilable DENY fail the request
+        // closed. But `EfCorePermissionGrantStore.CreateAsync` only PARSES a
+        // selector, so a stored deny naming a withdrawn tag still exists -- and on
+        // this path it used to resolve to `actual = null`, compare false, and
+        // therefore NOT DENY. The SQL path failed closed while this one granted
+        // access: a deny that stops denying.
+        //
+        // Throwing the same exception the compiler throws puts both paths on
+        // #577's rule, which the Authorizer applies asymmetrically: a deny fails
+        // closed, an allow is skipped with a warning.
+        if (KnownTags is not null && !KnownTags.Contains(tag.Tag))
+        {
+            throw new SelectorCompilationException(
+                $"Selector names '{tag.Tag}', which is not a tag this kind advertises. "
+                + "A grant naming an unknown tag cannot be evaluated, and a DENY that "
+                + "cannot be evaluated must not be treated as 'does not match'.");
+        }
+
         var actual = facts.TryGetValue(tag.Tag, out var v) ? v : null;
 
         if (tag.Nested is null)

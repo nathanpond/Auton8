@@ -184,12 +184,13 @@ public sealed class ExecutionAuthorizationFromCacheTests
             authorizer, Principal(Actor), Actions.View, instanceId, CancellationToken.None);
     }
 
-    private static async Task GrantAsync(AutoNateWebApplicationFactory factory, string selector)
+    private static async Task GrantAsync(
+        AutoNateWebApplicationFactory factory, string selector, string effect = "allow")
     {
         using var scope = factory.Services.CreateScope();
         var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
         await grants.CreateAsync(new CreatePermissionGrantInput(
-            EntityKinds.User, Actor.ToString(), Actions.View, selector, "allow", 0), Actor);
+            EntityKinds.User, Actor.ToString(), Actions.View, selector, effect, 0), Actor);
     }
 
     /// <summary>
@@ -298,6 +299,75 @@ public sealed class ExecutionAuthorizationFromCacheTests
 
             Assert.Null(gone);
         }
+    }
+
+    /// <summary>
+    /// A deny naming a withdrawn tag refuses, in memory as it does in SQL (#632).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #576 withdrew <c>tenant</c> and #581 withdrew the candidate pair from the
+    /// compilers, and #577 made an uncompilable DENY fail the request closed. But
+    /// <c>EfCorePermissionGrantStore.CreateAsync</c> only PARSES a selector, so a
+    /// stored deny naming a withdrawn tag survives — and on this path it resolved
+    /// to <c>actual = null</c>, compared false, and therefore did not deny.
+    /// </para>
+    /// <para>
+    /// The same grant failed closed in the list and GRANTED ACCESS on a single
+    /// read. A deny that stops denying is the direction that matters, and it was
+    /// introduced by this cluster's own removals.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_deny_naming_a_withdrawn_tag_still_refuses()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            extraConfig: Enforcing);
+        _ = factory.CreateClient();
+
+        await SeedCachedInstanceAsync(factory, "inst-632", startedBy: "alice");
+
+        // Engine unreachable, as the siblings above do: the seed ages the row past
+        // ReadThroughFreshness, so without this the live read returns null, #634
+        // concludes the ACTIVE run was deleted, and the refusal below would be
+        // about a missing row rather than about the deny.
+        factory.FlowableStub.GetProcessInstanceThrows =
+            new HttpRequestException("connection refused");
+
+        // A broad allow the actor really holds...
+        await GrantAsync(factory, "/workflowexecution/*");
+        // ...and a deny naming a tag this kind no longer advertises.
+        await GrantAsync(factory, "/workflowexecution/*[tenant=acme]", effect: "deny");
+
+        Assert.False(await AuthorizeAsync(factory, "inst-632"));
+    }
+
+    /// <summary>
+    /// The complement: a deny naming a LIVE tag still behaves normally (#632).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "refuse whenever a deny exists" passes the test above while
+    /// making every deny unconditional — which would refuse far more than it
+    /// should and look like the fix working.
+    /// </remarks>
+    [Fact]
+    public async Task A_deny_naming_a_live_tag_that_does_not_match_still_allows()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            extraConfig: Enforcing);
+        _ = factory.CreateClient();
+
+        await SeedCachedInstanceAsync(factory, "inst-632-ok", startedBy: "alice");
+
+        factory.FlowableStub.GetProcessInstanceThrows =
+            new HttpRequestException("connection refused");
+
+        await GrantAsync(factory, "/workflowexecution/*");
+        // `startedby` IS advertised, and this run was started by alice, so the
+        // deny does not match and must not fire.
+        await GrantAsync(factory, "/workflowexecution/*[startedby=bob]", effect: "deny");
+
+        Assert.True(await AuthorizeAsync(factory, "inst-632-ok"));
     }
 
     private static async Task SeedCachedInstanceAsync(
