@@ -19,6 +19,7 @@ import org.flowable.bpmn.model.BaseElement;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.flowable.engine.impl.bpmn.behavior.ScriptTaskActivityBehavior;
+import org.flowable.engine.impl.persistence.entity.ExecutionEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -273,6 +274,17 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
             }
         }
 
+        // #231. Variables the script wrote with `variables.setLocal`, applied to
+        // the nearest ENCLOSING SCOPE rather than to the process instance.
+        var localMutations = parsed.get("localMutations");
+        if (localMutations != null && localMutations.isObject()) {
+            var scope = enclosingScope(execution);
+            for (Iterator<Map.Entry<String, JsonNode>> it = localMutations.fields(); it.hasNext(); ) {
+                var mutation = it.next();
+                scope.setVariableLocal(mutation.getKey(), toJavaValue(mutation.getValue()));
+            }
+        }
+
         // `resultVariable` is what the studio already writes onto script tasks,
         // so it keeps working unchanged.
         if (resultVariable != null && !resultVariable.isBlank()) {
@@ -281,6 +293,42 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
             enforceRouteContract(execution, value, activityId, correlationId);
             execution.setVariable(resultVariable, value);
         }
+    }
+
+    /**
+     * #231. The execution a block-scoped write belongs on.
+     *
+     * <p><strong>Not this execution.</strong> That is the obvious reading of
+     * "setVariableLocal" and it breaks the feature it was added for. Measured on
+     * Flowable 8.0.0, parallel branches inside a sequential multi-instance body
+     * form this tree:
+     *
+     * <pre>
+     *   process instance
+     *   `- MI container      (activityId=sub)   nrOfInstances
+     *      `- MI body/iteration (activityId=sub) item, loopCounter   &lt;- the scope
+     *         |- branch A    (activityId=ta)
+     *         `- branch B    (activityId=tb)
+     * </pre>
+     *
+     * <p>The branches are <em>siblings</em> under the body execution. A write on
+     * the script task's own execution would therefore give branch A and branch B
+     * each a private copy, and an accumulating join would never accumulate. The
+     * nearest enclosing scope is shared by one iteration's branches and distinct
+     * between iterations, which is exactly the property spike #219 needed when it
+     * found {@code trail = '"x";"y";"z";'} leaking across iterations.
+     *
+     * <p>With no subprocess the walk degenerates correctly: a branch's parent is
+     * then the process instance execution, which is itself a scope.
+     */
+    private DelegateExecution enclosingScope(DelegateExecution execution) {
+        var candidate = execution;
+        while (candidate instanceof ExecutionEntity entity
+            && !entity.isScope()
+            && entity.getParent() != null) {
+            candidate = entity.getParent();
+        }
+        return candidate;
     }
 
     /**

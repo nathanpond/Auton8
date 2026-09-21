@@ -44,7 +44,13 @@ public sealed record class CodeNodeReply(
 // variables the script wrote, to be applied to the execution by the caller.
 public sealed record class ScriptTaskResult(
     object? Result,
-    IReadOnlyDictionary<string, object?> Mutations);
+    IReadOnlyDictionary<string, object?> Mutations,
+    // #231. Variables the script wrote with `variables.setLocal`, to be applied
+    // with setVariableLocal on the nearest ENCLOSING SCOPE execution rather than
+    // on the process instance. Optional: a reply from an executor that predates
+    // this field, or from a script that never called setLocal, simply omits it
+    // and behaves exactly as before.
+    IReadOnlyDictionary<string, object?>? LocalMutations = null);
 
 internal static class CodeNodeWireFormat
 {
