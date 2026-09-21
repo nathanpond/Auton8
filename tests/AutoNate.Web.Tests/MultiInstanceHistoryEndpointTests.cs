@@ -127,6 +127,142 @@ public sealed class MultiInstanceHistoryEndpointTests
         Assert.Equal(3, instances!.Count);
     }
 
+    /// <summary>
+    /// One recorded failure across three instances reads as ONE (#173).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The complement is the whole test.</b> Asserting that a failure shows up
+    /// at all passes against a counter that reports every instance as failed —
+    /// which is exactly what counting <c>IsErrored</c> over the instances did,
+    /// because the history enrichment stamps that flag on every row sharing the
+    /// activity id. Three instances, one error, and the honest answer is 1.
+    /// </para>
+    /// <para>
+    /// <c>workflow_execution_errors</c> is keyed by <c>(process, activity)</c> and
+    /// carries no execution or task id, so WHICH instance failed is not knowable
+    /// here. The count of recorded failures is, and it is clamped to the instances
+    /// that exist so a retried instance cannot report more failures than there are
+    /// instances to fail.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task One_failure_across_three_instances_is_counted_once()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-7)),
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+
+        await SeedErrorsAsync(factory, "review", count: 1);
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        var progress = one.GetProperty("multiInstance");
+
+        Assert.Equal(1, progress.GetProperty("failed").GetInt32());
+        Assert.Equal(5, progress.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// Retries of one instance cannot outnumber the instances (#173).
+    /// </summary>
+    /// <remarks>
+    /// Four recorded failures over three instances is an ordinary retry history,
+    /// not four failed instances. Without the clamp the row reads "4 failed" of a
+    /// declared total of 5 — a number the reader cannot reconcile with anything.
+    /// </remarks>
+    [Fact]
+    public async Task Four_failures_across_three_instances_cannot_exceed_the_instance_count()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-7)),
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+
+        await SeedErrorsAsync(factory, "review", count: 4);
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        Assert.Equal(3, one.GetProperty("multiInstance").GetProperty("failed").GetInt32());
+    }
+
+    /// <summary>
+    /// A clean multi-instance activity reports no failures (#173).
+    /// </summary>
+    /// <remarks>
+    /// The complement of the two above: a count sourced from the error rows must
+    /// read zero when there are none, or "failed" becomes decoration.
+    /// </remarks>
+    [Fact]
+    public async Task No_errors_means_no_failures_counted()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        Assert.Equal(0, one.GetProperty("multiInstance").GetProperty("failed").GetInt32());
+    }
+
+    private static async Task SeedErrorsAsync(
+        AutoNateWebApplicationFactory factory, string activityId, int count)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+
+        for (var i = 0; i < count; i++)
+        {
+            db.WorkflowExecutionErrors.Add(new WorkflowExecutionError
+            {
+                Id = Guid.NewGuid(),
+                ProcessInstanceId = Instance,
+                ActivityId = activityId,
+                ActivityName = "Review",
+                ErrorMessage = $"boom {i}",
+                RawFlowableEventType = "job.execution.failed",
+                OccurredAtUtc = DateTime.UtcNow.AddMinutes(-5 + i)
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     private static WorkflowExecutionHistoryEvent Row(
         string activityId, string name, DateTimeOffset startedAt, DateTimeOffset? endedAt) => new()
     {

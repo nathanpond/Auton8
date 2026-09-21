@@ -1635,11 +1635,20 @@ public static class ExecutionEndpoints
                     Completed: completed,
                     Active: active,
 
-                    // Counted from the instances rather than from the collapsed
-                    // row's own IsErrored, which is already an aggregate over the
-                    // activity id -- using it would report "1 failed" for any
-                    // number of failures.
-                    Failed: instances.Count(e => e.IsErrored == true),
+                    // MEASURED, and the first version was wrong. Counting
+                    // `IsErrored` over the instances reported THREE failed for one
+                    // recorded failure across three instances, because the history
+                    // enrichment above stamps that flag on every row sharing the
+                    // activity id -- it is an aggregate wearing a per-row name.
+                    //
+                    // `workflow_execution_errors` is keyed by (process, activity)
+                    // and carries no execution or task id, so WHICH instance failed
+                    // is not knowable here and no arrangement of this data will make
+                    // it so. What is knowable is how many failures were recorded,
+                    // which is `ErrorCount` -- clamped to the instances that exist,
+                    // because a retried instance would otherwise report more
+                    // failures than there are instances to fail.
+                    Failed: Math.Min(instances.Max(e => e.ErrorCount) ?? 0, instances.Count),
                     IsSequential: marker.IsSequential)
             });
         }
