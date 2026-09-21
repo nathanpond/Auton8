@@ -210,6 +210,7 @@ public static class ExecutionEndpoints
         executions.MapGet("/{processInstanceId}/history", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IFlowableReadThrough readThrough,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
@@ -306,7 +307,7 @@ public static class ExecutionEndpoints
                 // path that could not show it. Measured: the collapse never ran,
                 // and an unconditional `throw` placed inside it was never reached.
                 return Results.Ok(await CollapseMultiInstanceAsync(
-                    history, processInstanceId, dbFactory, flowable, cancellationToken));
+                    history, processInstanceId, dbFactory, flowable, readThrough, cancellationToken));
             }
 
             var enriched = history
@@ -396,7 +397,7 @@ public static class ExecutionEndpoints
             // lazy-loading criterion exists to avoid, and it cannot be paid in
             // the SPA.
             var collapsed = await CollapseMultiInstanceAsync(
-                sorted, processInstanceId, dbFactory, flowable, cancellationToken);
+                sorted, processInstanceId, dbFactory, flowable, readThrough, cancellationToken);
 
             return Results.Ok(collapsed);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
@@ -410,6 +411,7 @@ public static class ExecutionEndpoints
             string processInstanceId,
             string activityId,
             IFlowableClient flowable,
+            IFlowableReadThrough readThrough,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
@@ -439,7 +441,7 @@ public static class ExecutionEndpoints
             // which maps every execution route -- would have blinded the guard to
             // whatever lands in it next.
             var itemVariableName = await ResolveElementVariableAsync(
-                processInstanceId, activityId, dbFactory, cancellationToken);
+                processInstanceId, activityId, dbFactory, readThrough, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(itemVariableName))
             {
@@ -1624,14 +1626,17 @@ public static class ExecutionEndpoints
         string processInstanceId,
         string activityId,
         IDbContextFactory<AutoNateDbContext> dbFactory,
+        IFlowableReadThrough readThrough,
         CancellationToken cancellationToken)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-
-        var processDefinitionId = await db.WorkflowExecutionCache.AsNoTracking()
-            .Where(e => e.FlowableInstanceId == processInstanceId)
-            .Select(e => e.ProcessDefinitionId)
-            .FirstOrDefaultAsync(cancellationToken);
+        // #627. THROUGH the read-through, not a bare cache query. The AC says in
+        // terms "where the cache cannot answer, it reads through", and a bare
+        // FirstOrDefaultAsync returns null on a miss -- so opening a history in
+        // the window before the projection lands a row, or after an eviction,
+        // silently dropped the element values.
+        var processDefinitionId =
+            (await readThrough.GetInstanceAsync(processInstanceId, cancellationToken))
+            ?.ProcessDefinitionId;
 
         if (string.IsNullOrWhiteSpace(processDefinitionId)) return null;
 
@@ -1649,6 +1654,7 @@ public static class ExecutionEndpoints
         string processInstanceId,
         IDbContextFactory<AutoNateDbContext> dbFactory,
         IFlowableClient flowable,
+        IFlowableReadThrough readThrough,
         CancellationToken cancellationToken)
     {
         if (rows.Count == 0) return rows;
@@ -1657,11 +1663,13 @@ public static class ExecutionEndpoints
         // engine call: the rows carry no definition id, and #609 populates that
         // row the moment an instance starts. A miss simply means no collapsing --
         // several rows where there should be one is a worse view, not a wrong one.
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var processDefinitionId = await db.WorkflowExecutionCache.AsNoTracking()
-            .Where(e => e.FlowableInstanceId == processInstanceId)
-            .Select(e => e.ProcessDefinitionId)
-            .FirstOrDefaultAsync(cancellationToken);
+        // #627. THROUGH the read-through. A bare cache query returned null on a
+        // miss and the method then returned `rows` uncollapsed -- so a 50-instance
+        // activity rendered as 50 rows with no progress and no error, which is
+        // exactly the pre-story behaviour #173 exists to remove, arriving silently.
+        var processDefinitionId =
+            (await readThrough.GetInstanceAsync(processInstanceId, cancellationToken))
+            ?.ProcessDefinitionId;
 
         if (string.IsNullOrWhiteSpace(processDefinitionId)) return rows;
 
@@ -1819,10 +1827,28 @@ public static class ExecutionEndpoints
         var owner = await cacheRefresher.OwnerOfAsync(taskId, cancellationToken);
         if (owner is { } found)
         {
+            // #626. `described`, NOT `exception.Message`.
+            //
+            // `FlowableRequestException.Message` is built by
+            // `FlowableClient.EnsureSuccessAsync` as "Flowable could not {op}.
+            // HTTP {code} {reason}. {rawResponseBody}" -- the engine's ENTIRE
+            // HTTP body, which `NoEndpointReturnsARawEngineMessageTests`
+            // documents as carrying a JDBC URL with its password, internal
+            // hostnames, container ids and filesystem paths.
+            //
+            // This row is served to any caller with WorkflowExecution:View by
+            // GET /api/executions/{id}/history. Persisting the raw body here
+            // routed around #350 through a different endpoint: the guard scans
+            // for `.Message` used INSIDE a FlowableRequestException catch block,
+            // and this use is in a helper two hops from the catch.
+            //
+            // The engine's own words are not lost -- they are in the LogWarning
+            // above, where an operator with server access can read them and a
+            // caller cannot.
             await errorRecorder.RecordSynchronousFailureAsync(
                 found.InstanceId,
                 found.ActivityId,
-                $"Completing this step failed: {exception.Message}",
+                described,
                 exception.StackTrace,
                 cancellationToken);
         }

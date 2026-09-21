@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Collections.Concurrent;
+using AutoNate.Web.Authorization.EntityTypes;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence;
@@ -56,7 +58,13 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
 
         var outboundEdges = await ActorOutboundUserEdges
             .LoadAsync(_dbFactory, actorId.Value, cancellationToken);
-        var evaluator = new InMemorySelectorEvaluator(actorId.Value, outboundEdges);
+        // #632. The tags this kind ADVERTISES, so a selector naming a withdrawn
+        // one throws instead of quietly evaluating to false -- which on a DENY
+        // meant the deny did not fire.
+        var evaluator = new InMemorySelectorEvaluator(actorId.Value, outboundEdges)
+        {
+            KnownTags = AdvertisedTags.For(Kind)
+        };
         var facts = BuildFacts(task);
 
         return await authorizer.IsAuthorizedAsync(
@@ -147,7 +155,13 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
 
         var outboundEdges = await ActorOutboundUserEdges
             .LoadAsync(_dbFactory, actorId.Value, cancellationToken);
-        var evaluator = new InMemorySelectorEvaluator(actorId.Value, outboundEdges);
+        // #632. The tags this kind ADVERTISES, so a selector naming a withdrawn
+        // one throws instead of quietly evaluating to false -- which on a DENY
+        // meant the deny did not fire.
+        var evaluator = new InMemorySelectorEvaluator(actorId.Value, outboundEdges)
+        {
+            KnownTags = AdvertisedTags.For(Kind)
+        };
         var facts = BuildFacts(instance);
 
         return await authorizer.IsAuthorizedAsync(
@@ -254,4 +268,22 @@ public sealed class WorkflowMessageInstanceAuthorizer : IInstanceAuthorizer
         string action,
         string targetId,
         CancellationToken cancellationToken) => Task.FromResult(false);
+}
+
+/// <summary>The tags a kind advertises, from the registry (#632).</summary>
+/// <remarks>
+/// Read from <see cref="CoreEntityTypes"/> rather than copied, so withdrawing a
+/// tag there -- as #576 did for <c>tenant</c> and #581 for the candidate pair --
+/// narrows the in-memory evaluator in the same commit. A second hand-maintained
+/// list is how the SQL and in-memory paths drifted apart in the first place.
+/// </remarks>
+internal static class AdvertisedTags
+{
+    private static readonly ConcurrentDictionary<string, IReadOnlySet<string>> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static IReadOnlySet<string> For(string kind) => Cache.GetOrAdd(kind, static k =>
+        CoreEntityTypes.All
+            .Where(t => string.Equals(t.Kind, k, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(t => t.Tags)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase));
 }

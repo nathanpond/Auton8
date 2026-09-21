@@ -467,7 +467,38 @@ public sealed class Authorizer : IAuthorizer
         var matchedAllow = false;
         foreach (var grant in grants)
         {
-            if (!selectorMatcher(grant.Ast))
+            bool matches;
+            try
+            {
+                matches = selectorMatcher(grant.Ast);
+            }
+            catch (SelectorCompilationException exception) when (grant.Effect == AuthEffect.Deny)
+            {
+                // #632/#577. A DENY WE CANNOT EVALUATE FAILS THE REQUEST CLOSED.
+                //
+                // The same rule ComputeFilterAsync already applies to the query
+                // path, now applied to the single-instance path -- which is where
+                // it was missing, because that path never compiles anything and so
+                // #577's "uncompilable" framing did not reach it.
+                _log.LogError(
+                    exception,
+                    "Deny grant '{Selector}' for {Kind} could not be evaluated; refusing the request. {Reason}",
+                    grant.SelectorString, kind, exception.Message);
+                return false;
+            }
+            catch (SelectorCompilationException exception)
+            {
+                // An ALLOW is skipped, as it always has been: an allow that cannot
+                // be evaluated grants nothing, and failing the request closed on it
+                // would turn one bad grant into an outage for everyone.
+                _log.LogWarning(
+                    exception,
+                    "Allow grant '{Selector}' for {Kind} could not be evaluated; skipping it. {Reason}",
+                    grant.SelectorString, kind, exception.Message);
+                continue;
+            }
+
+            if (!matches)
             {
                 continue;
             }

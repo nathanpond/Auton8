@@ -74,14 +74,35 @@ public sealed class MultiPoolPublishRefusalTests : E2ETestBase
         // cannot make: the defect was a definition deployed where Auton8 could
         // never see it, so "refused" and "refused after deploying" have to be
         // told apart at the engine.
+        // #633. ASKED OF FLOWABLE DIRECTLY, and that is the correction.
+        //
+        // This block used to GET `/api/workflows/flowable/definitions`, a route
+        // that exists nowhere in src/ -- so every iteration 404'd, hit
+        // `if (!defs.Ok) continue;`, and asserted nothing. The comment above
+        // called it "the half a response check cannot make" while making no
+        // check at all. A skip-on-missing-route is silence dressed as tolerance.
+        //
+        // The Auton8-side check below cannot replace it either: a model row
+        // staying unpublished cannot distinguish "nothing was deployed" from
+        // "something was deployed and Auton8 forgot about it", which is exactly
+        // the orphan this story exists to prevent.
+        using var engine = FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL")
+                ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
         foreach (var key in new[] { buyerKey, sellerKey })
         {
-            var defs = await api.GetAsync(
-                $"/api/workflows/flowable/definitions?processKey={key}");
-            if (!defs.Ok) continue;   // no such surface is fine; the DB check below is the backstop
+            var definitions = await engine.GetStringAsync(
+                $"service/repository/process-definitions?key={Uri.EscapeDataString(key)}");
 
-            var text = await defs.TextAsync();
-            Assert.DoesNotContain(key, text, StringComparison.Ordinal);
+            using var page = JsonDocument.Parse(definitions);
+
+            // `total: 0` is the claim. Asserted on the engine's own count rather
+            // than on the absence of a substring, so a differently-shaped payload
+            // fails loudly instead of passing by not containing the key.
+            Assert.Equal(0, page.RootElement.GetProperty("total").GetInt32());
         }
 
         // The model itself stayed unpublished, which is the Auton8-side shadow of

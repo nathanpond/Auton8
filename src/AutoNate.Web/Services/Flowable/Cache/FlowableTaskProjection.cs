@@ -84,10 +84,36 @@ public sealed class FlowableTaskProjection : IProjection<FlowableTaskSummary>
                     due_date               = EXCLUDED.due_date,
                     created_time           = EXCLUDED.created_time,
                     claim_time             = EXCLUDED.claim_time,
-                    completed_time         = EXCLUDED.completed_time,
+                    -- #629. COMPLETION IS A POSITIVE FACT AND SURVIVES A RE-POLL.
+                    --
+                    -- Every producer emits only OPEN tasks, so MapRow writes
+                    -- completed_time = null and status = 'active' unconditionally.
+                    -- That is safe in the steady state and not safe in a race:
+                    -- FlowableTaskPollingFeed emits into a channel this projection
+                    -- drains asynchronously, so a page captured BEFORE a completion
+                    -- can be applied AFTER WorkflowTaskCompletionSweep marked it,
+                    -- resetting the row to active/NULL.
+                    --
+                    -- Recovery was not guaranteed either: the sweep walks
+                    -- endTime DESC and breaks on the first page that marks nothing,
+                    -- so once newer completions push the resurrected task off page
+                    -- 0 it is never re-marked, and CURRENTSTEP() goes back to
+                    -- reporting the stale task -- the symptom #586 exists to remove.
+                    --
+                    -- COALESCE keeps the first completion anyone observed. Both
+                    -- writers already guard on `completed_time IS NULL` for the
+                    -- same reason; this is that rule applied to the poll path,
+                    -- which had no guard at all.
+                    completed_time         = COALESCE(
+                                                 workflow_task_cache.completed_time,
+                                                 EXCLUDED.completed_time),
                     form_key               = EXCLUDED.form_key,
                     priority               = EXCLUDED.priority,
-                    status                 = EXCLUDED.status,
+                    status                 = CASE
+                                                 WHEN workflow_task_cache.completed_time IS NOT NULL
+                                                 THEN workflow_task_cache.status
+                                                 ELSE EXCLUDED.status
+                                             END,
                     auth_tags              = EXCLUDED.auth_tags,
                     projection_version     = EXCLUDED.projection_version,
                     last_sync_at           = EXCLUDED.last_sync_at

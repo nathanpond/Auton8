@@ -184,12 +184,190 @@ public sealed class ExecutionAuthorizationFromCacheTests
             authorizer, Principal(Actor), Actions.View, instanceId, CancellationToken.None);
     }
 
-    private static async Task GrantAsync(AutoNateWebApplicationFactory factory, string selector)
+    private static async Task GrantAsync(
+        AutoNateWebApplicationFactory factory, string selector, string effect = "allow")
     {
         using var scope = factory.Services.CreateScope();
         var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
         await grants.CreateAsync(new CreatePermissionGrantInput(
-            EntityKinds.User, Actor.ToString(), Actions.View, selector, "allow", 0), Actor);
+            EntityKinds.User, Actor.ToString(), Actions.View, selector, effect, 0), Actor);
+    }
+
+    /// <summary>
+    /// A finished run is still authorizable and still cached (#634).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The read-through treated a null live read as "deleted in Flowable" and
+    /// removed the row. But <c>GetProcessInstanceAsync</c> asks
+    /// <c>service/runtime/process-instances/{id}</c>, and Flowable answers 404
+    /// there for every COMPLETED instance — measured against the engine, whose
+    /// runtime table holds only live runs.
+    /// </para>
+    /// <para>
+    /// So once a finished run's row aged past the 30s freshness window inside the
+    /// 60s poll interval, it was deleted: every
+    /// <c>RequirePermission(..., "processInstanceId")</c> route 403'd for
+    /// non-super-admins and the executions list lost the run until the next poll.
+    /// 4,894 completed/cancelled rows were in scope on the dev database.
+    /// </para>
+    /// <para>
+    /// The stub holds NO instance for this id, which is exactly what the real
+    /// client returns for a finished run, and the row is aged so the live read is
+    /// genuinely attempted.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_completed_run_is_not_deleted_when_the_engine_stops_listing_it()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-634";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+
+        // Finished. The runtime endpoint will not list it, which the stub models
+        // by simply not holding it.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE workflow_execution_cache SET status = 'completed'
+                WHERE flowable_instance_id = {Instance}
+                """);
+        }
+
+        factory.FlowableStub.InstancesById.Remove(Instance);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+
+            var served = await readThrough.GetInstanceAsync(Instance, CancellationToken.None);
+
+            Assert.NotNull(served);
+            Assert.Equal("completed", served!.Status);
+        }
+
+        // AND THE ROW SURVIVED. Returning it while deleting it would satisfy the
+        // assertion above and still break the executions list on the next read.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var still = await db.WorkflowExecutionCache.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.FlowableInstanceId == Instance);
+
+            Assert.NotNull(still);
+        }
+    }
+
+    /// <summary>
+    /// The complement: a run that is genuinely gone IS still removed (#634).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "never delete" passes the test above while turning the cache
+    /// into a graveyard — a deleted instance would be served forever. Only a
+    /// TERMINAL row is protected; an active one the engine no longer lists really
+    /// has been deleted.
+    /// </remarks>
+    [Fact]
+    public async Task An_active_run_the_engine_no_longer_lists_is_still_removed()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-634-gone";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+        factory.FlowableStub.InstancesById.Remove(Instance);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+            Assert.Null(await readThrough.GetInstanceAsync(Instance, CancellationToken.None));
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var gone = await db.WorkflowExecutionCache.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.FlowableInstanceId == Instance);
+
+            Assert.Null(gone);
+        }
+    }
+
+    /// <summary>
+    /// A deny naming a withdrawn tag refuses, in memory as it does in SQL (#632).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #576 withdrew <c>tenant</c> and #581 withdrew the candidate pair from the
+    /// compilers, and #577 made an uncompilable DENY fail the request closed. But
+    /// <c>EfCorePermissionGrantStore.CreateAsync</c> only PARSES a selector, so a
+    /// stored deny naming a withdrawn tag survives — and on this path it resolved
+    /// to <c>actual = null</c>, compared false, and therefore did not deny.
+    /// </para>
+    /// <para>
+    /// The same grant failed closed in the list and GRANTED ACCESS on a single
+    /// read. A deny that stops denying is the direction that matters, and it was
+    /// introduced by this cluster's own removals.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_deny_naming_a_withdrawn_tag_still_refuses()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            extraConfig: Enforcing);
+        _ = factory.CreateClient();
+
+        await SeedCachedInstanceAsync(factory, "inst-632", startedBy: "alice");
+
+        // Engine unreachable, as the siblings above do: the seed ages the row past
+        // ReadThroughFreshness, so without this the live read returns null, #634
+        // concludes the ACTIVE run was deleted, and the refusal below would be
+        // about a missing row rather than about the deny.
+        factory.FlowableStub.GetProcessInstanceThrows =
+            new HttpRequestException("connection refused");
+
+        // A broad allow the actor really holds...
+        await GrantAsync(factory, "/workflowexecution/*");
+        // ...and a deny naming a tag this kind no longer advertises.
+        await GrantAsync(factory, "/workflowexecution/*[tenant=acme]", effect: "deny");
+
+        Assert.False(await AuthorizeAsync(factory, "inst-632"));
+    }
+
+    /// <summary>
+    /// The complement: a deny naming a LIVE tag still behaves normally (#632).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "refuse whenever a deny exists" passes the test above while
+    /// making every deny unconditional — which would refuse far more than it
+    /// should and look like the fix working.
+    /// </remarks>
+    [Fact]
+    public async Task A_deny_naming_a_live_tag_that_does_not_match_still_allows()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            extraConfig: Enforcing);
+        _ = factory.CreateClient();
+
+        await SeedCachedInstanceAsync(factory, "inst-632-ok", startedBy: "alice");
+
+        factory.FlowableStub.GetProcessInstanceThrows =
+            new HttpRequestException("connection refused");
+
+        await GrantAsync(factory, "/workflowexecution/*");
+        // `startedby` IS advertised, and this run was started by alice, so the
+        // deny does not match and must not fire.
+        await GrantAsync(factory, "/workflowexecution/*[startedby=bob]", effect: "deny");
+
+        Assert.True(await AuthorizeAsync(factory, "inst-632-ok"));
     }
 
     private static async Task SeedCachedInstanceAsync(

@@ -55,6 +55,32 @@ public sealed class FlowableReadThrough : IFlowableReadThrough
 
         if (live is null)
         {
+            // #634. NOT NECESSARILY DELETED -- it may simply have finished.
+            //
+            // `GetProcessInstanceAsync` queries `service/runtime/process-instances/{id}`
+            // and maps 404 to null, and Flowable returns 404 there for every
+            // COMPLETED instance; the runtime table holds only live ones.
+            // Measured against the engine: a finished instance's runtime GET is
+            // 404 while its history row is intact.
+            //
+            // Reading that as deletion did real damage. Once a finished run's row
+            // passed ReadThroughFreshness (30s) inside the 60s poll interval --
+            // roughly half of every cycle -- the row was deleted, so
+            // `ExistsAndAuthorizedAsync` returned false and every
+            // RequirePermission(..., "processInstanceId") route 403'd for
+            // non-super-admins, while the executions list lost the run until the
+            // next poll re-inserted it. Measured on the dev database: 4,536
+            // completed and 358 cancelled rows were in scope.
+            //
+            // So a terminal row is SERVED, not deleted. Deletion stays the poll's
+            // job: it enumerates, so absence there is a fact about the engine
+            // rather than an inference from one endpoint that was asked the wrong
+            // question.
+            if (cached is not null && WorkflowExecutionStatuses.IsTerminal(cached.Status))
+            {
+                return cached;
+            }
+
             // Instance has been deleted in Flowable. Clear the cache row so
             // future reads don't keep serving a tombstone.
             if (cached is not null)

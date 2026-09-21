@@ -1784,4 +1784,55 @@ public sealed class FlowableClientTests
         Assert.True(await client.IsSignalGlobalAsync("def-3", "global.one", "noSuchActivity"));
         Assert.True(await client.IsSignalGlobalAsync("def-3", "global.one", null));
     }
+
+    /// <summary>
+    /// The history query asks for newest-first, and that is now asserted (#630).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #590 removed <c>startedAfter</c> because the engine ignored it, and replaced
+    /// it with newest-first paging that stops at the first event older than the
+    /// watermark. <b>Descending order is therefore the SOLE mechanism bounding the
+    /// feed</b> — with the server-side filter gone, ordering is the only thing that
+    /// makes "stop at the first known event" sound.
+    /// </para>
+    /// <para>
+    /// Nothing asserted it reached the URL. <c>HistoryFeedWatermarkTests</c> runs
+    /// against <c>StubFlowableClient</c>, which sorts descending <em>internally</em>
+    /// whatever the URL says, and the other client tests register handlers by path
+    /// prefix only. So deleting <c>&amp;order=desc</c> left every test green while
+    /// the feed, now reading oldest-first, would stop on its first page and ingest
+    /// almost nothing.
+    /// </para>
+    /// <para>
+    /// That is the original #590 defect with its polarity reversed: there, a test
+    /// proved the parameter was sent but never that it was honoured; here, nothing
+    /// proved it was even sent.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetHistoricActivityEventsAsync_AsksTheEngineForNewestFirst()
+    {
+        var (client, stub) = CreateClient();
+
+        var queries = new List<string>();
+        stub.When(HttpMethod.Get, "service/history/historic-activity-instances", request =>
+        {
+            queries.Add(request.RequestUri!.Query);
+            return StubHttpMessageHandler.JsonResponse(new { data = Array.Empty<object>(), total = 0 });
+        });
+
+        await client.GetHistoricActivityEventsAsync(0, 200, CancellationToken.None);
+
+        // Not vacuous: without this the assertions below pass over an empty list.
+        var query = Assert.Single(queries);
+
+        Assert.Contains("order=desc", query, StringComparison.Ordinal);
+        Assert.Contains("sort=startTime", query, StringComparison.Ordinal);
+
+        // AND THE PARAMETER #590 REMOVED IS STILL GONE. Re-adding it would look
+        // like a fix and would be the bug: the engine ignores it, so the feed
+        // would silently go back to paging from the beginning every tick.
+        Assert.DoesNotContain("startedAfter", query, StringComparison.Ordinal);
+    }
 }

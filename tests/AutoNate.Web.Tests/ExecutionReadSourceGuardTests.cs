@@ -50,6 +50,33 @@ public sealed class ExecutionReadSourceGuardTests
             + "workflow_execution_cache is per PROCESS instance and has no row to hang it on. The four "
             + "owner decisions after #222 took no schema change here deliberately, and this route only "
             + "runs when an operator expands a row, which is the point of it being a separate route.",
+        // #635. NEWLY VISIBLE. The scan used to read only `executions.MapGet`
+        // parameter lists for the literal `IFlowableClient`, so these were not
+        // absent from the list -- they were absent from the QUESTION.
+        ["/{processInstanceId}/tasks"] =
+            "#604: a DETAIL view, read through on every call. The cache learns of a task the "
+            + "engine created on its own -- a timer firing, a boundary event, an ad-hoc activity, "
+            + "the successor to a task just completed -- only on the next poll, which is a minute, "
+            + "while the things watching for it give up in thirty seconds. Reached through "
+            + "WorkflowTaskCacheRefresher rather than the client directly, which is exactly how it "
+            + "escaped this guard for a whole story.",
+        ["tasks:/assigned-to-me"] =
+            "NOT REVIEWED against the cache, and saying so rather than inventing a 'cannot'. "
+            + "workflow_task_cache holds these rows, so this is a candidate for cache-serving that "
+            + "#104 never scoped. Listed to make it visible; see #637.",
+        ["tasks:/assigned-to-team"] =
+            "Same as /assigned-to-me: a candidate #104 never scoped, listed rather than hidden.",
+        ["tasks:/{taskId}/form-config"] =
+            "Reads the task's form key from the engine to resolve a form. The cache carries "
+            + "form_key, so this is also a candidate; not reviewed, listed.",
+        ["/{processInstanceId}/jobs"] =
+            "STRUCTURAL: jobs are live engine state -- what is scheduled, retrying or dead-lettered "
+            + "right now -- and nothing projects them. Reached through IFlowableJobClient, which is "
+            + "not a substring of IFlowableClient and so was outside the old scan.",
+        ["/{processInstanceId}/jobs/{jobId}/exception"] =
+            "Same as /jobs: live engine state, no projection.",
+        ["/jobs"] =
+            "Same as /jobs, cross-execution.",
         ["/{processInstanceId}/adhoc"] =
             "STRUCTURAL: enabled ad-hoc activities are live engine state, not a projection of anything. "
             + "There is nothing to cache.",
@@ -63,14 +90,51 @@ public sealed class ExecutionReadSourceGuardTests
         var actual = new SortedSet<string>(StringComparer.Ordinal);
         var allRoutes = new SortedSet<string>(StringComparer.Ordinal);
 
-        // Each MapGet's parameter list runs from the route literal to the opening
-        // brace of the handler body.
+        // #635. EVERY MapGet in the file, and every type that reaches the engine.
+        //
+        // The old scan asked `executions.MapGet` only, for the literal
+        // `IFlowableClient` in the parameter list. Three holes, and one had
+        // already been walked through:
+        //
+        //   * a live read reached through an INJECTED HELPER was invisible, so
+        //     #604 made /tasks read live on every request while this guard went
+        //     on calling it cache-served;
+        //   * `tasks.MapGet` was not scanned at all, and all three of its routes
+        //     inject the client;
+        //   * `IFlowableJobClient` is not a substring of `IFlowableClient`, so
+        //     the three jobs routes were outside it too.
+        //
+        // A guard whose scope is narrower than its promise is worse than none:
+        // its allow-list reads as the complete set of live reads and is not.
+        string[] engineReaching =
+        [
+            "IFlowableClient",
+            "IFlowableJobClient",
+            "IFlowableDecisionClient",
+            // Injected helpers that call the engine on the handler's behalf.
+            "WorkflowTaskCacheRefresher",
+            "IFlowableReadThrough"
+        ];
+
         foreach (Match match in Regex.Matches(
-                     source, @"executions\.MapGet\(""(?<route>[^""]+)"".*?\n(?<params>.*?)\n\s*\{", RegexOptions.Singleline))
+                     source, @"(?<group>executions|tasks)\.MapGet\(""(?<route>[^""]+)"".*?\n(?<params>.*?)\n\s*\{", RegexOptions.Singleline))
         {
-            var route = match.Groups["route"].Value;
+            // `tasks:` prefixed so two groups' routes cannot collide in one set.
+            var group = match.Groups["group"].Value;
+            var route = group == "tasks"
+                ? $"tasks:{match.Groups["route"].Value}"
+                : match.Groups["route"].Value;
+
             allRoutes.Add(route);
-            if (match.Groups["params"].Value.Contains("IFlowableClient", StringComparison.Ordinal))
+
+            var parameters = match.Groups["params"].Value;
+
+            // IFlowableReadThrough is the cache's OWN read-through, which is the
+            // thing #104 built -- it is not a live read escaping the cache, so it
+            // does not put a route on the list by itself.
+            if (engineReaching
+                .Where(t => t != "IFlowableReadThrough")
+                .Any(t => parameters.Contains(t, StringComparison.Ordinal)))
             {
                 actual.Add(route);
             }
@@ -78,10 +142,17 @@ public sealed class ExecutionReadSourceGuardTests
 
         // Vacuity guard: if the regex stops matching, every assertion below is
         // trivially satisfied by an empty set.
+        // EXACT, not a floor. The old `>= 9` was set to #104's inventory and never
+        // moved; the file has carried 17 GET routes since, so five could have gone
+        // invisible to the regex with the threshold still passing -- and it is the
+        // crept arm, the one that catches NEW live reads, that depends on the
+        // regex seeing them. House style for pins here is exact (tests/tiers.env,
+        // ExecutionOracleSizeTests): growth has to be as visible as loss.
         Assert.True(
-            allRoutes.Count >= 9,
-            $"Expected to find the execution GET routes; found {allRoutes.Count}. "
-            + "If MapGet's shape changed, this guard is looking at nothing and is no longer checking anything.");
+            allRoutes.Count == 17,
+            $"Expected 17 GET routes in {EndpointsPath}; found {allRoutes.Count}. "
+            + "If a route was added or removed, move this number in the same commit. "
+            + "If MapGet's shape changed, this guard is looking at nothing.");
 
         var expected = new SortedSet<string>(LiveReadsAllowed.Keys, StringComparer.Ordinal);
 
@@ -99,17 +170,39 @@ public sealed class ExecutionReadSourceGuardTests
     }
 
     /// <summary>
-    /// `/tasks` is served from the cache, asserted at the source (#104).
+    /// `/tasks` reads LIVE, and that is now said out loud (#604, #635).
     /// </summary>
     /// <remarks>
-    /// The list above would still pass if `/tasks` read live and were quietly
-    /// added to it. This pins the direction of travel for the one route this
-    /// story moved.
+    /// <para>
+    /// <b>Inverted, because it was asserting something false.</b> #104 wrote this
+    /// as "`/tasks` is served from the cache, asserted at the source", to pin the
+    /// direction of travel for the one route that story moved. #604 then moved it
+    /// back: `ReadThroughOpenTasksAsync` calls the engine unconditionally, with no
+    /// freshness window, on every request — deliberately, and for a stated reason
+    /// — while this test went on claiming the opposite.
+    /// </para>
+    /// <para>
+    /// It could not notice because the scan above read the handler's parameter
+    /// list for `IFlowableClient`, and the live read had moved behind an injected
+    /// helper. So the story's own pin outlived the story's own decision by a
+    /// milestone.
+    /// </para>
+    /// <para>
+    /// Kept rather than deleted: the direction of travel is still worth pinning,
+    /// it just points the other way now, and a future attempt to serve `/tasks`
+    /// from the cache should have to come here and say so.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void The_tasks_route_is_not_on_the_live_read_list()
+    public void The_tasks_route_reads_live_and_is_listed_with_its_reason()
     {
-        Assert.DoesNotContain("/{processInstanceId}/tasks", LiveReadsAllowed.Keys);
+        Assert.Contains("/{processInstanceId}/tasks", LiveReadsAllowed.Keys);
+
+        // Listed WITH a reason, not merely listed. An entry whose reason is empty
+        // is an exemption nobody had to justify.
+        Assert.False(
+            string.IsNullOrWhiteSpace(LiveReadsAllowed["/{processInstanceId}/tasks"]),
+            "A live-reading route must carry the reason it cannot be cache-served.");
     }
 
     // RepoRoot, not a walk up to a `.git` DIRECTORY. In a git worktree `.git` is

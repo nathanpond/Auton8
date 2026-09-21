@@ -31,6 +31,60 @@ namespace AutoNate.Web.Tests;
 [Trait("Category", "Integration")]
 public sealed class SynchronousStepFailureTests
 {
+    /// <summary>
+    /// The recorded failure carries no engine internals to /history (#626).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sibling above asserts the engine's words are absent from the
+    /// <c>/complete</c> RESPONSE. That is not where they leaked. The recorded row
+    /// carried <c>exception.Message</c> — which
+    /// <c>FlowableClient.EnsureSuccessAsync</c> builds as
+    /// <c>"Flowable could not {op}. HTTP {code} {reason}. {rawResponseBody}"</c> —
+    /// and <c>GET /api/executions/{id}/history</c> serves it to any caller with
+    /// <c>WorkflowExecution:View</c>.
+    /// </para>
+    /// <para>
+    /// So the assertion belongs on the endpoint that serves it, not the one that
+    /// refuses. <c>NoEndpointReturnsARawEngineMessageTests</c> could not see it
+    /// either: it scans for <c>.Message</c> used inside a
+    /// <c>FlowableRequestException</c> catch block, and this use was in a helper
+    /// two hops away, exfiltrating through a different route.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_recorded_failure_carries_no_engine_internals_to_the_history()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-626";
+        await SeedTaskAsync(factory, "task-626", Instance, "approve");
+
+        // Shaped like a real Flowable 500: a stack frame, a container id and a
+        // connection string with a password, which is what the #350 guard's own
+        // docstring records that body having carried.
+        factory.FlowableStub.CompleteThrows = new FlowableRequestException(
+            HttpStatusCode.InternalServerError,
+            "complete the user task",
+            """{"exception":"org.flowable.common.engine.api.FlowableException: jdbc:postgresql://db:5432/AutoNate?user=autonate&password=hunter2 at org.flowable.engine.impl.bpmn.behavior.ExclusiveGatewayActivityBehavior.leave(ExclusiveGatewayActivityBehavior.java:82) [container 9f3c1a]"}""");
+
+        var response = await client.PostAsJsonAsync("/api/tasks/task-626/complete", new { });
+        Assert.False(response.IsSuccessStatusCode);
+
+        var history = await client.GetStringAsync($"/api/executions/{Instance}/history");
+
+        // The row exists -- otherwise the absences below are vacuous.
+        Assert.Contains("\"isErrored\":true", history, StringComparison.Ordinal);
+
+        // AND IT CARRIES NONE OF THE ENGINE'S INTERNALS.
+        Assert.DoesNotContain("password=hunter2", history, StringComparison.Ordinal);
+        Assert.DoesNotContain("jdbc:postgresql", history, StringComparison.Ordinal);
+        Assert.DoesNotContain("org.flowable", history, StringComparison.Ordinal);
+        Assert.DoesNotContain("container 9f3c1a", history, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_failed_completion_is_recorded_against_the_execution()
     {
