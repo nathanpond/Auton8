@@ -458,6 +458,67 @@ public sealed class MultiInstanceHistoryEndpointTests
         Assert.Equal(JsonValueKind.Null, one.GetProperty("elementValue").ValueKind);
     }
 
+    /// <summary>
+    /// The collapse survives a cache miss by reading through (#627).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #173's AC says "where the cache cannot answer, it reads through". It did
+    /// not: both the collapse and the element-value lookup issued a bare
+    /// <c>WorkflowExecutionCache</c> query and returned the rows UNCOLLAPSED on a
+    /// miss — so opening a history in the window before the projection lands a
+    /// row, or after a rebuild or eviction, rendered a 50-instance activity as 50
+    /// rows with no progress and no error. Silent degradation to precisely the
+    /// behaviour the story exists to remove.
+    /// </para>
+    /// <para>
+    /// Here the execution-cache row is deleted while the ENGINE still knows the
+    /// instance, which is the shape of a miss. The read-through repopulates it and
+    /// the collapse happens anyway.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_cache_miss_still_collapses_because_the_read_through_answers()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-7)),
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+
+        // The engine still knows it -- this is a cache MISS, not a deletion.
+        factory.FlowableStub.InstancesById[Instance] = new FlowableProcessInstanceSummary
+        {
+            Id = Instance,
+            ProcessDefinitionId = DefinitionId,
+            Name = "Review flow"
+        };
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                DELETE FROM workflow_execution_cache WHERE flowable_instance_id = {Instance}
+                """);
+        }
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        // ONE row, with progress. Before the fix this came back as three.
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        Assert.Equal(JsonValueKind.Object, one.GetProperty("multiInstance").ValueKind);
+    }
+
     private static WorkflowExecutionHistoryEvent Row(
         string activityId,
         string name,
