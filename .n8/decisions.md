@@ -10376,3 +10376,31 @@ when both land; the resolution is additive and the provenance notes name which
 story contributed which tests.
 
 **Issue:** #231 (owns #237)
+
+## #327 — blocked on an owner decision, 2026-09-21
+
+**The issue was filed to surface a decision and still needs it.** Its closing line
+asks whether the remaining eight id-bearing surfaces get mapped or the product
+accepts that generated ids leak outside the execution view. It carries no
+acceptance criteria, so the direction *is* the open question.
+
+**Split, because it is not one decision.** Five of the eight are read surfaces —
+the log endpoint, the assistant skill (twice), the open-error detector, the
+executions-list current step — plus the reverse direction in `FlowableClient`,
+which is purely additive. All of those change only what a person is shown, the
+machinery already exists and is cached per definition, and I would do them without
+asking.
+
+**The four AQL projection entities are the blocker.** They *store* the id, and an
+operator can have saved a query filtering or grouping on `cg__autonateRoute`.
+Remapping silently changes what those queries match, and re-projecting rewrites
+history somebody may have been reading for months — a data-shape change with a
+user-visible, hard-to-reverse consequence. Three options were put on the issue
+(map and re-project / map going forward only / leave the query layer raw and
+document the boundary), with a recommendation of the third for the projections and
+mapping everything else, because the query layer is the one place a raw engine id
+is arguably correct and because re-projecting breaks saved work silently.
+
+Nothing implemented, nothing pushed. Labelled `blocked` + `needs-owner-action`.
+
+**Issue:** #327
