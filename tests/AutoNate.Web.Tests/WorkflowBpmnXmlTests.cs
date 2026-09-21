@@ -932,6 +932,153 @@ public sealed class WorkflowBpmnXmlTests
     private static readonly XNamespace Flowable218 = "http://flowable.org/bpmn";
     private static readonly XNamespace Autonate218 = "http://autonate.dev/workflows";
 
+    // #231. Named rather than spelled inline, so the attribute has one spelling
+    // in this file and a rename cannot leave half the assertions checking a
+    // string nothing writes any more.
+    private const string ComplexGatewayArrivingFlow =
+        WorkflowBpmnXml.ComplexGatewayArrivingFlowAttribute;
+
+    // #231. A gateway two branches arrive at. `ComplexGatewayXml` has ONE inbound
+    // flow, so every assertion above is about the split-only shape and none of
+    // them would notice the joining one being absent, wrong, or applied to both.
+    private const string JoiningComplexGatewayXml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="joiner" name="Joiner" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="split" />
+            <bpmn:parallelGateway id="split" />
+            <bpmn:sequenceFlow id="fs1" sourceRef="split" targetRef="t1" />
+            <bpmn:sequenceFlow id="fs2" sourceRef="split" targetRef="t2" />
+            <bpmn:userTask id="t1" name="One" />
+            <bpmn:userTask id="t2" name="Two" />
+            <bpmn:sequenceFlow id="in1" sourceRef="t1" targetRef="cg" />
+            <bpmn:sequenceFlow id="in2" sourceRef="t2" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Enough"
+                                 autonate:routeScript="return 'fa';" />
+            <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
+            <bpmn:userTask id="ta" name="Route A" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ExpandForDeployment_GeneratesOneAccumulatorPerIncomingFlow()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(JoiningComplexGatewayXml));
+
+        var accumulators = document.Descendants(Bpmn218 + "scriptTask")
+            .ToDictionary(t => t.Attribute("id")!.Value);
+
+        // TWO, not one. A single shared node is what #218 generates and it cannot
+        // tell which branch arrived -- the identity is the whole point, and it is
+        // carried as a literal on the node rather than read off the execution.
+        Assert.Equal(2, accumulators.Count);
+
+        var first = accumulators["cg__autonateAcc__in1"];
+        var second = accumulators["cg__autonateAcc__in2"];
+
+        Assert.Equal("in1", first.Attribute(Flowable218 + ComplexGatewayArrivingFlow)?.Value);
+        Assert.Equal("in2", second.Attribute(Flowable218 + ComplexGatewayArrivingFlow)?.Value);
+
+        // Each arrives with the SAME author script and the same result variable:
+        // they are one gateway's behaviour split across its branches, not two
+        // different decisions.
+        Assert.Equal("return 'fa';", first.Element(Bpmn218 + "script")?.Value);
+        Assert.Equal("return 'fa';", second.Element(Bpmn218 + "script")?.Value);
+        Assert.Equal("__autonateRoute_cg", first.Attribute(Flowable218 + "resultVariable")?.Value);
+        Assert.Equal("__autonateRoute_cg", second.Attribute(Flowable218 + "resultVariable")?.Value);
+
+        // Both map back to the one gateway the author drew, or the execution view
+        // shows ids no diagram has.
+        Assert.Equal("cg", first.Attribute(Flowable218 + "autonateExpandedFrom")?.Value);
+        Assert.Equal("cg", second.Attribute(Flowable218 + "autonateExpandedFrom")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesASingleInboundComplexGatewayOnTheSplitShape()
+    {
+        // THE COMPLEMENT, and the decision it records: a gateway with one inbound
+        // flow has nothing to accumulate and nothing to wait for. Applying the
+        // joining shape anyway would change the runtime shape of every
+        // already-published split-only gateway to buy nothing.
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+
+        var scriptTask = Assert.Single(document.Descendants(Bpmn218 + "scriptTask"));
+        Assert.Equal("cg__autonateRoute", scriptTask.Attribute("id")?.Value);
+        Assert.Null(scriptTask.Attribute(Flowable218 + ComplexGatewayArrivingFlow));
+
+        // And no absorbing end event, because no arrival can ever be a second one.
+        Assert.DoesNotContain(
+            document.Descendants(Bpmn218 + "endEvent"),
+            e => e.Attribute("id")?.Value == "cg__autonateWaiting");
+    }
+
+    [Fact]
+    public void ExpandForDeployment_RewiresEachIncomingFlowToItsOwnAccumulator()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(JoiningComplexGatewayXml));
+
+        var flows = document.Descendants(Bpmn218 + "sequenceFlow")
+            .ToDictionary(f => f.Attribute("id")!.Value,
+                f => (Source: f.Attribute("sourceRef")?.Value, Target: f.Attribute("targetRef")?.Value));
+
+        // Each branch reaches ITS OWN node. Both landing on one would lose the
+        // identity the accumulator exists to carry.
+        Assert.Equal("cg__autonateAcc__in1", flows["in1"].Target);
+        Assert.Equal("cg__autonateAcc__in2", flows["in2"].Target);
+
+        // ...and each flows on into the author's gateway, so the gateway is
+        // reached once per arriving branch.
+        Assert.Equal(("cg__autonateAcc__in1", "cg"), flows["cg__autonateAcc__in1__flow"]);
+        Assert.Equal(("cg__autonateAcc__in2", "cg"), flows["cg__autonateAcc__in2__flow"]);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_GivesAWaitingJoinSomewhereToSendTheToken()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(JoiningComplexGatewayXml));
+
+        // Without this the gateway is reached with no matching condition and the
+        // engine refuses the instance outright -- "no outgoing sequence flow
+        // found". It is also what absorbs a later arrival on a join that has
+        // already fired.
+        var waitEnd = Assert.Single(
+            document.Descendants(Bpmn218 + "endEvent"),
+            e => e.Attribute("id")?.Value == "cg__autonateWaiting");
+        Assert.Equal("cg", waitEnd.Attribute(Flowable218 + "autonateExpandedFrom")?.Value);
+
+        var waitFlow = Assert.Single(
+            document.Descendants(Bpmn218 + "sequenceFlow"),
+            f => f.Attribute("targetRef")?.Value == "cg__autonateWaiting");
+        Assert.Equal("cg", waitFlow.Attribute("sourceRef")?.Value);
+
+        // A CONDITION, not a default flow: a default swallows the wait token only
+        // when nothing else matched, which is also when the author's own default
+        // is meant to run. Two meanings on one edge.
+        Assert.Equal(
+            "${__autonateRoute_cg == 'autonateWait'}",
+            waitFlow.Element(Bpmn218 + "conditionExpression")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LetsAJoinsScriptAnswerThatItIsStillWaiting()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(JoiningComplexGatewayXml));
+
+        var accumulator = document.Descendants(Bpmn218 + "scriptTask")
+            .First(t => t.Attribute("id")?.Value == "cg__autonateAcc__in1");
+
+        // The wait route joins the contract the engine enforces. Without it the
+        // route check fails the activity for the one answer a join most needs to
+        // give, and every waiting branch becomes a dead-lettered job.
+        var routes = accumulator.Attribute(Flowable218 + "autonateAllowedRoutes")?.Value;
+        Assert.Equal("fa,autonateWait", routes);
+    }
+
     [Fact]
     public void ExpandForDeployment_PutsAScriptTaskInFrontOfAComplexGateway_AndKeepsTheGateway()
     {

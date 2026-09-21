@@ -1097,10 +1097,30 @@ public static partial class WorkflowBpmnXml
 
             var resultVariable = ComplexGatewayRouteVariable(gatewayId);
 
+            // #231. How many branches arrive here decides the shape.
+            //
+            // A gateway with ONE incoming flow keeps #218's shape exactly: there
+            // is nothing to accumulate, nothing to wait for, and no second
+            // arrival to absorb. Giving every already-published split-only
+            // gateway an accumulator, a wait route and an end event would change
+            // the runtime shape of every one of them to buy nothing -- so the
+            // accumulating shape applies only where a join can actually occur.
+            // The AC asks for this to be stated either way; this is the statement.
+            var inboundFlows = document.Descendants(BpmnNamespace + "sequenceFlow")
+                .Where(flow => flow.Attribute("targetRef")?.Value == gatewayId)
+                .ToList();
+
+            if (inboundFlows.Count > 1)
+            {
+                ExpandComplexGatewayJoin(
+                    document, gateway, gatewayId, inboundFlows, routeIds, resultVariable, defaultFlowId);
+                ApplyComplexGatewayRouteConditions(outgoing, defaultFlowId, resultVariable);
+                continue;
+            }
+
             // Rewire every flow INTO the gateway so it lands on the script task
             // instead, then flow the script task into the gateway.
-            foreach (var inbound in document.Descendants(BpmnNamespace + "sequenceFlow")
-                         .Where(flow => flow.Attribute("targetRef")?.Value == gatewayId))
+            foreach (var inbound in inboundFlows)
             {
                 inbound.SetAttributeValue("targetRef", scriptTaskId);
             }
@@ -1151,12 +1171,7 @@ public static partial class WorkflowBpmnXml
             // Stripping them here is also just correct: they describe how the
             // author configured the element, which the stored model keeps and
             // the engine has no use for.
-            gateway.Attribute("scriptFormat")?.Remove();
-            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Remove();
-            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Remove();
-            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute)?.Remove();
-            gateway.Attribute(ScriptTaskIdentity.RunAsAttribute)?.Remove();
-            gateway.Element(BpmnNamespace + "script")?.Remove();
+            StripComplexGatewayAuthoringAttributes(gateway);
 
             gateway.AddBeforeSelf(scriptTask);
             AddFlowElement(gateway.Parent, new XElement(
@@ -1172,21 +1187,181 @@ public static partial class WorkflowBpmnXml
 
             AddShapeBeside(document, gatewayId, scriptTaskId);
 
-            // Conditions on the author's own outgoing flows. An author-written
-            // condition is left alone, exactly as ApplyAutoNateGatewayConditions
-            // does — the script chooses among the routes it was given, and an
-            // author who has already written a condition meant it.
-            foreach (var flow in outgoing)
-            {
-                var flowId = flow.Attribute("id")?.Value;
-                if (string.IsNullOrWhiteSpace(flowId) || flowId == defaultFlowId) continue;
-                if (flow.Element(BpmnNamespace + "conditionExpression") is not null) continue;
+            ApplyComplexGatewayRouteConditions(outgoing, defaultFlowId, resultVariable);
+        }
+    }
 
-                flow.Add(new XElement(
-                    BpmnNamespace + "conditionExpression",
-                    new XAttribute(XsiNamespace + "type", FormalExpressionType(flow)),
-                    $"${{{resultVariable} == '{flowId}'}}"));
+    /// <summary>
+    /// The authoring data has moved to the generated node, so it leaves the
+    /// gateway (#218).
+    /// </summary>
+    /// <remarks>
+    /// Flowable validates the DEPLOYED xml against the strict BPMN schema, where
+    /// <c>bpmn:complexGateway</c> has no <c>scriptFormat</c> and no
+    /// <c>&lt;script&gt;</c> child. Leaving them refuses the whole deployment:
+    /// <c>cvc-complex-type.3.2.2: Attribute 'scriptFormat' is not allowed to
+    /// appear in element 'bpmn:complexGateway'</c>. Stripping them is also just
+    /// correct — they describe how the author configured the element, which the
+    /// stored model keeps and the engine has no use for.
+    /// </remarks>
+    private static void StripComplexGatewayAuthoringAttributes(XElement gateway)
+    {
+        gateway.Attribute("scriptFormat")?.Remove();
+        gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Remove();
+        gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Remove();
+        gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute)?.Remove();
+        gateway.Attribute(ScriptTaskIdentity.RunAsAttribute)?.Remove();
+        gateway.Element(BpmnNamespace + "script")?.Remove();
+    }
+
+    /// <summary>
+    /// A complex gateway with more than one incoming flow becomes an
+    /// accumulating join (#231).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One generated accumulator per incoming flow</b>, each stamping its own
+    /// flow id. That is what makes a branch's identity knowable at all —
+    /// #219 chose it over a field extension because the expansion has to generate
+    /// a node anyway, so the literal costs nothing. A single shared node, which is
+    /// what #218 generates, cannot tell which branch arrived.
+    /// </para>
+    /// <para>
+    /// Each accumulator flows into the author's own gateway, so the gateway is
+    /// reached once per arriving branch and routes on the same variable as
+    /// before. What is new is where a token goes when the join is <b>not</b> ready:
+    /// a generated outgoing flow, conditioned on the wait route, into a generated
+    /// none end event. Without it the gateway would be reached with no matching
+    /// condition and the engine would refuse the instance outright.
+    /// </para>
+    /// <para>
+    /// The wait route is also what absorbs a <b>later</b> arrival on a join that
+    /// has already fired — the defect #219 measured as two live tokens down one
+    /// path from one join. The engine-side behaviour owns firing once; this owns
+    /// giving the absorbed token somewhere to go.
+    /// </para>
+    /// <para>
+    /// Every generated element carries <c>autonateExpandedFrom</c>, so the
+    /// execution view maps all of it back to the one gateway the author drew —
+    /// the same contract #218 established, extended to N nodes rather than one.
+    /// </para>
+    /// </remarks>
+    private static void ExpandComplexGatewayJoin(
+        XDocument document,
+        XElement gateway,
+        string gatewayId,
+        List<XElement> inboundFlows,
+        List<string> routeIds,
+        string resultVariable,
+        string? defaultFlowId)
+    {
+        var scriptFormat = ReadComplexGatewayScriptFormat(gateway) ?? "javascript";
+        var scriptBody = Trimmed(ReadComplexGatewayScript(gateway)) ?? DefaultRouteScript(routeIds[0]);
+        var runAs = ScriptTaskIdentity.ReadRunAs(gateway);
+
+        // The script may also answer "not yet", so the wait route joins the
+        // contract it is checked against. Without this the engine's route
+        // enforcement would fail the activity for the one answer a join most
+        // needs to give.
+        var allowedRoutes = string.Join(",", routeIds.Append(ComplexGatewayWaitRoute));
+
+        foreach (var inbound in inboundFlows)
+        {
+            var flowId = Trimmed(inbound.Attribute("id")?.Value);
+            if (flowId is null) continue;
+
+            var accumulatorId = ComplexGatewayAccumulatorId(gatewayId, flowId);
+
+            var accumulator = new XElement(
+                BpmnNamespace + "scriptTask",
+                new XAttribute("id", accumulatorId),
+                new XAttribute("name", ComplexGatewayScriptTaskName(gateway.Attribute("name")?.Value)),
+                new XAttribute("scriptFormat", scriptFormat),
+                new XAttribute(FlowableNamespace + "resultVariable", resultVariable),
+                new XAttribute(FlowableNamespace + "async", "true"),
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId),
+                new XAttribute(FlowableNamespace + ComplexGatewayRoutesAttribute, allowedRoutes),
+                // The literal that gives this branch its identity.
+                new XAttribute(FlowableNamespace + ComplexGatewayArrivingFlowAttribute, flowId),
+                new XElement(BpmnNamespace + "script", scriptBody));
+
+            if (!string.IsNullOrWhiteSpace(runAs))
+            {
+                accumulator.SetAttributeValue(
+                    ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute, runAs);
             }
+
+            inbound.SetAttributeValue("targetRef", accumulatorId);
+
+            gateway.AddBeforeSelf(accumulator);
+            AddFlowElement(gateway.Parent, new XElement(
+                BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{accumulatorId}__flow"),
+                new XAttribute("sourceRef", accumulatorId),
+                new XAttribute("targetRef", gatewayId),
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId)));
+
+            AddShapeBeside(document, gatewayId, accumulatorId);
+        }
+
+        StripComplexGatewayAuthoringAttributes(gateway);
+
+        // Where a token goes when the join is not ready, and where a later
+        // arrival on a fired join is absorbed.
+        var waitEndId = ComplexGatewayWaitEndId(gatewayId);
+        var waitEnd = new XElement(
+            BpmnNamespace + "endEvent",
+            new XAttribute("id", waitEndId),
+            new XAttribute("name", "Waiting for more branches"),
+            new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId));
+
+        gateway.AddAfterSelf(waitEnd);
+        AddShapeBeside(document, gatewayId, waitEndId);
+
+        var waitFlow = new XElement(
+            BpmnNamespace + "sequenceFlow",
+            new XAttribute("id", $"{waitEndId}__flow"),
+            new XAttribute("sourceRef", gatewayId),
+            new XAttribute("targetRef", waitEndId),
+            new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId));
+
+        // A CONDITION even when the author set a default flow. A default would
+        // swallow the wait token only when nothing else matched, which is also
+        // when the author's own default is meant to run -- two different meanings
+        // on one edge.
+        waitFlow.Add(new XElement(
+            BpmnNamespace + "conditionExpression",
+            new XAttribute(XsiNamespace + "type", FormalExpressionType(waitFlow)),
+            $"${{{resultVariable} == '{ComplexGatewayWaitRoute}'}}"));
+
+        AddFlowElement(gateway.Parent, waitFlow);
+
+        _ = defaultFlowId;
+    }
+
+    /// <summary>
+    /// Conditions on the author's own outgoing flows (#218).
+    /// </summary>
+    /// <remarks>
+    /// An author-written condition is left alone, exactly as
+    /// <c>ApplyAutoNateGatewayConditions</c> does — the script chooses among the
+    /// routes it was given, and an author who has already written a condition
+    /// meant it. Extracted in #231 so the split shape and the joining shape share
+    /// ONE reader of this rule rather than growing two that can disagree.
+    /// </remarks>
+    private static void ApplyComplexGatewayRouteConditions(
+        List<XElement> outgoing, string? defaultFlowId, string resultVariable)
+    {
+        foreach (var flow in outgoing)
+        {
+            var flowId = flow.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(flowId) || flowId == defaultFlowId) continue;
+            if (flow.Element(BpmnNamespace + "conditionExpression") is not null) continue;
+
+            flow.Add(new XElement(
+                BpmnNamespace + "conditionExpression",
+                new XAttribute(XsiNamespace + "type", FormalExpressionType(flow)),
+                $"${{{resultVariable} == '{flowId}'}}"));
         }
     }
 
@@ -1239,6 +1414,27 @@ public static partial class WorkflowBpmnXml
     /// <summary>The variable the routing script's chosen route id lands in (#218).</summary>
     internal static string ComplexGatewayRouteVariable(string gatewayId) =>
         $"__autonateRoute_{gatewayId}";
+
+    /// <summary>
+    /// The accumulator generated for one incoming flow of a joining gateway (#231).
+    /// </summary>
+    /// <remarks>
+    /// One node per incoming flow is what makes a branch's identity knowable at
+    /// all: the flow id is stamped on the node as a literal, which #219 chose over
+    /// a field extension because the expansion has to generate the node anyway.
+    /// </remarks>
+    internal static string ComplexGatewayAccumulatorId(string gatewayId, string flowId) =>
+        $"{gatewayId}__autonateAcc__{flowId}";
+
+    /// <summary>Where a token goes when the join is not ready to fire (#231).</summary>
+    internal static string ComplexGatewayWaitEndId(string gatewayId) =>
+        $"{gatewayId}__autonateWaiting";
+
+    /// <summary>The routing script's answer for "not enough has arrived yet" (#231).</summary>
+    internal const string ComplexGatewayWaitRoute = "autonateWait";
+
+    /// <summary>The incoming flow one accumulator stands for (#231).</summary>
+    internal const string ComplexGatewayArrivingFlowAttribute = "autonateArrivingFlow";
 
     // Marks a generated node as belonging to an author's element, so the
     // execution view can map Flowable's activity ids back onto the diagram the
