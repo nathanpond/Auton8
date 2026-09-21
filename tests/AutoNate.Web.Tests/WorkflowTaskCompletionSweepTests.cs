@@ -190,6 +190,66 @@ public sealed class WorkflowTaskCompletionSweepTests
 
     // ---- helpers ----
 
+    /// <summary>
+    /// A re-poll cannot un-complete a task the sweep already marked (#629).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every producer emits only OPEN tasks, so <c>MapRow</c> writes
+    /// <c>completed_time = null</c> and <c>status = 'active'</c> unconditionally.
+    /// Safe in the steady state; not safe in a race.
+    /// <c>FlowableTaskPollingFeed</c> emits into a channel this projection drains
+    /// asynchronously, so a page captured BEFORE a completion can be applied
+    /// AFTER the sweep marked it.
+    /// </para>
+    /// <para>
+    /// And the sweep would not heal it: it walks <c>endTime DESC</c> and breaks
+    /// on the first page that marks nothing, so once newer completions push the
+    /// resurrected task off page 0 it is never re-marked — and
+    /// <c>CURRENTSTEP()</c> goes back to reporting the stale task, which is the
+    /// symptom #586 exists to remove.
+    /// </para>
+    /// <para>
+    /// Every other test in this file re-projects only BEFORE marking, which is
+    /// why none of them could see it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_late_poll_page_cannot_un_complete_a_swept_task()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string TaskId = "task-629";
+        const string Instance = "inst-629";
+        await SeedActiveTaskAsync(factory, TaskId, Instance);
+
+        // The engine reports it finished, and the sweep marks it.
+        factory.FlowableStub.FinishedTasks.Add(new FlowableFinishedTask
+        {
+            Id = TaskId,
+            EndedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ProcessInstanceId = Instance
+        });
+
+        Assert.Equal(1, await SweepAsync(factory));
+
+        var marked = await ReadTaskAsync(factory, TaskId);
+        Assert.NotNull(marked.CompletedTime);
+        Assert.Equal("completed", marked.Status);
+
+        // NOW THE LATE PAGE LANDS — the same open-task summary a poll captured
+        // before the completion, applied after it.
+        await SeedActiveTaskAsync(factory, TaskId, Instance);
+
+        var after = await ReadTaskAsync(factory, TaskId);
+
+        Assert.NotNull(after.CompletedTime);
+        Assert.Equal("completed", after.Status);
+        Assert.Equal(marked.CompletedTime, after.CompletedTime);
+    }
+
     private static async Task<int> SweepAsync(AutoNateWebApplicationFactory factory)
     {
         using var scope = factory.Services.CreateScope();
