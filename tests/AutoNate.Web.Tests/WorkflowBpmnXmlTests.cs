@@ -1059,9 +1059,18 @@ public sealed class WorkflowBpmnXmlTests
         // A CONDITION, not a default flow: a default swallows the wait token only
         // when nothing else matched, which is also when the author's own default
         // is meant to run. Two meanings on one edge.
-        Assert.Equal(
-            "${__autonateRoute_cg == 'autonateWait'}",
-            waitFlow.Element(Bpmn218 + "conditionExpression")?.Value);
+        var condition = waitFlow.Element(Bpmn218 + "conditionExpression");
+        Assert.Equal("${__autonateRoute_cg == 'autonateWait'}", condition?.Value);
+
+        // AND ITS xsi:type IS PREFIXED. Asserted because the value alone is not
+        // enough and the slim tier proved it: a bare `tFormalExpression` reads
+        // identically in the value assertion above and is refused by Flowable
+        // with `cvc-elt.4.2: Cannot resolve 'tFormalExpression' to a type
+        // definition` -- a 400 on every join publish, caught only by the engine
+        // tier. It happens when the condition is built on a flow not yet attached
+        // to the document, because the prefix is resolved from the ancestors.
+        var xsi = (XNamespace)"http://www.w3.org/2001/XMLSchema-instance";
+        Assert.Equal("bpmn:tFormalExpression", condition?.Attribute(xsi + "type")?.Value);
     }
 
     [Fact]

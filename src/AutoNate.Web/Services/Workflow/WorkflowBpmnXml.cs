@@ -1325,6 +1325,15 @@ public static partial class WorkflowBpmnXml
             new XAttribute("targetRef", waitEndId),
             new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId));
 
+        // ATTACHED FIRST, and that ordering is load-bearing. `FormalExpressionType`
+        // resolves the bpmn: prefix by walking the element's ancestors, so on an
+        // element that is not in the document yet it finds none and emits a bare
+        // `tFormalExpression`. Flowable then refuses the whole deployment with
+        //   cvc-elt.4.2: Cannot resolve 'tFormalExpression' to a type definition
+        // -- measured, as a 400 on every join publish. The condition has to be
+        // added to a flow that already knows where it lives.
+        AddFlowElement(gateway.Parent, waitFlow);
+
         // A CONDITION even when the author set a default flow. A default would
         // swallow the wait token only when nothing else matched, which is also
         // when the author's own default is meant to run -- two different meanings
@@ -1333,8 +1342,6 @@ public static partial class WorkflowBpmnXml
             BpmnNamespace + "conditionExpression",
             new XAttribute(XsiNamespace + "type", FormalExpressionType(waitFlow)),
             $"${{{resultVariable} == '{ComplexGatewayWaitRoute}'}}"));
-
-        AddFlowElement(gateway.Parent, waitFlow);
 
         _ = defaultFlowId;
     }
