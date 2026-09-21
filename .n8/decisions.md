@@ -10311,3 +10311,68 @@ failing at the call site. Now one singleton serving both roles.
 **Pins:** SLIM_BACKEND 2930 → 2932, FLOWABLE 259 → 261, FULL_LOCAL 493 → 495.
 
 **Issue:** #222
+
+## #231 — an accumulating complex-gateway join, 2026-09-21
+
+**Step 0 corrected the protocol's target.** #219 specified `setVariableLocal`
+"against the gateway's own scope execution". The obvious reading — *on the
+execution the script ran on* — breaks the feature. Measured: parallel branches
+inside a sequential multi-instance body are **siblings** under the body
+execution, so a write on the script task's own execution gives each branch a
+private copy and an accumulating join never accumulates. The target is the
+nearest **enclosing scope**, which is shared across one iteration's branches and
+distinct between iterations. With no subprocess it degenerates correctly.
+
+**The decision the AC demanded, taken: the accumulating shape applies only to a
+gateway with more than one incoming flow.** A single-inbound gateway keeps
+#218's shape exactly. It has nothing to accumulate, nothing to wait for and no
+second arrival to absorb, so giving every already-published split-only gateway an
+accumulator, a wait route and an end event would change the runtime shape of all
+of them to buy nothing. Pinned in both directions, including a complement test
+asserting a single-inbound gateway gains neither the arriving-flow attribute nor
+the absorbing end event.
+
+**The oracle cell deliberately stays on the split shape, and the reason is not
+convenience.** `Ev_1` there has one incoming flow, so it is unaffected and the
+three pins did not move. Moving it would *break* the `variable-written` observer
+rather than strengthen it: that observer requires the writing activity to be
+exactly one hop from `Ev_1`, and N accumulators put a generated node on every
+inbound edge — so a correct implementation would read as a failure and the fix
+would be to loosen the one-hop rule, weakening the strictest thing about the
+oracle to accommodate a shape it was never asked to prove. What proves the new
+shape is the three live-engine specs, which assert accumulation *over time* — a
+claim no single-token oracle cell can make. Recorded at the cell itself, not
+only here.
+
+**Rule 1 — a publish-breaking bug the slim tier could not see.** The wait flow's
+condition was built before the flow was attached to the document, so
+`FormalExpressionType` — which resolves the `bpmn:` prefix from ancestors — found
+none and emitted a bare `tFormalExpression`. Flowable refused **every** join
+publish with `cvc-elt.4.2`. The unit test asserted the condition's value, which
+is identical either way. It now asserts the prefix, and that assertion fails
+against the old ordering — a publish-breaking bug moved from the engine tier down
+to the merge gate.
+
+**A test of mine was passing vacuously, and the fix is recorded rather than
+quietly applied.** The E2E scripts read `autonateArrived` as a bare global; the
+sandbox exposes process variables through `variables.get(name)`, so they threw
+`autonateArrived is not defined`. The out-of-order spec failed outright, but
+*"a branch that never arrives leaves the join waiting"* **passed** — a script that
+dies also fails to produce "Joined". It was asserting the right absence for the
+wrong reason.
+
+**#237, on the fourth attempt.** Three previous assertions were vacuous. Two
+things measured before writing this one: the attempt count is **not** in history
+(the failing node has zero activity-instance rows — Flowable rolls back the
+failing transaction including its history write), and start-to-dead-letter is
+38.6s for the retried job. So the signal is elapsed time, with a **control
+measured in the same run** — the same diagram with a valid route — and the
+control assertion placed *first*, so an engine slow enough to invalidate the
+floor fails loudly instead of letting the floor pass for the wrong reason.
+
+**Pins:** FLOWABLE 261 → 264, FULL_LOCAL 495 → 498, SLIM_BACKEND 2932 → 2937.
+This branch is off `master`, so these will conflict with #173's pins in PR #613
+when both land; the resolution is additive and the provenance notes name which
+story contributed which tests.
+
+**Issue:** #231 (owns #237)
