@@ -10652,3 +10652,104 @@ tests are `RequiresService=Dapr`, which no pull request has ever run).
 guard that only runs full-local is how six of these survived.
 
 **Issues:** #626, #627, #629, #630, #632, #633, #634, #635
+
+## M5 fix pass, round two: #628, 2026-09-21
+
+`/n8-verify M5`'s last unblocked bug. #173's AC — the expand control is
+keyboard-operable and the progress is announced — held only in its ratchet
+third; the other two had no executable coverage at any tier, and #613's
+completion evidence implied otherwise.
+
+**The third fact is the one with teeth.** A live region rendered
+already-populated announces nothing: assistive technology speaks a *change*. So
+the region's node is marked before the task completes and the marked node must
+carry the new sentence — a remount loses the mark, which is exactly the shape
+that looks announced and is silent. Waiting longer cannot fake it, which is the
+objection `PageModeTaskRefreshTests` raises against any bus-timing assertion.
+
+**Rule 1, the page never refreshed.** The detail-channel `useBusSubscription`
+lived in the LIST page, so `/executions/:id` — a real route, linked from Called
+Workflows — subscribed to nothing and never updated after its first paint.
+Measured against the pre-fix state: the marked node resolved **64 times over 60
+seconds** and never left "Approve: 0 of 3 complete.". The node persisted, so the
+region was never remounted; the text simply could not change. Moved to
+`ExecutionContent`, the component that reads those four queries. The drawer is
+unaffected — it mounts `ExecutionContent` only while a row is open, which is
+when the subscription used to exist.
+
+**Rule 1, and the fix was the cause.** `fitAndCenter` defers its zoom to the
+next animation frame with nothing guarding the callback, so a frame can outlive
+its viewer and `Canvas.getSize()` reads `clientWidth` off undefined. A/B on the
+same three specs: **0 occurrences before the subscription move, 2 after.** I
+introduced it. It was unreachable while that route never refetched — no second
+import, no frame in flight — so the guard ships with the change that reached it.
+My reading of the code had said the deferral was fine; the measurement said
+otherwise, and only the A/B distinguished "exposed a latent race" from "caused
+one".
+
+**Mutations, all three killed:** `tabIndex={-1}` killed the keyboard fact by its
+own message; `aria-live="assertive"` killed both region facts on the locator;
+the pre-fix run is the third's kill.
+
+**Pins:** FLOWABLE 268 → 271, FULL_LOCAL 509 → 512, verified by discovery.
+Neither slim pin moves — the row does not exist without a live multi-instance
+execution, and the wording and arithmetic it depends on are already slim.
+
+**One flake, recorded rather than quietly re-run.** The slim E2E leg went 239/240
+on the first attempt (`AgentConversationTests.Assistant_CrossPageSearch…`,
+10 s waiting for "Loaded from"). Re-running the whole tier under the same
+contention: 240/240. That surface is untouched by all three changed files and
+was green at `cdfd856`.
+
+**Issues:** #628 (PR #638, `d9c687c`)
+
+## Blocker: #631 — selector tag case sensitivity, 2026-09-21
+
+**Waiting on the owner. `blocked` + `needs-owner-action`.**
+
+The in-memory selector evaluator compares tag values case-INsensitively — pinned
+by an existing test — and the SQL compiler compares case-sensitively. Measured:
+Postgres says `'alice' = 'ALICE'` is `false`.
+
+Every available fix changes what already-stored grants mean. Making SQL
+insensitive widens what allows return in the list path; making memory sensitive
+narrows single-instance reads into what reads as a lockout; normalising on write
+rewrites what an operator typed. A leak and a lockout are the two failure
+directions and they point opposite ways, so this is not a low-cost ambiguity to
+call and log — it is the same class of decision as #574's wildcard, which was
+also the owner's.
+
+Three options are on the issue. Nothing downstream is blocked by it.
+
+## Blocker: #636 — one publish, two stream messages, 2026-09-21
+
+**Cause measured; confirming it needs a destructive change to shared dev
+infrastructure, which is the owner's call.**
+
+Bisected below the application, each step a measurement:
+
+- both instances are the same deployed definition, 66 ms apart;
+- the single JetStream consumer reported `consumer_seq 2`, `num_redelivered 0` —
+  two distinct messages, not a redelivery;
+- publishing straight to NATS, bypassing Dapr entirely, duplicates identically
+  (per-subject count 16 → 18 → 20 → 22 across four single publishes);
+- a core subscriber sees exactly **one** message per publish, while the stream
+  stores two, 0.93 ms apart, same subject, same payload;
+- it happens on `workflow.messages` and `workflow.signals` and on no other
+  subject — the only two **literal** subjects in the stream; every `x.>` wildcard
+  stores once;
+- a throwaway stream of the same shape stores one;
+- the stream has no `sources`, no `mirror`, no `republish`, no
+  `subject_transform`, one replica, one account, no duplicated subject entry.
+
+`NatsStreamProvisioner` uses `CreateOrUpdateStreamAsync`. The two literal
+subjects were **added to an already-existing stream** (#524, #540); the wildcards
+were present when it was created on 2026-09-17. The duplication tracks exactly
+that split, so the leading explanation is local JetStream state left by a stream
+update — not product code, and not these two specs, which would then be correct.
+
+Confirming it means `nats stream rm workflow-execution -f`, dropping ~137k
+buffered messages on a shared dev stack. Almost certainly harmless (`max_age` is
+24 h, Dapr's consumers are `deliverPolicy: new`, and the app re-provisions at
+startup) — but destructive to shared infrastructure and not mine to do. The tool
+refused it and the refusal was right. Full evidence is on the issue.
