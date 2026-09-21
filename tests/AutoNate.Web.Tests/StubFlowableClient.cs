@@ -323,6 +323,21 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(list);
     }
 
+    // #173. The engine's own multi-instance counters and per-execution
+    // variables. Seeded per process instance; unseeded instances report Empty,
+    // which is the shape a finished process returns for real.
+    public Dictionary<string, MultiInstanceEngineState> MultiInstanceStateByInstance { get; } = new();
+
+    public Task<MultiInstanceEngineState> GetMultiInstanceEngineStateAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"MultiInstanceState:{processInstanceId}");
+        return Task.FromResult(
+            MultiInstanceStateByInstance.TryGetValue(processInstanceId, out var state)
+                ? state
+                : MultiInstanceEngineState.Empty);
+    }
+
     public Dictionary<string, List<WorkflowExecutionLogEntry>> LogByInstance { get; } = new();
 
     public Task<IReadOnlyList<WorkflowExecutionLogEntry>> GetWorkflowExecutionLogAsync(

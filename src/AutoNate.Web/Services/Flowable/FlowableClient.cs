@@ -804,9 +804,111 @@ public sealed class FlowableClient(
                 DurationMs = activity.DurationInMillis,
                 Assignee = string.IsNullOrWhiteSpace(activity.Assignee) ? null : activity.Assignee,
                 TaskId = string.IsNullOrWhiteSpace(activity.TaskId) ? null : activity.TaskId,
+                ExecutionId = string.IsNullOrWhiteSpace(activity.ExecutionId) ? null : activity.ExecutionId,
                 DeleteReason = string.IsNullOrWhiteSpace(activity.DeleteReason) ? null : activity.DeleteReason
             })
             .ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task<MultiInstanceEngineState> GetMultiInstanceEngineStateAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        var encodedId = Uri.EscapeDataString(processInstanceId);
+
+        // Every variable in the process, with the execution each is scoped to.
+        // One call covers both facts: the `nrOf*` counters on the multi-instance
+        // container, and the element variable on each instance.
+        using var variablesResponse = await _httpClient.GetAsync(
+            $"service/history/historic-variable-instances?processInstanceId={encodedId}&size={WorkflowExecutionQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(variablesResponse, "query historic variables for multi-instance state");
+
+        var variablesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricVariableInstanceResponse>>(
+            variablesResponse, cancellationToken);
+
+        var byExecution = new Dictionary<string, Dictionary<string, string?>>(StringComparer.Ordinal);
+        foreach (var row in variablesPayload.Data)
+        {
+            var name = row.Variable?.Name;
+            if (string.IsNullOrWhiteSpace(row.ExecutionId) || string.IsNullOrWhiteSpace(name)) continue;
+
+            if (!byExecution.TryGetValue(row.ExecutionId!, out var bag))
+            {
+                bag = new Dictionary<string, string?>(StringComparer.Ordinal);
+                byExecution[row.ExecutionId!] = bag;
+            }
+
+            bag[name!] = FormatVariableValue(row.Variable?.Value);
+        }
+
+        // The counters name no activity, and the container execution they hang
+        // off appears in NO historic activity row -- measured on 8.0.0, and it is
+        // why the collapse cannot be built on them alone. The runtime tree does
+        // carry `activityId` for that execution, so it is the only thing that can
+        // attribute a count to an activity.
+        //
+        // A finished process has no runtime tree and returns nothing here. That
+        // is not a gap: once the activity is over, every instance it will ever
+        // create has a historic row, so counting rows is exact.
+        var counts = new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal);
+        try
+        {
+            using var executionsResponse = await _httpClient.GetAsync(
+                $"service/runtime/executions?processInstanceId={encodedId}&size={WorkflowExecutionQuerySize}",
+                cancellationToken);
+
+            if (executionsResponse.IsSuccessStatusCode)
+            {
+                var executionsPayload = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(
+                    executionsResponse, cancellationToken);
+
+                foreach (var execution in executionsPayload.Data)
+                {
+                    if (string.IsNullOrWhiteSpace(execution.Id)
+                        || string.IsNullOrWhiteSpace(execution.ActivityId)
+                        || !byExecution.TryGetValue(execution.Id!, out var bag))
+                    {
+                        continue;
+                    }
+
+                    if (!TryReadInt(bag, "nrOfInstances", out var total)) continue;
+
+                    TryReadInt(bag, "nrOfCompletedInstances", out var completed);
+                    TryReadInt(bag, "nrOfActiveInstances", out var active);
+
+                    counts[execution.ActivityId!] = new MultiInstanceCounts(total, completed, active);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Degrades to counting historic rows rather than failing the whole
+            // history view, which is the same trade the jobs panel makes.
+            _logger.LogWarning(
+                exception,
+                "Could not read the runtime execution tree for {ProcessInstanceId}; multi-instance "
+                + "totals fall back to the historic rows.",
+                processInstanceId);
+        }
+
+        return new MultiInstanceEngineState(
+            counts,
+            byExecution.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyDictionary<string, string?>)kv.Value,
+                StringComparer.Ordinal));
+    }
+
+    private static bool TryReadInt(IReadOnlyDictionary<string, string?> bag, string name, out int value)
+    {
+        value = 0;
+        return bag.TryGetValue(name, out var text)
+               && int.TryParse(text, out value);
     }
 
     public async Task<IReadOnlyList<WorkflowExecutionLogEntry>> GetWorkflowExecutionLogAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -2614,6 +2716,10 @@ public sealed class FlowableClient(
 
         public string? TaskId { get; init; }
 
+        // #173. Distinct per multi-instance instance -- the join key to the
+        // element variable, which Flowable scopes to this execution.
+        public string? ExecutionId { get; init; }
+
         // Flowable propagates the process-level delete reason to every
         // activity instance that was in flight at cancellation time. This is
         // the authoritative signal for "this node was halted, not finished."
@@ -2623,6 +2729,11 @@ public sealed class FlowableClient(
     private sealed class FlowableHistoricVariableInstanceResponse
     {
         public FlowableHistoricVariableResponse? Variable { get; init; }
+
+        // #173. Sits beside `variable`, not inside it. The multi-instance
+        // counters hang off the container execution and the element variable off
+        // each instance's own, so this field is what separates them.
+        public string? ExecutionId { get; init; }
 
         public DateTimeOffset? CreateTime { get; init; }
 

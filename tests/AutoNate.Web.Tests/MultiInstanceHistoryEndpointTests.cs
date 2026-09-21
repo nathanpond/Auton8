@@ -25,6 +25,21 @@ public sealed class MultiInstanceHistoryEndpointTests
     private const string Instance = "inst-173";
     private const string DefinitionId = "review_flow:1:abc";
 
+    private const string SequentialBpmn = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="review_flow" isExecutable="true">
+            <bpmn:userTask id="review" name="Review">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="true"
+                  flowable:collection="reviewers" flowable:elementVariable="reviewer" />
+            </bpmn:userTask>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     private const string Bpmn = """
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -263,18 +278,205 @@ public sealed class MultiInstanceHistoryEndpointTests
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// A sequential loop in flight reports the engine's total, not its rows (#173).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the case the row count cannot answer, measured on Flowable
+    /// 8.0.0.</b> A sequential multi-instance creates ONE instance at a time, so a
+    /// loop over five reviewers with the first task open writes exactly one
+    /// historic activity row. Counting rows reports "1 of 1" — a finished-looking
+    /// activity that has four runs still to go, and the AC asking for "how many
+    /// remain" is unanswerable.
+    /// </para>
+    /// <para>
+    /// The engine knows: <c>nrOfInstances</c> is 5 on the multi-instance container
+    /// execution. The complement is the row below — with no engine state, the same
+    /// request falls back to the rows — so this pair fails in opposite directions
+    /// if the precedence is ever inverted.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_sequential_loop_in_flight_reports_the_engine_total()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory, SequentialBpmn);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+
+        factory.FlowableStub.MultiInstanceStateByInstance[Instance] = new MultiInstanceEngineState(
+            new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal)
+            {
+                ["review"] = new MultiInstanceCounts(Total: 5, Completed: 0, Active: 1)
+            },
+            new Dictionary<string, IReadOnlyDictionary<string, string?>>(StringComparer.Ordinal));
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        var progress = one.GetProperty("multiInstance");
+
+        Assert.Equal(5, progress.GetProperty("total").GetInt32());
+        Assert.Equal(1, progress.GetProperty("active").GetInt32());
+        Assert.True(progress.GetProperty("isSequential").GetBoolean());
+    }
+
+    /// <summary>
+    /// With no engine state, the rows are the total (#173).
+    /// </summary>
+    /// <remarks>
+    /// The complement of the test above, and the shape a FINISHED process really
+    /// returns: the runtime tree is gone, so the counters cannot be attributed to
+    /// an activity. Counting rows is exact by then — every instance the loop will
+    /// ever create has one. Without this row, "always prefer the engine" would
+    /// pass the test above while reporting zero for every completed activity.
+    /// </remarks>
+    [Fact]
+    public async Task With_no_engine_state_the_historic_rows_are_the_total()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory, SequentialBpmn);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-8), now.AddMinutes(-7)),
+            Row("review", "Review", now.AddMinutes(-7), now.AddMinutes(-6))
+        ];
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        var progress = one.GetProperty("multiInstance");
+
+        Assert.Equal(3, progress.GetProperty("total").GetInt32());
+        Assert.Equal(3, progress.GetProperty("completed").GetInt32());
+        Assert.Equal(0, progress.GetProperty("active").GetInt32());
+    }
+
+    /// <summary>
+    /// Each expanded instance says which collection item it has (#173).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The AC is "its element value from the collection so an operator can tell
+    /// which item it is". Flowable scopes that variable to each instance's own
+    /// execution, so the join is by execution id — asserted with DIFFERENT values
+    /// per instance, because a single shared value passes against an
+    /// implementation that reads the process-level collection and hands the same
+    /// item to everyone.
+    /// </para>
+    /// <para>
+    /// The complement is the third instance: its execution has no such variable,
+    /// and it must come back null rather than borrowing a neighbour's.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Each_expanded_instance_carries_its_own_collection_item()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory, SequentialBpmn);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8), executionId: "exec-1"),
+            Row("review", "Review", now.AddMinutes(-8), endedAt: null, executionId: "exec-2"),
+            Row("review", "Review", now.AddMinutes(-7), endedAt: null, executionId: "exec-3")
+        ];
+
+        factory.FlowableStub.MultiInstanceStateByInstance[Instance] = new MultiInstanceEngineState(
+            new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyDictionary<string, string?>>(StringComparer.Ordinal)
+            {
+                ["exec-1"] = new Dictionary<string, string?>(StringComparer.Ordinal) { ["reviewer"] = "alice" },
+                ["exec-2"] = new Dictionary<string, string?>(StringComparer.Ordinal) { ["reviewer"] = "bob" }
+            });
+
+        var instances = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/activities/review/instances");
+
+        Assert.Equal(3, instances!.Count);
+        Assert.Equal("alice", instances[0].GetProperty("elementValue").GetString());
+        Assert.Equal("bob", instances[1].GetProperty("elementValue").GetString());
+        Assert.Equal(JsonValueKind.Null, instances[2].GetProperty("elementValue").ValueKind);
+    }
+
+    /// <summary>
+    /// The collapsed history never carries the element values (#173).
+    /// </summary>
+    /// <remarks>
+    /// The lazy-loading criterion, asserted on the payload rather than on the UI.
+    /// Enriching the collapsed row would be invisible in the browser and would
+    /// pay the per-instance cost on every history read — which is the regression
+    /// #108's paging work exists to prevent.
+    /// </remarks>
+    [Fact]
+    public async Task The_collapsed_history_does_not_pay_for_element_values()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        await SeedDefinitionAsync(factory, SequentialBpmn);
+
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8), executionId: "exec-1"),
+            Row("review", "Review", now.AddMinutes(-8), endedAt: null, executionId: "exec-2")
+        ];
+
+        factory.FlowableStub.MultiInstanceStateByInstance[Instance] = new MultiInstanceEngineState(
+            new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyDictionary<string, string?>>(StringComparer.Ordinal)
+            {
+                ["exec-1"] = new Dictionary<string, string?>(StringComparer.Ordinal) { ["reviewer"] = "alice" }
+            });
+
+        var rows = await client.GetFromJsonAsync<List<JsonElement>>(
+            $"/api/executions/{Instance}/history");
+
+        var one = Assert.Single(rows!.Where(r => r.GetProperty("activityId").GetString() == "review"));
+        Assert.Equal(JsonValueKind.Null, one.GetProperty("elementValue").ValueKind);
+    }
+
     private static WorkflowExecutionHistoryEvent Row(
-        string activityId, string name, DateTimeOffset startedAt, DateTimeOffset? endedAt) => new()
+        string activityId,
+        string name,
+        DateTimeOffset startedAt,
+        DateTimeOffset? endedAt,
+        string? executionId = null) => new()
     {
         ActivityId = activityId,
         ActivityName = name,
         ActivityType = "userTask",
         StartedAtUtc = startedAt,
-        EndedAtUtc = endedAt
+        EndedAtUtc = endedAt,
+        ExecutionId = executionId
     };
 
-    private static async Task SeedDefinitionAsync(AutoNateWebApplicationFactory factory)
+    private static async Task SeedDefinitionAsync(
+        AutoNateWebApplicationFactory factory, string? diagram = null)
     {
+        var bpmn = diagram ?? Bpmn;
         using var scope = factory.Services.CreateScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -285,7 +487,7 @@ public sealed class MultiInstanceHistoryEndpointTests
             Id = modelId,
             Name = "Review flow",
             ProcessKey = "review_flow",
-            BpmnXml = Bpmn,
+            BpmnXml = bpmn,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         });
@@ -300,7 +502,7 @@ public sealed class MultiInstanceHistoryEndpointTests
             VersionNumber = 1,
             Name = "Review flow",
             ProcessKey = "review_flow",
-            BpmnXml = Bpmn,
+            BpmnXml = bpmn,
             ProcessDefinitionId = DefinitionId,
             DeploymentId = "dep-173",
             ProcessDefinitionKey = "review_flow",

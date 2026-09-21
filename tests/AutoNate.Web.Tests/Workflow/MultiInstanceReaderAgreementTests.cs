@@ -204,6 +204,12 @@ public sealed class MultiInstanceReaderAgreementTests
             "loopCardinality", "LoopCardinalityAttribute",
             // collection
             "\"collection\"", "loopDataInputRef",
+            // the element each run is bound to. #173: this fact already had TWO
+            // readers -- WorkflowBpmnXml and WorkflowConditionValidation -- and
+            // this list could not see either, so the guard would have watched a
+            // new one arrive without a word. Added with the second reader routed
+            // through the first, not after.
+            "elementVariable",
             // aggregation
             "variableAggregation",
             "AggregateTargetAttribute", "AggregateSourceAttribute",
@@ -226,6 +232,7 @@ public sealed class MultiInstanceReaderAgreementTests
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:CardinalityText",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresCollection",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:CollectionName",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:ElementVariableName",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresAggregationElement",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationTarget",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationSource",

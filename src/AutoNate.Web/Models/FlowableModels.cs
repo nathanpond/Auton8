@@ -226,6 +226,18 @@ public sealed record class WorkflowExecutionHistoryEvent
 
     public string? TaskId { get; init; }
 
+    // #173. The engine execution this row ran on. Distinct per multi-instance
+    // instance, which is what lets each instance be matched to the collection
+    // item it was given -- Flowable scopes the element variable to exactly this
+    // execution. Null on nothing the engine returns; present on every row.
+    public string? ExecutionId { get; init; }
+
+    // #173. The collection item this instance was handed, rendered for display.
+    // Populated only on the per-instance route, and only when the loop declares
+    // a `flowable:elementVariable` -- a loop driven by a bare cardinality binds
+    // no item, so there is nothing to show and null is the honest answer.
+    public string? ElementValue { get; init; }
+
     // Set by Flowable when the row was halted by a process-level cancel
     // (or other delete) rather than completing through normal flow.
     public string? DeleteReason { get; init; }
@@ -262,6 +274,41 @@ public sealed record class WorkflowExecutionHistoryEvent
     // rendering as the several rows it is.
     public MultiInstanceProgress? MultiInstance { get; init; }
 }
+/// <summary>
+/// What the engine itself says about one multi-instance activity (#173).
+/// </summary>
+/// <remarks>
+/// <b>Measured on Flowable 8.0.0.</b> The engine keeps <c>nrOfInstances</c>,
+/// <c>nrOfCompletedInstances</c> and <c>nrOfActiveInstances</c> as local variables
+/// on the multi-instance CONTAINER execution, and they survive the activity's
+/// completion as historic variable instances. They are the only source that can
+/// answer "how many remain" for a SEQUENTIAL loop, which creates one instance at a
+/// time: a sequential loop over five reviewers with one task open writes exactly
+/// ONE historic activity row, so counting rows reports "1 of 1" for something that
+/// is one of five.
+/// </remarks>
+public sealed record MultiInstanceCounts(int Total, int Completed, int Active);
+
+/// <summary>
+/// The engine-side facts behind a process's multi-instance activities (#173).
+/// </summary>
+/// <remarks>
+/// Two queries, made only for a process whose diagram actually carries a
+/// multi-instance marker. The counts need the runtime execution tree because the
+/// container execution appears in NO historic activity row -- measured -- so its
+/// variables cannot otherwise be attributed to an activity. Once the process ends
+/// the tree is gone and the counts are empty, which is exactly when counting the
+/// historic rows is correct, because by then every instance has run.
+/// </remarks>
+public sealed record MultiInstanceEngineState(
+    IReadOnlyDictionary<string, MultiInstanceCounts> CountsByActivityId,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string?>> VariablesByExecutionId)
+{
+    public static MultiInstanceEngineState Empty { get; } = new(
+        new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal),
+        new Dictionary<string, IReadOnlyDictionary<string, string?>>(StringComparer.Ordinal));
+}
+
 
 /// <summary>
 /// How far a multi-instance activity has got, as one row (#173).

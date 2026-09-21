@@ -648,32 +648,6 @@ public static partial class WorkflowBpmnXml
     internal const string LoopCardinalityAttribute = "loopCardinality";
 
     /// <summary>
-    /// Does this loop say how many times to run — in EITHER spelling (#356)?
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// There are two, and that is not optional: the studio writes
-    /// <c>autonate:loopCardinality</c> as an <b>attribute</b>
-    /// (<c>workflow.js:3257</c>) because bpmn-js has no Flowable moddle extension
-    /// and cannot create the child element; <c>ExpandForDeployment</c> converts it
-    /// to <c>&lt;bpmn:loopCardinality&gt;</c> on the way to the engine. Validation
-    /// runs on the <b>stored</b> diagram, before that conversion.
-    /// </para>
-    /// <para>
-    /// So any rule that reads only the child element is wrong for every diagram
-    /// the studio produces. <c>BuildMissingRequiredAttributeErrors</c> did exactly
-    /// that from #333 until #356, and a fixed-count multi-instance could not be
-    /// published — the error told the author to set the thing they had set. It was
-    /// red for four rounds because the Flowable suite is full-local only, and
-    /// nobody was running that tier.
-    /// </para>
-    /// <para>
-    /// One reader now, because two readers of one thing disagreeing is the defect
-    /// family this milestone has spent thirteen rounds on. <c>MultiInstanceReaderAgreementTests</c>
-    /// pins that every reader goes through here.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// THE reader of a declared cardinality, in either spelling (#356, #173).
     /// </summary>
     /// <remarks>
@@ -725,10 +699,10 @@ public static partial class WorkflowBpmnXml
     /// moment the activity ends.
     /// </para>
     /// </remarks>
-    public static IReadOnlyDictionary<string, (bool IsSequential, int? Cardinality)>
+    public static IReadOnlyDictionary<string, (bool IsSequential, int? Cardinality, string? ElementVariable)>
         ExtractMultiInstanceActivities(string xml)
     {
-        var found = new Dictionary<string, (bool, int?)>(StringComparer.Ordinal);
+        var found = new Dictionary<string, (bool, int?, string?)>(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(xml)) return found;
 
         XDocument document;
@@ -745,7 +719,7 @@ public static partial class WorkflowBpmnXml
                 Trimmed(loop.Attribute("isSequential")?.Value),
                 "true", StringComparison.OrdinalIgnoreCase);
 
-            found[id!] = (sequential, DeclaredCardinality(loop));
+            found[id!] = (sequential, DeclaredCardinality(loop), ElementVariableName(loop));
         }
 
         return found;
@@ -797,6 +771,34 @@ public static partial class WorkflowBpmnXml
     /// <c>loopDataInputRef</c> is the spec's own element form.
     /// </remarks>
     internal static bool DeclaresCollection(XElement loop) => CollectionName(loop) is not null;
+
+    /// <summary>
+    /// THE reader of the name each run's collection item is bound to (#173).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured:</b> Flowable writes this variable as a historic variable
+    /// instance scoped to each instance's own execution — three instances over
+    /// <c>["alice","bob","carol"]</c> produce three <c>reviewer</c> rows, one per
+    /// execution id, and they survive the activity's completion. That is what
+    /// lets an expanded row say WHICH item each instance is working on, which is
+    /// the whole reason the expansion is worth opening.
+    /// </para>
+    /// <para>
+    /// One reader, and this one arrived with a second already in the codebase:
+    /// <c>WorkflowConditionValidation</c> reads the same attribute to know which
+    /// names a loop assigns. <c>MultiInstanceReaderAgreementTests</c> could not
+    /// see it, because <c>elementVariable</c> was missing from its spellings
+    /// list — so the spelling was added there in the same change rather than
+    /// quietly stepping around a guard that happened to be looking elsewhere.
+    /// </para>
+    /// <para>
+    /// Unprefixed is not read: like <c>collection</c>, an unprefixed
+    /// <c>elementVariable</c> is rejected by the BPMN XSD (#341).
+    /// </para>
+    /// </remarks>
+    internal static string? ElementVariableName(XElement loop) =>
+        Trimmed(loop.Attribute(FlowableNamespace + "elementVariable")?.Value);
 
     /// <summary>Where each run's result is collected, and from which variable (#245).</summary>
     internal const string AggregateTargetAttribute = "aggregateTarget";
