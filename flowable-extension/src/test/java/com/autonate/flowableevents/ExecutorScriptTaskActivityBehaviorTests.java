@@ -16,6 +16,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,6 +24,7 @@ import org.flowable.bpmn.model.ExtensionAttribute;
 import org.flowable.bpmn.model.ScriptTask;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
+import org.flowable.engine.impl.persistence.entity.ExecutionEntity;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -342,6 +344,141 @@ class ExecutorScriptTaskActivityBehaviorTests {
         return new ExecutorScriptTaskActivityBehavior(
             "ScriptTask_1", script, "javascript", resultVariable, null, false,
             HttpClient.newHttpClient(), Mapper, propertiesFor(baseUrl));
+    }
+
+    /**
+     * #231. A fake that can tell a scope from a concurrent branch.
+     *
+     * <p>The {@link DelegateExecution} proxy above cannot: it is not an
+     * {@link ExecutionEntity}, so {@code isScope()} and {@code getParent()} are
+     * not reachable and every walk trivially stops where it started. A test
+     * written against it would pass whether the scoped write landed on the right
+     * execution or the wrong one, which is precisely the claim under test.
+     *
+     * <p>{@code locals} is separate from {@code variables} so the test can assert
+     * WHERE a value landed rather than only that it exists somewhere.
+     */
+    private static DelegateExecution newScopedExecution(
+        String executionId,
+        boolean isScope,
+        DelegateExecution parent,
+        Map<String, Object> variables,
+        Map<String, Object> locals
+    ) {
+        return (DelegateExecution) Proxy.newProxyInstance(
+            ExecutionEntity.class.getClassLoader(),
+            new Class<?>[] { ExecutionEntity.class },
+            (proxy, method, args) -> switch (method.getName()) {
+                case "getProcessInstanceId" -> "p-1";
+                case "getId" -> executionId;
+                case "getCurrentActivityId" -> "ScriptTask_1";
+                case "isScope" -> isScope;
+                case "getParent" -> parent;
+                case "getVariables" -> new HashMap<>(variables);
+                case "getVariable" -> variables.get((String) args[0]);
+                case "setVariable" -> {
+                    variables.put((String) args[0], args[1]);
+                    yield null;
+                }
+                case "getVariableLocal" -> locals.get((String) args[0]);
+                case "setVariableLocal" -> {
+                    locals.put((String) args[0], args[1]);
+                    yield null;
+                }
+                default -> {
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class) yield false;
+                    if (returnType == int.class) yield 0;
+                    if (returnType == long.class) yield 0L;
+                    if (returnType.isPrimitive()) yield 0;
+                    yield null;
+                }
+            });
+    }
+
+    @Test
+    void aScopedWriteLandsOnTheEnclosingScopeAndNotOnTheBranch() throws Exception {
+        // The tree #231 measured: a concurrent branch under a scope execution.
+        // Parallel branches of one gateway are SIBLINGS under that scope, so a
+        // write that landed on the branch would be private to it and an
+        // accumulating join would never accumulate.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var branchLocals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+
+        var scope = newScopedExecution("scope-1", true, null, shared, scopeLocals);
+        var branch = newScopedExecution("branch-1", false, scope, shared, branchLocals);
+
+        var captured = new AtomicReference<String>();
+        var response = "{\"result\":null,\"mutations\":{},\"localMutations\":{\"arrived\":[\"f1\"]}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(fixture.baseUrl(), "variables.setLocal('arrived', ['f1']);", null);
+
+            behavior.runInSandbox(branch);
+
+            // Asserted as its rendered form, not as a List: `toJavaValue` keeps a
+            // JSON array as a JsonNode, which is pre-existing behaviour shared
+            // with `mutations` and not this change's to alter. WHERE the value
+            // landed is the claim under test.
+            assertNotNull(scopeLocals.get("arrived"),
+                "a scoped write must land on the enclosing scope, which the branches share");
+            assertEquals("[\"f1\"]", String.valueOf(scopeLocals.get("arrived")));
+            // THE COMPLEMENT, and the half that actually fails a wrong
+            // implementation: landing on the branch too would still satisfy the
+            // assertion above while making the value invisible to the sibling.
+            assertTrue(branchLocals.isEmpty(),
+                "a scoped write must NOT land on the branch execution; a sibling branch could not see it");
+            assertTrue(shared.isEmpty(),
+                "a scoped write must not fall back to the process-wide variables");
+        }
+    }
+
+    @Test
+    void aScopedWriteOnAScopeExecutionStaysThere() throws Exception {
+        // The degenerate case: no subprocess, so the execution reached IS a
+        // scope. Without this row, "always walk to the parent" passes the test
+        // above and writes past the process instance on an ordinary process.
+        var locals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+        var scope = newScopedExecution("proc-1", true, null, shared, locals);
+
+        var captured = new AtomicReference<String>();
+        var response = "{\"result\":null,\"mutations\":{},\"localMutations\":{\"n\":1}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(fixture.baseUrl(), "variables.setLocal('n', 1);", null);
+
+            behavior.runInSandbox(scope);
+
+            assertEquals(1, locals.get("n"));
+        }
+    }
+
+    @Test
+    void anOrdinaryMutationIsStillProcessWideAlongsideAScopedOne() throws Exception {
+        // The two bags must not be conflated in either direction. A reply
+        // carrying both must put each where it belongs, or "scoped" becomes a
+        // label rather than a behaviour.
+        var scopeLocals = new LinkedHashMap<String, Object>();
+        var branchLocals = new LinkedHashMap<String, Object>();
+        var shared = new LinkedHashMap<String, Object>();
+
+        var scope = newScopedExecution("scope-1", true, null, shared, scopeLocals);
+        var branch = newScopedExecution("branch-1", false, scope, shared, branchLocals);
+
+        var captured = new AtomicReference<String>();
+        var response =
+            "{\"result\":null,\"mutations\":{\"wide\":true},\"localMutations\":{\"narrow\":true}}";
+        try (var fixture = HttpFixture.start(captured, 200, response)) {
+            var behavior = newBehavior(
+                fixture.baseUrl(), "variables.set('wide', true);", null);
+
+            behavior.runInSandbox(branch);
+
+            assertEquals(Boolean.TRUE, shared.get("wide"));
+            assertEquals(Boolean.TRUE, scopeLocals.get("narrow"));
+            assertTrue(!shared.containsKey("narrow"), "a scoped write must not become process-wide");
+            assertTrue(!scopeLocals.containsKey("wide"), "a process-wide write must not become scoped");
+        }
     }
 
     private static DelegateExecution newExecution(
