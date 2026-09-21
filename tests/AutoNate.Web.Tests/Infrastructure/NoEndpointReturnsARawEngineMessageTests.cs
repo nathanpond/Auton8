@@ -43,6 +43,46 @@ public sealed class NoEndpointReturnsARawEngineMessageTests
     private static readonly Regex FlowableCatch = new(
         @"catch\s*\(\s*FlowableRequestException\s+(?<name>\w+)", RegexOptions.Compiled);
 
+    /// <summary>
+    /// #626. A method that TAKES a FlowableRequestException is the same hazard as
+    /// a catch block that holds one.
+    /// </summary>
+    /// <remarks>
+    /// The scan used to look only at catch blocks, and #222 walked straight past
+    /// it: the catch forwarded the exception to a helper, and the helper put
+    /// <c>.Message</c> into a persisted row that a DIFFERENT endpoint then served.
+    /// A rule about what catches do cannot see a rule about what helpers do, so
+    /// the scope is now "anywhere the exception is in hand".
+    /// </remarks>
+    private static readonly Regex FlowableParameter = new(
+        @"FlowableRequestException\s+(?<name>\w+)\s*[,)]", RegexOptions.Compiled);
+
+    /// <summary>Every scope holding a FlowableRequestException, with its body.</summary>
+    private static IEnumerable<(string Variable, string Body)> FlowableScopes(string text)
+    {
+        foreach (var scope in FlowableCatchBlocks(text)) yield return scope;
+
+        foreach (Match m in FlowableParameter.Matches(text))
+        {
+            // Skip the catch form, already yielded above.
+            var before = text[Math.Max(0, m.Index - 40)..m.Index];
+            if (before.Contains("catch", StringComparison.Ordinal)) continue;
+
+            var open = text.IndexOf('{', m.Index + m.Length);
+            if (open < 0) continue;
+
+            var depth = 0;
+            var i = open;
+            for (; i < text.Length; i++)
+            {
+                if (text[i] == '{') depth++;
+                else if (text[i] == '}' && --depth == 0) break;
+            }
+
+            yield return (m.Groups["name"].Value, text[open..Math.Min(i + 1, text.Length)]);
+        }
+    }
+
     /// <summary>Every FlowableRequestException catch block, with its body.</summary>
     private static IEnumerable<(string Variable, string Body)> FlowableCatchBlocks(string text)
     {
@@ -71,21 +111,41 @@ public sealed class NoEndpointReturnsARawEngineMessageTests
     {
         var found = new List<string>();
 
-        foreach (var (variable, body) in FlowableCatchBlocks(source))
+        foreach (var (variable, body) in FlowableScopes(source))
         {
             var lines = body.Split('\n');
             for (var n = 0; n < lines.Length; n++)
             {
                 var line = lines[n];
+
+                // Comments are prose, not code. Without this the guard flags the
+                // comment EXPLAINING the fix -- measured, on #626's own fix, which
+                // names `exception.Message` in order to say not to use it. The
+                // sibling guard MultiInstanceReaderAgreementTests skips comments
+                // for the same reason.
+                var trimmed = line.TrimStart();
+                if (trimmed.StartsWith("//", StringComparison.Ordinal)) continue;
+
                 if (!line.Contains($"{variable}.Message", StringComparison.Ordinal)) continue;
                 if (line.Contains("Log", StringComparison.Ordinal)) continue;
                 if (line.Contains("EngineRefusal", StringComparison.Ordinal)) continue;
 
-                var window = string.Join(" ", lines[Math.Max(0, n - 2)..(n + 1)]);
+                // SIX lines back, not two. Measured: the first version of this
+                // widening looked two lines back and did NOT catch #626, because
+                // the message sat third in an argument list and the
+                // `RecordSynchronousFailureAsync(` that names the sink was four
+                // lines above it. A widening that does not fire is worse than
+                // none -- it reads as coverage.
+                var window = string.Join(" ", lines[Math.Max(0, n - 6)..(n + 1)]);
                 if (window.Contains("Results.", StringComparison.Ordinal)
                     || window.Contains("message =", StringComparison.Ordinal)
                     || window.Contains("errors =", StringComparison.Ordinal)
-                    || window.Contains("new[]", StringComparison.Ordinal))
+                    || window.Contains("new[]", StringComparison.Ordinal)
+                    // #626. PERSISTING it is the same leak one hop later: the row
+                    // is served by GET /api/executions/{id}/history to anyone with
+                    // WorkflowExecution:View. A response is not the only way out.
+                    || window.Contains("Record", StringComparison.Ordinal)
+                    || window.Contains("ErrorMessage", StringComparison.Ordinal))
                 {
                     found.Add(line.Trim());
                 }

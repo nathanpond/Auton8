@@ -1819,10 +1819,28 @@ public static class ExecutionEndpoints
         var owner = await cacheRefresher.OwnerOfAsync(taskId, cancellationToken);
         if (owner is { } found)
         {
+            // #626. `described`, NOT `exception.Message`.
+            //
+            // `FlowableRequestException.Message` is built by
+            // `FlowableClient.EnsureSuccessAsync` as "Flowable could not {op}.
+            // HTTP {code} {reason}. {rawResponseBody}" -- the engine's ENTIRE
+            // HTTP body, which `NoEndpointReturnsARawEngineMessageTests`
+            // documents as carrying a JDBC URL with its password, internal
+            // hostnames, container ids and filesystem paths.
+            //
+            // This row is served to any caller with WorkflowExecution:View by
+            // GET /api/executions/{id}/history. Persisting the raw body here
+            // routed around #350 through a different endpoint: the guard scans
+            // for `.Message` used INSIDE a FlowableRequestException catch block,
+            // and this use is in a helper two hops from the catch.
+            //
+            // The engine's own words are not lost -- they are in the LogWarning
+            // above, where an operator with server access can read them and a
+            // caller cannot.
             await errorRecorder.RecordSynchronousFailureAsync(
                 found.InstanceId,
                 found.ActivityId,
-                $"Completing this step failed: {exception.Message}",
+                described,
                 exception.StackTrace,
                 cancellationToken);
         }
