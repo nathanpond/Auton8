@@ -132,12 +132,13 @@ export async function runPython(request: CodeNodeRequest): Promise<CodeNodeFrame
 export async function runPythonScriptTask(request: CodeNodeRequest): Promise<ScriptTaskResult> {
   const parsed = await runIsolated(request);
   if (parsed === null || typeof parsed !== "object") {
-    return { result: null, mutations: {} };
+    return { result: null, mutations: {}, localMutations: {} };
   }
   const shaped = parsed as Partial<ScriptTaskResult>;
   return {
     result: shaped.result ?? null,
     mutations: (shaped.mutations ?? {}) as Record<string, unknown>,
+    localMutations: (shaped.localMutations ?? {}) as Record<string, unknown>,
   };
 }
 

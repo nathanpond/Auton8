@@ -132,6 +132,13 @@ export function defaultHostApi(): HostApiRegistry {
       // earlier in this same script — otherwise a set followed by a get in one
       // script would not see its own write.
       source: `function (name) {
+        // #231. Local writes are checked FIRST: a script that calls setLocal and
+        // then get must see its own write, and a local value shadows the
+        // instance-scoped one of the same name the way the engine's own lookup
+        // does.
+        if (Object.prototype.hasOwnProperty.call(__state.localMutations, name)) {
+          return __state.localMutations[name];
+        }
         if (Object.prototype.hasOwnProperty.call(__state.mutations, name)) {
           return __state.mutations[name];
         }
@@ -152,6 +159,26 @@ export function defaultHostApi(): HostApiRegistry {
           throw new Error("variables.set requires a non-empty variable name.");
         }
         __state.mutations[name] = value;
+        return value;
+      }`,
+    })
+    .register({
+      namespace: "variables",
+      name: "setLocal",
+      description:
+        "Writes a process variable scoped to the enclosing block rather than the whole process. "
+        + "Inside a repeated step, each run gets its own copy; parallel branches of the SAME run share it.",
+      parameters: [
+        { name: "name", type: "string", description: "The process variable's name.", required: true },
+        { name: "value", type: "any", description: "The value to store.", required: true },
+      ],
+      // #231. The bag is separate from `mutations` all the way to the engine,
+      // because the two are applied by different calls there.
+      source: `function (name, value) {
+        if (typeof name !== "string" || name.length === 0) {
+          throw new Error("variables.setLocal requires a non-empty variable name.");
+        }
+        __state.localMutations[name] = value;
         return value;
       }`,
     });
