@@ -120,25 +120,13 @@ export default function WorkflowExecutions() {
     ),
   );
 
-  // Detail channel: only when a row is open. Fires on events for that one
-  // execution; cascades into the four detail panes.
-  const detailChannels = useMemo(
-    () => (selectedId ? [`workflow-execution:${selectedId}`] : []),
-    [selectedId],
-  );
-  useBusSubscription(
-    detailChannels,
-    useCallback(
-      () => {
-        if (!selectedId) return;
-        qc.invalidateQueries({ queryKey: executionDiagramQueryKey(selectedId) });
-        qc.invalidateQueries({ queryKey: executionHistoryQueryKey(selectedId) });
-        qc.invalidateQueries({ queryKey: executionLogQueryKey(selectedId) });
-        qc.invalidateQueries({ queryKey: executionTasksQueryKey(selectedId) });
-      },
-      [qc, selectedId],
-    ),
-  );
+  // The DETAIL channel used to live here too, keyed on `selectedId`. It now
+  // lives in ExecutionContent (#628), which is the component that actually
+  // reads those four queries — and, crucially, is also what `/executions/:id`
+  // renders. Owned here, that route subscribed to nothing and so never
+  // refreshed at all: not the diagram, not the task list, not the history. The
+  // drawer is unaffected, because it only mounts ExecutionContent while a row
+  // is open, which is exactly when this subscription used to exist.
 
   const busStatus = useSubscriptionStatus();
 
@@ -554,6 +542,33 @@ export function ExecutionContent({
   const reassignTask = useReassignTask(processInstanceId);
   const updateTaskDueDate = useUpdateTaskDueDate(processInstanceId);
   const moveExecutionState = useMoveExecutionState(processInstanceId);
+
+  // Detail channel: events for this one execution, cascading into the four
+  // panes below. It lives HERE rather than in the list page (#628) because this
+  // is the component that reads those queries, and it is also what
+  // `/executions/:id` renders — a route that, while the list page owned this,
+  // subscribed to nothing and therefore never updated after its first paint.
+  //
+  // The multi-instance row's live region is where that showed: a polite region
+  // is announced when its text CHANGES, so a page on which nothing can change
+  // has an announcement that is never made, however correct its markup reads.
+  const detailChannels = useMemo(
+    () => [`workflow-execution:${processInstanceId}`],
+    [processInstanceId],
+  );
+  const qc = useQueryClient();
+  useBusSubscription(
+    detailChannels,
+    useCallback(
+      () => {
+        qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+        qc.invalidateQueries({ queryKey: executionHistoryQueryKey(processInstanceId) });
+        qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
+        qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      },
+      [qc, processInstanceId],
+    ),
+  );
 
   // Set when the operator picks "Move Execution Here" from the context menu.
   // The confirmation modal renders off this and clears it on confirm/cancel.
