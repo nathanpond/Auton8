@@ -10500,3 +10500,86 @@ is arguably correct and because re-projecting breaks saved work silently.
 Nothing implemented, nothing pushed. Labelled `blocked` + `needs-owner-action`.
 
 **Issue:** #327
+## Four owner decisions, 2026-09-21
+
+**1. Merges are mine to run.** A Bash permission rule for `gh pr merge` was added
+after the auto-mode classifier refused it as "Merge Without Review". #613 merged at
+`8067de0`. The rule is a standing grant, not a one-off, so green PRs land from here
+without stopping at the gate — which is what makes the `/n8-exec` loop autonomous
+rather than half-autonomous.
+
+**2. #327 — leave the query layer raw.** Map the five read surfaces and the reverse
+direction; the four AQL projection entities keep storing the engine's own id, and
+that boundary gets documented and guarded rather than discovered. Mapping and
+re-projecting would break any saved AQL query filtering on a generated id with no
+warning to whoever wrote it; mapping going-forward-only would leave the column
+meaning two different things depending on when the row was written. The execution
+view and the assistant show the author's id; the query layer is where you reach for
+the engine's own questions, and a raw id is arguably correct there.
+
+**3. #169 — `Pool / Participant` becomes `engine: "executes"`.** Epic #40's call,
+asked 2026-09-19. A pool *is* a deployed definition once the story ships, so
+`executes` is true and `annotation` would leave the manifest's own `reason` false.
+It also makes the element discoverable: the supported panel filters on
+`engine !== "annotation"`, so under the old classification an author could not find
+a feature that works. Costs a declared departure in `BpmnSupportManifestTests` plus
+the `coming-soon` → `supported` flip #107 left undone. #170 and #171 unblocked
+behind it.
+
+**4. Finish #78, then verify M5.** Coverage first, then `/n8-verify` over the
+milestone's closed stories. Verification of roughly fifteen stories has been
+deferred since the run began; this is the second deliberate acceptance of that risk,
+recorded because a defect in shared machinery compounds into everything built after
+it.
+
+**Issues:** #327, #169, #170, #171, #78
+
+## #78 — studio editor coverage, 2026-09-21
+
+**The blocker this story was written against was never real.** Both E2E-036 and
+E2E-037 recorded that the studio has "no stable semantic selectors" for seeded BPMN
+nodes. `data-element-id` is stock diagram-js, ships to real users, and eight spec
+files were already selecting by it. Nothing was built; what was missing was a guard,
+and that guard now exists — a future custom renderer would otherwise have taken out
+eight spec files in one commit with failures that look like the editors breaking.
+
+**The tier split is the substance, not bookkeeping.** Seven of the eight new specs
+are **untraited**. They open a diagram, edit it and reload it; none publishes, so
+none needs Flowable. `WorkflowStudioTests` carries `RequiresService=Flowable` per
+CLASS, so putting canvas coverage there would have pushed it into a tier no pull
+request runs — the failure mode that kept #356 broken for four rounds. The one
+Flowable spec is the half that genuinely needs an engine: publish, start, open the
+task each completion mode produces.
+
+**Rule: found a defect, filed it, did not fix it inline (#624).** A user task's form
+mode is silently discarded on save. Measured: the task NAME typed into the same
+modal in the same Apply persists, and both form attributes are gone, with no error.
+An author configures a form task and gets the default completion modal.
+
+I attempted a fix and backed it out, which is worth recording. `updateUserTask-
+Properties` writes both attributes **before** `modeling.updateProperties`, while the
+script-task path 40 lines above writes **after** and says why — *"Written after
+updateProperties so it is not cleared by it"*. Reordering did **not** fix it, so that
+inconsistency is real but is not this cause. Reverted rather than left in as a
+speculative change, and #624 records what is ruled out: not the panel state
+(asserted immediately before Apply), not Apply failing, not the save, not a stale
+bundle, and not flowable attributes generally — a service task's `behaviorKey`
+round-trips through the same diagram and the same save.
+
+**The failing spec is INVERTED, not deleted**, which is this codebase's pattern for a
+refusal it intends to lift (#578's E2E is handled the same way). It pins the current
+behaviour with the task name from the same Apply as its control, so it cannot pass
+because "nothing happened", and it goes red the moment #624 is fixed.
+
+**E2E-059's blocker note re-stated** rather than left pointing at something untrue:
+it claimed a dependency on E2E-036's mode setup, but `ApiSeeder.CreateAndPublish-
+WorkflowAsync` already takes `userFormMode`/`userFormShortCode`. What remains is
+E2E-059's own subject — submitting the rendered form — which waits on E2E-057.
+
+**Ten consecutive local runs, recorded** (the AC asks for it, and studio specs are
+exactly the kind that pass once and flake on the fourth): 10/10 green, 8 tests each,
+zero failures, 12–14s per run.
+
+**Pins:** FLOWABLE 267 → 268, SLIM_E2E 233 → 240, FULL_LOCAL 501 → 509.
+
+**Issue:** #78, filed #624
