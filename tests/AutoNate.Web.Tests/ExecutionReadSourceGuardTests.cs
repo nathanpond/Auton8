@@ -43,6 +43,13 @@ public sealed class ExecutionReadSourceGuardTests
             + "relation cannot be expressed in it at all. Adding one is a projection and schema change.",
         ["/{processInstanceId}/activities/{activityId}/completed-assignees"] =
             "History-derived; same sibling read-through as /history.",
+        ["/{processInstanceId}/activities/{activityId}/instances"] =
+            "STRUCTURAL, twice over (#173). The per-instance rows are history-derived, so the same "
+            + "sibling read-through as /history; and each instance's element value is a variable "
+            + "Flowable scopes to that instance's OWN execution, which nothing projects -- "
+            + "workflow_execution_cache is per PROCESS instance and has no row to hang it on. The four "
+            + "owner decisions after #222 took no schema change here deliberately, and this route only "
+            + "runs when an operator expands a row, which is the point of it being a separate route.",
         ["/{processInstanceId}/adhoc"] =
             "STRUCTURAL: enabled ad-hoc activities are live engine state, not a projection of anything. "
             + "There is nothing to cache.",
