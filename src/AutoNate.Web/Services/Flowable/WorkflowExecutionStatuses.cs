@@ -33,6 +33,19 @@ public static class WorkflowExecutionStatuses
     /// rather than being forced to a default: guessing "active" for a status
     /// nobody anticipated would grant on a state we do not understand.
     /// </summary>
+    /// <summary>Has this run finished, one way or another (#634)?</summary>
+    /// <remarks>
+    /// A terminal run is not a deleted one. Flowable's RUNTIME endpoint returns
+    /// 404 for every completed instance -- measured -- so a read-through that
+    /// reads "not running" as "deleted" removes finished runs from the cache and
+    /// then refuses their gates.
+    /// </remarks>
+    public static bool IsTerminal(string? status) => Normalize(status) switch
+    {
+        Completed or Cancelled or Terminated => true,
+        _ => false
+    };
+
     public static string Normalize(string? raw) => (raw?.ToLowerInvariant()) switch
     {
         null or "" => Active,

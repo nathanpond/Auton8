@@ -192,6 +192,114 @@ public sealed class ExecutionAuthorizationFromCacheTests
             EntityKinds.User, Actor.ToString(), Actions.View, selector, "allow", 0), Actor);
     }
 
+    /// <summary>
+    /// A finished run is still authorizable and still cached (#634).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The read-through treated a null live read as "deleted in Flowable" and
+    /// removed the row. But <c>GetProcessInstanceAsync</c> asks
+    /// <c>service/runtime/process-instances/{id}</c>, and Flowable answers 404
+    /// there for every COMPLETED instance — measured against the engine, whose
+    /// runtime table holds only live runs.
+    /// </para>
+    /// <para>
+    /// So once a finished run's row aged past the 30s freshness window inside the
+    /// 60s poll interval, it was deleted: every
+    /// <c>RequirePermission(..., "processInstanceId")</c> route 403'd for
+    /// non-super-admins and the executions list lost the run until the next poll.
+    /// 4,894 completed/cancelled rows were in scope on the dev database.
+    /// </para>
+    /// <para>
+    /// The stub holds NO instance for this id, which is exactly what the real
+    /// client returns for a finished run, and the row is aged so the live read is
+    /// genuinely attempted.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_completed_run_is_not_deleted_when_the_engine_stops_listing_it()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-634";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+
+        // Finished. The runtime endpoint will not list it, which the stub models
+        // by simply not holding it.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE workflow_execution_cache SET status = 'completed'
+                WHERE flowable_instance_id = {Instance}
+                """);
+        }
+
+        factory.FlowableStub.InstancesById.Remove(Instance);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+
+            var served = await readThrough.GetInstanceAsync(Instance, CancellationToken.None);
+
+            Assert.NotNull(served);
+            Assert.Equal("completed", served!.Status);
+        }
+
+        // AND THE ROW SURVIVED. Returning it while deleting it would satisfy the
+        // assertion above and still break the executions list on the next read.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var still = await db.WorkflowExecutionCache.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.FlowableInstanceId == Instance);
+
+            Assert.NotNull(still);
+        }
+    }
+
+    /// <summary>
+    /// The complement: a run that is genuinely gone IS still removed (#634).
+    /// </summary>
+    /// <remarks>
+    /// Without this, "never delete" passes the test above while turning the cache
+    /// into a graveyard — a deleted instance would be served forever. Only a
+    /// TERMINAL row is protected; an active one the engine no longer lists really
+    /// has been deleted.
+    /// </remarks>
+    [Fact]
+    public async Task An_active_run_the_engine_no_longer_lists_is_still_removed()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-634-gone";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+        factory.FlowableStub.InstancesById.Remove(Instance);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+            Assert.Null(await readThrough.GetInstanceAsync(Instance, CancellationToken.None));
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var gone = await db.WorkflowExecutionCache.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.FlowableInstanceId == Instance);
+
+            Assert.Null(gone);
+        }
+    }
+
     private static async Task SeedCachedInstanceAsync(
         AutoNateWebApplicationFactory factory, string instanceId, string startedBy)
     {
