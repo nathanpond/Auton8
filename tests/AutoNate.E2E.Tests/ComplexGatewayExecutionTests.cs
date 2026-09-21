@@ -501,10 +501,55 @@ public sealed class ComplexGatewayExecutionTests : E2ETestBase
         var key = $"cgr{Guid.NewGuid():N}"[..20];
         await PublishAsync(api, key, Diagram(key, "return 'nowhere';"));
 
+        var startedAt = DateTime.UtcNow;
         var instance = await StartAsync(api, key);
 
         var attempts = await RetriesObservedAsync(instance);
         await EventuallyDeadLetteredAsync(instance);
+        var elapsed = DateTime.UtcNow - startedAt;
+
+        // #237, owned by #231: the half of the criterion that says the job was
+        // RETRIED, asserted at last -- and by elapsed time, which is what this
+        // file's own history says is the only honest signal left.
+        //
+        // The engine's counters provably cannot answer it. Flowable creates the
+        // async job with `retries` already at the executor's budget, before the
+        // first attempt, so the number is 3 whether or not a retry happens; three
+        // successive assertions were each vacuous for that reason. And the
+        // attempt COUNT is not in history either -- measured just now: the
+        // failing node has ZERO historic-activity-instance rows, because Flowable
+        // rolls back the failing transaction including its own history write,
+        // while `s` and `f0` have one row each. There is nothing to count.
+        //
+        // So: a control, measured in the same run against the same engine, is
+        // what one attempt costs right now. Without it the floor below is a
+        // number someone liked.
+        var controlKey = $"cgc{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, controlKey, Diagram(controlKey, "return 'fa';"));
+        var controlStartedAt = DateTime.UtcNow;
+        var controlInstance = await StartAsync(api, controlKey);
+        await EventuallyAsync(api, controlInstance,
+            n => n.Contains("Route A"), "the control's routing script to run once");
+        var oneAttempt = DateTime.UtcNow - controlStartedAt;
+
+        // Asserted FIRST, so that an engine slow enough to invalidate the floor
+        // fails loudly here rather than letting the assertion below pass for the
+        // wrong reason. That inversion is the whole lesson of the three vacuous
+        // versions this replaces.
+        Assert.True(oneAttempt < TimeSpan.FromSeconds(10),
+            $"The control routed in {oneAttempt.TotalSeconds:F1}s. One attempt is supposed to cost " +
+            "about a second; if it now costs ten, the floor below no longer separates a retried job " +
+            "from a terminal one and this assertion is measuring nothing.");
+
+        // MEASURED: 38.6s from start to dead-letter for the retried job, against
+        // ~1s for the control. The floor sits an order of magnitude above one
+        // attempt and a quarter of the observed retried time, so it separates
+        // them without going red when the engine is busy.
+        Assert.True(elapsed > TimeSpan.FromSeconds(10),
+            $"The routing job dead-lettered {elapsed.TotalSeconds:F1}s after the process started, " +
+            $"against {oneAttempt.TotalSeconds:F1}s for one successful attempt. That is a single " +
+            "terminal failure, not a retried one -- so the bound #218's criterion claims is being " +
+            "honoured by a job that never retried at all.");
 
         // #292. The anti-vacuity check, as its own assertion with its own message.
         //
