@@ -10,6 +10,7 @@ import {
   forceCompleteTaskAtNode,
   getCompletedAssigneesForActivity,
   getExecutionDiagram,
+  getExecutionActivityInstances,
   getExecutionHistory,
   getExecutionLog,
   getExecutionFreshness,
@@ -122,6 +123,29 @@ export function useExecutionHistory(id: string | null) {
     queryKey: executionHistoryQueryKey(id ?? "unset"),
     queryFn: ({ signal }) => (id ? getExecutionHistory(id, signal) : Promise.resolve([])),
     enabled: Boolean(id)
+  });
+}
+
+// #173. The instances behind one collapsed multi-instance row.
+//
+// `enabled` is the lazy-loading criterion made structural: the query does not
+// run until the row is expanded, and react-query then keeps the answer, so
+// collapsing and reopening the same row does not re-fetch.
+export const executionActivityInstancesQueryKey = (id: string, activityId: string) =>
+  ["executions", "activity-instances", id, activityId] as const;
+
+export function useExecutionActivityInstances(
+  id: string | null,
+  activityId: string | null,
+  enabled: boolean
+) {
+  return useQuery<WorkflowExecutionHistoryEvent[]>({
+    queryKey: executionActivityInstancesQueryKey(id ?? "unset", activityId ?? "unset"),
+    queryFn: ({ signal }) =>
+      id && activityId
+        ? getExecutionActivityInstances(id, activityId, signal)
+        : Promise.resolve([]),
+    enabled: enabled && Boolean(id) && Boolean(activityId)
   });
 }
 

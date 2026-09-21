@@ -193,7 +193,11 @@ public static class WorkflowConditionValidation
             // Service task / business rule task / call activity result targets.
             Add(assigned, element.Attribute(Flowable + "resultVariable")?.Value);
             Add(assigned, element.Attribute("resultVariable")?.Value);
-            Add(assigned, element.Attribute(Flowable + "elementVariable")?.Value);
+            // #173. Through the shared reader rather than naming the spelling a
+            // second time: this file and WorkflowBpmnXml both need "what does a
+            // loop bind each item to", and two readers of one fact drifting apart
+            // is the family MultiInstanceReaderAgreementTests exists for.
+            Add(assigned, WorkflowBpmnXml.ElementVariableName(element));
             Add(assigned, element.Attribute(Flowable + "variable")?.Value);
             Add(assigned, element.Attribute(Flowable + "target")?.Value);
             Add(assigned, element.Attribute("target")?.Value);

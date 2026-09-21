@@ -96,6 +96,18 @@ public interface IFlowableClient
     // start time. Drives the History tab on the workflow execution modal.
     Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// What the engine says about this process's multi-instance activities (#173).
+    /// </summary>
+    /// <remarks>
+    /// The counters are the only source that can answer "how many remain" for a
+    /// sequential loop, which creates its instances one at a time and so writes one
+    /// historic row for a loop of five. The variables carry each instance's
+    /// collection item, scoped to the instance's own execution.
+    /// </remarks>
+    Task<MultiInstanceEngineState> GetMultiInstanceEngineStateAsync(
+        string processInstanceId, CancellationToken cancellationToken = default);
+
     // Variable updates + task lifecycle events (created/claimed/completed/
     // cancelled) merged and sorted ascending by occurrence. Drives the
     // Execution Log tab on the workflow execution modal.

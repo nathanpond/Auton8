@@ -299,7 +299,14 @@ public static class ExecutionEndpoints
 
             if (completions.Count == 0 && errorsByActivity.Count == 0)
             {
-                return Results.Ok(history);
+                // #173. Still collapsed. This shortcut skips the enrichment, which
+                // is fine -- there is none to do -- but it used to skip the
+                // multi-instance collapse with it, so a process whose only
+                // interesting feature was a multi-instance activity took the one
+                // path that could not show it. Measured: the collapse never ran,
+                // and an unconditional `throw` placed inside it was never reached.
+                return Results.Ok(await CollapseMultiInstanceAsync(
+                    history, processInstanceId, dbFactory, flowable, cancellationToken));
             }
 
             var enriched = history
@@ -382,7 +389,84 @@ public static class ExecutionEndpoints
                 .OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue)
                 .ToArray();
 
-            return Results.Ok(sorted);
+            // #173. A multi-instance activity collapses to ONE row carrying its
+            // progress. Done here rather than in the browser because a process
+            // with 500 instances would otherwise put 500 rows on the wire before
+            // anything could decide not to show them -- which is the cost the
+            // lazy-loading criterion exists to avoid, and it cannot be paid in
+            // the SPA.
+            var collapsed = await CollapseMultiInstanceAsync(
+                sorted, processInstanceId, dbFactory, flowable, cancellationToken);
+
+            return Results.Ok(collapsed);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        // #173. The instances behind a collapsed row, fetched when it is expanded.
+        //
+        // A separate route rather than a flag on the one above, so that "do not
+        // pay for instances you did not open" is a property of the API rather
+        // than a promise about how a caller uses it.
+        executions.MapGet("/{processInstanceId}/activities/{activityId}/instances", async (
+            string processInstanceId,
+            string activityId,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+
+            var instances = history
+                .Where(e => string.Equals(e.ActivityId, activityId, StringComparison.Ordinal))
+                .OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue)
+                .ThenBy(e => e.TaskId, StringComparer.Ordinal)
+                .ToArray();
+
+            // Which collection item each instance was handed. The loop declares the
+            // NAME (`flowable:elementVariable`); the engine stores the VALUE as a
+            // variable scoped to that instance's own execution -- measured: three
+            // instances over ["alice","bob","carol"] produce three `reviewer` rows,
+            // one per execution id, and they outlive the activity.
+            //
+            // Enriched only here, never on the collapsed history: this is the whole
+            // reason an operator opens the expansion, and paying for it on every
+            // history read is what the lazy-loading criterion exists to prevent.
+            //
+            // The local is NOT named for the attribute: MultiInstanceReaderAgreement-
+            // Tests screens for the spelling by substring, and a variable holding a
+            // value the shared reader already returned would read to it as a second
+            // reader. Renaming the local is right where allowlisting this method --
+            // which maps every execution route -- would have blinded the guard to
+            // whatever lands in it next.
+            var itemVariableName = await ResolveElementVariableAsync(
+                processInstanceId, activityId, dbFactory, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(itemVariableName))
+            {
+                var engine = await flowable.GetMultiInstanceEngineStateAsync(
+                    processInstanceId, cancellationToken);
+
+                for (var i = 0; i < instances.Length; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(instances[i].ExecutionId)) continue;
+
+                    if (engine.VariablesByExecutionId.TryGetValue(instances[i].ExecutionId!, out var bag)
+                        && bag.TryGetValue(itemVariableName!, out var value))
+                    {
+                        instances[i] = instances[i] with { ElementValue = value };
+                    }
+                }
+            }
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionHistoryViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId, activityId },
+                details: new { resultCount = instances.Length },
+                cancellationToken);
+
+            return Results.Ok(instances);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
         executions.MapGet("/{processInstanceId}/log", async (
@@ -1498,6 +1582,181 @@ public static class ExecutionEndpoints
         if (string.IsNullOrEmpty(processDefinitionId)) return null;
         var sep = processDefinitionId.IndexOf(':');
         return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
+    }
+
+    /// <summary>
+    /// Collapses each multi-instance activity's rows into one carrying progress (#173).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only activities the DIAGRAM marks as multi-instance are collapsed.</b>
+    /// Measured on Flowable 8.0.0, history gives a multi-instance three rows with
+    /// the same activityId and activityType and no container row — the same shape
+    /// a loop or a retried activity produces. Collapsing on repetition would turn
+    /// an activity that simply ran twice into "1/2 complete", which is a
+    /// regression wearing a feature's clothes.
+    /// </para>
+    /// <para>
+    /// <b>Total prefers the author's literal cardinality over the instance
+    /// count</b>, because those differ in exactly the case that matters: a
+    /// sequential multi-instance over five items has created ONE instance when
+    /// you look at it, and "1/1 complete" for a task that has four runs left is
+    /// the wrong answer rather than an imprecise one. A collection-driven loop
+    /// declares no literal, and there the instances are all we have.
+    /// </para>
+    /// <para>
+    /// The surviving row keeps the FIRST instance's identity — its start time and
+    /// activity name — and drops the per-instance fields (<c>taskId</c>,
+    /// <c>assignee</c>) rather than picking one of several to show, which would be
+    /// arbitrary. They are available per instance on the expand route.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// The name a multi-instance activity binds each collection item to (#173).
+    /// </summary>
+    /// <remarks>
+    /// From the stored diagram, through the one reader that knows the spelling.
+    /// Null when the activity is not multi-instance, or is driven by a bare
+    /// cardinality -- a loop that counts to three binds no item, so there is
+    /// nothing to show and inventing a label would be worse than showing none.
+    /// </remarks>
+    private static async Task<string?> ResolveElementVariableAsync(
+        string processInstanceId,
+        string activityId,
+        IDbContextFactory<AutoNateDbContext> dbFactory,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+        var processDefinitionId = await db.WorkflowExecutionCache.AsNoTracking()
+            .Where(e => e.FlowableInstanceId == processInstanceId)
+            .Select(e => e.ProcessDefinitionId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(processDefinitionId)) return null;
+
+        var bpmnXml = await ResolveBpmnXmlForProcessDefinitionAsync(
+            dbFactory, processDefinitionId, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(bpmnXml)) return null;
+
+        return WorkflowBpmnXml.ExtractMultiInstanceActivities(bpmnXml!)
+            .TryGetValue(activityId, out var marker) ? marker.ElementVariable : null;
+    }
+
+    private static async Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> CollapseMultiInstanceAsync(
+        IReadOnlyList<WorkflowExecutionHistoryEvent> rows,
+        string processInstanceId,
+        IDbContextFactory<AutoNateDbContext> dbFactory,
+        IFlowableClient flowable,
+        CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0) return rows;
+
+        // The definition comes from the execution cache rather than a second
+        // engine call: the rows carry no definition id, and #609 populates that
+        // row the moment an instance starts. A miss simply means no collapsing --
+        // several rows where there should be one is a worse view, not a wrong one.
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var processDefinitionId = await db.WorkflowExecutionCache.AsNoTracking()
+            .Where(e => e.FlowableInstanceId == processInstanceId)
+            .Select(e => e.ProcessDefinitionId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(processDefinitionId)) return rows;
+
+        var bpmnXml = await ResolveBpmnXmlForProcessDefinitionAsync(
+            dbFactory, processDefinitionId, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(bpmnXml)) return rows;
+
+        var markers = WorkflowBpmnXml.ExtractMultiInstanceActivities(bpmnXml!);
+        if (markers.Count == 0) return rows;
+
+        // Asked only now -- a process with no multi-instance marker pays nothing
+        // for this, which is most of them.
+        MultiInstanceEngineState engine;
+        try
+        {
+            engine = await flowable.GetMultiInstanceEngineStateAsync(processInstanceId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            engine = MultiInstanceEngineState.Empty;
+        }
+
+        var collapsed = new List<WorkflowExecutionHistoryEvent>(rows.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var row in rows)
+        {
+            if (!markers.TryGetValue(row.ActivityId, out var marker))
+            {
+                collapsed.Add(row);
+                continue;
+            }
+
+            if (!seen.Add(row.ActivityId)) continue;
+
+            var instances = rows
+                .Where(e => string.Equals(e.ActivityId, row.ActivityId, StringComparison.Ordinal))
+                .ToList();
+
+            var observedCompleted = instances.Count(e => e.EndedAtUtc is not null);
+            var observedActive = instances.Count - observedCompleted;
+
+            // The engine's own counters where it still has them, the rows
+            // otherwise. MEASURED, and the fallback alone is wrong for exactly one
+            // shape: a SEQUENTIAL loop in flight creates one instance at a time, so
+            // a loop over five reviewers with one task open writes ONE historic row
+            // and counting rows reports "1 of 1". `nrOfInstances` says 5.
+            //
+            // A finished process has no runtime tree, so nothing comes back and the
+            // rows are used -- correct by then, because every instance the loop will
+            // ever create has a row.
+            engine.CountsByActivityId.TryGetValue(row.ActivityId, out var engineCounts);
+
+            var completed = engineCounts?.Completed ?? observedCompleted;
+            var active = engineCounts?.Active ?? observedActive;
+
+            collapsed.Add(row with
+            {
+                TaskId = null,
+                Assignee = null,
+                CompletedByUserId = null,
+                IsOverride = null,
+                EndedAtUtc = active == 0 ? instances.Max(e => e.EndedAtUtc) : null,
+                MultiInstance = new MultiInstanceProgress(
+                    // The author's declared count first -- it is the only one that
+                    // is true before the engine has created anything -- then the
+                    // engine's, then the rows.
+                    Total: marker.Cardinality ?? engineCounts?.Total ?? instances.Count,
+                    Completed: completed,
+                    Active: active,
+
+                    // MEASURED, and the first version was wrong. Counting
+                    // `IsErrored` over the instances reported THREE failed for one
+                    // recorded failure across three instances, because the history
+                    // enrichment above stamps that flag on every row sharing the
+                    // activity id -- it is an aggregate wearing a per-row name.
+                    //
+                    // `workflow_execution_errors` is keyed by (process, activity)
+                    // and carries no execution or task id, so WHICH instance failed
+                    // is not knowable here and no arrangement of this data will make
+                    // it so. What is knowable is how many failures were recorded,
+                    // which is `ErrorCount` -- clamped to the instances that exist,
+                    // because a retried instance would otherwise report more
+                    // failures than there are instances to fail.
+                    Failed: Math.Min(instances.Max(e => e.ErrorCount) ?? 0, instances.Count),
+                    IsSequential: marker.IsSequential)
+            });
+        }
+
+        return collapsed;
     }
 
     /// <summary>

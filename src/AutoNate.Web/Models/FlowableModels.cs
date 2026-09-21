@@ -226,6 +226,18 @@ public sealed record class WorkflowExecutionHistoryEvent
 
     public string? TaskId { get; init; }
 
+    // #173. The engine execution this row ran on. Distinct per multi-instance
+    // instance, which is what lets each instance be matched to the collection
+    // item it was given -- Flowable scopes the element variable to exactly this
+    // execution. Null on nothing the engine returns; present on every row.
+    public string? ExecutionId { get; init; }
+
+    // #173. The collection item this instance was handed, rendered for display.
+    // Populated only on the per-instance route, and only when the loop declares
+    // a `flowable:elementVariable` -- a loop driven by a bare cardinality binds
+    // no item, so there is nothing to show and null is the honest answer.
+    public string? ElementValue { get; init; }
+
     // Set by Flowable when the row was halted by a process-level cancel
     // (or other delete) rather than completing through normal flow.
     public string? DeleteReason { get; init; }
@@ -256,7 +268,91 @@ public sealed record class WorkflowExecutionHistoryEvent
     // Useful when an activity errored, retried, then succeeded — the row
     // looks "completed" but the retry count tells the real story.
     public int? ErrorCount { get; init; }
+
+    // #173. Set only on the ONE row a multi-instance activity collapses into.
+    // Null everywhere else, which is what keeps an ordinary repeated activity
+    // rendering as the several rows it is.
+    public MultiInstanceProgress? MultiInstance { get; init; }
 }
+/// <summary>
+/// What the engine itself says about one multi-instance activity (#173).
+/// </summary>
+/// <remarks>
+/// <b>Measured on Flowable 8.0.0.</b> The engine keeps <c>nrOfInstances</c>,
+/// <c>nrOfCompletedInstances</c> and <c>nrOfActiveInstances</c> as local variables
+/// on the multi-instance CONTAINER execution, and they survive the activity's
+/// completion as historic variable instances. They are the only source that can
+/// answer "how many remain" for a SEQUENTIAL loop, which creates one instance at a
+/// time: a sequential loop over five reviewers with one task open writes exactly
+/// ONE historic activity row, so counting rows reports "1 of 1" for something that
+/// is one of five.
+/// </remarks>
+public sealed record MultiInstanceCounts(int Total, int Completed, int Active);
+
+/// <summary>
+/// The engine-side facts behind a process's multi-instance activities (#173).
+/// </summary>
+/// <remarks>
+/// Two queries, made only for a process whose diagram actually carries a
+/// multi-instance marker. The counts need the runtime execution tree because the
+/// container execution appears in NO historic activity row -- measured -- so its
+/// variables cannot otherwise be attributed to an activity. Once the process ends
+/// the tree is gone and the counts are empty, which is exactly when counting the
+/// historic rows is correct, because by then every instance has run.
+/// </remarks>
+public sealed record MultiInstanceEngineState(
+    IReadOnlyDictionary<string, MultiInstanceCounts> CountsByActivityId,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string?>> VariablesByExecutionId)
+{
+    public static MultiInstanceEngineState Empty { get; } = new(
+        new Dictionary<string, MultiInstanceCounts>(StringComparer.Ordinal),
+        new Dictionary<string, IReadOnlyDictionary<string, string?>>(StringComparer.Ordinal));
+}
+
+
+/// <summary>
+/// How far a multi-instance activity has got, as one row (#173).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Which activities are multi-instance comes from the DIAGRAM, not the
+/// engine's history.</b> Measured on Flowable 8.0.0: a parallel multi-instance
+/// user task with cardinality 3 reports three historic rows with the same
+/// activityId and the same activityType, and <b>no</b> <c>multiInstanceBody</c>
+/// row — indistinguishable from a loop that ran three times or an activity that
+/// was retried. Grouping on "several rows share an id" would have collapsed
+/// ordinary repeated activities into a progress row they never earned.
+/// </para>
+/// <para>
+/// The engine does model it, in the EXECUTION TREE — a body execution whose
+/// children carry the same activityId — but that is runtime only, and a finished
+/// multi-instance still has to render 5/5. <c>multiInstanceLoopCharacteristics</c>
+/// on the element survives completion and is Auton8's own data.
+/// </para>
+/// </remarks>
+/// <param name="Total">
+/// The instance count. From <c>loopCardinality</c> where the author wrote a
+/// literal one; otherwise the number of instances the engine actually created,
+/// because a collection-driven multi-instance has no cardinality to read.
+/// </param>
+/// <param name="Completed">Instances the engine has ended.</param>
+/// <param name="Active">Instances still running.</param>
+/// <param name="Failed">
+/// Instances with a recorded failure. Surfaced on the COLLAPSED row so an
+/// operator scanning a list sees that something needs attention without
+/// expanding every row, which is the AC this exists for.
+/// </param>
+/// <param name="IsSequential">
+/// Sequential runs one instance at a time, so "which is running and how many
+/// remain" is a different question from a parallel one's, and the view asks it
+/// differently.
+/// </param>
+public sealed record MultiInstanceProgress(
+    int Total,
+    int Completed,
+    int Active,
+    int Failed,
+    bool IsSequential);
 
 // One row in the Execution Log tab. Either a variable change or a task
 // lifecycle event (created / claimed / completed / cancelled). The Kind

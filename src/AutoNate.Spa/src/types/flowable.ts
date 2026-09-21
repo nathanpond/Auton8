@@ -80,6 +80,36 @@ export type WorkflowExecutionHistoryEvent = {
   errorStackTrace: string | null;
   // Number of recorded failures for this activity in this process.
   errorCount: number | null;
+  // #173. The engine execution this row ran on — distinct per multi-instance
+  // instance, and the key the element value is joined on server-side.
+  executionId: string | null;
+  // #173. The collection item this instance was handed. Populated only on the
+  // per-instance route; null on the collapsed history, deliberately, so a
+  // history read never pays for the instances nobody expanded.
+  elementValue: string | null;
+  // #173. Present only on a row that collapses a multi-instance activity. Null
+  // on every ordinary row, including an activity that simply repeated — history
+  // cannot tell those apart, so only the diagram's marker sets this.
+  multiInstance: MultiInstanceProgress | null;
+};
+
+// #173. Mirror of AutoNate.Web.Models.MultiInstanceProgress.
+//
+// `total` prefers the author's declared cardinality, then the engine's own
+// `nrOfInstances`, then the historic rows — a sequential loop in flight has one
+// row for however many instances remain, so the rows alone would report a loop
+// of five as "1 of 1".
+//
+// `failed` counts RECORDED FAILURES, clamped to the instances that exist.
+// `workflow_execution_errors` is keyed by (process, activity) and carries no
+// execution id, so which instance failed is not knowable — only how many
+// failures there were.
+export type MultiInstanceProgress = {
+  total: number;
+  completed: number;
+  active: number;
+  failed: number;
+  isSequential: boolean;
 };
 
 // One row in the Execution Log tab. Mirror of

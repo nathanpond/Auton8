@@ -125,6 +125,126 @@ public sealed class MultiInstanceExecutionTests : E2ETestBase
         Assert.Contains("Approve", body, StringComparison.Ordinal);
     }
 
+    // ── #173: the operator-facing half ───────────────────────────────────────
+
+    [Fact]
+    public async Task The_history_collapses_a_parallel_multi_instance_to_one_row_with_progress()
+    {
+        // Against the REAL engine, because everything this asserts was derived
+        // from probing Flowable 8.0.0 and a stub would only replay what I already
+        // believe. Three instances, one completed, and the row must say so.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mih{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, UserTaskDiagram(key, sequential: false));
+        var instance = await StartAsync(api, key, ["alpha", "beta", "gamma"]);
+
+        var tasks = await EventuallyTasksAsync(api, instance, t => t.Count == 3,
+            "three parallel instances");
+
+        var completed = await api.PostAsync($"/api/tasks/{tasks[0].Id}/complete",
+            new APIRequestContextOptions { DataObject = new { } });
+        Assert.True(completed.Ok, await completed.TextAsync());
+
+        await EventuallyTasksAsync(api, instance, t => t.Count == 2, "two instances left");
+
+        var rows = await HistoryAsync(api, instance);
+        var review = rows.Where(r => r.GetProperty("activityId").GetString() == "t").ToList();
+
+        // ONE row, not three. This is the whole point: 500 instances must not
+        // become 500 rows.
+        var one = Assert.Single(review);
+        var progress = one.GetProperty("multiInstance");
+
+        Assert.Equal(3, progress.GetProperty("total").GetInt32());
+        Assert.Equal(1, progress.GetProperty("completed").GetInt32());
+        Assert.Equal(2, progress.GetProperty("active").GetInt32());
+        Assert.False(progress.GetProperty("isSequential").GetBoolean());
+
+        // The instances are NOT in that payload -- the lazy-loading criterion,
+        // asserted on the wire rather than on what the browser happens to render.
+        Assert.Equal(JsonValueKind.Null, one.GetProperty("elementValue").ValueKind);
+
+        // ...and are there when asked for, each carrying its own collection item.
+        var instancesResponse = await api.GetAsync(
+            $"/api/executions/{instance}/activities/t/instances");
+        Assert.True(instancesResponse.Ok, await instancesResponse.TextAsync());
+
+        using var document = JsonDocument.Parse(await instancesResponse.TextAsync());
+        var expanded = document.RootElement.EnumerateArray().ToList();
+        Assert.Equal(3, expanded.Count);
+
+        var items = expanded
+            .Select(e => e.GetProperty("elementValue").GetString())
+            .OrderBy(v => v, StringComparer.Ordinal)
+            .ToList();
+
+        // Each instance knows WHICH item it has. A shared or empty value would
+        // pass a count assertion and tell an operator nothing.
+        Assert.Equal(["alpha", "beta", "gamma"], items);
+    }
+
+    [Fact]
+    public async Task A_sequential_loop_in_flight_reports_the_engine_total_not_its_one_row()
+    {
+        // The measurement that changed the design: a sequential loop creates one
+        // instance at a time, so Flowable writes ONE historic activity row for a
+        // loop over three. Counting rows reports "1 of 1" -- a finished-looking
+        // activity with two runs to go. This is the spec that fails if the engine
+        // counters are ever dropped, and it cannot run without a live engine.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mis3{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, UserTaskDiagram(key, sequential: true));
+        var instance = await StartAsync(api, key, ["alpha", "beta", "gamma"]);
+
+        await EventuallyTasksAsync(api, instance, t => t.Count == 1, "the first instance");
+
+        var rows = await HistoryAsync(api, instance);
+        var one = Assert.Single(rows.Where(r => r.GetProperty("activityId").GetString() == "t"));
+        var progress = one.GetProperty("multiInstance");
+
+        Assert.True(progress.GetProperty("isSequential").GetBoolean());
+        Assert.Equal(3, progress.GetProperty("total").GetInt32());
+        Assert.Equal(0, progress.GetProperty("completed").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_executions_list_shows_one_row_however_many_instances_a_process_has()
+    {
+        // The AC, asserted against the LIST endpoint rather than the detail view,
+        // because that is where a per-instance row would break #108's paging.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"mil2{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, key, UserTaskDiagram(key, sequential: false));
+        var instance = await StartAsync(api, key, ["a", "b", "c", "d", "e"]);
+
+        await EventuallyTasksAsync(api, instance, t => t.Count == 5, "five instances");
+
+        var response = await api.GetAsync("/api/executions/");
+        Assert.True(response.Ok, await response.TextAsync());
+
+        using var document = JsonDocument.Parse(await response.TextAsync());
+        var mine = document.RootElement.EnumerateArray()
+            .Where(e => e.GetProperty("id").GetString() == instance)
+            .ToList();
+
+        // Five instances, one row. Not five, and not zero.
+        Assert.Single(mine);
+    }
+
+    private static async Task<List<JsonElement>> HistoryAsync(IAPIRequestContext api, string instanceId)
+    {
+        var response = await api.GetAsync($"/api/executions/{instanceId}/history");
+        Assert.True(response.Ok, await response.TextAsync());
+        using var document = JsonDocument.Parse(await response.TextAsync());
+        return document.RootElement.EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+
     // ── diagrams ─────────────────────────────────────────────────────────────
 
     // ── #245: the criteria #159 ticked and did not implement ────────────────

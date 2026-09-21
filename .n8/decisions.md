@@ -10312,6 +10312,102 @@ failing at the call site. Now one singleton serving both roles.
 
 **Issue:** #222
 
+## M5 execution — four more owner decisions, taken 2026-09-20
+
+**1. Finish executing before verifying.** Thirteen M5 stories have closed this run
+with none through `/n8-verify`. The stage rules put verification debt above new
+execution, and that was raised rather than assumed; the owner chose one
+verification pass at the end. Recorded because it is a deliberate acceptance of
+risk: a defect in shared machinery — and #604/#609/#222 all touched shared
+machinery — compounds into everything built after it.
+
+**2. The task read-through stays unconditional.** `/{id}/tasks` calls the engine
+on every request. A 1–2s floor was offered and declined in favour of correctness:
+it is a detail view of one instance, the jobs endpoints in the same file already
+read live for the same stated reason, and the list page stays cached. If it ever
+costs, it costs visibly under load rather than silently returning stale data.
+
+**3. #232 closed on #111 as its cold test.** The restructured skill was followed
+on a story it had never seen; its Step 0 probe contradicted that story's own AC
+and turned it from a manifest edit into an expansion, and it exposed the skill's
+own staleness — sixteen `set*Editor(null)` sites that `clearEditors()` had
+replaced. Noted on the issue that the reader was the author, and that what makes
+it a real test is the codebase disagreeing with the skill rather than a re-read.
+
+**4. #173 takes no schema change.** Its AC is conditional — *"WHERE per-instance
+state is stored…"* — and #604's read-through makes storing it unnecessary:
+collapsed progress computes from the activity-history rows the endpoint already
+loads, and per-instance detail is fetched on expand, which the AC wants anyway.
+The alternative was an additive column making progress queryable by the selector
+layer; declined because it adds one more projection that can drift from the
+engine, which is the defect this milestone has now hit three times.
+
+## #173 — a multi-instance activity as one row, 2026-09-20
+
+**The diagram is the signal, not the engine's history (Step 0).** The plan assumed
+a `multiInstanceBody` row would identify the container. Measured on Flowable
+8.0.0: there is none. Three instances report three `historic-activity-instances`
+rows sharing an `activityId` and an `activityType` — indistinguishable from a loop
+that ran three times. Keying on repetition would have reported *"1/2 complete"* for
+an activity that simply ran twice, so the collapse keys on
+`multiInstanceLoopCharacteristics` in the stored diagram, which also survives the
+activity's completion where the execution tree does not.
+
+**Rule 1 — the failure count was wrong, and the comment defending it had the
+direction backwards.** `Failed` counted `IsErrored` over the instances. The history
+enrichment stamps that flag on every row whose activity id appears in
+`workflow_execution_errors`, so one recorded failure across three instances
+reported `failed: 3` — measured, expected 1, actual 3. It now reports the recorded
+failure count, clamped to the instances that exist. `workflow_execution_errors` is
+keyed by `(process, activity)` with no execution id, so *which* instance failed is
+not recoverable — a gap in the table, stated rather than papered over.
+
+**Rule 2 — two acceptance criteria were unimplementable as designed, and the engine
+was probed for both.**
+
+*Sequential totals.* A sequential loop creates one instance at a time, so a loop
+over five reviewers with one task open writes exactly ONE historic row.
+`Total = cardinality ?? rows` therefore reported "1 of 1", and a collection-driven
+loop declares no cardinality, so that was the only branch that ran — "how many
+remain" had no answer. The engine keeps `nrOfInstances` on the multi-instance
+container execution and it survives completion. The catch: that container appears
+in no historic activity row, so its variables can only be attributed to an
+activity through the RUNTIME execution tree. Hence two extra queries, made only
+for a process whose diagram carries a marker. A finished process has no tree and
+falls back to counting rows — correct by then, because every instance exists.
+
+*Element values.* "Its element value from the collection" was not implemented.
+Flowable scopes the element variable to each instance's own execution, so the join
+key is the execution id, which the history rows did not carry and now do.
+Enriched on the instances route only, never on the collapsed history — asserted on
+the payload, because eager enrichment is invisible in a browser and only shows up
+under load.
+
+**A guard widened rather than side-stepped.** The element-variable fact already had
+two readers — `WorkflowBpmnXml` and `WorkflowConditionValidation` — and
+`MultiInstanceReaderAgreementTests` could not see either, because `elementVariable`
+was missing from its spellings list. Adding a third quietly would have been #356 a
+fourth time. The spelling went into the guard and the existing second reader was
+routed through the shared one, in the same change. Confirmed by mutation:
+restoring the direct read fails the guard by name, file and line.
+
+**Where the SPA logic lives.** The SPA's vitest runs `environment: "node"` with no
+DOM and no testing-library, so anything inside a component is reachable only from
+the E2E tier — which needs a live engine and does not gate a merge. That is the
+tier problem #356 spent four rounds on. So the wording and arithmetic are a pure
+module with ten slim-tier tests, and only browser-answerable facts stayed for E2E.
+Adding jsdom and testing-library was the alternative; declined as a test-
+infrastructure change wider than this story, and not needed to cover the logic.
+
+**Moot, said out loud rather than ticked.** The test plan's *"cache migration is
+additive and existing rows remain readable"* has nothing to verify — the four
+owner decisions took no schema change, so no row was written differently. It is
+recorded as moot on the completion comment rather than read as covered.
+
+**Pins:** FLOWABLE 261 → 264, FULL_LOCAL 495 → 498, SLIM_BACKEND 2932 → 2946
+(two commits' worth — see the note in `tests/tiers.env`).
+
+**Issue:** #173
 ## #231 — an accumulating complex-gateway join, 2026-09-21
 
 **Step 0 corrected the protocol's target.** #219 specified `setVariableLocal`
