@@ -204,6 +204,12 @@ public sealed class MultiInstanceReaderAgreementTests
             "loopCardinality", "LoopCardinalityAttribute",
             // collection
             "\"collection\"", "loopDataInputRef",
+            // the element each run is bound to. #173: this fact already had TWO
+            // readers -- WorkflowBpmnXml and WorkflowConditionValidation -- and
+            // this list could not see either, so the guard would have watched a
+            // new one arrive without a word. Added with the second reader routed
+            // through the first, not after.
+            "elementVariable",
             // aggregation
             "variableAggregation",
             "AggregateTargetAttribute", "AggregateSourceAttribute",
@@ -217,9 +223,16 @@ public sealed class MultiInstanceReaderAgreementTests
         // any other class was allowlisted by the previous version (#373).
         var mayNameASpelling = new HashSet<string>(StringComparer.Ordinal)
         {
-            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresCardinality",
+            // #173 renamed this reader rather than adding a second one beside it.
+            // `DeclaresCardinality` asks whether a cardinality is declared and
+            // `DeclaredCardinality` asks what it is; both now go through
+            // `CardinalityText`, which is the only method that names either
+            // spelling. Sanctioning two would have satisfied this list while
+            // recreating the disagreement it exists to prevent.
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:CardinalityText",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresCollection",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:CollectionName",
+            "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:ElementVariableName",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:DeclaresAggregationElement",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationTarget",
             "src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs:AggregationSource",

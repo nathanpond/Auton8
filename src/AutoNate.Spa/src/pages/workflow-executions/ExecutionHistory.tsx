@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
-import { Alert, Badge, Button, Text } from "@mantine/core";
-import { useExecutionHistory } from "@/hooks/useExecutions";
+import { Alert, Badge, Button, Group, Progress, Text, VisuallyHidden } from "@mantine/core";
+import { useExecutionActivityInstances, useExecutionHistory } from "@/hooks/useExecutions";
 import { useUserDirectory, userFullDisplay } from "@/hooks/useUserDirectory";
+import { summarizeMultiInstance } from "@/lib/multiInstanceProgress";
+import type { WorkflowExecutionHistoryEvent } from "@/types/flowable";
 import { describeError, formatTimestamp } from "./utils";
 
 type Props = {
@@ -94,6 +96,12 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
               </>
             )}
           </div>
+          {event.multiInstance && (
+            <MultiInstanceRow
+              processInstanceId={processInstanceId}
+              event={event}
+            />
+          )}
           {event.errorMessage && (
             <ErrorDetails
               message={event.errorMessage}
@@ -103,6 +111,153 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
         </li>
       ))}
     </ol>
+  );
+}
+
+type MultiInstanceRowProps = {
+  processInstanceId: string;
+  event: WorkflowExecutionHistoryEvent;
+};
+
+/**
+ * #173. One multi-instance activity, collapsed to its progress and expandable.
+ *
+ * The server already folded the engine's rows into one; this shows what that
+ * row says and fetches the instances only when asked. A process with 500
+ * instances therefore costs one row here and one request if -- and only if --
+ * somebody opens it.
+ */
+function MultiInstanceRow({ processInstanceId, event }: MultiInstanceRowProps) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  const directory = useUserDirectory();
+
+  const progress = event.multiInstance!;
+  const label = event.activityName ?? event.activityId;
+  const summary = summarizeMultiInstance(progress, label);
+
+  const {
+    data: instances = [],
+    isLoading,
+    error
+  } = useExecutionActivityInstances(processInstanceId, event.activityId, expanded);
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Group gap="xs" wrap="wrap" align="center">
+        {/*
+          * The count is TEXT, and it is the fact. The bar beside it is
+          * decoration and is hidden from the accessibility tree rather than
+          * announced as a second, vaguer version of the same number.
+          */}
+        <Text size="sm" fw={500}>
+          {summary.completionLabel}
+        </Text>
+
+        <Progress
+          value={summary.percent}
+          aria-hidden="true"
+          style={{ width: 120 }}
+          color={summary.attentionLabel ? "yellow" : "blue"}
+        />
+
+        {summary.sequentialLabel && (
+          <Text size="sm" c="dimmed">
+            {summary.sequentialLabel}
+          </Text>
+        )}
+
+        {/*
+          * Not colour alone: the badge carries the words. An operator scanning
+          * the list reads "1 failed" whether or not they can tell yellow from
+          * grey, which is the AC.
+          */}
+        {summary.attentionLabel && (
+          <Badge color="yellow" variant="filled" leftSection={<i className="fa fa-triangle-exclamation" aria-hidden="true" />}>
+            {summary.attentionLabel}
+          </Badge>
+        )}
+
+        {/*
+          * A real <button>, so it is in the tab order and answers Enter and
+          * Space without anything being re-implemented.
+          */}
+        <Button
+          variant="subtle"
+          size="compact-xs"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Hide instances" : `Show ${progress.total} instances`}
+        </Button>
+      </Group>
+
+      {/*
+        * The whole sentence, announced politely. Screen-reader users get no
+        * badge layout, so the parts are read as prose rather than left to be
+        * inferred from what happens to sit next to what.
+        */}
+      <VisuallyHidden role="status" aria-live="polite">
+        {summary.announcement}
+      </VisuallyHidden>
+
+      {expanded && (
+        <div id={panelId} style={{ marginTop: 8 }}>
+          {error && (
+            <Alert color="red" variant="light" role="alert">
+              {describeError(error)}
+            </Alert>
+          )}
+          {isLoading && (
+            <Text size="sm" c="dimmed">
+              Loading instances...
+            </Text>
+          )}
+          {!isLoading && !error && instances.length === 0 && (
+            <Text size="sm" c="dimmed">
+              No instances recorded yet.
+            </Text>
+          )}
+          {instances.length > 0 && (
+            <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {instances.map((instance, index) => (
+                <li
+                  key={instance.executionId ?? instance.taskId ?? index}
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    padding: "4px 0",
+                    fontSize: "0.875rem"
+                  }}
+                >
+                  <Text size="sm" fw={500}>
+                    {/*
+                      * The collection item, which is the only thing that tells
+                      * one instance from another. Numbered when the loop binds
+                      * no item -- a bare cardinality hands out nothing to name.
+                      */}
+                    {instance.elementValue ?? `Instance ${index + 1}`}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    {instance.endedAtUtc ? "complete" : "in progress"}
+                  </Text>
+                  {instance.assignee && (
+                    <Text size="sm" c="dimmed">
+                      {userFullDisplay(directory.get(instance.assignee), instance.assignee)}
+                    </Text>
+                  )}
+                  <Text size="sm" c="dimmed">
+                    {formatTimestamp(instance.startedAtUtc)}
+                  </Text>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
