@@ -2930,7 +2930,13 @@ function ScriptTaskModal({
           {isRoutingGateway
             ? "This gateway routes on your script. Return the id of one of its outgoing " +
               "sequence flows; returning anything else fails the step rather than quietly " +
-              "taking a branch. The ids are available to the script as autonateRoutes."
+              "taking a branch. The ids are available to the script as autonateRoutes.\n\n" +
+              "If more than one sequence flow arrives at this gateway, your script runs once " +
+              "per arriving branch and variables.get('autonateArrived') lists the ones that " +
+              "have arrived so far. Return 'autonateWait' to wait for more. The gateway routes " +
+              "once: after your script returns a route, later branches are absorbed and your " +
+              "script is not asked again. A branch that never arrives leaves the gateway " +
+              "waiting indefinitely \u2014 there is no timeout."
             : "Edit the selected BPMN script task. Auton8 saves the JavaScript body inline in the " +
               "BPMN XML and validates it before save or publish."}
         </Text>
