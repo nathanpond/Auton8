@@ -79,6 +79,22 @@ export async function getExecutionHistory(
   return data;
 }
 
+// #173. The instances behind a collapsed multi-instance row, fetched only when
+// the operator expands it. A separate route rather than a flag on the history,
+// so "do not pay for instances you did not open" is a property of the API.
+export async function getExecutionActivityInstances(
+  processInstanceId: string,
+  activityId: string,
+  signal?: AbortSignal
+): Promise<WorkflowExecutionHistoryEvent[]> {
+  const { data } = await api.get<WorkflowExecutionHistoryEvent[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}` +
+      `/activities/${encodeURIComponent(activityId)}/instances`,
+    { signal }
+  );
+  return data;
+}
+
 export async function getExecutionLog(
   processInstanceId: string,
   signal?: AbortSignal
