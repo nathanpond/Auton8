@@ -10753,3 +10753,40 @@ buffered messages on a shared dev stack. Almost certainly harmless (`max_age` is
 24 h, Dapr's consumers are `deliverPolicy: new`, and the app re-provisions at
 startup) — but destructive to shared infrastructure and not mine to do. The tool
 refused it and the refusal was right. Full evidence is on the issue.
+
+## #79 — execution admin controls covered, 2026-09-21
+
+**Rule-scope decision: six controls through the operator endpoints, one through
+the UI.** The SPA reaches reassign, due date, force-complete, move-state and the
+variable editors through the bpmn-js context menu, which has no stable accessible
+target for Playwright. Bulk-delete has a real button and a real confirm dialog and
+the least forgiving failure mode, so its dialog is the part driven. Every control
+is asserted on its effect read back from the engine or the engine-facing API,
+with a complement.
+
+**Bulk-delete asserts WIRING, not the engine wipe, and this is a narrowing of the
+AC stated rather than hidden.** `FlowableClient.DeleteAllWorkflowExecutionsAsync`
+pages every historic instance Flowable has -- engine-wide, not Auton8-scoped --
+and six engine-touching E2E classes run outside `AutoNateE2ECollection`, in
+parallel, against the same engine. A spec that confirmed the real dialog on a
+full-local run would wipe a neighbour's mid-flight instances: an intermittent red
+that would look like *their* flake. So the request is intercepted at the browser;
+cancelling sends zero requests, confirming sends exactly one with the right
+method and path, and nothing reaches the server. Filed as **#643**
+(`needs-triage`), because the hazard endangers every spec that mutates
+engine-global state, not only this one.
+
+**Seeding goes through the engine.** `ApiSeeder.CreateAndPublishTwoStepWorkflowAsync`
+and a variables overload of `StartExecutionAsync`; the must-have's key link says
+the cache would test the read model against itself.
+
+**Three of my own mistakes, each caught by a run rather than by reading:** an XML
+comment containing `--` inside the seed BPMN failed every publish; the history
+predicate named `endTime` where the route projects `endedAtUtc`; the log
+predicate looked for a flat `activityId` where rows nest `task.taskDefinitionKey`.
+The timeout message now dumps the rows, which is what found the last two.
+
+**Ten consecutive runs, 10/10 green, 7/7 each.** FLOWABLE 271 -> 278,
+FULL_LOCAL 512 -> 519; neither slim pin moves.
+
+**Issues:** #79
