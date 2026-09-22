@@ -164,12 +164,37 @@ internal static class BpmnDiagram
     /// </remarks>
     internal static IReadOnlyCollection<string> NestedIdsIn(string xml, string id)
     {
-        return ElementIn(xml, id)
+        var element = ElementIn(xml, id);
+        var nested = element
             .Descendants()
             .Select(e => (string?)e.Attribute("id"))
             .Where(found => found is not null && found != id)
             .Select(found => found!)
             .ToHashSet(StringComparer.Ordinal);
+
+        // #169. A participant contains the process it REFERENCES, not one it
+        // nests: `<participant processRef="p"/>` is an empty element in the XML,
+        // and its process is a sibling of the collaboration. Without this the
+        // oracle's task-appears check -- "the task belongs to an activity inside
+        // Ev_1" -- would look at an element with no children and conclude the pool
+        // created nothing, for a pool whose process created a task. The
+        // containment is what a pool IS, so it is expressed here rather than by
+        // making the pool's cell special-case its own effect.
+        if (element.Name.LocalName == "participant"
+            && (string?)element.Attribute("processRef") is { Length: > 0 } processRef)
+        {
+            var process = element.Document?.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "process" && (string?)e.Attribute("id") == processRef);
+            if (process is not null)
+            {
+                nested.UnionWith(process.Descendants()
+                    .Select(e => (string?)e.Attribute("id"))
+                    .Where(found => found is not null)
+                    .Select(found => found!));
+            }
+        }
+
+        return nested;
     }
 
     /// <summary>Every call activity in this diagram (#445).</summary>

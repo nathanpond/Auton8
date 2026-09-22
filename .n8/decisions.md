@@ -10854,3 +10854,34 @@ refusal, manifest, palette and compensation classes. SPA lint 98/0, tsc clean.
 Pins: SLIM_BACKEND 2962 → 2974, FLOWABLE 278 → 280, FULL_LOCAL 519 → 521.
 
 **Issues:** #169
+
+## #169, second movement — what the first gate caught, 2026-09-21
+
+**Seventeen backend failures, one cause I should have known.** `deployed_definitions`
+was added to `DatabaseSchemaInitializer` alone; the backend test database
+applies `BaseSchema.sql` alone, and every later-added column in that file is an
+`ALTER TABLE … ADD COLUMN IF NOT EXISTS` for exactly this reason. `42703: column
+w.deployed_definitions does not exist` in sixteen tests that never mention it.
+Added in both places, in the file's own style, with the measurement in the
+comment.
+
+**The seventeenth was the execution-evidence guard refusing the manifest flip**
+-- "Pool / Participant claims `executes` and has no row saying whether it was
+ever RUN" -- which is #325's guard doing precisely its job. The row is a
+DECLARATION (`task-appears`), and the live oracle gained the cell that measures
+it. Two conventions the oracle enforces that I learned by being refused:
+`Ev_1` must BE the declared element, authored and deployed (my first cell made
+the user task `Ev_1` and failed on `Expected: "participant", Actual:
+"userTask"`); and containment is by descendants, so a participant -- an empty
+element whose process is a sibling -- needed `NestedIdsIn` to follow
+`processRef`. That is expressed as "a pool contains the process it references",
+not as a special case in the pool's cell. A participant has no activity row, so
+it joins `NeverEntered`. `ExecutionOracleSizeTests` 50 → 51; FLOWABLE 280 → 281,
+FULL_LOCAL 521 → 522.
+
+**Also learned the hard way:** `dotnet test --no-build` after editing a test file
+runs the stale binary -- one run reported the OLD tally literals as still wrong
+after I had changed them. And a `--filter` naming a theory I had guessed the
+name of matched only the size pin and reported green in 1 ms. Both are the
+"filter matching nothing reads as a faster, greener run" shape this project
+documents, and I walked into both in one hour.

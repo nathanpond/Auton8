@@ -246,6 +246,12 @@ public sealed class ExecutionEvidenceTests
             ("Multi-Instance (Parallel)", "tasks-appear-together"),
             ("Multi-Instance (Sequential)", "tasks-appear-in-turn"),
             ("Parallel Gateway (AND)", "variable-written"),
+            // #169. A pool executes by CONTAINING a process: the collaboration is
+            // published as one deployment with a definition per pool, the primary
+            // pool's process is what `start` starts, and a user task inside it
+            // appearing is what proves the pool ran. Never entered as an activity
+            // -- a participant has no history row -- so it is also in NeverEntered.
+            ("Pool / Participant", "task-appears"),
             ("Receive Task", "instance-waits"),
             ("Script Task", "variable-written"),
             ("Send Task", "instance-ends"),
@@ -542,6 +548,9 @@ public sealed class ExecutionEvidenceTests
         [
             """("boundaryEvent", "compensate")""",
             """("dataObjectReference", null)""",
+            // #169. A participant is the boundary around a process, not a step in
+            // one; the engine records no activity instance for it.
+            """("participant", null)""",
         ];
 
         var source = OracleSource();

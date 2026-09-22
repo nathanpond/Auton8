@@ -1720,6 +1720,11 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // which is why this row's effect is a value on the instance rather than
         // anything an activity did.
         ("dataObjectReference", null),
+        // #169. A participant is the boundary drawn around a process. It deploys
+        // as a definition and its CONTENTS run; the engine records no activity
+        // instance for the pool itself, so the proof is the task its process
+        // creates.
+        ("participant", null),
     ];
 
     /// <summary>
@@ -2959,6 +2964,49 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + """<completionCondition xsi:type="tFormalExpression" """
                 + """xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${done == true}</completionCondition>"""
                 + """</adHocSubProcess>""")),
+
+            // #169. A two-pool collaboration. `Ev_1` IS the pool -- the oracle
+            // asserts the declared element is what carries that id, deployed and
+            // authored -- and its proof is the task its process creates, which
+            // NestedIdsIn reaches through `processRef` (BpmnDiagram.cs). The
+            // primary pool carries `key` and a user task; the other is a
+            // counterparty drawn for context, with
+            // nothing in it, which #169 marks non-executable and deploys as nothing.
+            // Both of #169's shapes in one probe: the set deploys, and the pool
+            // that contains a process is the one whose process runs.
+            "Pool / Participant" => $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                             xmlns:flowable="http://flowable.org/bpmn"
+                             xmlns:autonate="http://autonate.dev/workflows"
+                             targetNamespace="http://autonate.dev/workflows">
+                  <collaboration id="Collab_1">
+                    <participant id="Ev_1" name="Us" processRef="{key}" />
+                    <participant id="P_2" name="Counterparty" processRef="{key}cp" />
+                  </collaboration>
+                  <process id="{key}" name="probe" isExecutable="true">
+                    <startEvent id="Start_1"/><userTask id="Task_1" name="approve"/><endEvent id="End_1"/>
+                    <sequenceFlow id="f1" sourceRef="Start_1" targetRef="Task_1"/>
+                    <sequenceFlow id="f2" sourceRef="Task_1" targetRef="End_1"/>
+                  </process>
+                  <process id="{key}cp" name="Counterparty" isExecutable="true" />
+                  <bpmndi:BPMNDiagram id="Diagram_1"
+                                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+                    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="Collab_1">
+                      <bpmndi:BPMNShape id="Shape_Ev_1" bpmnElement="Ev_1" isHorizontal="true">
+                        <dc:Bounds x="100" y="60" width="600" height="160" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_Task_1" bpmnElement="Task_1">
+                        <dc:Bounds x="240" y="100" width="100" height="80" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_P_2" bpmnElement="P_2" isHorizontal="true">
+                        <dc:Bounds x="100" y="260" width="600" height="120" />
+                      </bpmndi:BPMNShape>
+                    </bpmndi:BPMNPlane>
+                  </bpmndi:BPMNDiagram>
+                </definitions>
+                """,
 
             "Call Activity" => Wrap("", Linear(
                 $"""<callActivity id="Ev_1" name="call" calledElement="{key}c"/>""")),

@@ -597,6 +597,15 @@
       ]
     },
     {
+      "name": "Pool / Participant",
+      "localName": "participant",
+      "eventDefinition": null,
+      "declaredEffect": "task-appears",
+      "liveEngineTestsMentioningIt": [
+        "MultiPoolPublishRefusalTests"
+      ]
+    },
+    {
       "name": "Event Sub-Process",
       "localName": "subProcess",
       "eventDefinition": "triggeredByEvent",
