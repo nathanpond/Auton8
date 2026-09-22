@@ -11136,3 +11136,51 @@ primary process id with the model's key and nothing else
 (`AlignPrimaryProcessKey`): a caller who publishes raw XML is asking for that
 XML to run, and prepare's other rewrites change what a diagram means.
 
+## #660 — a component per engine topic, 2026-09-22
+
+Owner answer, verbatim option: "One component per engine topic".
+
+**Why one per topic and not one for all.** Dapr's JetStream component applies
+`durableName` and `queueGroupName` as-is to every topic it serves
+(components-contrib `pubsub/jetstream`: `consumerConfig.Durable = v`, then
+`nats.Bind(stream, consumer)`), so a single component carrying those two lines
+gave all ~18 topics one consumer, the first topic's filter subject won, and
+delivery stopped -- measured, 0 of 2 bus specs, which is what blocked the first
+attempt. A component that serves ONE topic has no such ambiguity.
+
+**What ships.** `pubsub-workflow-messages` and `pubsub-workflow-signals`, each
+with a durable queue-grouped consumer; `DaprOptions.TopicPubSubNames` (base
+config, since the map is a constant of the deployment rather than of an
+environment) and a per-topic lookup on the SUBSCRIBE side only -- publishing
+keeps the shared component, because a subject is a subject.
+
+**The E2E fixture writes its own components per run.** Same app-id means the
+same queue group, so a suite run and the compose container are replicas by
+Dapr's definition and would take each other's messages. The fixture copies the
+tracked components and rewrites the two consumer names to `e2e-<run>-<topic>`,
+deletes them at teardown, and sweeps `e2e-` consumers older than two hours at
+start -- the FlowableDeploymentSweep pattern, for the same reason: a durable
+consumer outlives its process and Dapr cannot set an inactivity threshold.
+Measured on a live run: `workflow.messages` and `workflow.signals` were each
+served by `durable=e2e-4659c8f9-… group=e2e-4659c8f9-…`, and zero engine-topic
+consumers remained afterwards.
+
+**Rule 3, in scope.** `ensure-up.sh` never refreshed
+`autonate-web-dapr/components` -- the mount existed and held whatever someone
+last copied by hand, fifteen days stale, predating these components entirely.
+Without that copy a containerised app could not join the queue group at all, so
+the fix would have been real only for a locally run app. Hostnames there are the
+compose service names, which is what the hand copies carried.
+
+**Proof, and its complement.** `NatsQueueGroupTests` against the real NATS: two
+clients bound to ONE durable consumer receive a message once between them; two
+consumers of their own each receive it -- the pre-#660 shape, so a test that
+stopped telling them apart fails. `DaprEngineTopicComponentTests` guards the
+configuration both ways, including that the SHARED component must NOT carry
+those two fields.
+
+**Known residual, filed as #669**: a workflow declaring its own
+`flowable:topic` still subscribes through the shared component, so custom topics
+keep today's fan-out. Components are files; topics are runtime. Options are in
+the issue; none of them is a small change.
+
