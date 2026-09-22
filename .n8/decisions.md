@@ -10885,3 +10885,50 @@ after I had changed them. And a `--filter` naming a theory I had guessed the
 name of matched only the size pin and reported green in 1 ms. Both are the
 "filter matching nothing reads as a faster, greener run" shape this project
 documents, and I walked into both in one hour.
+
+## #170 — message flows execute, 2026-09-21
+
+**A message flow is the addressing, not a decoration.** `ApplyMessageFlows`
+stamps the target pool's process id, message name and correlation key onto the
+flow's source at prepare time, and `ExtractMessageSendDeclarations` resolves the
+same from the flow at run time when the attributes are absent. An explicit
+attribute still wins: an author who typed a target meant it, and the flow is the
+default beneath that, never an override above it. Logged as a `(planner)` call.
+
+**Declarations are scoped to a pool only where there are pools to tell apart.**
+The first cut scoped `ExtractMessageDeclarations` whenever a process id was
+supplied, and two dispatcher facts went to zero starts: their single-process
+stub diagrams carry a process id that is not the registration key, which every
+caller before this overload had relied on being harmless. Scoping now applies
+only when the diagram holds more than one process AND the supplied id names one
+of them; a single-process diagram answers for any key it is addressed by. A
+scope that changes the answer for diagrams it was not written for is a
+regression wearing a feature's name.
+
+**A flow drawn to the pool itself is accepted and resolved to the pool's one
+message start.** BPMN allows `targetRef` to be a participant and the studio
+draws exactly that for a collapsed pool. It is also the ONLY way a message flow
+can reach a pool that deploys nothing -- anything a flow could end AT is a flow
+node, and a pool holding one deploys -- so the "deploys as nothing" refusal the
+story asks for is unreachable without it. The first version of that refusal
+test removed the start event and asserted on the wrong error (a dangling ref),
+which was the test telling me the path did not exist. Two refusals name the
+pool: empty, and no single message start.
+
+**Flowable wraps historic-variable rows under `variable`.** The upstream half
+of the counterpart lookup deserialised the row as the variable and read an
+empty name; the E2E spec's reverse direction timed out on `Counterparts were:`
+nothing. Probed the endpoint by hand, found the existing
+`FlowableHistoricVariableInstanceResponse` already modelled it (#173), reused it.
+The two-directional assertion in `A_flow_into_a_start_event_starts_a_counterpart_linked_both_ways`
+is what caught it -- the sender side passed alone.
+
+**`$"""` cannot hold `${…}`.** The Message Flow oracle arm used `${{…}}` inside a
+single-dollar raw string, which is CS9006, and the E2E project stopped
+compiling; tier discovery reported FLOWABLE 0 / FULL_LOCAL 0, which is the
+"filter matching nothing reads as a faster run" shape again, this time as a
+build failure hiding behind a count. Switched the arm to `$$"""`.
+
+Pins by discovery: SLIM_BACKEND 2975 → 2993, FLOWABLE 282 → 286, FULL_LOCAL
+523 → 527.
+

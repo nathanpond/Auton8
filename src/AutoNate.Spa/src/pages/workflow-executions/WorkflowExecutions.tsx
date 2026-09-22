@@ -31,6 +31,7 @@ import {
   useExecutionDiagram,
   useExecutionHistory,
   useExecutionChildren,
+  useExecutionCounterparts,
   useExecutionTasks,
   useAdhocSubProcesses,
   useExecutions,
@@ -537,6 +538,11 @@ export function ExecutionContent({
   // waits, the parent's own task list is empty — so without this the operator
   // sees a process that appears hung and has nothing to open.
   const { data: children = [] } = useExecutionChildren(processInstanceId);
+  // #170. Counterparts started by (or starting) this run over a message flow.
+  // Shown on the same tab as called workflows: to an operator both answer
+  // "what else is this run entangled with?", and #113 already built that tab.
+  const { data: counterparts = [] } = useExecutionCounterparts(processInstanceId);
+  const linked = children.length + counterparts.length;
   const directory = useUserDirectory();
   const forceCompleteTask = useForceCompleteTask(processInstanceId);
   const reassignTask = useReassignTask(processInstanceId);
@@ -785,8 +791,8 @@ export function ExecutionContent({
           <Tabs.Tab value="log">Execution Log</Tabs.Tab>
           {/* Only shown when there is something to show: a process with no call
               activity should not carry an empty tab suggesting otherwise. */}
-          {children.length > 0 && (
-            <Tabs.Tab value="children">Called Workflows ({children.length})</Tabs.Tab>
+          {linked > 0 && (
+            <Tabs.Tab value="children">Linked Workflows ({linked})</Tabs.Tab>
           )}
           {/* #163. Same rule as Called Workflows: only shown when there is
               something to show. A process with no ad-hoc subprocess must not
@@ -873,6 +879,30 @@ export function ExecutionContent({
                 This execution started these workflows and is waiting for them. Open one to see
                 where it has got to &mdash; while it runs, the work is there rather than here.
               </Text>
+              {counterparts.length > 0 && (
+                <Text size="sm" c="dimmed">
+                  Counterparts &mdash; runs linked to this one by a message flow, whether this run
+                  started them or one of them started this run.
+                </Text>
+              )}
+              {counterparts.map((counterpart) => (
+                <Group key={`cp-${counterpart.id}`} justify="space-between" wrap="nowrap">
+                  <Box>
+                    <Text size="sm" fw={500}>
+                      {counterpart.name ?? counterpart.processDefinitionId.split(":")[0]}
+                    </Text>
+                    <Text size="xs" c="dimmed" ff="monospace">{counterpart.id}</Text>
+                  </Box>
+                  <Button
+                    component={Link}
+                    to={`/executions/${encodeURIComponent(counterpart.id)}`}
+                    variant="default"
+                    size="compact-sm"
+                  >
+                    Open
+                  </Button>
+                </Group>
+              ))}
               {children.map((child) => (
                 <Group key={child.id} justify="space-between" wrap="nowrap">
                   <Box>

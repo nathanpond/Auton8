@@ -1,3 +1,4 @@
+using AutoNate.Web.Services.Workflow;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -2273,6 +2274,87 @@ public sealed class FlowableClient(
                 StartUserId = item.StartUserId
             })
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        var results = new List<FlowableProcessInstanceSummary>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // Downstream: instances a send from THIS one started. History, not
+        // runtime, so a counterpart that has already finished is still linked.
+        var query = new Dictionary<string, object?>
+        {
+            ["variables"] = new[]
+            {
+                new { name = WorkflowMessageCorrelator.CounterpartOfVariable, value = processInstanceId, operation = "equals", type = "string" }
+            }
+        };
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/historic-process-instances", query, cancellationToken);
+        await EnsureSuccessAsync(response, $"list counterpart instances of {processInstanceId}");
+        var page = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(
+            response, cancellationToken);
+        foreach (var item in page.Data ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(item.Id) || !seen.Add(item.Id)) continue;
+            results.Add(new FlowableProcessInstanceSummary
+            {
+                Id = item.Id,
+                Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                ActivityId = null,
+                Suspended = false,
+                StartUserId = item.StartUserId
+            });
+        }
+
+        // Upstream: the instance whose send started THIS one, if any. A 404 is
+        // the ordinary answer -- most instances were not message-started.
+        using var upstream = await _httpClient.GetAsync(
+            $"service/history/historic-variable-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}"
+            + $"&variableName={Uri.EscapeDataString(WorkflowMessageCorrelator.CounterpartOfVariable)}",
+            cancellationToken);
+        if (upstream.IsSuccessStatusCode)
+        {
+            // Each row wraps its variable under `variable`; the row itself carries
+            // only ids and timestamps (see FlowableHistoricVariableInstanceResponse).
+            var variables = await DeserializeAsync<FlowableListResponse<FlowableHistoricVariableInstanceResponse>>(upstream, cancellationToken);
+            var starter = variables.Data?
+                .Select(v => v.Variable)
+                .FirstOrDefault(v => string.Equals(v?.Name, WorkflowMessageCorrelator.CounterpartOfVariable, StringComparison.Ordinal))
+                ?.Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(starter) && seen.Add(starter))
+            {
+                using var starterResponse = await _httpClient.GetAsync(
+                    $"service/history/historic-process-instances/{Uri.EscapeDataString(starter)}", cancellationToken);
+                if (starterResponse.IsSuccessStatusCode)
+                {
+                    var item = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(starterResponse, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(item.Id))
+                    {
+                        results.Add(new FlowableProcessInstanceSummary
+                        {
+                            Id = item.Id,
+                            Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                            ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                            ActivityId = null,
+                            Suspended = false,
+                            StartUserId = item.StartUserId
+                        });
+                    }
+                }
+            }
+        }
+
+        return results;
     }
 
     public async Task<string> StartProcessInstanceByMessageAsync(

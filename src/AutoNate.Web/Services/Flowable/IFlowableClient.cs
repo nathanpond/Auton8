@@ -130,6 +130,13 @@ public interface IFlowableClient
     // Returns the number of instances deleted so the caller can surface it.
     Task<int> DeleteAllWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Instances linked to this one by a message flow (#170): those a send from
+    /// it STARTED, and the one whose send started it. Read from the
+    /// `autonateCounterpartOf` process variable, running and finished alike.
+    /// </summary>
+    Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     // Stops a running process instance and leaves the historic record in
     // place so the executions list can show it as "Cancelled". No-op if the
     // instance has already finished.

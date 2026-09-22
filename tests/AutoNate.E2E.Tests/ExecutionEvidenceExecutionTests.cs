@@ -1725,6 +1725,10 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // instance for the pool itself, so the proof is the task its process
         // creates.
         ("participant", null),
+        // #170. A message flow is a connection between pools, not a step in
+        // either; the engine records nothing for it. The proof is the send at
+        // its source running to the end of a linear pool.
+        ("messageFlow", null),
     ];
 
     /// <summary>
@@ -3003,6 +3007,66 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                       <bpmndi:BPMNShape id="Shape_P_2" bpmnElement="P_2" isHorizontal="true">
                         <dc:Bounds x="100" y="260" width="600" height="120" />
                       </bpmndi:BPMNShape>
+                    </bpmndi:BPMNPlane>
+                  </bpmndi:BPMNDiagram>
+                </definitions>
+                """,
+
+            // #170. `Ev_1` IS the message flow, from a send task in the primary
+            // pool to a message start event in the counterparty. The primary is
+            // linear, so instance-ends proves the send ran -- and the send's
+            // addressing is nothing but this flow, resolved at run time from the
+            // stored diagram; delete the flow and the send fails "noTargetProcess".
+            "Message Flow" => $$"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                             xmlns:flowable="http://flowable.org/bpmn"
+                             xmlns:autonate="http://autonate.dev/workflows"
+                             targetNamespace="http://autonate.dev/workflows">
+                  <message id="Msg_1" name="{{key}}-order" />
+                  <collaboration id="Collab_1">
+                    <participant id="P_1" name="Us" processRef="{{key}}" />
+                    <participant id="P_2" name="Counterparty" processRef="{{key}}cp" />
+                    <messageFlow id="Ev_1" name="order" sourceRef="Send_1" targetRef="Start_cp" />
+                  </collaboration>
+                  <process id="{{key}}" name="probe" isExecutable="true">
+                    <startEvent id="Start_1"/>
+                    <sendTask id="Send_1" name="send order"
+                              flowable:delegateExpression="${autonateBehaviorDelegate}"
+                              flowable:autonateServiceKind="behavior"
+                              flowable:behaviorKey="autonate.send-message"
+                              flowable:async="true"/>
+                    <endEvent id="End_1"/>
+                    <sequenceFlow id="f1" sourceRef="Start_1" targetRef="Send_1"/>
+                    <sequenceFlow id="f2" sourceRef="Send_1" targetRef="End_1"/>
+                  </process>
+                  <process id="{{key}}cp" name="Counterparty" isExecutable="true">
+                    <startEvent id="Start_cp"><messageEventDefinition messageRef="Msg_1"/></startEvent>
+                    <userTask id="Task_cp" name="handle order"/>
+                    <endEvent id="End_cp"/>
+                    <sequenceFlow id="c1" sourceRef="Start_cp" targetRef="Task_cp"/>
+                    <sequenceFlow id="c2" sourceRef="Task_cp" targetRef="End_cp"/>
+                  </process>
+                  <bpmndi:BPMNDiagram id="Diagram_1"
+                                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                                      xmlns:di="http://www.omg.org/spec/DD/20100524/DI">
+                    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="Collab_1">
+                      <bpmndi:BPMNShape id="Shape_P_1" bpmnElement="P_1" isHorizontal="true">
+                        <dc:Bounds x="100" y="60" width="600" height="160" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_Send_1" bpmnElement="Send_1">
+                        <dc:Bounds x="240" y="100" width="100" height="80" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_P_2" bpmnElement="P_2" isHorizontal="true">
+                        <dc:Bounds x="100" y="260" width="600" height="160" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_Start_cp" bpmnElement="Start_cp">
+                        <dc:Bounds x="272" y="322" width="36" height="36" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNEdge id="Edge_Ev_1" bpmnElement="Ev_1">
+                        <di:waypoint x="290" y="180" /><di:waypoint x="290" y="322" />
+                      </bpmndi:BPMNEdge>
                     </bpmndi:BPMNPlane>
                   </bpmndi:BPMNDiagram>
                 </definitions>

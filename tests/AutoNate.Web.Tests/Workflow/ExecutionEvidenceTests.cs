@@ -241,6 +241,12 @@ public sealed class ExecutionEvidenceTests
             ("Intermediate Throw (None)", "instance-ends"),
             ("Intermediate Throw (Signal)", "instance-ends"),
             ("Message Boundary", "host-cancelled"),
+            // #170. The flow itself is never an activity; the SEND at its source is.
+            // A linear primary pool -- start, send task, end -- whose send crosses
+            // the flow into the counterparty's start event: the instance ending
+            // proves the send ran as the flow's addressing, and MessageFlowExecutionTests
+            // proves the message arrived. Also in NeverEntered.
+            ("Message Flow", "instance-ends"),
             ("Message End", "instance-ends"),
             ("Message Start Event", "instance-starts"),
             ("Multi-Instance (Parallel)", "tasks-appear-together"),
@@ -551,6 +557,8 @@ public sealed class ExecutionEvidenceTests
             // #169. A participant is the boundary around a process, not a step in
             // one; the engine records no activity instance for it.
             """("participant", null)""",
+            // #170. A message flow is a connection, not a step; no activity row.
+            """("messageFlow", null)""",
         ];
 
         var source = OracleSource();

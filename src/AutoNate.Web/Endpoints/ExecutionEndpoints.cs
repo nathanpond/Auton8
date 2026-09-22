@@ -690,6 +690,28 @@ public static class ExecutionEndpoints
             return Results.Ok(children);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        // #170. Instances linked to this one by a message flow: what its sends
+        // started, and what started it. The same gate and shape as /children,
+        // because to an operator a counterpart and a called workflow are the
+        // same question -- "what else is this run entangled with?"
+        executions.MapGet("/{processInstanceId}/counterparts", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var counterparts = await flowable.GetCounterpartInstancesAsync(
+                processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionCounterpartsViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = counterparts.Count },
+                cancellationToken);
+            return Results.Ok(counterparts);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
         executions.MapGet("/{processInstanceId}/activities/{activityId}/completed-assignees", async (
             string processInstanceId,
             string activityId,

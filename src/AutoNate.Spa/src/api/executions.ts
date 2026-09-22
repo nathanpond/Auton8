@@ -129,6 +129,19 @@ export async function getExecutionChildren(
   return data;
 }
 
+// #170. Instances linked to this one by a message flow -- what its sends
+// started, and what started it. Same shape as a called child, on purpose.
+export async function getExecutionCounterparts(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<ChildExecutionSummary[]> {
+  const { data } = await api.get<ChildExecutionSummary[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/counterparts`,
+    { signal }
+  );
+  return data;
+}
+
 export async function getExecutionTasks(
   processInstanceId: string,
   signal?: AbortSignal

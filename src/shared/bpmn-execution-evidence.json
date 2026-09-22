@@ -606,6 +606,15 @@
       ]
     },
     {
+      "name": "Message Flow",
+      "localName": "messageFlow",
+      "eventDefinition": null,
+      "declaredEffect": "instance-ends",
+      "liveEngineTestsMentioningIt": [
+        "MessageFlowExecutionTests"
+      ]
+    },
+    {
       "name": "Event Sub-Process",
       "localName": "subProcess",
       "eventDefinition": "triggeredByEvent",

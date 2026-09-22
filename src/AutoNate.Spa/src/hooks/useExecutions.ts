@@ -29,6 +29,7 @@ import {
   updateTaskDueDateAtNode,
   ChildExecutionSummary,
   getExecutionChildren,
+  getExecutionCounterparts,
   getAdhocSubProcesses
 } from "@/api/executions";
 import {
@@ -181,6 +182,18 @@ export function useExecutionChildren(id: string | null) {
   return useQuery<ChildExecutionSummary[]>({
     queryKey: ["execution-children", id ?? "unset"],
     queryFn: ({ signal }) => (id ? getExecutionChildren(id, signal) : Promise.resolve([])),
+    enabled: Boolean(id)
+  });
+}
+
+// #170. Counterparts, keyed and refreshed like children.
+export const executionCounterpartsQueryKey = (id: string) =>
+  ["executions", "counterparts", id] as const;
+
+export function useExecutionCounterparts(id: string | null) {
+  return useQuery<ChildExecutionSummary[]>({
+    queryKey: executionCounterpartsQueryKey(id ?? "unset"),
+    queryFn: ({ signal }) => (id ? getExecutionCounterparts(id, signal) : Promise.resolve([])),
     enabled: Boolean(id)
   });
 }

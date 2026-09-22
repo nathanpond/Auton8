@@ -670,4 +670,105 @@ public sealed class EfCoreWorkflowModelStoreTests
         Assert.False(runtimeUpdated.IsDraft);
         Assert.Equal("process-instance-42", runtimeUpdated.ActiveProcessInstanceId);
     }
+
+    /// <summary>
+    /// A pool's definition key resolves to the workflow that deployed it (#170).
+    /// </summary>
+    /// <remarks>
+    /// After #169 a non-primary pool's key is a definition INSIDE the primary's
+    /// workflow, not a <c>workflow_models</c> row. The version row records the
+    /// set; this is the lookup that reads it -- and the correlator's whole
+    /// ability to address the Seller pool rests on it.
+    /// </remarks>
+    [Fact]
+    public async Task GetPublishedByDefinitionKeyAsync_FindsTheWorkflowThatDeployedAPoolsKey()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Orders",
+            ProcessKey = "orders",
+            BpmnXml = "<xml />"
+        });
+        await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "dep-orders-1",
+            ProcessDefinitionId = "orders:1:dep-orders-1",
+            ProcessDefinitionKey = "orders",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow,
+            Definitions =
+            [
+                new WorkflowDeployedDefinition { ProcessDefinitionKey = "orders", ProcessDefinitionId = "orders:1:dep-orders-1", ProcessDefinitionVersion = 1, Name = "Orders" },
+                new WorkflowDeployedDefinition { ProcessDefinitionKey = "supplier", ProcessDefinitionId = "supplier:1:dep-orders-1", ProcessDefinitionVersion = 1, Name = "Supplier" },
+            ]
+        });
+
+        // The workflow's own key: the path every single-pool caller took before.
+        var byOwnKey = await store.GetPublishedByDefinitionKeyAsync("orders");
+        Assert.NotNull(byOwnKey);
+        Assert.Equal(original.Id, byOwnKey.Id);
+
+        // The pool's key: found through the deployed set.
+        var byPoolKey = await store.GetPublishedByDefinitionKeyAsync("supplier");
+        Assert.NotNull(byPoolKey);
+        Assert.Equal(original.Id, byPoolKey.Id);
+        Assert.Equal("<xml />", byPoolKey.BpmnXml);
+
+        // The complement: a key nothing deployed is nobody's.
+        Assert.Null(await store.GetPublishedByDefinitionKeyAsync("nobody"));
+
+        // And the old lookup still does NOT find the pool -- which is the whole
+        // reason the new one exists, asserted so a future "simplification" that
+        // folds them together cannot pass by accident.
+        Assert.Null(await store.GetPublishedByProcessKeyAsync("supplier"));
+    }
+
+    /// <summary>
+    /// Only the PUBLISHED version's set answers; a stale version row for a
+    /// since-republished workflow must not resolve a key it no longer deploys.
+    /// </summary>
+    [Fact]
+    public async Task GetPublishedByDefinitionKeyAsync_IgnoresASetTheWorkflowNoLongerDeploys()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Orders",
+            ProcessKey = "orders",
+            BpmnXml = "<xml />"
+        });
+        var v1 = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "dep-1",
+            ProcessDefinitionId = "orders:1:dep-1",
+            ProcessDefinitionKey = "orders",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow,
+            Definitions =
+            [
+                new WorkflowDeployedDefinition { ProcessDefinitionKey = "orders", ProcessDefinitionId = "orders:1:dep-1", ProcessDefinitionVersion = 1 },
+                new WorkflowDeployedDefinition { ProcessDefinitionKey = "supplier", ProcessDefinitionId = "supplier:1:dep-1", ProcessDefinitionVersion = 1 },
+            ]
+        });
+
+        // Republish WITHOUT the supplier pool.
+        var redrawn = await store.SaveAsync(v1 with { BpmnXml = "<xml v2 />" });
+        await store.PublishAsync(redrawn, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "dep-2",
+            ProcessDefinitionId = "orders:2:dep-2",
+            ProcessDefinitionKey = "orders",
+            ProcessDefinitionVersion = 2,
+            DeployedAtUtc = DateTimeOffset.UtcNow.AddSeconds(1),
+            Definitions =
+            [
+                new WorkflowDeployedDefinition { ProcessDefinitionKey = "orders", ProcessDefinitionId = "orders:2:dep-2", ProcessDefinitionVersion = 2 },
+            ]
+        });
+
+        Assert.Null(await store.GetPublishedByDefinitionKeyAsync("supplier"));
+    }
 }

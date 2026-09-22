@@ -38,7 +38,8 @@ public sealed class ExecutionOracleSizeTests
         // Moves with `obliged` in ExecutionEvidenceTests, which names the same
         // set. Both are edited together or one of them fails.
         // #169 added Pool / Participant: 50 -> 51.
-        const int Cells = 51;
+        // #170 added Message Flow: 51 -> 52.
+        const int Cells = 52;
 
         var actual = ExecutionEvidenceExecutionTests.DeclaredEffects().Count;
 

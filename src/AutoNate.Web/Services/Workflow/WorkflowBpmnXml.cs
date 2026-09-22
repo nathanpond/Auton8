@@ -2240,6 +2240,8 @@ public static partial class WorkflowBpmnXml
             // participant whose process does not exist, two processes sharing an
             // id, or no executable pool at all.
             errors.AddRange(BuildCollaborationErrors(document));
+            // #170. A message flow that could never deliver is a send into the void.
+            errors.AddRange(BuildMessageFlowErrors(document));
             // #111: a business rule task with no table decides nothing, and the
             // engine would refuse the deployment rather than say so usefully.
             errors.AddRange(BuildBusinessRuleTaskErrors(document));
@@ -3177,11 +3179,26 @@ public static partial class WorkflowBpmnXml
                 messageName = element.Attribute(FlowableNamespace + "autonateMessageName")?.Value ?? string.Empty;
             }
 
+            // #170. A message flow drawn from this element IS its addressing.
+            // Prepare stamps the attributes for the studio's benefit, but a
+            // diagram published as raw XML never went through prepare, and the
+            // flow is the fact either way -- so it is resolved here too, with an
+            // explicit attribute always winning over the drawn flow.
+            var target = Trimmed(element.Attribute(FlowableNamespace + TargetProcessKeyAttribute)?.Value);
+            var key = Trimmed(element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value);
+            var flowTarget = ResolveMessageFlowTarget(document, element, messageNamesById);
+            if (flowTarget is not null)
+            {
+                target ??= flowTarget.Value.ProcessId;
+                key ??= flowTarget.Value.CorrelationKey;
+                if (string.IsNullOrWhiteSpace(messageName)) messageName = flowTarget.Value.MessageName;
+            }
+
             declarations.Add(new WorkflowMessageSendDeclaration(
                 elementId,
                 messageName.Trim(),
-                Trimmed(element.Attribute(FlowableNamespace + TargetProcessKeyAttribute)?.Value),
-                Trimmed(element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value),
+                target,
+                key,
                 EndsProcess: localName == "endEvent"));
         }
 
@@ -3290,7 +3307,21 @@ public static partial class WorkflowBpmnXml
     /// Every point in a published definition that can be advanced from outside,
     /// with the variable that addresses it (#112).
     /// </summary>
-    public static IReadOnlyList<WorkflowMessageDeclaration> ExtractMessageDeclarations(string xml)
+    public static IReadOnlyList<WorkflowMessageDeclaration> ExtractMessageDeclarations(string xml) =>
+        ExtractMessageDeclarations(xml, processId: null);
+
+    /// <summary>
+    /// The message-catching points of ONE process in a diagram that may hold
+    /// several (#170). Null scopes to the whole document, which is what a
+    /// single-process diagram always was.
+    /// </summary>
+    /// <remarks>
+    /// After #169 a published workflow can carry N definitions, and a message
+    /// addressed to the Seller pool must be answered by Seller's declarations
+    /// alone -- a receive task in the SENDER's pool with the same name is not a
+    /// match, it is the bug this overload exists to prevent.
+    /// </remarks>
+    public static IReadOnlyList<WorkflowMessageDeclaration> ExtractMessageDeclarations(string xml, string? processId)
     {
         if (string.IsNullOrWhiteSpace(xml))
         {
@@ -3298,6 +3329,17 @@ public static partial class WorkflowBpmnXml
         }
 
         var document = XDocument.Parse(xml);
+
+        // #170. Scoping exists to tell one pool's declarations from another's, so
+        // it applies only where there is more than one process to tell apart AND
+        // the addressed id names one of them. A single-process diagram answers
+        // for any key it is addressed by -- which is what every caller before
+        // this overload relied on, including stores whose stored key and process
+        // id have drifted apart.
+        var processes = document.Descendants(BpmnNamespace + "process").ToList();
+        var scopeToProcess = processId is not null
+            && processes.Count > 1
+            && processes.Any(p => p.Attribute("id")?.Value == processId);
 
         // <bpmn:message id="…" name="…"> lives at definitions level; the events
         // reference it by id. The name is what the engine subscribes under, so a
@@ -3326,6 +3368,11 @@ public static partial class WorkflowBpmnXml
                 _ => (WorkflowMessageTargetKind?)null
             };
             if (kind is null || element.Name.Namespace != BpmnNamespace) continue;
+            if (scopeToProcess
+                && element.Ancestors(BpmnNamespace + "process").FirstOrDefault()?.Attribute("id")?.Value != processId)
+            {
+                continue;
+            }
 
             var elementId = element.Attribute("id")?.Value;
             if (string.IsNullOrWhiteSpace(elementId)) continue;
@@ -4684,7 +4731,239 @@ public static partial class WorkflowBpmnXml
             // engine, the prepare response and the studio all agree on it.
             process.SetAttributeValue("isExecutable", HasFlowNodes(process) ? "true" : "false");
         }
+
+        // #170. After the renames, so a target in the primary pool resolves to
+        // the workflow key rather than the id it had a moment ago.
+        ApplyMessageFlows(document);
     }
+
+    // ── #170: message flows ─────────────────────────────────────────────────
+    //
+    // The engine never executes a message flow. What executes is the SEND at its
+    // source -- a send task or a message throw/end event, which #112 runs through
+    // SendMessageBehavior -- addressed by the three `autonate*` attributes that
+    // behaviour reads off the sender's stored diagram. A message flow is
+    // therefore compiled at prepare into exactly those attributes: the flow the
+    // author drew becomes the addressing the author used to type by hand.
+
+    private static readonly HashSet<string> MessageFlowSourceKinds =
+        new(StringComparer.Ordinal) { "sendTask", "intermediateThrowEvent", "endEvent" };
+
+    private static readonly HashSet<string> MessageFlowTargetKinds =
+        new(StringComparer.Ordinal) { "receiveTask", "intermediateCatchEvent", "boundaryEvent", "startEvent" };
+
+    private static bool CarriesMessageDefinition(XElement element) =>
+        element.Elements(BpmnNamespace + "messageEventDefinition").Any();
+
+    private static bool IsValidMessageFlowSource(XElement element) =>
+        element.Name.Namespace == BpmnNamespace
+        && (element.Name.LocalName == "sendTask"
+            || (MessageFlowSourceKinds.Contains(element.Name.LocalName) && CarriesMessageDefinition(element)));
+
+    private static bool IsValidMessageFlowTarget(XElement element) =>
+        element.Name.Namespace == BpmnNamespace
+        && (element.Name.LocalName == "receiveTask"
+            || (MessageFlowTargetKinds.Contains(element.Name.LocalName) && CarriesMessageDefinition(element))
+            || (element.Name.LocalName == "participant" && ParticipantMessageStart(element) is not null));
+
+    /// <summary>
+    /// A flow drawn to a POOL rather than to an element in it -- which BPMN allows
+    /// and the studio draws for a collapsed pool -- delivers to the pool's message
+    /// start event, if it has exactly one (#170). Null for an empty pool, a pool
+    /// with no message start, or one with several (ambiguous).
+    /// </summary>
+    private static XElement? ParticipantMessageStart(XElement participant)
+    {
+        var processRef = participant.Attribute("processRef")?.Value;
+        if (string.IsNullOrWhiteSpace(processRef)) return null;
+        var process = participant.Document?.Descendants(BpmnNamespace + "process")
+            .FirstOrDefault(p => p.Attribute("id")?.Value == processRef);
+        var starts = process?.Elements(BpmnNamespace + "startEvent").Where(CarriesMessageDefinition).ToList();
+        return starts is { Count: 1 } ? starts[0] : null;
+    }
+
+    private static XElement? ProcessOf(XElement element) =>
+        element.Ancestors(BpmnNamespace + "process").FirstOrDefault();
+
+    private static Dictionary<string, XElement> ElementsById(XDocument document) =>
+        document.Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace && !string.IsNullOrWhiteSpace(e.Attribute("id")?.Value))
+            .GroupBy(e => e.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+    /// <summary>
+    /// Stamp each message flow's target onto its source (#170), so the flow the
+    /// author drew is the addressing <c>SendMessageBehavior</c> reads. Runs after
+    /// the primary process has been renamed, so a target in the primary pool
+    /// resolves to the workflow key.
+    /// </summary>
+    /// <summary>
+    /// Where a message flow drawn FROM this element goes (#170): the target
+    /// pool's process id, the name the target answers to, and the target's
+    /// declared correlation key. Null when no valid flow leaves the element.
+    /// </summary>
+    private static (string ProcessId, string MessageName, string? MessageRef, string? CorrelationKey)? ResolveMessageFlowTarget(
+        XDocument document,
+        XElement source,
+        IReadOnlyDictionary<string, string> messageNamesById)
+    {
+        var sourceId = source.Attribute("id")?.Value;
+        if (string.IsNullOrWhiteSpace(sourceId) || !IsValidMessageFlowSource(source)) return null;
+
+        var flow = document.Descendants(BpmnNamespace + "messageFlow")
+            .FirstOrDefault(f => f.Attribute("sourceRef")?.Value == sourceId);
+        var targetRef = flow?.Attribute("targetRef")?.Value;
+        if (targetRef is null) return null;
+
+        var target = document.Descendants()
+            .FirstOrDefault(e => e.Name.Namespace == BpmnNamespace && e.Attribute("id")?.Value == targetRef);
+        if (target is null || !IsValidMessageFlowTarget(target)) return null;
+        if (target.Name.LocalName == "participant")
+        {
+            target = ParticipantMessageStart(target)!;
+        }
+
+        var targetProcessId = ProcessOf(target)?.Attribute("id")?.Value;
+        if (string.IsNullOrWhiteSpace(targetProcessId)) return null;
+
+        // The name the target answers to: its message, or -- for a receive task,
+        // which has no message of its own -- its element id (#112).
+        string? messageName;
+        string? messageRef = null;
+        if (target.Name.LocalName == "receiveTask")
+        {
+            messageName = target.Attribute("id")?.Value;
+        }
+        else
+        {
+            messageRef = target.Element(BpmnNamespace + "messageEventDefinition")?.Attribute("messageRef")?.Value;
+            messageName = messageRef is not null && messageNamesById.TryGetValue(messageRef, out var resolved) ? resolved : null;
+        }
+        if (string.IsNullOrWhiteSpace(messageName)) return null;
+
+        return (targetProcessId, messageName, messageRef,
+            Trimmed(target.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value));
+    }
+
+    private static void ApplyMessageFlows(XDocument document)
+    {
+        var messageNamesById = MessageNamesById(document);
+
+        foreach (var source in document.Descendants().Where(IsValidMessageFlowSource).ToList())
+        {
+            var resolved = ResolveMessageFlowTarget(document, source, messageNamesById);
+            if (resolved is null) continue;
+            var (targetProcessId, messageName, messageRef, targetKey) = resolved.Value;
+
+            source.SetAttributeValue(FlowableNamespace + TargetProcessKeyAttribute, targetProcessId);
+
+            if (source.Name.LocalName == "sendTask")
+            {
+                source.SetAttributeValue(FlowableNamespace + "autonateMessageName", messageName);
+            }
+            else if (messageRef is not null)
+            {
+                // A throw or end event names its message by reference. Point it at
+                // the target's message so both ends agree by construction.
+                source.Element(BpmnNamespace + "messageEventDefinition")?.SetAttributeValue("messageRef", messageRef);
+            }
+
+            // Inferred, never overwritten (Claude's Discretion on #170): the
+            // author's own key wins; the target's declared key fills a blank.
+            if (string.IsNullOrWhiteSpace(source.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value)
+                && !string.IsNullOrWhiteSpace(targetKey))
+            {
+                source.SetAttributeValue(FlowableNamespace + CorrelationKeyAttribute, targetKey);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A message flow that could never deliver is refused before deployment
+    /// (#170): inside one pool, between endpoints that are not a send/receive
+    /// pair, into a pool that deploys nothing, or between ids that do not exist.
+    /// </summary>
+    private static IReadOnlyList<string> BuildMessageFlowErrors(XDocument document)
+    {
+        var flows = document.Descendants(BpmnNamespace + "messageFlow").ToList();
+        if (flows.Count == 0) return Array.Empty<string>();
+
+        var byId = ElementsById(document);
+        var errors = new List<string>();
+        foreach (var flow in flows)
+        {
+            var flowName = flow.Attribute("name")?.Value ?? flow.Attribute("id")?.Value ?? "(unnamed message flow)";
+            var sourceRef = flow.Attribute("sourceRef")?.Value;
+            var targetRef = flow.Attribute("targetRef")?.Value;
+            if (sourceRef is null || !byId.TryGetValue(sourceRef, out var source))
+            {
+                errors.Add($"Message flow '{flowName}' starts at '{sourceRef ?? "(nothing)"}', which is not in the diagram.");
+                continue;
+            }
+            if (targetRef is null || !byId.TryGetValue(targetRef, out var target))
+            {
+                errors.Add($"Message flow '{flowName}' ends at '{targetRef ?? "(nothing)"}', which is not in the diagram.");
+                continue;
+            }
+
+            if (!IsValidMessageFlowSource(source))
+            {
+                errors.Add($"Message flow '{flowName}' starts at '{Label(source)}', which does not send a message. "
+                    + "A message flow must start at a send task, a message throw event or a message end event.");
+            }
+            XElement? targetProcess;
+            if (target.Name.LocalName == "participant")
+            {
+                // Drawn to the pool itself. Deliverable only if the pool has
+                // exactly one message start event; a pool with nothing in it is
+                // the void, and one with several starts is ambiguous.
+                var poolName = target.Attribute("name")?.Value ?? target.Attribute("id")?.Value ?? "(unnamed pool)";
+                var processRef = target.Attribute("processRef")?.Value;
+                targetProcess = processRef is null ? null
+                    : document.Descendants(BpmnNamespace + "process").FirstOrDefault(p => p.Attribute("id")?.Value == processRef);
+                if (targetProcess is null || !HasFlowNodes(targetProcess))
+                {
+                    errors.Add($"Message flow '{flowName}' sends into pool '{poolName}', which contains nothing to run and deploys as nothing. "
+                        + "A message sent there would never arrive; draw the receiving flow inside the pool, or remove the message flow.");
+                    continue;
+                }
+                if (ParticipantMessageStart(target) is null)
+                {
+                    errors.Add($"Message flow '{flowName}' ends at pool '{poolName}' itself, which has no single message start event to deliver to. "
+                        + "End the flow at the element that receives it: a receive task, a message catch event, or a message start event.");
+                    continue;
+                }
+            }
+            else
+            {
+                targetProcess = ProcessOf(target);
+                if (!IsValidMessageFlowTarget(target))
+                {
+                    errors.Add($"Message flow '{flowName}' ends at '{Label(target)}', which does not receive a message. "
+                        + "A message flow must end at a receive task, a message catch event, a message boundary event or a message start event.");
+                }
+            }
+
+            var sourceProcess = ProcessOf(source);
+            if (sourceProcess is not null && ReferenceEquals(sourceProcess, targetProcess))
+            {
+                errors.Add($"Message flow '{flowName}' connects two elements in the same pool. "
+                    + "A message flow crosses between pools; inside one pool, use a sequence flow.");
+            }
+            if (targetProcess is not null && !HasFlowNodes(targetProcess))
+            {
+                var poolName = document.Descendants(BpmnNamespace + "participant")
+                    .FirstOrDefault(p => p.Attribute("processRef")?.Value == targetProcess.Attribute("id")?.Value)
+                    ?.Attribute("name")?.Value ?? targetProcess.Attribute("id")?.Value ?? "(unnamed pool)";
+                errors.Add($"Message flow '{flowName}' sends into pool '{poolName}', which contains nothing to run and deploys as nothing. "
+                    + "A message sent there would never arrive; draw the receiving flow inside the pool, or remove the message flow.");
+            }
+        }
+        return errors;
+    }
+
+    private static string Label(XElement element) =>
+        element.Attribute("name")?.Value ?? element.Attribute("id")?.Value ?? element.Name.LocalName;
 
     /// <summary>
     /// What a collaboration would deploy as, participant by participant (#169).

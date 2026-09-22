@@ -632,11 +632,11 @@
     {
       "name": "Message Flow",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "messageFlow",
       "eventDefinition": null,
-      "reason": "A message flow connects two participants across a pool boundary and is not an executable path. It deploys and carries no execution semantics (#325 AC5).",
+      "reason": "A message flow is the addressing of the send at its source. Auton8 resolves the flow's target -- the pool's process key, the message the target answers to, its correlation key -- onto the send task or message event it leaves, and #112's send behaviour delivers through the same correlator the API uses; the engine itself never executes the flow, it executes the send. A flow inside one pool, between endpoints that are not a send/receive pair, or into a pool that deploys nothing is refused at publish, naming it (#170).",
       "evidence": "deployed and started"
     },
     {

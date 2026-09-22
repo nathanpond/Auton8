@@ -68,6 +68,11 @@ internal sealed class StubFlowableClient : IFlowableClient
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<FlowableProcessDefinitionSummary>>([]);
 
+    public Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<FlowableProcessInstanceSummary>>([]);
+
     public Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default)
     {
         DeletedDeployments.Add(deploymentId);
