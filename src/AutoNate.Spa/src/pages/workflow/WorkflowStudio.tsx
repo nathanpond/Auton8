@@ -59,6 +59,7 @@ import {
   WorkflowModel
 } from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
+import { listGroups, type Group as AuthGroup } from "@/api/admin";
 import { extractProcessVariables } from "@/lib/bpmn/processVariables";
 import {
   ANNOTATION_ELEMENTS,
@@ -122,6 +123,15 @@ type GatewayEditor = {
   name: string;
   defaultFlowId: string;
   outgoingFlows: GatewayOutgoingFlow[];
+};
+
+// #171. The lane a node sits in, as the modeller reports it from flowNodeRef.
+type StudioLane = { id: string; name: string | null; groupId: string | null };
+
+type LaneEditor = {
+  id: string;
+  name: string;
+  groupId: string;
 };
 
 type SignalStartEventEditor = {
@@ -324,6 +334,7 @@ type UserTaskEditor = {
   candidateUserIds: string[];
   candidateUsersExpression: string;
   candidateGroupsRaw: string;
+  lane: StudioLane | null;
   dueDateMode: DueDateMode;
   dueDateDays: string;
   dueDateExpression: string;
@@ -353,6 +364,8 @@ type ElementSelection = {
   assignee?: string | null;
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
+  laneGroupId?: string | null;
+  lane?: StudioLane | null;
   dueDate?: string | null;
   signalName?: string | null;
   signalTopic?: string | null;
@@ -547,6 +560,7 @@ export default function WorkflowStudio() {
   const [callActivityEditor, setCallActivityEditor] = useState<CallActivityEditor | null>(null);
   const [signalEditor, setSignalEditor] = useState<SignalEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
+  const [laneEditor, setLaneEditor] = useState<LaneEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [elementDataEditor, setElementDataEditor] = useState<ElementDataEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
@@ -591,6 +605,7 @@ export default function WorkflowStudio() {
     setCodedEventEditor(null);
     setConditionalEventEditor(null);
     setGatewayEditor(null);
+    setLaneEditor(null);
     setGenericEditor(null);
     setMessageEditor(null);
     setScriptTaskEditor(null);
@@ -953,11 +968,18 @@ export default function WorkflowStudio() {
         candidateUserIds: candidateUsersIsExpression ? [] : candidateUsers,
         candidateUsersExpression: candidateUsersIsExpression ? candidateUsersFirst : "",
         candidateGroupsRaw: candidateGroups.join(", "),
+        lane: selection.lane ?? null,
         dueDateMode: dueDate.mode,
         dueDateDays: dueDate.days,
         dueDateExpression: dueDate.expression,
         userFormMode,
         userFormShortCode: (selection.userFormShortCode ?? "").trim()
+      });
+    } else if (selection && selection.type === "bpmn:Lane") {
+      setLaneEditor({
+        id: selection.id,
+        name: selection.name ?? "",
+        groupId: selection.laneGroupId ?? ""
       });
     } else if (selection) {
       setGenericEditor({
@@ -1027,6 +1049,7 @@ export default function WorkflowStudio() {
     setTimerIntermediateEditor(null);
     setServiceTaskEditor(null);
     setGatewayEditor(null);
+    setLaneEditor(null);
     setGenericEditor(null);
     setConditionalEventEditor(null);
     setTimerBoundaryEditor(null);
@@ -1547,6 +1570,19 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
     });
 
+  const applyLane = () =>
+    runBusy("applying lane changes", async () => {
+      if (!handle || !laneEditor) {
+        throw new Error("Select a lane before applying changes.");
+      }
+      await workflow.updateLaneProperties(handle, {
+        id: laneEditor.id,
+        name: laneEditor.name,
+        groupId: laneEditor.groupId || null
+      });
+      setLaneEditor(null);
+    });
+
   const onPause = () =>
     runBusy("pausing the workflow", async () => {
       if (!currentModel) return;
@@ -2022,6 +2058,19 @@ export default function WorkflowStudio() {
             setGatewayEditor(null);
           }}
           onApply={applyGateway}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {laneEditor && (
+        <LaneModal
+          editor={laneEditor}
+          onChange={setLaneEditor}
+          onClose={() => {
+            if (busy) return;
+            setLaneEditor(null);
+          }}
+          onApply={applyLane}
           disabled={!!busy || !handle}
         />
       )}
@@ -4778,6 +4827,103 @@ function SequenceFlowModal({
   );
 }
 
+// #171. The groups a lane can name, by id. One query, cached by React Query,
+// shared by the lane modal and the user task modal's assignment-source line.
+function useGroupDirectory() {
+  const { data: groups = [], isLoading } = useQuery<AuthGroup[]>({
+    queryKey: ["admin", "groups", "active"],
+    queryFn: () => listGroups(false)
+  });
+  const byId = useMemo(() => {
+    const map = new Map<string, AuthGroup>();
+    for (const group of groups) map.set(group.id.toLowerCase(), group);
+    return map;
+  }, [groups]);
+  return {
+    groups,
+    isLoading,
+    get(id: string | null | undefined): AuthGroup | null {
+      if (!id) return null;
+      return byId.get(id.toLowerCase()) ?? null;
+    }
+  };
+}
+
+function LaneModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: LaneEditor;
+  onChange: (next: LaneEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const directory = useGroupDirectory();
+  const current = directory.get(editor.groupId);
+  // A group that was deleted after the lane named it. Shown, disabled, so the
+  // author sees what the lane still points at rather than an empty picker;
+  // publish refuses the diagram until it is changed.
+  const missing = editor.groupId.length > 0 && !directory.isLoading && !current;
+  const options = [
+    ...directory.groups.map((group) => ({ value: group.id, label: group.name })),
+    ...(missing ? [{ value: editor.groupId, label: `(deleted group ${editor.groupId})`, disabled: true }] : [])
+  ];
+
+  return (
+    <Modal opened onClose={onClose} title="Lane" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          A lane names a group. User tasks drawn inside it, with no assignment of their own,
+          are offered to that group when the workflow runs. A task can still be assigned
+          specifically, which overrides the lane.
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>bpmn:Lane</Code>
+        </Group>
+
+        <TextInput
+          label="Lane name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
+
+        <Select
+          label="Group"
+          value={editor.groupId || null}
+          onChange={(v) => onChange({ ...editor, groupId: v ?? "" })}
+          data={options}
+          clearable
+          searchable
+          placeholder={directory.isLoading ? "Loading groups…" : "(no group)"}
+          nothingFoundMessage="No group by that name"
+          description="Chosen from the groups that exist. Clear it and the lane assigns nobody."
+        />
+
+        {missing && (
+          <Alert color="red" variant="light" title="This lane's group no longer exists">
+            Publishing will be refused until the lane names a group that exists, or none.
+          </Alert>
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 function GatewayModal({
   editor,
   onChange,
@@ -4842,6 +4988,44 @@ function GatewayModal({
   );
 }
 
+// #171. Where a task in a lane gets its assignment from -- its own settings or
+// the lane -- so an author is not left guessing which one won.
+function AssignmentSourceNote({ editor, lane }: { editor: UserTaskEditor; lane: StudioLane }) {
+  const directory = useGroupDirectory();
+  const group = directory.get(lane.groupId);
+  const laneLabel = lane.name ?? lane.id;
+  const groupLabel = group?.name ?? (lane.groupId ? `deleted group ${lane.groupId}` : null);
+  const hasOwnAssignment =
+    (editor.assigneeMode === "expression" ? editor.assigneeExpression : editor.assigneeUserId).trim().length > 0 ||
+    (editor.candidateUsersMode === "expression"
+      ? editor.candidateUsersExpression.trim().length > 0
+      : editor.candidateUserIds.length > 0) ||
+    editor.candidateGroupsRaw.trim().length > 0;
+
+  if (hasOwnAssignment) {
+    return (
+      <Alert color="blue" variant="light" title="Assignment source: this task's own settings">
+        This task is in lane &ldquo;{laneLabel}&rdquo;
+        {groupLabel ? ` (group ${groupLabel})` : ""}, and its own assignment below overrides the lane.
+      </Alert>
+    );
+  }
+  if (lane.groupId) {
+    return (
+      <Alert color="blue" variant="light" title={`Assignment source: the lane “${laneLabel}”`}>
+        Offered to the group {groupLabel} because this task sits in that lane. Set an assignee or
+        candidates below to override it.
+      </Alert>
+    );
+  }
+  return (
+    <Alert color="yellow" variant="light" title="No assignment yet">
+      This task is in lane &ldquo;{laneLabel}&rdquo;, which names no group, and has no assignment of
+      its own. Give the lane a group, or set one here.
+    </Alert>
+  );
+}
+
 function UserTaskModal({
   editor,
   onChange,
@@ -4897,6 +5081,10 @@ function UserTaskModal({
           <Code>{editor.id}</Code>
           <Code>{editor.type}</Code>
         </Group>
+
+        {editor.lane && (
+          <AssignmentSourceNote editor={editor} lane={editor.lane} />
+        )}
 
         <TextInput
           label="Task Name"

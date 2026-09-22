@@ -9,6 +9,7 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Decisions;
 using AutoNate.Web.Services.Flowable.Cache;
 using AutoNate.Web.Services.Events;
@@ -294,6 +295,7 @@ public static class WorkflowEndpoints
             IFlowableDecisionClient decisionEngine,
             IAuditEventPublisher auditPublisher,
             IAuthorizer authorizer,
+            IGroupStore groups,
             IOptions<WorkflowBehaviorOptions> behaviorOptions,
             ClaimsPrincipal actor,
             ILoggerFactory loggerFactory,
@@ -352,6 +354,28 @@ public static class WorkflowEndpoints
             if (validationErrors.Count > 0)
             {
                 return Results.BadRequest(new { errors = validationErrors });
+            }
+
+            // #171. A lane names a group. A group that has since been deleted or
+            // archived would deploy that lane's user tasks with nobody able to
+            // see them -- a send into the void wearing a lane's name. Refused
+            // here, naming the lane, before anything reaches the engine.
+            var laneErrors = new List<string>();
+            foreach (var lane in WorkflowBpmnXml.ExtractLaneGroups(model.BpmnXml))
+            {
+                var group = Guid.TryParse(lane.GroupId, out var groupId)
+                    ? await groups.GetAsync(groupId, cancellationToken)
+                    : null;
+                if (group is null || group.IsArchived)
+                {
+                    laneErrors.Add(
+                        $"Lane '{lane.LaneName}' is assigned to a group that no longer exists ({lane.GroupId}). "
+                        + "Its user tasks would deploy with nobody able to see them. Open the lane and pick a group, or clear its group.");
+                }
+            }
+            if (laneErrors.Count > 0)
+            {
+                return Results.BadRequest(new { errors = laneErrors });
             }
 
             // #113. Every call activity is resolved to the child definition that

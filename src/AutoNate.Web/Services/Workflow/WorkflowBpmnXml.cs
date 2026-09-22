@@ -242,6 +242,10 @@ public static partial class WorkflowBpmnXml
         ExpandBusinessRuleTasks(document);
         NamespaceScriptTaskResultVariables(document);
         ApplySignalScopes(document);
+        // #171. A lane's group becomes the candidate group of the user tasks it
+        // holds. Here, on the DEPLOYED copy, so the stored diagram keeps saying
+        // "no assignment of its own" and the studio can say where one came from.
+        ApplyLaneAssignments(document);
 
         var declaration = document.Declaration is null
             ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -5240,6 +5244,88 @@ public static partial class WorkflowBpmnXml
         }
 
         return errors;
+    }
+
+    /// <summary>
+    /// The attribute on a <c>bpmn:lane</c> naming the Auton8 group its user
+    /// tasks default to (#171). In the <c>autonate</c> namespace, which is on
+    /// the do-not-rename list; this adds an attribute to it and changes nothing
+    /// already there.
+    /// </summary>
+    public const string LaneGroupAttribute = "groupId";
+
+    /// <summary>A lane and the group it names (#171).</summary>
+    public sealed record WorkflowLaneGroup(string LaneId, string LaneName, string GroupId);
+
+    /// <summary>
+    /// Every lane carrying a group association (#171), so publish can refuse a
+    /// lane whose group no longer exists by name rather than deploy tasks
+    /// nobody can see.
+    /// </summary>
+    public static IReadOnlyList<WorkflowLaneGroup> ExtractLaneGroups(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<WorkflowLaneGroup>();
+
+        var document = XDocument.Parse(xml);
+        return document.Descendants(BpmnNamespace + "lane")
+            .Select(lane => (Lane: lane, GroupId: LaneGroupOf(lane)))
+            .Where(pair => pair.GroupId is not null)
+            .Select(pair => new WorkflowLaneGroup(
+                pair.Lane.Attribute("id")?.Value ?? string.Empty,
+                LabelOf(pair.Lane),
+                pair.GroupId!))
+            .ToList();
+    }
+
+    private static string? LaneGroupOf(XElement lane)
+    {
+        var value = lane.Attribute(ScriptTaskIdentity.AutoNateNamespace + LaneGroupAttribute)?.Value?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// A lane's group is the default assignment of every user task it lists
+    /// (#171): <c>flowable:candidateGroups</c> on each one that has no
+    /// assignee, candidate users or candidate groups of its own. A task that
+    /// has any of those keeps them -- the lane is a default beneath the task's
+    /// own settings, never a constraint above them.
+    /// </summary>
+    /// <remarks>
+    /// A task inside a NESTED lane is listed by the inner lane and by every
+    /// lane around it -- bpmn-js collects every lane whose bounds contain the
+    /// shape -- so the innermost lane that names a group wins. A lane with no
+    /// group contributes nothing, and a task no lane lists is left exactly as
+    /// authored, which is what "moving it out of all lanes leaves no stale
+    /// group" means on the deployed copy.
+    /// </remarks>
+    private static void ApplyLaneAssignments(XDocument document)
+    {
+        var elementsById = ElementsById(document);
+        var groupByTask = new Dictionary<string, (int Depth, string GroupId)>(StringComparer.Ordinal);
+
+        foreach (var lane in document.Descendants(BpmnNamespace + "lane"))
+        {
+            var groupId = LaneGroupOf(lane);
+            if (groupId is null) continue;
+
+            var depth = lane.Ancestors(BpmnNamespace + "lane").Count();
+            foreach (var reference in lane.Elements(BpmnNamespace + "flowNodeRef"))
+            {
+                var taskId = reference.Value.Trim();
+                if (taskId.Length == 0) continue;
+                if (!groupByTask.TryGetValue(taskId, out var current) || current.Depth < depth)
+                {
+                    groupByTask[taskId] = (depth, groupId);
+                }
+            }
+        }
+
+        foreach (var (taskId, assignment) in groupByTask)
+        {
+            if (!elementsById.TryGetValue(taskId, out var element)) continue;
+            if (element.Name.LocalName != "userTask" || HasSomeoneToDoIt(element)) continue;
+            element.SetAttributeValue(FlowableNamespace + "candidateGroups", assignment.GroupId);
+        }
     }
 
     private static bool HasSomeoneToDoIt(XElement userTask) =>

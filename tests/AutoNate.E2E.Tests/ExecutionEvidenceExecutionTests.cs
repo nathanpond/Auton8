@@ -125,7 +125,7 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(50, DeclaredEffects().Count);
+        Assert.Equal(51, DeclaredEffects().Count);
     }
 
     /// <summary>
@@ -1729,6 +1729,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // either; the engine records nothing for it. The proof is the send at
         // its source running to the end of a linear pool.
         ("messageFlow", null),
+        // #171. A lane partitions a pool; the engine records nothing for it. The
+        // proof is the task it lists.
+        ("lane", null),
     ];
 
     /// <summary>
@@ -3006,6 +3009,52 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                       </bpmndi:BPMNShape>
                       <bpmndi:BPMNShape id="Shape_P_2" bpmnElement="P_2" isHorizontal="true">
                         <dc:Bounds x="100" y="260" width="600" height="120" />
+                      </bpmndi:BPMNShape>
+                    </bpmndi:BPMNPlane>
+                  </bpmndi:BPMNDiagram>
+                </definitions>
+                """,
+
+            // #171. `Ev_1` IS the lane, listing the pool's user task. The oracle
+            // asserts the element carrying that id is a lane, deployed and
+            // authored, and its proof is the task it lists, which NestedIdsIn
+            // reaches through `flowNodeRef` (BpmnDiagram.cs) -- a lane is an
+            // element with no children but references, like a participant. No
+            // group on the lane here: the oracle has none to name, and the
+            // assignment it would produce is LaneAssignmentExecutionTests' claim.
+            "Lane" => $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                             xmlns:flowable="http://flowable.org/bpmn"
+                             xmlns:autonate="http://autonate.dev/workflows"
+                             targetNamespace="http://autonate.dev/workflows">
+                  <collaboration id="Collab_1">
+                    <participant id="P_1" name="Us" processRef="{key}" />
+                  </collaboration>
+                  <process id="{key}" name="probe" isExecutable="true">
+                    <laneSet id="LaneSet_1">
+                      <lane id="Ev_1" name="Finance">
+                        <flowNodeRef>Start_1</flowNodeRef>
+                        <flowNodeRef>Task_1</flowNodeRef>
+                        <flowNodeRef>End_1</flowNodeRef>
+                      </lane>
+                    </laneSet>
+                    <startEvent id="Start_1"/><userTask id="Task_1" name="approve"/><endEvent id="End_1"/>
+                    <sequenceFlow id="f1" sourceRef="Start_1" targetRef="Task_1"/>
+                    <sequenceFlow id="f2" sourceRef="Task_1" targetRef="End_1"/>
+                  </process>
+                  <bpmndi:BPMNDiagram id="Diagram_1"
+                                      xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                      xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+                    <bpmndi:BPMNPlane id="Plane_1" bpmnElement="Collab_1">
+                      <bpmndi:BPMNShape id="Shape_P_1" bpmnElement="P_1" isHorizontal="true">
+                        <dc:Bounds x="100" y="60" width="600" height="160" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_Ev_1" bpmnElement="Ev_1" isHorizontal="true">
+                        <dc:Bounds x="130" y="60" width="570" height="160" />
+                      </bpmndi:BPMNShape>
+                      <bpmndi:BPMNShape id="Shape_Task_1" bpmnElement="Task_1">
+                        <dc:Bounds x="240" y="100" width="100" height="80" />
                       </bpmndi:BPMNShape>
                     </bpmndi:BPMNPlane>
                   </bpmndi:BPMNDiagram>

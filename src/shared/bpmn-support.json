@@ -622,12 +622,12 @@
     {
       "name": "Lane",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "lane",
       "eventDefinition": null,
-      "reason": "A lane partitions a diagram visually. It deploys and carries no execution semantics: no instance ever enters it, so no run can prove it (#325 AC5).",
-      "evidence": "deployed and started"
+      "reason": "A lane names an Auton8 group (#171). At deploy, every user task the lane lists that has no assignment of its own takes that group as its candidate group; a task with its own assignee or candidates keeps them. Executes by expansion, like Business Rule Task: the engine never enters the lane, it offers the lane's tasks to the lane's people.",
+      "evidence": "deployed, started, and the lane's task offered to a member of its group and not to a non-member (LaneAssignmentExecutionTests)"
     },
     {
       "name": "Message Flow",

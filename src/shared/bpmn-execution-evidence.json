@@ -606,6 +606,13 @@
       ]
     },
     {
+      "name": "Lane",
+      "localName": "lane",
+      "eventDefinition": null,
+      "declaredEffect": "task-appears",
+      "liveEngineTestsMentioningIt": ["LaneAssignmentExecutionTests"]
+    },
+    {
       "name": "Message Flow",
       "localName": "messageFlow",
       "eventDefinition": null,

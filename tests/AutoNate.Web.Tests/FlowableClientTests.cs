@@ -651,6 +651,73 @@ public sealed class FlowableClientTests
 
     // --- GetTasksAssignedToUserAsync -----------------------------------------
 
+    /// <summary>
+    /// #171. The actor's groups reach the engine as a third query, and its
+    /// tasks are merged like the other two.
+    /// </summary>
+    [Fact]
+    public async Task GetTasksAssignedToUserAsync_WithGroups_AsksTheEngineForTheGroupsTasksToo()
+    {
+        var (client, stub) = CreateClient();
+        var groupQueries = new List<string>();
+
+        stub.When(HttpMethod.Get, "service/runtime/tasks", request =>
+        {
+            var q = request.RequestUri!.Query;
+            if (q.Contains("candidateGroups=", StringComparison.Ordinal))
+            {
+                groupQueries.Add(Uri.UnescapeDataString(q));
+                return StubHttpMessageHandler.JsonResponse(new
+                {
+                    data = new[]
+                    {
+                        new { id = "t-lane", name = "Approve", taskDefinitionKey = "approve", assignee = (string?)null,
+                              processInstanceId = "i", processDefinitionId = "pd-1",
+                              createTime = "2026-04-01T00:00:00Z", dueDate = (string?)null }
+                    }
+                });
+            }
+            return StubHttpMessageHandler.JsonResponse(new { data = Array.Empty<object>() });
+        });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1",
+            new { id = "pd-1", key = "k", name = "My Process", version = 1 });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances/i",
+            new { id = "i", processDefinitionId = "pd-1", name = "My Process (1)",
+                  startTime = "2026-04-01T00:00:00Z", endTime = (string?)null });
+
+        var tasks = await client.GetTasksAssignedToUserAsync("u", new[] { "g-finance", "g-legal", "g-finance" });
+
+        var query = Assert.Single(groupQueries);
+        // Both groups, once each, comma-separated -- the engine's own parameter shape.
+        Assert.Contains("candidateGroups=g-finance,g-legal", query, StringComparison.Ordinal);
+        Assert.Single(tasks, t => t.Id == "t-lane");
+    }
+
+    /// <summary>
+    /// #171, the complement: an actor in no group issues no group query. A query
+    /// for "" is not a query for nothing, and the engine would answer it.
+    /// </summary>
+    [Fact]
+    public async Task GetTasksAssignedToUserAsync_WithNoGroups_DoesNotAskTheEngineAboutGroups()
+    {
+        var (client, stub) = CreateClient();
+        var groupQueries = 0;
+        var queries = 0;
+
+        stub.When(HttpMethod.Get, "service/runtime/tasks", request =>
+        {
+            queries++;
+            if (request.RequestUri!.Query.Contains("candidateGroups=", StringComparison.Ordinal)) groupQueries++;
+            return StubHttpMessageHandler.JsonResponse(new { data = Array.Empty<object>() });
+        });
+
+        var tasks = await client.GetTasksAssignedToUserAsync("u", Array.Empty<string>());
+
+        Assert.Empty(tasks);
+        Assert.Equal(0, groupQueries);
+        Assert.Equal(2, queries);
+    }
+
     [Fact]
     public async Task GetTasksAssignedToUserAsync_MergesAssigneeAndCandidateTasks_AndDedupesById()
     {

@@ -194,6 +194,17 @@ internal static class BpmnDiagram
             }
         }
 
+        // #171. A lane contains the nodes it REFERENCES: `<flowNodeRef>` carries
+        // the id as text, and the node itself is a sibling of the laneSet. The
+        // same shape as the participant above, for the same reason.
+        if (element.Name.LocalName == "lane")
+        {
+            nested.UnionWith(element.Elements()
+                .Where(e => e.Name.LocalName == "flowNodeRef")
+                .Select(e => e.Value.Trim())
+                .Where(found => found.Length > 0 && found != id));
+        }
+
         return nested;
     }
 

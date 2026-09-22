@@ -468,6 +468,13 @@ internal sealed class StubFlowableClient : IFlowableClient
     }
 
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId, IReadOnlyCollection<string> candidateGroups, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"TasksForUserGroups:{userId}:{string.Join(",", candidateGroups)}");
+        return GetTasksAssignedToUserAsync(userId, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
         string userId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"TasksForUser:{userId}");

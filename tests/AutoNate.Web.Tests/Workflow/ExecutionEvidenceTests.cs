@@ -240,6 +240,11 @@ public sealed class ExecutionEvidenceTests
             ("Intermediate Throw (Message)", "instance-ends"),
             ("Intermediate Throw (None)", "instance-ends"),
             ("Intermediate Throw (Signal)", "instance-ends"),
+            // #171. A lane is never an activity; the user task it lists is. The
+            // proof of the lane's own effect -- the task offered to the lane's
+            // group -- lives in LaneAssignmentExecutionTests; the oracle's cell
+            // proves the lane deploys and the task inside it appears.
+            ("Lane", "task-appears"),
             ("Message Boundary", "host-cancelled"),
             // #170. The flow itself is never an activity; the SEND at its source is.
             // A linear primary pool -- start, send task, end -- whose send crosses
@@ -559,6 +564,8 @@ public sealed class ExecutionEvidenceTests
             """("participant", null)""",
             // #170. A message flow is a connection, not a step; no activity row.
             """("messageFlow", null)""",
+            // #171. A lane is a partition of a pool, not a step; no activity row.
+            """("lane", null)""",
         ];
 
         var source = OracleSource();

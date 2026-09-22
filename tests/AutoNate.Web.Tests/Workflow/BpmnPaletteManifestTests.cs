@@ -266,12 +266,10 @@ public sealed class BpmnPaletteManifestTests
             "bpmn-icon-intermediate-event-throw-link",
             "bpmn-icon-intermediate-event-throw-message",
             // #169 offered the pool and removed "bpmn-icon-participant" from this
-            // list. "bpmn-icon-lane" STAYS: it used to be denied only as one of the
-            // withheld pool's menuClassNames, and offering the pool would have put
-            // a coming-soon Lane one click away inside it -- the exact #381 hole.
-            // Lane is now its own withheld catalog row, so the key derives from
-            // the element it actually guards.
-            "bpmn-icon-lane",
+            // list. "bpmn-icon-lane" stayed then, denied by the lane note's OWN
+            // coming-soon status rather than by the pool's proxy -- and left in
+            // #171, when the lane became supported. The note still exists and
+            // still carries the class; what changed is the status it is judged by.
             "bpmn-icon-loop-marker",
             "bpmn-icon-manual",
             "bpmn-icon-manual-task",

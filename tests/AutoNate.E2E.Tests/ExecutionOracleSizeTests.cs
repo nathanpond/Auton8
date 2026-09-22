@@ -39,7 +39,7 @@ public sealed class ExecutionOracleSizeTests
         // set. Both are edited together or one of them fails.
         // #169 added Pool / Participant: 50 -> 51.
         // #170 added Message Flow: 51 -> 52.
-        const int Cells = 52;
+        const int Cells = 53;
 
         var actual = ExecutionEvidenceExecutionTests.DeclaredEffects().Count;
 

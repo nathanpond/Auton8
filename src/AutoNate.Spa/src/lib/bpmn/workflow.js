@@ -109,13 +109,13 @@ export async function createModeler(container, xml, dotNetRef) {
       return;
     }
 
-    // Right-clicking the canvas / pool / lane shouldn't surface "Configure…" —
-    // those aren't routable to any of our editor modals.
+    // Right-clicking the canvas / pool shouldn't surface "Configure…" — those
+    // aren't routable to any of our editor modals. A LANE is (#171): it has a
+    // name and a group to pick.
     const $type = businessObject.$type;
     if ($type === "bpmn:Process"
       || $type === "bpmn:Collaboration"
       || $type === "bpmn:Participant"
-      || $type === "bpmn:Lane"
       || $type === "bpmn:LaneSet") {
       configureMenu.hide();
       return;
@@ -616,6 +616,10 @@ function describeBusinessObject(businessObject) {
     // this file is: bpmn-js has no moddle extension loaded for it, so
     // modeling.updateProperties would serialise it without the prefix.
     runAs: readAutoNateAttribute(businessObject, "runAs"),
+    // #171. A lane's group, and -- for a node in a lane -- which lane that is,
+    // so the user task editor can say where an assignment comes from.
+    laneGroupId: businessObject.$type === "bpmn:Lane" ? readAutoNateAttribute(businessObject, "groupId") : null,
+    lane: describeContainingLane(businessObject),
     // #218. A complex gateway's routing script is an autonate: ATTRIBUTE, not a
     // <bpmn:script> child. bpmn-js's moddle has no script property on
     // ComplexGateway and DROPS the child on save — proven in
@@ -2485,6 +2489,71 @@ export function updateGatewayDefaultFlow(modelerHandle, payload) {
 
   modeling.updateProperties(gatewayElement, {
     default: defaultElement
+  });
+}
+
+// #171. The innermost lane whose flowNodeRef lists this node. Walked from the
+// node's process rather than the canvas, so it works on a bare business object,
+// and by flowNodeRef rather than by bounds, because membership is what the
+// deployed copy reads -- a task that LOOKS inside a lane but is not listed by
+// it is the classic lane bug, and this reports what the XML says.
+//
+// A nested lane lists a node alongside every lane around it (bpmn-js collects
+// every lane whose bounds contain the shape), so the deepest match wins --
+// the same rule the publish-time expansion applies.
+function describeContainingLane(businessObject) {
+  let process = businessObject?.$parent;
+  while (process && process.$type !== "bpmn:Process") {
+    process = process.$parent;
+  }
+  if (!process || !Array.isArray(process.laneSets)) return null;
+
+  let best = null;
+  let bestDepth = -1;
+  const visit = (lanes, depth) => {
+    for (const lane of lanes ?? []) {
+      const refs = Array.isArray(lane.flowNodeRef) ? lane.flowNodeRef : [];
+      if (refs.some((ref) => ref === businessObject || ref?.id === businessObject.id) && depth > bestDepth) {
+        best = lane;
+        bestDepth = depth;
+      }
+      visit(lane.childLaneSet?.lanes, depth + 1);
+    }
+  };
+  for (const laneSet of process.laneSets) {
+    visit(laneSet.lanes, 0);
+  }
+
+  return best
+    ? {
+        id: best.id,
+        name: typeof best.name === "string" ? best.name : null,
+        groupId: readAutoNateAttribute(best, "groupId")
+      }
+    : null;
+}
+
+// #171. A lane's name and the Auton8 group it hands its user tasks to. The
+// group is an `autonate:` attribute, like every other namespaced property in
+// this file; publish reads it and writes candidateGroups on the deployed copy.
+export function updateLaneProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the lane.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:Lane") {
+    throw new Error(`Lane '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  writeAutoNateAttribute(element.businessObject, "groupId", normalizeOptionalString(payload.groupId));
+  // Through the command stack, so the change is undoable and marks the diagram
+  // dirty even when only the group changed.
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name)
   });
 }
 

@@ -146,6 +146,15 @@ public interface IFlowableClient
 
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default);
 
+    // #171. The same, plus every task whose candidate groups name any of the
+    // actor's Auton8 groups. Flowable's `candidateUser` only expands to groups
+    // through its own IdM, which Auton8 does not populate, so the groups are
+    // passed explicitly; an empty set issues no group query at all.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId,
+        IReadOnlyCollection<string> candidateGroups,
+        CancellationToken cancellationToken = default);
+
     // Paged enumeration of every runtime task (active + claimed, not yet completed).
     // Used by the projection-framework polling feed to seed the workflow_task_cache
     // without per-user fan-out. `start` is 0-based; `size` caps each page.

@@ -1349,7 +1349,13 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default) =>
+        GetTasksAssignedToUserAsync(userId, Array.Empty<string>(), cancellationToken);
+
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId,
+        IReadOnlyCollection<string> candidateGroups,
+        CancellationToken cancellationToken = default)
     {
         var encodedUserId = Uri.EscapeDataString(userId);
         var assigneeUrl = $"service/runtime/tasks?assignee={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
@@ -1361,18 +1367,36 @@ public sealed class FlowableClient(
         // footgun for whoever copies this pattern next.
         var assigneeTask = _httpClient.GetAsync(assigneeUrl, cancellationToken);
         var candidateTask = _httpClient.GetAsync(candidateUrl, cancellationToken);
+        // #171. Tasks offered to any of the actor's groups. Flowable's
+        // `candidateGroups` takes a comma-separated list and answers with every
+        // task holding a candidate identity link for one of them. Not sent at
+        // all when the actor is in no group: a query for "" is not a query for
+        // nothing.
+        var groups = candidateGroups.Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.Ordinal).ToArray();
+        var groupTask = groups.Length == 0
+            ? null
+            : _httpClient.GetAsync(
+                $"service/runtime/tasks?candidateGroups={Uri.EscapeDataString(string.Join(",", groups))}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}",
+                cancellationToken);
 
         using var assigneeResponse = await assigneeTask;
         using var candidateResponse = await candidateTask;
+        using var groupResponse = groupTask is null ? null : await groupTask;
 
         await EnsureSuccessAsync(assigneeResponse, "query tasks assigned to user");
         await EnsureSuccessAsync(candidateResponse, "query tasks where user is a candidate");
 
         var assigneePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(assigneeResponse, cancellationToken);
         var candidatePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(candidateResponse, cancellationToken);
+        IEnumerable<FlowableTaskResponse> groupTasks = [];
+        if (groupResponse is not null)
+        {
+            await EnsureSuccessAsync(groupResponse, "query tasks offered to the user's groups");
+            groupTasks = (await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(groupResponse, cancellationToken)).Data;
+        }
 
         var mergedById = new Dictionary<string, FlowableTaskResponse>(StringComparer.Ordinal);
-        foreach (var task in assigneePayload.Data.Concat(candidatePayload.Data))
+        foreach (var task in assigneePayload.Data.Concat(candidatePayload.Data).Concat(groupTasks))
         {
             if (string.IsNullOrWhiteSpace(task.Id))
             {

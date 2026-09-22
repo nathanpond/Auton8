@@ -10942,3 +10942,52 @@ and `/counterparts` allowed as STRUCTURAL like `/children` -- the link is a
 process variable read from history in both directions, which no cache column
 holds -- with the route pin moved 17 → 18.
 
+## #171 — a lane's group is the default assignment of its tasks, 2026-09-21
+
+**Resolved on the deployed copy, not the stored diagram.** `ExpandForDeployment`
+writes `flowable:candidateGroups` from the lane onto each listed user task that
+has nothing of its own; prepare (what save stores) leaves the task unassigned
+and the group on the lane. That is what lets the property editor say "from the
+lane" instead of showing an assignment the author never made, and it is why
+`(planner)` candidateGroups was the natural mapping: the engine already offers
+a task to its candidate groups; the lane only has to say which.
+
+**The group is written by id, and the task list asks the engine for the actor's
+group ids.** Flowable's `candidateUser` expands to groups only through its own
+IdM, which Auton8 does not populate, so `GET /api/tasks/assigned-to-me` gains a
+third query, `candidateGroups=<ids>`, resolved through `IGroupStore`. An actor
+in no group issues no third query -- unit-asserted, because a query for "" is a
+query the engine answers. Ids rather than names: a renamed group keeps its lane.
+The studio's existing free-text candidate-groups field is left as it was; it
+never had a consumer and gaining one is a separate decision.
+
+**Override honoured by NOT also writing the lane's group.** The E2E asserts the
+lane's group does not see a task that has its own assignee. Writing both would
+have passed a member-sees check and made every specifically assigned task the
+whole team's.
+
+**Nested lanes: the innermost lane naming a group wins.** bpmn-js lists a node
+in every lane whose bounds contain it, inner and outer alike; taking the
+deepest is the rule in both the expansion and the studio's description. Flat
+lanes satisfy the AC (`Claude's Discretion`); nesting is proven at the XML
+level only.
+
+**A flow-node's lane is reported from `flowNodeRef`, never from bounds.** The
+classic lane bug is a task that looks inside a lane and is not listed by it;
+a description that read the canvas would hide exactly that. The studio E2E
+drags with the real mouse so bpmn-js's own lane-update behaviour is what keeps
+membership in step, and asserts the lane LEFT as well as the lane entered.
+
+**Lane moves to `executes` with a declared departure**, the same shape as
+Business Rule Task and Message Flow: the engine never enters it, and a run
+proves it anyway. The oracle's cell carries no group (the oracle has none to
+name) and proves the lane deploys and its task appears; the assignment is
+`LaneAssignmentExecutionTests`' claim, named on the evidence row.
+
+**Rule 2, in scope:** the property-coverage vitest guard demanded a round-trip
+test for the new `groupId` property, which it got (`lane-round-trip.test.js`,
+seven facts); the guard is why it was not forgotten.
+
+Pins by discovery: SLIM_BACKEND 2993 → 3007, SLIM_E2E 240 → 243, FLOWABLE
+286 → 290, FULL_LOCAL 527 → 534.
+
