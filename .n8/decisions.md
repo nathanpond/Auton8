@@ -10790,3 +10790,67 @@ The timeout message now dumps the rows, which is what found the last two.
 FULL_LOCAL 512 -> 519; neither slim pin moves.
 
 **Issues:** #79
+
+## #169 — a collaboration publishes as one deployment, many definitions, 2026-09-21
+
+**Owner decision applied:** `Pool / Participant` → `studio: supported`,
+`engine: executes` (epic #40's call, made 2026-09-21). The declared departure in
+`BpmnSupportManifestTests` says HOW a pool executes -- by containing a process,
+not by being a step -- which is the honest form of widening "every element the
+studio offers executes". Reason baseline regenerated; the diff was exactly that
+row.
+
+**Discretion: the shared version identity is the Flowable deployment id.** One
+uploaded file with N `<process>` elements is already one deployment holding N
+definitions, co-versioned and all-or-nothing -- measured, and the story named it
+the obvious candidate. The set is recorded as a JSON **column** on the version
+row (`deployed_definitions`), not a table: inside Rule 4's line, and the primary
+keeps the 1:1 columns so every existing reader is unchanged.
+
+**Discretion: the primary pool is the first participant, in collaboration order,
+whose process contains a flow node; it carries the workflow key and is what
+`start` starts.** Other pools start by message (#170's subject). A single-pool or
+no-pool diagram reduces to `FirstOrDefault()` exactly, asserted -- that is the
+regression that matters most. The prepare response says which pool starts and
+which pools deploy as nothing, as warnings, so the studio shows it.
+
+**Rule 1: the save path.** `ApplyProcessMetadata` renamed the first process and
+never rewrote `participant/@processRef`, so a two-pool diagram was broken before
+publish was reached. Fixed; the participant follows the rename; non-primary
+pools take their participant's name as the process name so an execution's
+definition name IS the pool name.
+
+**Rule 1: compensation.** Deploy succeeded, `store.PublishAsync` failed, and
+`IFlowableClient` had no delete-deployment call -- a window open for every
+single-pool publish too. `WorkflowPublishCompensation.RecordOrWithdrawAsync` is
+shaped as two delegates rather than a class over two interfaces, because the
+test project has no mocking library and a fake of a thirty-member interface is a
+place for the tested behaviour to hide. Both failures are reported apart: "the
+engine still holds an orphan" is the more serious fact and must not vanish into
+the first error.
+
+**#578's refusal inverted, not deleted.** `BuildMultiPoolParticipantErrors`
+became `BuildCollaborationErrors`: dangling `processRef`, duplicate process ids,
+no executable pool. The unit test and the E2E that proved the refusal now prove
+the capability, and the E2E keeps the "nothing reached the engine" shape for
+what is refused now.
+
+**Found while flipping the manifest, and worth its own line:** offering the pool
+would have put a coming-soon Lane one click away inside it. The withheld pool
+had been denying `bpmn-icon-lane` by proxy, through its own `menuClassNames`;
+with the pool offered that class left the deny set AND joined the supported
+set. The lane's `notOnThePalette` note now names its glyph and is judged by its
+OWN manifest status, in `palette.js` and in the guard that mirrors it. The
+guard caught it before the studio did.
+
+**Not delivered here, said plainly:** AC 6's second half -- counterpart
+executions started by a message flow are navigable from one another -- has no
+subject until #170 creates counterparts. The participant half lands here.
+
+**Measured:** inverted E2E 3/3 against a live engine (two definitions under one
+deployment id; republish advanced the unchanged pool to v2 under the same id;
+dangling ref refused with `total: 0` for both keys). Unit 83/83 across the
+refusal, manifest, palette and compensation classes. SPA lint 98/0, tsc clean.
+Pins: SLIM_BACKEND 2962 → 2974, FLOWABLE 278 → 280, FULL_LOCAL 519 → 521.
+
+**Issues:** #169

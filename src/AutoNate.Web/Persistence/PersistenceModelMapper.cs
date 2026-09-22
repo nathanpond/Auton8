@@ -90,6 +90,31 @@ internal static class PersistenceModelMapper
         entity.DefaultVariables = SerializeDefaultVariables(model.DefaultVariables);
     }
 
+    // #169. The set, as JSON on the version row. Tolerant of null (rows from
+    // before the column existed) and of malformed text (returns empty, and the
+    // primary columns still answer), because a version row that cannot be read
+    // must not make the workflow unopenable.
+    internal static IReadOnlyList<WorkflowDeployedDefinition> DeserializeDeployedDefinitions(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<WorkflowDeployedDefinition>>(json, DeployedDefinitionsJson) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    internal static string? SerializeDeployedDefinitions(IReadOnlyList<WorkflowDeployedDefinition>? definitions) =>
+        definitions is null || definitions.Count == 0
+            ? null
+            : System.Text.Json.JsonSerializer.Serialize(definitions, DeployedDefinitionsJson);
+
+    private static readonly System.Text.Json.JsonSerializerOptions DeployedDefinitionsJson =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
     private static IReadOnlyList<WorkflowDefaultVariable>? DeserializeDefaultVariables(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -136,7 +161,8 @@ internal static class PersistenceModelMapper
                 ProcessDefinitionId = entity.ProcessDefinitionId,
                 ProcessDefinitionKey = entity.ProcessDefinitionKey,
                 ProcessDefinitionVersion = entity.ProcessDefinitionVersion,
-                DeployedAtUtc = ToDateTimeOffset(entity.PublishedAtUtc)
+                DeployedAtUtc = ToDateTimeOffset(entity.PublishedAtUtc),
+                Definitions = DeserializeDeployedDefinitions(entity.DeployedDefinitions)
             }
         };
     }

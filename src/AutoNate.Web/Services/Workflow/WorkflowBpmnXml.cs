@@ -1,7 +1,9 @@
+using AutoNate.Web.Models;
 using System.Collections.Frozen;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -130,7 +132,13 @@ public static partial class WorkflowBpmnXml
 
     private static string ApplyProcessMetadata(XDocument document, string processKey, string workflowName)
     {
-        var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault()
+        // #169. THE PRIMARY PROCESS, not the first one in the file. A collaboration
+        // lists its processes in whatever order the modeller wrote them, and the
+        // first may be a drawn-only counterparty with nothing in it. The primary is
+        // the first participant, in collaboration order, whose process contains a
+        // flow node -- for a single-pool or no-pool diagram that is exactly the
+        // `FirstOrDefault()` this used to be, which is the regression that matters.
+        var processElement = ResolvePrimaryProcess(document)
             ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
 
         EnsureFlowableNamespaceDeclared(document);
@@ -144,6 +152,14 @@ public static partial class WorkflowBpmnXml
         processElement.SetAttributeValue("id", normalizedProcessKey);
         processElement.SetAttributeValue("name", normalizedWorkflowName);
         processElement.SetAttributeValue("isExecutable", "true");
+
+        // #169. Renaming the primary process used to leave its participant
+        // pointing at the OLD id -- the defect the replan found at save, before
+        // publish was ever reached. The other pools keep their authored ids and
+        // take their participant's name as the process name, so the engine's
+        // definition name IS the pool name and an execution can say which
+        // participant it belongs to without a second lookup.
+        ApplyCollaborationMetadata(document, processElement, oldProcessKey, normalizedProcessKey);
 
         foreach (var plane in document.Descendants(BpmndiNamespace + "BPMNPlane"))
         {
@@ -2185,7 +2201,10 @@ public static partial class WorkflowBpmnXml
         try
         {
             var document = XDocument.Parse(xml);
-            var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault();
+            // #169. The primary process (see ResolvePrimaryProcess) -- a drawn-only
+            // counterparty listed first must not be the one whose executability
+            // decides the whole diagram.
+            var processElement = ResolvePrimaryProcess(document);
             if (processElement is null)
             {
                 return WorkflowBpmnValidationResult.WithError("The BPMN XML must contain a <process> element.");
@@ -2215,8 +2234,12 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
             // #107: silence becomes a refusal with a reason.
             errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
-            // #578: more than one pool deploys a definition Auton8 can never see.
-            errors.AddRange(BuildMultiPoolParticipantErrors(document));
+            // #169 supersedes #578's blanket refusal. A multi-pool diagram now deploys
+            // one definition per executable pool, recorded as a set -- so what is
+            // refused is a collaboration that could not deploy as a set: a
+            // participant whose process does not exist, two processes sharing an
+            // id, or no executable pool at all.
+            errors.AddRange(BuildCollaborationErrors(document));
             // #111: a business rule task with no table decides nothing, and the
             // engine would refuse the deployment rather than say so usefully.
             errors.AddRange(BuildBusinessRuleTaskErrors(document));
@@ -4557,55 +4580,208 @@ public static partial class WorkflowBpmnXml
     // ENGINE axis, not its studio axis: an element Flowable runs deploys even while
     // the studio still lists it as coming soon, because "we have not built the
     // property editor yet" is not a reason to reject a hand-authored diagram.
+    // ── #169: collaborations ──────────────────────────────────────────────────
+    //
+    // BPMN says each pool is its own process. Auton8 says a diagram is one
+    // authored unit. Both hold at once by deploying N definitions as ONE Flowable
+    // deployment (one multipart file already is one), and by choosing one pool --
+    // the primary -- to carry the workflow key and to be what "start" means.
+
     /// <summary>
-    /// More than one pool is refused, because only one of them would survive (#578).
+    /// Element local names that make a process something the engine can run. A
+    /// process with none of these is a drawn-only counterparty.
+    /// </summary>
+    private static bool IsFlowNode(XElement element)
+    {
+        if (element.Name.Namespace != BpmnNamespace) return false;
+        var local = element.Name.LocalName;
+        return local.EndsWith("Event", StringComparison.Ordinal)
+            || local.EndsWith("Task", StringComparison.Ordinal)
+            || local.EndsWith("Gateway", StringComparison.Ordinal)
+            || local is "task" or "subProcess" or "callActivity" or "transaction" or "adHocSubProcess";
+    }
+
+    private static bool HasFlowNodes(XElement process) => process.Elements().Any(IsFlowNode);
+
+    /// <summary>
+    /// The process the workflow key names and the one <c>start</c> starts (#169).
     /// </summary>
     /// <remarks>
-    /// <para>A two-pool collaboration used to publish <b>silently</b>. Pool,
-    /// Participant, Lane and Message Flow are all <c>engine: annotation</c> in
-    /// <c>bpmn-support.json</c>, which that manifest documents as "Deploys and
-    /// carries no execution semantics by design — never refused", so
-    /// <c>BuildUnsupportedElementErrors</c> let the diagram through. Flowable then
-    /// accepted a deployment containing two process definitions while
-    /// <c>DeployProcessAsync</c> read the result back by process key, which
-    /// resolves exactly one. The second definition existed in the engine,
-    /// appeared in no <c>workflow_models</c> row, and was unreachable from every
-    /// Auton8 surface.</para>
-    ///
-    /// <para><b>This refuses the SHAPE, not the elements.</b> The manifest is not
-    /// touched and those rows keep their classification: a lone pool, a lane, a
-    /// message flow inside one process all still publish. What is refused is the
-    /// arrangement that produces a definition nothing can reach — which is why the
-    /// count is of participants rather than of any element the manifest names.</para>
-    ///
-    /// <para>It sits with the other publish validations, so it runs before
-    /// anything is deployed. There is no partial deployment to roll back because
-    /// none is ever made.</para>
+    /// With a collaboration: the first participant, in collaboration order, whose
+    /// process contains a flow node; failing that, the first participant whose
+    /// process resolves. Without one: the first <c>&lt;process&gt;</c>, exactly as
+    /// before, so single-pool and no-pool diagrams are untouched by this story.
     /// </remarks>
-    private static IReadOnlyList<string> BuildMultiPoolParticipantErrors(XDocument document)
+    private static XElement? ResolvePrimaryProcess(XDocument document)
+    {
+        var processesById = document.Descendants(BpmnNamespace + "process")
+            .Where(p => !string.IsNullOrWhiteSpace(p.Attribute("id")?.Value))
+            .GroupBy(p => p.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var participants = document.Descendants(BpmnNamespace + "participant").ToList();
+        if (participants.Count > 0)
+        {
+            XElement? firstResolving = null;
+            foreach (var participant in participants)
+            {
+                var processRef = participant.Attribute("processRef")?.Value;
+                if (processRef is null || !processesById.TryGetValue(processRef, out var process)) continue;
+                firstResolving ??= process;
+                if (HasFlowNodes(process)) return process;
+            }
+
+            if (firstResolving is not null) return firstResolving;
+        }
+
+        return document.Descendants(BpmnNamespace + "process").FirstOrDefault();
+    }
+
+    /// <summary>
+    /// After the primary process is renamed: point its participant at the new id,
+    /// name every other pool's process after its participant, and mark a pool with
+    /// nothing in it non-executable (#169).
+    /// </summary>
+    private static void ApplyCollaborationMetadata(
+        XDocument document,
+        XElement primaryProcess,
+        string? oldPrimaryId,
+        string newPrimaryId)
     {
         var participants = document.Descendants(BpmnNamespace + "participant").ToList();
-        if (participants.Count <= 1)
+        if (participants.Count == 0) return;
+
+        var processesById = document.Descendants(BpmnNamespace + "process")
+            .Where(p => !string.IsNullOrWhiteSpace(p.Attribute("id")?.Value))
+            .GroupBy(p => p.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        foreach (var participant in participants)
+        {
+            var processRef = participant.Attribute("processRef")?.Value;
+            if (processRef is null) continue;
+
+            if (oldPrimaryId is not null && processRef == oldPrimaryId)
+            {
+                // The half that was missing: the reference follows the rename.
+                participant.SetAttributeValue("processRef", newPrimaryId);
+                continue;
+            }
+
+            if (!processesById.TryGetValue(processRef, out var process) || ReferenceEquals(process, primaryProcess))
+            {
+                continue;
+            }
+
+            var participantName = participant.Attribute("name")?.Value;
+            if (!string.IsNullOrWhiteSpace(participantName))
+            {
+                process.SetAttributeValue("name", participantName);
+            }
+
+            // A counterparty drawn for context deploys as nothing. Said explicitly
+            // in the XML rather than left to whatever the modeller wrote, so the
+            // engine, the prepare response and the studio all agree on it.
+            process.SetAttributeValue("isExecutable", HasFlowNodes(process) ? "true" : "false");
+        }
+    }
+
+    /// <summary>
+    /// What a collaboration would deploy as, participant by participant (#169).
+    /// The prepare path reports it so the studio can say which pool starts and
+    /// which pools deploy nothing.
+    /// </summary>
+    public static IReadOnlyList<WorkflowParticipantInfo> DescribeCollaboration(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<WorkflowParticipantInfo>();
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch (XmlException)
+        {
+            return Array.Empty<WorkflowParticipantInfo>();
+        }
+
+        var participants = document.Descendants(BpmnNamespace + "participant").ToList();
+        if (participants.Count == 0) return Array.Empty<WorkflowParticipantInfo>();
+
+        var primary = ResolvePrimaryProcess(document);
+        var processesById = document.Descendants(BpmnNamespace + "process")
+            .Where(p => !string.IsNullOrWhiteSpace(p.Attribute("id")?.Value))
+            .GroupBy(p => p.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        return participants.Select(participant =>
+        {
+            var processRef = participant.Attribute("processRef")?.Value;
+            var process = processRef is not null && processesById.TryGetValue(processRef, out var found) ? found : null;
+            return new WorkflowParticipantInfo(
+                Id: participant.Attribute("id")?.Value ?? string.Empty,
+                Name: participant.Attribute("name")?.Value ?? participant.Attribute("id")?.Value ?? "(unnamed pool)",
+                ProcessId: processRef,
+                IsExecutable: process is not null && HasFlowNodes(process),
+                IsPrimary: process is not null && ReferenceEquals(process, primary));
+        }).ToList();
+    }
+
+    /// <summary>
+    /// A collaboration that could not deploy as a set is refused, naming what is
+    /// wrong (#169). Replaces #578's "more than one pool" refusal, which existed
+    /// because only one definition survived; now all of them do.
+    /// </summary>
+    private static IReadOnlyList<string> BuildCollaborationErrors(XDocument document)
+    {
+        var participants = document.Descendants(BpmnNamespace + "participant").ToList();
+        if (participants.Count == 0)
         {
             return Array.Empty<string>();
         }
 
-        // Named, because a second pool can be collapsed or off-screen and
-        // "multi-pool is not supported" alone leaves an author hunting for it.
-        var names = participants
-            .Select(p => p.Attribute("name")?.Value
-                         ?? p.Attribute("id")?.Value
-                         ?? "(unnamed pool)")
-            .ToList();
+        var errors = new List<string>();
+        var processes = document.Descendants(BpmnNamespace + "process").ToList();
 
-        return new[]
+        var duplicateIds = processes
+            .Select(p => p.Attribute("id")?.Value)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .GroupBy(id => id!, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+        foreach (var id in duplicateIds)
         {
-            $"This diagram has {participants.Count} pools ({string.Join(", ", names)}). "
-            + "Publishing a multi-pool collaboration is not supported yet: only one pool's "
-            + "process would be reachable afterwards, and the others would be deployed to the "
-            + "engine where Auton8 could not see or manage them. "
-            + "Publish one pool per workflow for now."
-        };
+            errors.Add($"Two pools share the process id '{id}'. Each pool must be its own process, so give one of them a different id.");
+        }
+
+        var processIds = processes.Select(p => p.Attribute("id")?.Value).Where(id => id is not null).ToHashSet(StringComparer.Ordinal);
+        foreach (var participant in participants)
+        {
+            var name = participant.Attribute("name")?.Value ?? participant.Attribute("id")?.Value ?? "(unnamed pool)";
+            var processRef = participant.Attribute("processRef")?.Value;
+            if (string.IsNullOrWhiteSpace(processRef))
+            {
+                errors.Add($"Pool '{name}' is not attached to a process. Every pool must reference the process it contains.");
+            }
+            else if (!processIds.Contains(processRef))
+            {
+                errors.Add($"Pool '{name}' references process '{processRef}', which is not in the diagram.");
+            }
+        }
+
+        var executable = participants.Count(p =>
+        {
+            var processRef = p.Attribute("processRef")?.Value;
+            var process = processRef is null ? null : processes.FirstOrDefault(x => x.Attribute("id")?.Value == processRef);
+            return process is not null && HasFlowNodes(process);
+        });
+        if (executable == 0)
+        {
+            errors.Add("None of the pools contains anything to run. A collaboration needs at least one pool with a flow inside it; a pool drawn only to show a counterparty deploys as nothing.");
+        }
+
+        return errors;
     }
 
     private static IReadOnlyList<string> BuildUnsupportedElementErrors(

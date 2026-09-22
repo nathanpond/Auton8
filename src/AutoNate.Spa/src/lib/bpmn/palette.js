@@ -37,6 +37,19 @@ export const PALETTE_CATALOG = catalog.entries;
 
 export const PALETTE_GROUP_ORDER = catalog.groupOrder;
 
+/**
+ * Elements that are not palette entries but DO have a glyph on bpmn-js's other
+ * surfaces (#169). A lane comes from the pool's context pad, not from any
+ * menu, so it has no catalog row -- but it has an icon class there, and while
+ * its manifest row is not supported that class must be denied like any other.
+ * Until #169 the withheld pool carried `bpmn-icon-lane` in its own
+ * `menuClassNames` and denied it by proxy; offering the pool would have let the
+ * lane through. So the note names its glyph and is judged by its OWN status.
+ */
+const NOT_ON_THE_PALETTE_WITH_GLYPH = (catalog.notOnThePalette ?? []).filter(
+  (note) => note.className && note.localName !== "*"
+);
+
 export function studioStatusOf(entry) {
   return MANIFEST_BY_KEY.get(manifestKey(entry.localName, entry.eventDefinition))?.studio ?? null;
 }
@@ -218,6 +231,7 @@ const SUPPORTED_ICON_CLASSES = new Set(
 
 export const WITHHELD_ICON_CLASSES = new Set(
   WITHHELD
+    .concat(NOT_ON_THE_PALETTE_WITH_GLYPH.filter((note) => studioStatusOf(note) !== "supported"))
     // #264. `className` alone was not enough: bpmn-js names some elements
     // differently in its own popups than the palette does, so
     // `bpmn-icon-business-rule-task` matched NOTHING in the bundle and Business

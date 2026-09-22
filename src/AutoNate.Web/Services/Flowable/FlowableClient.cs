@@ -58,18 +58,58 @@ public sealed class FlowableClient(
 
         using var response = await _httpClient.PostAsync("service/repository/deployments", content, cancellationToken);
         await EnsureSuccessAsync(response, "deploy the BPMN workflow");
+        var deploymentId = await ReadDeploymentIdAsync(response, cancellationToken);
 
-        var processDefinition = await GetLatestProcessDefinitionAsync(model.ProcessKey, cancellationToken)
-            ?? throw new InvalidOperationException($"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found.");
+        // #169. READ THE SET BACK BY DEPLOYMENT, not the primary by key. One
+        // uploaded file with N <process> elements is one deployment holding N
+        // definitions; asking for `latest=true` by the workflow key returned one of
+        // them and left the rest where Auton8 could never see them (#578). Asking
+        // by deployment id returns exactly what this upload produced, and cannot
+        // be confused by a concurrent publish of the same key.
+        var definitions = await GetProcessDefinitionsByDeploymentAsync(deploymentId, cancellationToken);
+        var primary = definitions.FirstOrDefault(d => string.Equals(d.Key, model.ProcessKey, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found in it. "
+                + $"It produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
 
         return new WorkflowDeploymentInfo
         {
-            DeploymentId = await ReadDeploymentIdAsync(response, cancellationToken),
-            ProcessDefinitionId = processDefinition.Id,
-            ProcessDefinitionKey = processDefinition.Key,
-            ProcessDefinitionVersion = processDefinition.Version,
-            DeployedAtUtc = DateTimeOffset.UtcNow
+            DeploymentId = deploymentId,
+            ProcessDefinitionId = primary.Id,
+            ProcessDefinitionKey = primary.Key,
+            ProcessDefinitionVersion = primary.Version,
+            DeployedAtUtc = DateTimeOffset.UtcNow,
+            Definitions = definitions
+                .Select(d => new WorkflowDeployedDefinition
+                {
+                    ProcessDefinitionKey = d.Key,
+                    ProcessDefinitionId = d.Id,
+                    ProcessDefinitionVersion = d.Version,
+                    Name = string.IsNullOrWhiteSpace(d.Name) ? null : d.Name
+                })
+                .ToList()
         };
+    }
+
+    public async Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(
+        string deploymentId,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"service/repository/process-definitions?deploymentId={Uri.EscapeDataString(deploymentId)}&size=200";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "list the process definitions of a deployment");
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableProcessDefinitionResponse>>(response, cancellationToken);
+        return payload.Data.Select(ToSummary).ToList();
+    }
+
+    public async Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default)
+    {
+        var url = $"service/repository/deployments/{Uri.EscapeDataString(deploymentId)}"
+            + (cascade ? "?cascade=true" : string.Empty);
+        using var response = await _httpClient.DeleteAsync(url, cancellationToken);
+        // A deployment that is already gone is the outcome this call wants.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return;
+        await EnsureSuccessAsync(response, "delete a deployment");
     }
 
     public async Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)

@@ -217,6 +217,8 @@ public sealed class EfCoreWorkflowModelStore(
         existingVersion.ProcessDefinitionId = deployment.ProcessDefinitionId;
         existingVersion.ProcessDefinitionKey = deployment.ProcessDefinitionKey;
         existingVersion.ProcessDefinitionVersion = deployment.ProcessDefinitionVersion;
+        // #169. The whole set, beside the primary's columns.
+        existingVersion.DeployedDefinitions = PersistenceModelMapper.SerializeDeployedDefinitions(deployment.Definitions);
         existingVersion.PublishedAtUtc = deployment.DeployedAtUtc.UtcDateTime;
 
         await dbContext.SaveChangesAsync(cancellationToken);

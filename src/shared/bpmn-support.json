@@ -612,12 +612,12 @@
     {
       "name": "Pool / Participant",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "participant",
       "eventDefinition": null,
-      "reason": "A pool is the boundary drawn around a process, not a step inside one. It deploys and carries no execution semantics: no instance ever enters it, so no run can prove it (#325 AC5).",
-      "evidence": "deployed and started"
+      "reason": "A pool is a deployed process definition. Publishing a collaboration deploys one definition per pool that contains a flow, as one Flowable deployment, versioned together; a pool drawn only to show a counterparty deploys as nothing and prepare says so. It does not execute the way a task does -- its contents do -- which is the shape of 'executes' recorded in the manifest guard's declared departure (#169).",
+      "evidence": "two-pool diagram deployed as two definitions under one deployment id; each started; single-pool and no-pool diagrams unchanged"
     },
     {
       "name": "Lane",

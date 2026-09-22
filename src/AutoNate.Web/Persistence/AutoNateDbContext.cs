@@ -286,6 +286,7 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ProcessDefinitionId).HasColumnName("process_definition_id");
             entity.Property(e => e.ProcessDefinitionKey).HasColumnName("process_definition_key");
             entity.Property(e => e.ProcessDefinitionVersion).HasColumnName("process_definition_version");
+            entity.Property(e => e.DeployedDefinitions).HasColumnName("deployed_definitions").HasColumnType("jsonb");
             entity.Property(e => e.ProcessKey).HasColumnName("process_key");
             entity.Property(e => e.PublishedAtUtc).HasColumnName("published_at_utc");
             entity.Property(e => e.VersionNumber).HasColumnName("version_number");

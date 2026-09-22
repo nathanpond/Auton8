@@ -114,12 +114,12 @@ public sealed class BpmnSupportManifestTests
             // absent from the image, the DMN engine is NOT, which the old reason
             // conflated), so publish rewrites the deployed copy into a
             // flowable:type=dmn service task. Same shape as Complex Gateway (#218).
-            ["studio:supported"] = 49,
+            ["studio:supported"] = 50,
             ["studio:withdrawn"] = 15,
-            ["studio:coming-soon"] = 5,
-            ["engine:executes"] = 52,
+            ["studio:coming-soon"] = 4,
+            ["engine:executes"] = 53,
             ["engine:cannot-execute"] = 8,
-            ["engine:annotation"] = 9,
+            ["engine:annotation"] = 8,
         };
 
         var drifted = expected
@@ -205,10 +205,16 @@ public sealed class BpmnSupportManifestTests
         // the expanded form wrote route='big' into a process variable, and
         // BusinessRuleTaskExecutionTests asserts a gateway after it takes the path
         // the table chose.
+        // Pool / Participant left this list in #169. The guard's bar: "an
+        // element moving INTO supported is a claim that an author can configure
+        // it and it runs." An author draws pools and the studio offers them;
+        // publishing deploys one definition per executable pool as one Flowable
+        // deployment, and the E2E starts each. Lane and Message Flow stay, as
+        // #171 and #170's subjects.
         string[] expectedComingSoon =
         [
             "Data Input", "Data Output", "Lane",
-            "Message Flow", "Pool / Participant",
+            "Message Flow",
         ];
 
         static string Diff(string label, IEnumerable<string> actual, IEnumerable<string> expected)
@@ -395,8 +401,9 @@ public sealed class BpmnSupportManifestTests
         // element is refused at DEPLOY (KIE is absent from the image; the DMN
         // engine is not), so publish rewrites the deployed copy into a
         // flowable:type=dmn service task.
-        Assert.Equal(38, Count("executes"));
-        Assert.Equal(9, Count("annotation"));
+        // #169 moved Pool / Participant from annotation to executes: 38 -> 39, 9 -> 8.
+        Assert.Equal(39, Count("executes"));
+        Assert.Equal(8, Count("annotation"));
         Assert.Equal(7, Count("cannot-execute"));
     }
 
@@ -718,7 +725,15 @@ public sealed class BpmnSupportManifestTests
             // proves it by starting an instance; the obstacle is that the
             // execution oracle's entry assertion is activity-shaped, which is
             // work rather than a reclassification.
-            ["Pool / Participant"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
+            // #169, owner's decision on epic #40: a pool IS a deployed process
+            // definition once a collaboration publishes as a set, so `annotation`
+            // -- "no instance ever enters it" -- became false the moment that
+            // shipped. The departure is upward and deserves saying HOW a pool
+            // executes, because it is not the way a task does: nothing runs the
+            // pool; its contents run, as their own definition, under the same
+            // deployment id as every other pool in the diagram. #103's verdict
+            // was measured before pools could deploy at all.
+            ["Pool / Participant"] = (BpmnSupportManifest.EngineExecutes, "#169: a pool deploys as its own process definition, one per executable pool, co-versioned under one Flowable deployment. It executes by containing a process, not by being a step; measured by deploying a two-pool diagram and starting each definition."),
             ["Lane"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
             ["Message Flow"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
             ["Data Store Reference"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
@@ -1515,7 +1530,6 @@ public sealed class BpmnSupportManifestTests
             "Group",
             "Lane",
             "Message Flow",
-            "Pool / Participant",
             "Text Annotation",
         ];
 

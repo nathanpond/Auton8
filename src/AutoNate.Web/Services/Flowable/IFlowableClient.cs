@@ -6,6 +6,16 @@ public interface IFlowableClient
 {
     Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default);
 
+    /// <summary>Every definition one deployment produced (#169).</summary>
+    Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(string deploymentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a deployment, and with <paramref name="cascade"/> everything it
+    /// started (#169). The compensation for a publish whose deploy succeeded and
+    /// whose record did not -- a window that had no mechanism before this.
+    /// </summary>
+    Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default);
+
     Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
     // Bulk fetch of every "latest=true" process definition. Used by the
