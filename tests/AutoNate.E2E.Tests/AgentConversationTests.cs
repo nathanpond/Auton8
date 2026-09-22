@@ -31,8 +31,27 @@ public sealed class AgentConversationTests : E2ETestBase
         await page.GetByLabel("Open Auton8 assistant").ClickAsync();
         await page.GetByPlaceholder("Search chats…").FillAsync(title);
         await page.GetByText(title, new() { Exact = true }).ClickAsync();
+
+        // 30 s, and UNLIKE the other two budgets in this file this one is not a
+        // UI-only wait (#640). The click above succeeds; what this waits on is the
+        // conversation actually loading -- a server round trip. Observed on CI at
+        // 10 s:
+        //
+        //   Locator expected to be visible
+        //     waiting for GetByText("Loaded from", Exact = true)
+        //     LocatorAssertions.ToBeVisibleAsync with timeout 10000ms
+        //
+        // A round trip is a real wait, and a budget too small for a loaded runner
+        // is not a correctness signal -- it reports "broken" for "busy", which is
+        // the failure this raise addresses.
+        //
+        // Stated plainly because it matters: this is a BUDGET change, not a
+        // mechanism change. It does not make the wait more precise the way the
+        // Commit fix in NotesTests does; it admits the wait was under-budgeted.
+        // If this recurs at 30 s, the answer is to wait on the response rather
+        // than to raise it again.
         await Assertions.Expect(page.GetByText("Loaded from", new() { Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         var resize = page.GetByLabel("Resize chatbot");
         var before = await page.EvaluateAsync<string>("() => localStorage.getItem('autonate.agent.width') ?? ''");
