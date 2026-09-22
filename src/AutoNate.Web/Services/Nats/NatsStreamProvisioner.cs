@@ -226,33 +226,47 @@ public sealed class NatsStreamProvisioner(
         }
 
         var fingerprint = $"stream-fidelity:{streamName}";
-        if (copies == 1)
+        try
         {
-            logger.LogInformation("JetStream stream '{StreamName}' stores each message once.", streamName);
+            if (copies == 1)
+            {
+                logger.LogInformation("JetStream stream '{StreamName}' stores each message once.", streamName);
+                if (issues is not null)
+                {
+                    await issues.MarkResolvedByFingerprintAsync(
+                        fingerprint, SystemIssueResolutionKinds.NoLongerPresent,
+                        "The stream stores each message once again.", cancellationToken);
+                }
+                return;
+            }
+
+            // Each placeholder ONCE: the logger rejects a template that repeats a
+            // name, and the first version of this line did -- which turned a
+            // diagnostic into a startup crash on every test host that met the
+            // multiplying stream. A report path must not be able to take the
+            // app down; hence the try around all of it.
+            logger.LogError(
+                "JetStream stream '{StreamName}' stores each message {Copies} times: every bus message is delivered "
+                + "that many times and a message-start workflow starts that many instances (#636). Recreate the stream "
+                + "with `nats stream rm <name>`; the app re-provisions it on the next start.",
+                streamName, copies);
             if (issues is not null)
             {
-                await issues.MarkResolvedByFingerprintAsync(fingerprint, SystemIssueResolutionKinds.NoLongerPresent, "The stream stores each message once again.", cancellationToken);
+                await issues.RecordAsync(new SystemIssueDraft(
+                    DetectorId: FidelityDetectorId,
+                    Category: SystemIssueCategories.Bus,
+                    Severity: SystemIssueSeverities.Critical,
+                    Fingerprint: fingerprint,
+                    Title: $"JetStream stream '{streamName}' stores each message {copies} times",
+                    Summary: $"One published message was stored {copies} times, so every bus message is delivered {copies} times "
+                        + $"and a workflow started by message starts {copies} instances. Recreate the stream "
+                        + $"(`nats stream rm {streamName}`); the app re-provisions it on its next start. See #636.",
+                    FactsJson: System.Text.Json.JsonSerializer.Serialize(new { stream = streamName, copies })), cancellationToken);
             }
-            return;
         }
-
-        logger.LogError(
-            "JetStream stream '{StreamName}' stores each message {Copies} times. Every bus message will be delivered "
-            + "{Copies} times and a message-start workflow will start {Copies} instances (#636). Recreate the stream "
-            + "(`nats stream rm {StreamName}`); the app re-provisions it on the next start.",
-            streamName, copies, copies, streamName);
-        if (issues is not null)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await issues.RecordAsync(new SystemIssueDraft(
-                DetectorId: FidelityDetectorId,
-                Category: SystemIssueCategories.Bus,
-                Severity: SystemIssueSeverities.Critical,
-                Fingerprint: fingerprint,
-                Title: $"JetStream stream '{streamName}' stores each message {copies} times",
-                Summary: $"One published message was stored {copies} times, so every bus message is delivered {copies} times "
-                    + $"and a workflow started by message starts {copies} instances. Recreate the stream "
-                    + $"(`nats stream rm {streamName}`); the app re-provisions it on its next start. See #636.",
-                FactsJson: System.Text.Json.JsonSerializer.Serialize(new { stream = streamName, copies })), cancellationToken);
+            logger.LogWarning(exception, "Could not report the storage fidelity of JetStream stream '{StreamName}'.", streamName);
         }
     }
 }

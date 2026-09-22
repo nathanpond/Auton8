@@ -11071,3 +11071,11 @@ it), let the app do so itself, or take it upstream.
 Pins by discovery: SLIM_BACKEND 3007 → 3023, SLIM_E2E 243 → 245, FLOWABLE 290 →
 293, FULL_LOCAL 534 → 539.
 
+**What the first gate of this pass caught (#636's probe).** The error log for a
+multiplying stream used a message template that repeated `{StreamName}` and
+`{Copies}`; the logger rejects that, the exception fired inside startup on the
+shared server's still-4× stream, and 453 test hosts timed out at five minutes
+each -- a diagnostic that took the app down, 4 h 6 m of red. Each placeholder
+once now, and the whole report path (log + SystemIssue) sits inside a try, so
+nothing the probe does can stop the app. The gate was killed and re-run.
+
