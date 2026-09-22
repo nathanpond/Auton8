@@ -82,6 +82,21 @@ describe("lane properties round-trip", () => {
     expect(described.lane.groupId).toBe("g-payables");
   });
 
+  it("a group-less inner lane defers to the outer lane that names a group, as the deploy does (#656)", () => {
+    const { handle } = laneDiagram({ innerGroup: "" });
+    updateLaneProperties(handle, { id: "l1", name: "Finance", groupId: "g-finance" });
+    const described = describeElementById(handle, "u1");
+    // The task's assignment comes from Finance, so that is the lane reported --
+    // not the innermost one, which contributes nothing.
+    expect(described.lane.id).toBe("l1");
+    expect(described.lane.groupId).toBe("g-finance");
+  });
+
+  it("when no lane names a group, the innermost lane is still reported so the note can say so", () => {
+    const { handle } = laneDiagram({ innerGroup: "" });
+    expect(describeElementById(handle, "u1").lane).toEqual({ id: "l1a", name: "Finance / Payables", groupId: null });
+  });
+
   it("a node that is not in a lane carries no laneGroupId of its own", () => {
     const { handle } = laneDiagram();
     expect(describeElementById(handle, "u1").laneGroupId).toBeNull();

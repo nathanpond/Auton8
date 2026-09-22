@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Xunit;
 using GroupEntity = AutoNate.Web.Persistence.Scaffolded.Group;
 using GroupMemberEntity = AutoNate.Web.Persistence.Scaffolded.GroupMember;
+using RecordEntity = AutoNate.Web.Persistence.Scaffolded.Record;
 using RecordTypeEntity = AutoNate.Web.Persistence.Scaffolded.RecordType;
 using RoleEntity = AutoNate.Web.Persistence.Scaffolded.Role;
 using WorkflowModelEntity = AutoNate.Web.Persistence.Scaffolded.WorkflowModel;
@@ -272,6 +273,62 @@ public sealed class SelectorCompilerTagPredicateTests
     // already asserts it, because RecordTypeSelectorCompiler has normalised short
     // codes since it was written. That one compiler getting it right is precisely
     // what made the other eight look deliberate.
+
+    /// <summary>
+    /// #651. The one site #631's nine-site table missed: `RecordSelectorCompiler`
+    /// compiled `[status=…]` with `==`, so a grant that matched in the records
+    /// list (whose SQL path lowers) missed in edge traversal and the grant
+    /// debugger. Record statuses are free text -- `Open`, `In-Progress` in the
+    /// dev database -- so the case an author types is the case that fails.
+    /// </summary>
+    [Fact]
+    public async Task Record_Status_MatchesRegardlessOfCase()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var actorId = Guid.NewGuid();
+
+        Guid openId, closedId;
+        await using (var ctx = db.CreateDbContext())
+        {
+            var typeId = Guid.NewGuid();
+            await ctx.RecordTypes.AddAsync(NewRecordType(typeId, "CASE", "Case", isArchived: false, actorId));
+            openId = Guid.NewGuid();
+            closedId = Guid.NewGuid();
+            await ctx.Records.AddRangeAsync(
+                NewRecord(openId, typeId, 1, "Open", actorId),
+                NewRecord(closedId, typeId, 2, "Closed", actorId));
+            await ctx.SaveChangesAsync();
+        }
+
+        var grants = db.CreatePermissionGrantStore();
+        await grants.CreateAsync(new CreatePermissionGrantInput(
+            EntityKinds.User, actorId.ToString(),
+            Actions.View, "/record/*[status=OPEN]", "allow", 0), actorId);
+
+        var visibleIds = await FilterAsync<RecordEntity>(
+            db, actorId, EntityKinds.Record,
+            ctx => ctx.Records.AsNoTracking().AsQueryable(),
+            r => r.Id);
+
+        Assert.Contains(openId, visibleIds);
+        // The complement: `Closed` is a different value, not a different spelling.
+        Assert.DoesNotContain(closedId, visibleIds);
+    }
+
+    private static RecordEntity NewRecord(Guid id, Guid typeId, long number, string status, Guid actorId) => new()
+    {
+        Id = id,
+        RecordTypeId = typeId,
+        Key = $"CASE-{number}",
+        KeyNumber = number,
+        Name = $"Case {number}",
+        Status = status,
+        Values = "{}",
+        CreatedAtUtc = DateTime.UtcNow,
+        CreatedBy = actorId,
+        UpdatedAtUtc = DateTime.UtcNow,
+        UpdatedBy = actorId
+    };
 
     [Fact]
     public async Task WorkflowModel_ProcessKey_MatchesRegardlessOfCase()

@@ -4579,6 +4579,12 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(QueryMenuSeedSql), QueryMenuSeedSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(ProjectionFrameworkSchemaSql), ProjectionFrameworkSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(WorkflowCacheSchemaSql), WorkflowCacheSchemaSql, cancellationToken);
+        // #659. The eight functional indexes #631 relies on were added by editing
+        // WorkflowCacheSchemaSql, a step every existing install had already
+        // recorded, so no upgraded database ever got them. A step of their own
+        // reaches those databases; IF NOT EXISTS makes it a no-op on the fresh
+        // installs that created them with the tables.
+        await ApplyStepAsync(dbContext, applied, nameof(CaseInsensitiveIndexesSql), CaseInsensitiveIndexesSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(WorkflowEventLogSchemaSql), WorkflowEventLogSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(ProcessRetentionConfigSchemaSql), ProcessRetentionConfigSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(RecordActivityRollupSchemaSql), RecordActivityRollupSchemaSql, cancellationToken);
@@ -4686,6 +4692,26 @@ internal static class DatabaseSchemaInitializer
     /// once safe. The guarantee is therefore "no schema work after the first
     /// boot", not "no schema work on the boot that introduces the ledger".
     /// </remarks>
+    /// <summary>
+    /// The functional twins of the raw btrees that the case-insensitive selector
+    /// predicates (`lower(col) = $n`, #631) use, as their own ledger step (#659).
+    /// </summary>
+    internal const string CaseInsensitiveIndexesSql = """
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_def_status_lower
+            ON workflow_execution_cache (lower(process_definition_key), lower(status));
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_started_by_lower
+            ON workflow_execution_cache (lower(started_by));
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_assignee_lower
+            ON workflow_task_cache (lower(assignee));
+        CREATE INDEX IF NOT EXISTS ix_groups_name_lower ON groups (lower(name));
+        CREATE INDEX IF NOT EXISTS ix_roles_name_lower ON roles (lower(name));
+        CREATE INDEX IF NOT EXISTS ix_forms_short_code_lower ON forms (lower(short_code));
+        CREATE INDEX IF NOT EXISTS ix_record_types_short_code_lower
+            ON record_types (lower(short_code));
+        CREATE INDEX IF NOT EXISTS ix_workflow_models_process_key_lower
+            ON workflow_models (lower(process_key));
+        """;
+
     private static async Task ApplyStepAsync(
         AutoNateDbContext dbContext,
         HashSet<string> applied,

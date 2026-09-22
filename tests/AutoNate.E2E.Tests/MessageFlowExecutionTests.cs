@@ -251,6 +251,93 @@ public sealed class MessageFlowExecutionTests : E2ETestBase
 
     // ---- helpers -------------------------------------------------------------
 
+    // ── #647: correlation failures through a flow are #112's, not a second mode ──
+
+    /// <summary>
+    /// The sender's send task records the SAME outcome the API path records.
+    /// No Supplier instance is waiting on the key the send carries, so the
+    /// correlator reports `noMatch`; the send task does not throw, does not
+    /// start anything, and the sender parks on its next task.
+    /// </summary>
+    [Fact]
+    public async Task A_send_over_a_flow_with_no_matching_instance_reports_noMatch_and_starts_nothing()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+        var customerKey = $"cust{Guid.NewGuid():N}"[..20];
+        var supplierKey = $"supp{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, customerKey, SendToReceiveTask(customerKey, supplierKey));
+
+        // Nobody is waiting: no Supplier instance at all.
+        var customer = await StartAsync(api, customerKey, new { orderId = "nobody-home" });
+
+        var result = await PollAsync(
+            () => SendResultAsync(api, customer), r => r.Count > 0,
+            "the send task on the customer to record its outcome");
+        Assert.Equal(["noMatch"], result);
+        // The complement: nothing was started on the Supplier's key.
+        Assert.Contains("Order sent", await TaskNamesAsync(api, customer));
+        using var engine = EngineClient();
+        var suppliers = await engine.GetStringAsync(
+            $"service/history/historic-process-instances?processDefinitionKey={Uri.EscapeDataString(supplierKey)}");
+        Assert.Equal(0, JsonDocument.Parse(suppliers).RootElement.GetProperty("total").GetInt32());
+    }
+
+    /// <summary>
+    /// Two Supplier instances wait on the same key; the send refuses with the
+    /// count rather than picking one -- #112's rule, unchanged by the flow.
+    /// </summary>
+    [Fact]
+    public async Task A_send_over_a_flow_with_two_waiting_instances_reports_multipleMatches_and_advances_neither()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+        var customerKey = $"cust{Guid.NewGuid():N}"[..20];
+        var supplierKey = $"supp{Guid.NewGuid():N}"[..20];
+        await PublishAsync(api, customerKey, SendToReceiveTask(customerKey, supplierKey));
+
+        var first = await StartAsync(api, supplierKey, new { orderId = "twins" });
+        var second = await StartAsync(api, supplierKey, new { orderId = "twins" });
+        await EventuallyAsync(api, first, t => t.Contains("Awaiting order"), "the first supplier to be waiting");
+        await EventuallyAsync(api, second, t => t.Contains("Awaiting order"), "the second supplier to be waiting");
+
+        var customer = await StartAsync(api, customerKey, new { orderId = "twins" });
+
+        var result = await PollAsync(
+            () => SendResultAsync(api, customer), r => r.Count > 0,
+            "the send task on the customer to record its outcome");
+        Assert.Equal(["multipleMatches"], result);
+        // Neither twin advanced.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.DoesNotContain("Order received", await TaskNamesAsync(api, first));
+        Assert.DoesNotContain("Order received", await TaskNamesAsync(api, second));
+    }
+
+    private static async Task<T> PollAsync<T>(Func<Task<T>> read, Func<T, bool> until, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        var last = await read();
+        while (!until(last) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(500);
+            last = await read();
+        }
+        Assert.True(until(last), $"Timed out waiting for {what}. Last: {last}");
+        return last;
+    }
+
+    /// <summary>The sender's `sendMessageResult` variable, as `/diagram` reports it.</summary>
+    private static async Task<List<string>> SendResultAsync(IAPIRequestContext api, string instanceId)
+    {
+        var response = await api.GetAsync($"/api/executions/{instanceId}/diagram");
+        if (!response.Ok) return [];
+        using var document = JsonDocument.Parse(await response.TextAsync());
+        return document.RootElement.GetProperty("variables").EnumerateArray()
+            .Where(v => v.GetProperty("name").GetString() == "sendMessageResult")
+            .Select(v => v.GetProperty("value").ToString())
+            .ToList();
+    }
+
     private static string Di(string primaryKey, params string[] elementIds)
     {
         var shapes = string.Join("\n", elementIds.Select((id, index) => $"""

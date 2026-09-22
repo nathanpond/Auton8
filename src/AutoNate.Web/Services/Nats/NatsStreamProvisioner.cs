@@ -31,7 +31,8 @@ namespace AutoNate.Web.Services.Nats;
 // topic can't drift out of sync with its stream.
 public sealed class NatsStreamProvisioner(
     IOptions<NatsOptions> natsOptions,
-    ILogger<NatsStreamProvisioner> logger)
+    ILogger<NatsStreamProvisioner> logger,
+    ISystemIssueRecorder? issues = null)
 {
     private readonly NatsOptions _options = natsOptions.Value;
 
@@ -168,6 +169,104 @@ public sealed class NatsStreamProvisioner(
                 "JetStream stream '{StreamName}' is ready (subjects: {Subjects}).",
                 streamConfig.Name,
                 string.Join(", ", streamConfig.Subjects ?? Array.Empty<string>()));
+            await CheckStorageFidelityAsync(js, streamConfig.Name!, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The subject the fidelity probe publishes on (#636). Under the `system.>`
+    /// wildcard the stream already captures, so it needs no subject of its own.
+    /// </summary>
+    public const string FidelityProbeSubject = "system.stream-fidelity-probe";
+
+    public const string FidelityDetectorId = "nats_stream_fidelity";
+
+    /// <summary>
+    /// Publish one message, count what the stream stored (#636). Measured on the
+    /// shared dev server: the `workflow-execution` stream stored ONE inbound
+    /// message FOUR times -- from a plain NATS client, no sidecar involved --
+    /// and every stored copy is delivered once, so one bus message started
+    /// four workflow instances. Nothing in the stream's config produces that
+    /// (identical updates, reorders, remove/re-add cycles and live consumers
+    /// were each tried on a throwaway stream and stored once); it is state the
+    /// server holds, and only recreating the stream has cleared it. The app
+    /// cannot repair that. It can refuse to be silent about it.
+    /// </summary>
+    internal static async Task<int> MeasureStorageFidelityAsync(
+        NatsJSContext js, string streamName, string probeSubject, CancellationToken cancellationToken)
+    {
+        var before = await StoredOnSubjectAsync(js, streamName, probeSubject, cancellationToken);
+        var ack = await js.PublishAsync(
+            probeSubject,
+            "{\"eventType\":\"stream.fidelity.probe\"}",
+            cancellationToken: cancellationToken);
+        ack.EnsureSuccess();
+        var after = await StoredOnSubjectAsync(js, streamName, probeSubject, cancellationToken);
+        return (int)(after - before);
+    }
+
+    private static async Task<long> StoredOnSubjectAsync(NatsJSContext js, string streamName, string subject, CancellationToken cancellationToken)
+    {
+        var stream = await js.GetStreamAsync(streamName, new StreamInfoRequest { SubjectsFilter = subject }, cancellationToken);
+        return stream.Info.State.Subjects is { } subjects && subjects.TryGetValue(subject, out var count) ? count : 0;
+    }
+
+    private async Task CheckStorageFidelityAsync(NatsJSContext js, string streamName, CancellationToken cancellationToken)
+    {
+        int copies;
+        try
+        {
+            copies = await MeasureStorageFidelityAsync(js, streamName, FidelityProbeSubject, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The probe is a diagnostic; a failure to run it must not stop the app.
+            logger.LogWarning(exception, "Could not measure storage fidelity of JetStream stream '{StreamName}'.", streamName);
+            return;
+        }
+
+        var fingerprint = $"stream-fidelity:{streamName}";
+        try
+        {
+            if (copies == 1)
+            {
+                logger.LogInformation("JetStream stream '{StreamName}' stores each message once.", streamName);
+                if (issues is not null)
+                {
+                    await issues.MarkResolvedByFingerprintAsync(
+                        fingerprint, SystemIssueResolutionKinds.NoLongerPresent,
+                        "The stream stores each message once again.", cancellationToken);
+                }
+                return;
+            }
+
+            // Each placeholder ONCE: the logger rejects a template that repeats a
+            // name, and the first version of this line did -- which turned a
+            // diagnostic into a startup crash on every test host that met the
+            // multiplying stream. A report path must not be able to take the
+            // app down; hence the try around all of it.
+            logger.LogError(
+                "JetStream stream '{StreamName}' stores each message {Copies} times: every bus message is delivered "
+                + "that many times and a message-start workflow starts that many instances (#636). Recreate the stream "
+                + "with `nats stream rm <name>`; the app re-provisions it on the next start.",
+                streamName, copies);
+            if (issues is not null)
+            {
+                await issues.RecordAsync(new SystemIssueDraft(
+                    DetectorId: FidelityDetectorId,
+                    Category: SystemIssueCategories.Bus,
+                    Severity: SystemIssueSeverities.Critical,
+                    Fingerprint: fingerprint,
+                    Title: $"JetStream stream '{streamName}' stores each message {copies} times",
+                    Summary: $"One published message was stored {copies} times, so every bus message is delivered {copies} times "
+                        + $"and a workflow started by message starts {copies} instances. Recreate the stream "
+                        + $"(`nats stream rm {streamName}`); the app re-provisions it on its next start. See #636.",
+                    FactsJson: System.Text.Json.JsonSerializer.Serialize(new { stream = streamName, copies })), cancellationToken);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "Could not report the storage fidelity of JetStream stream '{StreamName}'.", streamName);
         }
     }
 }

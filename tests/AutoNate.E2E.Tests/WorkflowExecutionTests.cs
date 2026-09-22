@@ -45,6 +45,7 @@ namespace AutoNate.E2E.Tests;
 // does not stand up — publishing a workflow there fails with
 // "Connection refused". Traited so the tier boundary is a capability rather
 // than a hand-maintained list of class names that would silently rot.
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class WorkflowExecutionTests : E2ETestBase
 {

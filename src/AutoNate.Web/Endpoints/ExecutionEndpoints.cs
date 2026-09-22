@@ -1165,10 +1165,18 @@ public static class ExecutionEndpoints
         // admin page to clear noise during signal-event debugging.
         executions.MapPost("/delete-all", async (
             IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> cacheDbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var deleted = await flowable.DeleteAllWorkflowExecutionsAsync(cancellationToken);
+            // #658. The cache goes with the engine. The single delete above has
+            // always done this; this one did not, and nothing else ever removed a
+            // terminal row, so every wiped run kept authorizing its instance gates.
+            await using (var cacheDb = await cacheDbFactory.CreateDbContextAsync(cancellationToken))
+            {
+                await cacheDb.Database.ExecuteSqlRawAsync("DELETE FROM workflow_execution_cache", cancellationToken);
+            }
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionsBulkDeleted,

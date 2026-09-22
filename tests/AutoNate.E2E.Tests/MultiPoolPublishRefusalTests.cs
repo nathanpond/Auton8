@@ -26,6 +26,7 @@ namespace AutoNate.E2E.Tests;
 /// engine is asked directly there too.
 /// </para>
 /// </remarks>
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class MultiPoolPublishRefusalTests : E2ETestBase
 {
@@ -231,6 +232,50 @@ public sealed class MultiPoolPublishRefusalTests : E2ETestBase
             Assert.True(publishedVersion.ValueKind == JsonValueKind.Null,
                 "A refused publish must leave the model unpublished.");
         }
+    }
+
+    /// <summary>
+    /// #645. A pool drawn only to show a counterparty -- nothing in it -- deploys
+    /// as NOTHING through /publish, the path every caller uses. Before #645 that
+    /// held only on /prepare, and the story's own oracle cell had left its empty
+    /// counterparty in the engine as a live definition.
+    /// </summary>
+    [Fact]
+    public async Task A_pool_with_nothing_in_it_deploys_as_nothing()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var buyerKey = $"buy{Guid.NewGuid():N}"[..20];
+        var emptyKey = $"emp{Guid.NewGuid():N}"[..20];
+        // Everything between the Seller process's open and close tags goes:
+        // a pool with nothing in it.
+        var xml = System.Text.RegularExpressions.Regex.Replace(
+            TwoPools(buyerKey, emptyKey),
+            $"(<bpmn:process id=\"{emptyKey}\"[^>]*>).*?(</bpmn:process>)",
+            "$1$2",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        Assert.DoesNotContain("id=\"st\"", xml, StringComparison.Ordinal);
+
+        var id = Guid.NewGuid();
+        var name = TestNames.Prefixed(buyerKey);
+        var created = await api.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = buyerKey, bpmnXml = xml }
+        });
+        Assert.True(created.Ok, await created.TextAsync());
+        var published = await api.PostAsync($"/api/workflows/{id}/publish", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = buyerKey, bpmnXml = xml }
+        });
+        Assert.True(published.Ok, $"A diagram with an empty counterparty must publish: {published.Status} {await published.TextAsync()}");
+
+        using var engine = EngineClient();
+        var buyer = await engine.GetStringAsync($"service/repository/process-definitions?key={Uri.EscapeDataString(buyerKey)}");
+        Assert.Equal(1, JsonDocument.Parse(buyer).RootElement.GetProperty("total").GetInt32());
+        // AND THE EMPTY POOL IS NOT A DEFINITION. Asked of the engine, by key.
+        var empty = await engine.GetStringAsync($"service/repository/process-definitions?key={Uri.EscapeDataString(emptyKey)}");
+        Assert.Equal(0, JsonDocument.Parse(empty).RootElement.GetProperty("total").GetInt32());
     }
 
     private static HttpClient EngineClient() => FlowableDeploymentSweep.CreateClient(

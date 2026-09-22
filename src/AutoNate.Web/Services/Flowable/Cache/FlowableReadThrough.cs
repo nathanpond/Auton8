@@ -76,9 +76,17 @@ public sealed class FlowableReadThrough : IFlowableReadThrough
             // job: it enumerates, so absence there is a fact about the engine
             // rather than an inference from one endpoint that was asked the wrong
             // question.
+            // #658. ...and the poll does not delete either -- it only upserts --
+            // so a served-forever terminal row was the other failure: an instance
+            // deleted from the engine (delete-all, history cleanup) kept a cache
+            // row that authorized every instance gate. History is the tie-break:
+            // a finished run is still in history; a run that is gone is not.
             if (cached is not null && WorkflowExecutionStatuses.IsTerminal(cached.Status))
             {
-                return cached;
+                if (await _flowable.HistoricProcessInstanceExistsAsync(instanceId, cancellationToken))
+                {
+                    return cached;
+                }
             }
 
             // Instance has been deleted in Flowable. Clear the cache row so

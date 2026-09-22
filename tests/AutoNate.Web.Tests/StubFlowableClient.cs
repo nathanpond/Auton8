@@ -47,14 +47,66 @@ internal sealed class StubFlowableClient : IFlowableClient
 
         DeployedModels.Add(model);
 
+        // #646. A deployment produces a SET: one definition per executable
+        // process in the file, like the engine. Recorded per deployment id so
+        // the readback returns what this upload produced, and so the endpoint's
+        // set branch (pause/resume across every definition) can run under test.
+        var deploymentId = $"stub-deployment-{Interlocked.Increment(ref _deployments)}";
+        var definitions = ExecutableProcessIds(model.BpmnXml)
+            .Select(key => new FlowableProcessDefinitionSummary
+            {
+                Id = $"{key}:1:{deploymentId}",
+                Key = key,
+                Name = key,
+                Version = 1,
+                DeploymentId = deploymentId,
+                Suspended = false
+            })
+            .ToList();
+        DeployedSets[deploymentId] = definitions;
+        // Like the engine: no definition under the model's key is a failure, not
+        // a definition the stub invents (#653 prepares the deployable, so the key
+        // is always there for a caller that went through the endpoint).
+        var primary = definitions.FirstOrDefault(d => d.Key == model.ProcessKey)
+            ?? throw new InvalidOperationException(
+                $"Stub deployment of '{model.ProcessKey}' produced no definition under that key; it produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
+
         return Task.FromResult(new WorkflowDeploymentInfo
         {
-            DeploymentId = "stub-deployment",
-            ProcessDefinitionId = "stub-pd",
-            ProcessDefinitionKey = model.ProcessKey,
+            DeploymentId = deploymentId,
+            ProcessDefinitionId = primary.Id,
+            ProcessDefinitionKey = primary.Key,
             ProcessDefinitionVersion = 1,
-            DeployedAtUtc = DateTimeOffset.UtcNow
+            DeployedAtUtc = DateTimeOffset.UtcNow,
+            Definitions = definitions.Select(d => new WorkflowDeployedDefinition
+            {
+                ProcessDefinitionKey = d.Key, ProcessDefinitionId = d.Id, ProcessDefinitionVersion = d.Version, Name = d.Name
+            }).ToList()
         });
+    }
+
+    private static int _deployments;
+
+    /// <summary>The set each stub deployment produced, by deployment id (#646).</summary>
+    public Dictionary<string, List<FlowableProcessDefinitionSummary>> DeployedSets { get; } = new(StringComparer.Ordinal);
+
+    private static IReadOnlyList<string> ExecutableProcessIds(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return [];
+        try
+        {
+            System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+            return System.Xml.Linq.XDocument.Parse(xml).Descendants(bpmn + "process")
+                .Where(p => !string.Equals(p.Attribute("isExecutable")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.Attribute("id")?.Value)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .ToList();
+        }
+        catch (System.Xml.XmlException)
+        {
+            return [];
+        }
     }
 
     // #169. The set a deployment produced, and the withdrawal of one. The stub
@@ -66,7 +118,8 @@ internal sealed class StubFlowableClient : IFlowableClient
     public Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(
         string deploymentId,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<FlowableProcessDefinitionSummary>>([]);
+        Task.FromResult<IReadOnlyList<FlowableProcessDefinitionSummary>>(
+            DeployedSets.TryGetValue(deploymentId, out var set) ? set : []);
 
     public Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(
         string processInstanceId,
@@ -155,6 +208,12 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     // Tests can seed this to assert the count-based auto-naming flow.
     public Dictionary<string, int> InstanceCountsByDefinitionKey { get; } = new();
+
+    /// <summary>#658. Instances the engine's HISTORY still holds; a live instance is in history too.</summary>
+    public HashSet<string> HistoricInstanceIds { get; } = new(StringComparer.Ordinal);
+
+    public Task<bool> HistoricProcessInstanceExistsAsync(string processInstanceId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(HistoricInstanceIds.Contains(processInstanceId) || InstancesById.ContainsKey(processInstanceId));
 
     public Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(
         string processDefinitionKey, CancellationToken cancellationToken = default)

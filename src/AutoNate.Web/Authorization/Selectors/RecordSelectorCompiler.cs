@@ -44,11 +44,11 @@ public sealed class RecordSelectorCompiler : SelectorCompilerBase<RecordEntity>
         };
     }
 
-    private static Expression<Func<RecordEntity, bool>> CompileStatusTag(TagExpr tag)
-    {
-        var status = RequireLiteral(tag);
-        return r => r.Status == status;
-    }
+    // #651. `lower(status) = 'x'`, like every other literal tag on both paths
+    // (#631). `==` here was the one site the nine-site table missed: a deny
+    // `/record/*[status=open]` withheld in the list and not in edge traversal.
+    private static Expression<Func<RecordEntity, bool>> CompileStatusTag(TagExpr tag) =>
+        CaseInsensitiveEquals(r => r.Status, RequireLiteral(tag));
 
     // Compiles tag expressions of the form `<edgeKind>=user[…]?` against
     // entity_edges. Without a nested predicate this is a single hop:

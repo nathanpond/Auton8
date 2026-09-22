@@ -247,4 +247,68 @@ public sealed class LaneStudioTests : E2ETestBase
         await Assertions.Expect(dialog.GetByText(groupName, new() { Exact = false }).First)
             .ToBeVisibleAsync(new() { Timeout = 5_000 });
     }
+
+    /// <summary>
+    /// #650, the complement of the fact above: a task in a lane that carries its
+    /// OWN assignee says so, rather than crediting the lane.
+    /// </summary>
+    [Fact]
+    public async Task A_task_with_its_own_assignee_says_its_assignment_is_its_own_not_the_lanes()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var groupName = TestNames.Prefixed("lane-own");
+        var group = await page.APIRequest.PostAsync("/api/admin/groups",
+            new APIRequestContextOptions { DataObject = new { name = groupName, description = (string?)null } });
+        Assert.True(group.Ok, await group.TextAsync());
+        var groupId = JsonDocument.Parse(await group.TextAsync()).RootElement.GetProperty("id").GetString()!;
+
+        var key = $"laneo{Guid.NewGuid():N}"[..20];
+        var name = TestNames.Prefixed("lane-own-source");
+        var id = Guid.NewGuid();
+        var xml = Diagram(key)
+            .Replace("<bpmn:lane id=\"Lane_finance\" name=\"Finance\">",
+                $"<bpmn:lane id=\"Lane_finance\" name=\"Finance\" autonate:groupId=\"{groupId}\">", StringComparison.Ordinal)
+            .Replace("<bpmn:userTask id=\"approve\" name=\"Approve\" />",
+                "<bpmn:userTask id=\"approve\" name=\"Approve\" flowable:assignee=\"${initiator}\" />", StringComparison.Ordinal);
+        Assert.Contains("flowable:assignee", xml, StringComparison.Ordinal);
+        var created = await page.APIRequest.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new { id, name, processKey = key, bpmnXml = xml }
+        });
+        Assert.True(created.Ok, await created.TextAsync());
+        await OpenInStudioAsync(page, name);
+
+        await page.Locator("[data-element-id='approve']").ClickAsync(new() { Button = MouseButton.Right });
+        await page.GetByText("Configure", new() { Exact = false }).First.ClickAsync(new() { Timeout = 10_000 });
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await Assertions.Expect(dialog.GetByText("Assignment source: this task's own settings", new() { Exact = false }))
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+        // And NOT credited to the lane.
+        await Assertions.Expect(dialog.GetByText("Assignment source: the lane", new() { Exact = false })).ToHaveCountAsync(0);
+    }
+
+    /// <summary>#650: a task in a lane that names no group has no assignment yet, and says so.</summary>
+    [Fact]
+    public async Task A_task_in_a_lane_with_no_group_says_it_has_no_assignment_yet()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var key = $"lanen{Guid.NewGuid():N}"[..20];
+        var name = TestNames.Prefixed("lane-no-group");
+        var id = await SeedAsync(page, name, key);
+        await OpenInStudioAsync(page, name);
+
+        await page.Locator("[data-element-id='approve']").ClickAsync(new() { Button = MouseButton.Right });
+        await page.GetByText("Configure", new() { Exact = false }).First.ClickAsync(new() { Timeout = 10_000 });
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await Assertions.Expect(dialog.GetByText("No assignment yet", new() { Exact = false }))
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+        await Assertions.Expect(dialog.GetByText("Assignment source:", new() { Exact = false })).ToHaveCountAsync(0);
+        _ = id;
+    }
 }

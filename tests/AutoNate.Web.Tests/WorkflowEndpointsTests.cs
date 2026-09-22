@@ -742,6 +742,136 @@ public sealed class WorkflowEndpointsTests
         Assert.Contains("ActivateDefinition:pausable", factory.FlowableStub.Calls);
     }
 
+    /// <summary>
+    /// Two executable pools, deployed as a set. Both keys have a start event, so
+    /// the stub's deployment produces two definitions, and <c>/pause</c> must
+    /// suspend BOTH: a message flow into an unpaused counterparty would still
+    /// start instances (#169 AC9). The set branch of
+    /// <c>PublishedDefinitionKeysAsync</c> never executed under test before #646.
+    /// </summary>
+    private const string TwoPoolBpmn = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:collaboration id="Collab_1">
+            <bpmn:participant id="P_b" name="Buyer" processRef="buyer" />
+            <bpmn:participant id="P_s" name="Seller" processRef="seller" />
+          </bpmn:collaboration>
+          <bpmn:process id="buyer" name="Buyer" isExecutable="true">
+            <bpmn:startEvent id="bs" /><bpmn:sequenceFlow id="bf" sourceRef="bs" targetRef="be" /><bpmn:endEvent id="be" />
+          </bpmn:process>
+          <bpmn:process id="seller" name="Seller" isExecutable="true">
+            <bpmn:startEvent id="ss" /><bpmn:sequenceFlow id="sf" sourceRef="ss" targetRef="se" /><bpmn:endEvent id="se" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public async Task PauseAndResume_ApplyToEveryDefinitionInThePublishedSet()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel { Id = id, Name = "Two pools", ProcessKey = "buyer", BpmnXml = TwoPoolBpmn };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model)).EnsureSuccessStatusCode();
+
+        // The stub read the set back by deployment id: two definitions.
+        var set = Assert.Single(factory.FlowableStub.DeployedSets).Value;
+        Assert.Equal(new[] { "buyer", "seller" }, set.Select(d => d.Key).Order().ToArray());
+        foreach (var key in new[] { "buyer", "seller" })
+        {
+            factory.FlowableStub.ProcessDefinitionsByKey[key] = new Models.FlowableProcessDefinitionSummary
+            {
+                Id = $"pd-{key}", Key = key, Version = 1, DeploymentId = set[0].DeploymentId, Suspended = false
+            };
+        }
+
+        (await client.PostAsync($"/api/workflows/{id}/pause", null)).EnsureSuccessStatusCode();
+        Assert.Contains("SuspendDefinition:buyer", factory.FlowableStub.Calls);
+        // THE COUNTERPARTY TOO. A primary-only pause passes the fact above and
+        // leaves Seller startable.
+        Assert.Contains("SuspendDefinition:seller", factory.FlowableStub.Calls);
+
+        (await client.PostAsync($"/api/workflows/{id}/resume", null)).EnsureSuccessStatusCode();
+        Assert.Contains("ActivateDefinition:buyer", factory.FlowableStub.Calls);
+        Assert.Contains("ActivateDefinition:seller", factory.FlowableStub.Calls);
+    }
+
+    /// <summary>
+    /// The window #169 built <c>WorkflowPublishCompensation</c> for, asserted
+    /// at the endpoint rather than on the class alone (#646): the engine
+    /// accepted the deployment, the record failed, and the deployment is
+    /// withdrawn -- by the id the engine produced.
+    /// </summary>
+    [Fact]
+    public async Task Publish_WithdrawsTheDeployment_WhenRecordingItFails()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            configureServices: services => services.AddScoped<IWorkflowModelStore>(sp =>
+                new FailingPublishStore(ActivatorUtilities.CreateInstance<EfCoreWorkflowModelStore>(sp))));
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel { Id = id, Name = "Unrecordable", ProcessKey = "unrecordable", BpmnXml = SimpleBpmn };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        var deployed = Assert.Single(factory.FlowableStub.DeployedSets).Key;
+        Assert.Equal(new[] { deployed }, factory.FlowableStub.DeletedDeployments);
+    }
+
+    /// <summary>
+    /// #653. A direct API caller whose body carries a process id other than the
+    /// model's key: the deployable is PREPARED, so the engine is asked to deploy
+    /// the key the record will be looked up by. Before this the raw id deployed,
+    /// the readback by key found nothing, and the deployment stayed in the engine
+    /// with nothing recording it.
+    /// </summary>
+    [Fact]
+    public async Task Publish_DeploysThePreparedCopy_WhenTheBodysProcessIdIsNotTheKey()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var body = SimpleBpmn.Replace("<bpmn:process id=\"", "<bpmn:process id=\"somethingelse_", StringComparison.Ordinal);
+        Assert.NotEqual(SimpleBpmn, body);
+        var model = new WorkflowModel { Id = id, Name = "Renamed", ProcessKey = "renamed_key", BpmnXml = body };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+
+        response.EnsureSuccessStatusCode();
+        var deployed = Assert.Single(factory.FlowableStub.DeployedModels);
+        Assert.Contains("<bpmn:process id=\"renamed_key\"", deployed.BpmnXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("somethingelse_", deployed.BpmnXml, StringComparison.Ordinal);
+        Assert.Empty(factory.FlowableStub.DeletedDeployments);
+    }
+
+    /// <summary>Every read delegates; only the record of a publish fails.</summary>
+    private sealed class FailingPublishStore(IWorkflowModelStore inner) : IWorkflowModelStore
+    {
+        public Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default) => inner.ListAsync(cancellationToken);
+        public Task<IReadOnlyList<WorkflowModel>> ListPublishedAsync(CancellationToken cancellationToken = default) => inner.ListPublishedAsync(cancellationToken);
+        public Task<WorkflowModel?> GetAsync(Guid workflowModelId, CancellationToken cancellationToken = default) => inner.GetAsync(workflowModelId, cancellationToken);
+        public Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default) => inner.GetMostRecentAsync(cancellationToken);
+        public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) => inner.GetByProcessKeyAsync(processKey, cancellationToken);
+        public Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default) => inner.GetPublishedByDefinitionKeyAsync(processDefinitionKey, cancellationToken);
+        public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) => inner.GetPublishedByProcessKeyAsync(processKey, cancellationToken);
+        public Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default) => inner.SaveAsync(model, cancellationToken);
+        public Task<WorkflowModel> PublishAsync(WorkflowModel model, WorkflowDeploymentInfo deployment, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("the record failed after the engine accepted the deployment");
+        public Task<IReadOnlyList<WorkflowModelVersion>> ListVersionsAsync(Guid workflowModelId, CancellationToken cancellationToken = default) => inner.ListVersionsAsync(workflowModelId, cancellationToken);
+        public Task<WorkflowModel?> DeleteAsync(Guid workflowModelId, CancellationToken cancellationToken = default) => inner.DeleteAsync(workflowModelId, cancellationToken);
+    }
+
     [Fact]
     public async Task ListWorkflows_PopulatesIsSuspendedFromFlowable()
     {

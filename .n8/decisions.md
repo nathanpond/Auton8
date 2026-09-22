@@ -11003,3 +11003,136 @@ pins that a candidate with a laneSet outscores the same diagram without one.
 This is the drag spec earning its keep before the story shipped: the lane bug
 it exists to catch turned up in a different coat.
 
+## M5 verification fix pass, round three, 2026-09-22
+
+Ten `confirmed sev:high` bugs gated the milestone after the second verification
+round. Scope decision: the ten blockers, plus the mediums that live in the same
+files and cost minutes (#654, #656, #657, #659); #652, #653, #655, #658, #660 and
+the lows #661–#665 are carried, and #327 stays on its owner decision.
+
+**#645 — the collaboration step at publish, not only prepare.** `ExpandForDeployment`
+now marks every empty pool non-executable, so the path every caller uses deploys
+it as nothing; the engine fact asks by key and gets `total 0`. The Pool row's
+evidence string stopped claiming "each started".
+
+**#646 — the stub produces a set.** `StubFlowableClient.DeployProcessAsync` returns
+one definition per executable process and records the set by deployment id, which
+is what makes the endpoint's set branch reachable; pause and resume are asserted
+on BOTH keys, and a publish whose record fails is asserted to withdraw the
+deployment by the engine's id, through a decorating store that throws only on
+`PublishAsync`. HTTP-shape facts pin `?deploymentId=` and `?cascade=true`.
+
+**#648 — one rule for the three attributes.** The flow fills a blank and never
+overwrites what the author typed: `FillIfBlank` for the target, the name, the
+end event's messageRef and the key alike. The correlation key already had it; the
+others did not, so a studio author's explicit target was rewritten on every save.
+
+**#649 — fan-out refused, not truncated.** A source with more than one message
+flow is refused naming the source and both flows; two senders with one flow each
+are fine. Auton8 does not implement one send reaching several pools, and a
+silently dropped second flow is the void this whole check exists to end.
+
+**#651 — the tenth site.** `RecordSelectorCompiler.CompileStatusTag` goes through
+`CaseInsensitiveEquals` like the nine #631 fixed; the pair through the real
+authorizer finds `Open` for `[status=OPEN]` and not `Closed`.
+
+**#659 — a step of their own.** The eight `lower()` indexes moved into
+`CaseInsensitiveIndexesSql`, applied after `WorkflowCacheSchemaSql`; the fact
+drops them and the ledger row after a first run and asserts the second run
+recreates all eight. (First cut placed the step before the cache tables existed
+and every ledger fact went red with `42P01` -- ordering by dependency, not by
+recency.)
+
+**#656 — one rule on both sides.** The studio's `describeContainingLane` takes the
+innermost lane NAMING A GROUP, as the expansion does, and reports the innermost
+lane only when none names a group -- so the note can still say which lane has
+none.
+
+**#666 / #667.** One pin (`ExecutionOracleSizeTests.Cells`) read by both
+assertions; the tab is "Linked Workflows" and the call-activity spec waits for
+that.
+
+**#636 — measured to the server, and stopped there.** One publish stored four
+copies on `workflow.messages`; a plain NATS client with no sidecar stored four;
+`system.>` stored four and `workflow.execution.>` stored one; the config carries
+no duplicates, sources, mirror or republish and did not change during a run; no
+configuration operation on a throwaway stream (identical updates, reorders,
+remove/re-add cycles, live consumers) stored more than once. The app cannot
+repair state it cannot produce. What it does now: a startup probe that publishes
+one message, counts what the stream stored, and raises a critical SystemIssue
+when the answer is not one (auto-resolved when it is again); the two Dapr specs
+settle before counting; the subscriber ignores callbacks from a torn-down
+subscription generation (a doubling path that exists on a probe flap, though not
+the one measured). The E2E fixture can tee the app's output to a file
+(`AUTONATE_E2E_APP_LOG`), which is how the dispatcher's four starts were seen at
+all. Blocker to the owner: recreate the stream (the only remedy that has cleared
+it), let the app do so itself, or take it upstream.
+
+Pins by discovery: SLIM_BACKEND 3007 → 3023, SLIM_E2E 243 → 245, FLOWABLE 290 →
+293, FULL_LOCAL 534 → 539.
+
+**What the first gate of this pass caught (#636's probe).** The error log for a
+multiplying stream used a message template that repeated `{StreamName}` and
+`{Copies}`; the logger rejects that, the exception fired inside startup on the
+shared server's still-4× stream, and 453 test hosts timed out at five minutes
+each -- a diagnostic that took the app down, 4 h 6 m of red. Each placeholder
+once now, and the whole report path (log + SystemIssue) sits inside a try, so
+nothing the probe does can stop the app. The gate was killed and re-run.
+
+## M5 fix pass, round three, second movement, 2026-09-22
+
+Owner answers, verbatim options: the NATS stream -- "Recreate it now"; #660 --
+"Build the queue group now"; the carried mediums -- "Fix all five mediums first";
+Outcomes -- "Waive it".
+
+**The stream was recreated** (`$JS.API.STREAM.DELETE.workflow-execution`; the
+next app start re-provisioned it) and the two Dapr specs measured one instance
+per message on it. The startup probe from the first movement now reads 1 there.
+
+**#660 measured, then blocked.** Dapr's JetStream component applies
+`durableName` and `queueGroupName` as-is to every topic's consumer; on a
+fixture-local components copy with both set, delivery stopped entirely (0 of 2
+specs, 0 instances) because the first topic owns the durable and the rest bind to
+it. A queue group here means one component per engine topic and routing in the
+subscriber, or an idempotency store (a table: Rule 4). Both are the owner's;
+`pubsub.yaml` is unchanged and the fixture keeps `AUTONATE_E2E_DAPR_COMPONENTS`
+as the way it was measured.
+
+**#653 -- prepare the deployable at publish.** The endpoint runs
+`ApplyProcessMetadata` on the body before expansion, so the key the record is
+looked up by is the key the engine deploys, whoever calls; the studio prepares on
+save so nothing changes for it. The readback failing withdraws the deployment by
+the id the POST returned. The stub stopped inventing a primary the engine would
+not produce.
+
+**#658 -- history decides.** A terminal cached row is served only while the
+engine's history still has the instance; gone from history is gone for good and
+the row is dropped -- the tie-break #634's fix said the poll would provide and
+the poll never did. Delete-all clears the cache rows with the engine, as the
+single delete always had.
+
+**#655 -- the cell asks for the counterpart.** The Message Flow oracle row keeps
+`instance-ends` and adds: the sender must have a counterpart when it ends.
+Removing the flow now turns the cell red.
+
+**#652 and #643 together.** Seven engine classes ran outside the sequential
+collection, which is why bulk-delete could only be asserted at the wiring. They
+are in it now, a guard keeps the next one in, and the admin spec drives
+delete-all for real: gone from the list, 404 in history. Engine-wide by design
+-- the control promises that -- and the full-local runbook already treats the
+shared engine as a test resource.
+
+**Outcomes waived** on PR #644 in the owner's words.
+
+Pins by discovery: SLIM_BACKEND 3023 → 3028, FLOWABLE 293 → 294, FULL_LOCAL
+539 → 540.
+
+**What the second gate of this movement caught (#653).** Running FULL prepare on
+the deployable at publish made the engine refuse four compensation diagrams and
+turned `ExecutionErrorSurfaceTests`' synchronous script failure asynchronous
+(`ForceAsyncScriptTasks` is a prepare step) -- seven red in full-local, all
+diagrams published raw through the API on purpose. Publish now aligns the
+primary process id with the model's key and nothing else
+(`AlignPrimaryProcessKey`): a caller who publishes raw XML is asking for that
+XML to run, and prepare's other rewrites change what a diagram means.
+

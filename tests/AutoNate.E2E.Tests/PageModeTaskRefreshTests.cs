@@ -31,6 +31,7 @@ namespace AutoNate.E2E.Tests;
 /// the query cache, which is exactly the state the bug lived in.
 /// </para>
 /// </remarks>
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class PageModeTaskRefreshTests : E2ETestBase
 {

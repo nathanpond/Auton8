@@ -92,6 +92,121 @@ public sealed class MessageFlowTests
 
     // ── prepare stamps the flow onto its source ──────────────────────────────
 
+    // ── #648: the flow fills a blank and never overwrites the author ─────────
+
+    /// <summary>
+    /// The rule run time already had, now at prepare too. Every studio save
+    /// passes through prepare, so before #648 an author's explicit target was
+    /// rewritten on every save while run time -- reading the same attributes --
+    /// let it win.
+    /// </summary>
+    [Fact]
+    public void Preparing_keeps_the_authors_explicit_target_and_message_name()
+    {
+        var xml = SendTaskToReceiveTask().Replace(
+            "<bpmn:sendTask id=\"send\" name=\"Send order\"",
+            "<bpmn:sendTask id=\"send\" name=\"Send order\" flowable:autonateTargetProcessKey=\"elsewhere\" flowable:autonateMessageName=\"mine\"",
+            StringComparison.Ordinal);
+
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(xml, "customer", "Customer");
+        var send = prepared[prepared.IndexOf("<bpmn:sendTask", StringComparison.Ordinal)..];
+        send = send[..send.IndexOf("/>", StringComparison.Ordinal)];
+
+        Assert.Contains("autonateTargetProcessKey=\"elsewhere\"", send, StringComparison.Ordinal);
+        Assert.Contains("autonateMessageName=\"mine\"", send, StringComparison.Ordinal);
+        // The complement: the flow's answers did NOT land beside the author's.
+        Assert.DoesNotContain("autonateTargetProcessKey=\"supplier\"", send, StringComparison.Ordinal);
+        Assert.DoesNotContain("autonateMessageName=\"receive\"", send, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Preparing_keeps_an_end_events_own_message_reference()
+    {
+        var xml = EndEventToStartEvent
+            .Replace("<bpmn:message id=\"Msg_order\" name=\"orderPlaced\" />",
+                "<bpmn:message id=\"Msg_order\" name=\"orderPlaced\" /><bpmn:message id=\"Msg_mine\" name=\"mine\" />", StringComparison.Ordinal)
+            .Replace("<bpmn:messageEventDefinition id=\"med_ce\" />",
+                "<bpmn:messageEventDefinition id=\"med_ce\" messageRef=\"Msg_mine\" />", StringComparison.Ordinal);
+
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(xml, "customer", "Customer");
+
+        Assert.Contains("<bpmn:messageEventDefinition id=\"med_ce\" messageRef=\"Msg_mine\"", prepared, StringComparison.Ordinal);
+        Assert.DoesNotContain("id=\"med_ce\" messageRef=\"Msg_order\"", prepared, StringComparison.Ordinal);
+    }
+
+    // ── #649: fan-out is refused, not silently truncated ─────────────────────
+
+    private static string TwoFlowsFromOneSend() => SendTaskToReceiveTask()
+        .Replace("<bpmn:messageFlow id=\"MF_1\" name=\"order\" sourceRef=\"send\" targetRef=\"receive\" />",
+            "<bpmn:messageFlow id=\"MF_1\" name=\"order\" sourceRef=\"send\" targetRef=\"receive\" />"
+            + "<bpmn:messageFlow id=\"MF_2\" name=\"copy\" sourceRef=\"send\" targetRef=\"receive2\" />", StringComparison.Ordinal)
+        .Replace("<bpmn:receiveTask id=\"receive\" name=\"Await order\" flowable:autonateCorrelationKey=\"orderId\" />",
+            "<bpmn:receiveTask id=\"receive\" name=\"Await order\" flowable:autonateCorrelationKey=\"orderId\" />"
+            + "<bpmn:receiveTask id=\"receive2\" name=\"Await copy\" />", StringComparison.Ordinal);
+
+    [Fact]
+    public void A_send_with_two_message_flows_is_refused_naming_it_and_both_flows()
+    {
+        var xml = TwoFlowsFromOneSend();
+        Assert.Contains("MF_2", xml, StringComparison.Ordinal);
+
+        var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
+
+        Assert.Contains(errors, e => e.Contains("Send order", StringComparison.Ordinal)
+            && e.Contains("2 message flows", StringComparison.Ordinal)
+            && e.Contains("'order'", StringComparison.Ordinal)
+            && e.Contains("'copy'", StringComparison.Ordinal));
+    }
+
+    /// <summary>The complement: two flows from two different senders are fine.</summary>
+    [Fact]
+    public void Two_flows_from_two_senders_are_not_refused()
+    {
+        var xml = TwoFlowsFromOneSend()
+            .Replace("sourceRef=\"send\" targetRef=\"receive2\"", "sourceRef=\"send2\" targetRef=\"receive2\"", StringComparison.Ordinal)
+            .Replace("<bpmn:sequenceFlow id=\"cf2\" sourceRef=\"send\" targetRef=\"ce\" />",
+                "<bpmn:sequenceFlow id=\"cf2\" sourceRef=\"send\" targetRef=\"send2\" />"
+                + "<bpmn:sendTask id=\"send2\" name=\"Send copy\"" + SendWiring + " />"
+                + "<bpmn:sequenceFlow id=\"cf3\" sourceRef=\"send2\" targetRef=\"ce\" />", StringComparison.Ordinal);
+        Assert.Contains("send2", xml, StringComparison.Ordinal);
+
+        var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
+
+        Assert.DoesNotContain(errors, e => e.Contains("message flows leaving it", StringComparison.Ordinal));
+    }
+
+    // ── #654: a flow drawn to the pool itself ────────────────────────────────
+
+    [Fact]
+    public void A_flow_drawn_to_a_pool_with_one_message_start_resolves_to_that_start()
+    {
+        var xml = EndEventToStartEvent.Replace("targetRef=\"ss\"", "targetRef=\"P_s\"", StringComparison.Ordinal);
+
+        // Validated AFTER prepare, as the studio's save does: prepare is what
+        // gives the end event its message from the flow.
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(xml, "customer", "Customer");
+        Assert.Empty(WorkflowBpmnXml.ValidateProcess(prepared).Errors);
+        Assert.Contains("flowable:autonateTargetProcessKey=\"supplier\"", prepared, StringComparison.Ordinal);
+        Assert.Contains("<bpmn:messageEventDefinition id=\"med_ce\" messageRef=\"Msg_order\"", prepared, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_flow_drawn_to_a_pool_with_two_message_starts_is_refused_naming_the_pool()
+    {
+        var xml = EndEventToStartEvent
+            .Replace("targetRef=\"ss\"", "targetRef=\"P_s\"", StringComparison.Ordinal)
+            .Replace("<bpmn:startEvent id=\"ss\"><bpmn:messageEventDefinition messageRef=\"Msg_order\" /></bpmn:startEvent>",
+                "<bpmn:startEvent id=\"ss\"><bpmn:messageEventDefinition messageRef=\"Msg_order\" /></bpmn:startEvent>"
+                + "<bpmn:startEvent id=\"ss2\"><bpmn:messageEventDefinition messageRef=\"Msg_order\" /></bpmn:startEvent>"
+                + "<bpmn:sequenceFlow id=\"sf2\" sourceRef=\"ss2\" targetRef=\"se\" />", StringComparison.Ordinal);
+        Assert.Contains("ss2", xml, StringComparison.Ordinal);
+
+        var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
+
+        Assert.Contains(errors, e => e.Contains("Supplier", StringComparison.Ordinal)
+            && e.Contains("no single message start event", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Preparing_stamps_the_targets_pool_and_message_onto_the_send_task()
     {

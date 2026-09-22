@@ -339,6 +339,51 @@ public sealed class WorkflowExecutionAdminTests : E2ETestBase
         return (instance, tasks.Single(t => t.Name == "Review"));
     }
 
+    /// <summary>
+    /// #652. Bulk-delete on its EFFECT: the seeded runs are gone from Auton8's
+    /// list and from the engine's history. Possible now because every
+    /// engine-touching class runs in the sequential collection (#643), so
+    /// nothing else is mid-flight when this wipes the engine. It IS
+    /// engine-wide -- that is what the control promises -- and the wiring fact
+    /// above still proves the dialog's two paths without it.
+    /// </summary>
+    [Fact]
+    public async Task Bulk_delete_removes_every_execution_from_the_list_and_from_the_engine()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var api = page.APIRequest;
+        var (first, _) = await SeedAtReviewAsync(api);
+        var (second, _) = await SeedAtReviewAsync(api);
+
+        await page.GotoAsync("/workflow-executions");
+        var deleteAll = page.GetByRole(AriaRole.Button, new() { Name = "Delete All Executions" });
+        await Assertions.Expect(deleteAll).ToBeEnabledAsync(new() { Timeout = 15_000 });
+        await deleteAll.ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Delete all", Exact = true }).ClickAsync();
+
+        // Gone from Auton8...
+        await EventuallyAsync(async () =>
+        {
+            var response = await api.GetAsync("/api/executions/");
+            if (!response.Ok) return false;
+            using var document = JsonDocument.Parse(await response.TextAsync());
+            var ids = document.RootElement.EnumerateArray().Select(e => Str(e, "id")).ToHashSet(StringComparer.Ordinal);
+            return !ids.Contains(first.Id) && !ids.Contains(second.Id);
+        }, "both seeded runs to leave the executions list");
+
+        // ...AND from the engine, by id, in history: 404 is "never existed or
+        // deleted", which is the claim.
+        using var engine = EngineClient();
+        foreach (var id in new[] { first.Id, second.Id })
+        {
+            var gone = await engine.GetAsync($"service/history/historic-process-instances/{id}");
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, gone.StatusCode);
+        }
+    }
+
     // ---- read-backs ----------------------------------------------------------
 
     private static async Task<List<TaskRow>> TasksAsync(IAPIRequestContext api, string instanceId)

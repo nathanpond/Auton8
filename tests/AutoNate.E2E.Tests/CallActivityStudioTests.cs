@@ -133,7 +133,7 @@ public sealed class CallActivityStudioTests : E2ETestBase
         await page.GotoAsync($"/executions/{parentInstance}");
 
         // The tab exists, is labelled with the count, and opens the child.
-        var tab = page.GetByRole(AriaRole.Tab, new() { Name = "Called Workflows (1)" });
+        var tab = page.GetByRole(AriaRole.Tab, new() { Name = "Linked Workflows (1)" });
         await Assertions.Expect(tab).ToBeVisibleAsync(new() { Timeout = 20_000 });
         await tab.ClickAsync();
 
