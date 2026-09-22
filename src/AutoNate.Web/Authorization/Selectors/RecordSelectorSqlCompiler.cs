@@ -75,8 +75,13 @@ public sealed class RecordSelectorSqlCompiler
                 "Tag 'status' requires a literal value, e.g. status=open.");
         }
 
-        var p = ctx.AddParameter(literal.Text);
-        return $"(records.status = {p})";
+        // #631. `lower()` on both sides, matching InMemorySelectorEvaluator and
+        // the LINQ compilers. The parameter is lowered here rather than in SQL so
+        // the emitted predicate is `lower(col) = $n` -- the form a functional
+        // index on `lower(status)` could serve, if `records.status` ever gets one
+        // (it has no index today, so none was added).
+        var p = ctx.AddParameter(literal.Text.ToLowerInvariant());
+        return $"(lower(records.status) = {p})";
     }
 
     private static string CompileEdgeTag(TagExpr tag, string edgeKind, RecordSqlBuildContext ctx)
@@ -219,7 +224,20 @@ public sealed class RecordSqlBuildContext
     {
         ActorUserId = actorUserId;
         NextIndex = parameterOffset;
-        RecordTypeIdsByShortCode = recordTypeIdsByShortCode;
+
+        // #631. RE-WRAPPED WITH AN ORDINAL-IGNORE-CASE COMPARER, here rather than
+        // at the call site.
+        //
+        // This lookup is the record path's half of `[recordtype=<short code>]`,
+        // and stored short codes are UPPER-cased by RecordTypeShortCode.Normalize
+        // while an author writes `[recordtype=lead]`. Whether the match worked
+        // therefore depended on the comparer whichever caller happened to build
+        // the dictionary with -- which is a rule that lives in no one place and
+        // so is a rule nobody maintains. Doing it in the constructor means a
+        // future caller cannot get it wrong by omission.
+        RecordTypeIdsByShortCode = recordTypeIdsByShortCode is null
+            ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, Guid>(recordTypeIdsByShortCode, StringComparer.OrdinalIgnoreCase);
     }
 
     public Guid ActorUserId { get; }

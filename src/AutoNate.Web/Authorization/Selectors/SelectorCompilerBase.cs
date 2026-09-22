@@ -107,4 +107,21 @@ public abstract class SelectorCompilerBase<T> : ISelectorCompiler<T> where T : c
         }
         return literal.Text;
     }
+
+    /// <summary>
+    /// Lambda-shaped wrapper over
+    /// <see cref="ExpressionUtilities.CaseInsensitiveEqualsBody"/> (#631), which
+    /// carries the reasoning. Here for the compilers that hand over a column
+    /// accessor rather than a bare member expression.
+    /// </summary>
+    protected static Expression<Func<T, bool>> CaseInsensitiveEquals(
+        Expression<Func<T, string?>> columnAccessor,
+        string value)
+    {
+        ArgumentNullException.ThrowIfNull(columnAccessor);
+
+        return Expression.Lambda<Func<T, bool>>(
+            ExpressionUtilities.CaseInsensitiveEqualsBody(columnAccessor.Body, value),
+            columnAccessor.Parameters[0]);
+    }
 }

@@ -33,8 +33,17 @@ public sealed class GroupSelectorCompiler : SelectorCompilerBase<GroupEntity>
 
     private static Expression<Func<GroupEntity, bool>> CompileName(TagExpr tag)
     {
+        // #631. Case-insensitive, matching InMemorySelectorEvaluator.
+        //
+        // `groups_name_key` is UNIQUE on the RAW column, so `Finance` and
+        // `finance` can both exist -- which means this does not only turn a grant
+        // that matched nothing into one that matches something, it can turn a
+        // grant that matched one row into one that matches two. Making the
+        // constraint itself case-insensitive is a data migration with its own
+        // failure mode (two existing rows differing only by case) and a separate
+        // decision; it is deliberately not bundled here.
         var name = RequireLiteral(tag);
-        return g => g.Name == name;
+        return CaseInsensitiveEquals(g => g.Name, name);
     }
 
     // `member=user` matches groups the actor belongs to. Other shapes

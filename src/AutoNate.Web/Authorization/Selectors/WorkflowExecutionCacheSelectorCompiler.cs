@@ -129,8 +129,13 @@ public sealed class WorkflowExecutionCacheSelectorCompiler : ISelectorCompiler<W
             return Expression.Lambda<Func<WorkflowExecutionCache, bool>>(hasAnyValue, p);
         }
 
+        // #631. `lower(col) = <lowered value>`, not `=`. See
+        // ExpressionUtilities.CaseInsensitiveEqualsBody for why, including why
+        // this is not ILIKE. ResolveTagValue serves BOTH a literal and a pinned
+        // `=user` id, so this covers an operator who typed a GUID in upper case
+        // as well as one who typed `Alice`.
         var value = ResolveTagValue(tag, context);
-        var eq = Expression.Equal(columnAccessor.Body, Expression.Constant(value, typeof(string)));
+        var eq = ExpressionUtilities.CaseInsensitiveEqualsBody(columnAccessor.Body, value);
         return Expression.Lambda<Func<WorkflowExecutionCache, bool>>(eq, p);
     }
 

@@ -77,6 +77,54 @@ internal static class ExpressionUtilities
             node == _from ? _to : base.Visit(node);
     }
 
+    /// <summary>
+    /// `lower(column) = &lt;value, lowered here&gt;` — the ONE place a selector tag
+    /// value is compared to a column (#631).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why it exists.</b> <c>InMemorySelectorEvaluator</c> compares tag
+    /// values with <c>OrdinalIgnoreCase</c> — pinned by a deliberate test — while
+    /// every compiler emitted <c>=</c>, which Postgres evaluates case-sensitively
+    /// (measured: <c>'alice' = 'ALICE'</c> is <c>false</c>). So a grant reading
+    /// <c>[assignee=Alice]</c> matched on a single-instance check and matched
+    /// nothing in a list. Nine sites each had their own <c>==</c>; they now share
+    /// this one, because a rule with nine copies is how the two paths drifted
+    /// apart to begin with.</para>
+    ///
+    /// <para>It lives here rather than on <c>SelectorCompilerBase&lt;T&gt;</c>
+    /// because the two workflow-cache compilers deliberately implement
+    /// <c>ISelectorCompiler&lt;T&gt;</c> directly and do not derive from it — so a
+    /// helper on the base class would have been reachable by seven of the nine
+    /// sites, which is exactly the shape that lets a rule drift.</para>
+    ///
+    /// <para><b>Not <c>EF.Functions.ILike</c>.</b> <c>ILIKE</c> reads <c>%</c> and
+    /// <c>_</c> as wildcards, so a tag value containing either would silently
+    /// match rows it does not name — a widening hidden inside the widening this
+    /// change already is.</para>
+    ///
+    /// <para><b>ASCII, not Unicode.</b> .NET's <c>OrdinalIgnoreCase</c> and
+    /// Postgres's <c>lower()</c> are not the same function. They agree across
+    /// ASCII, which is what process keys, usernames, statuses and short codes are;
+    /// they do not agree on, for instance, <c>U+0130</c>. This NARROWS the
+    /// divergence to that residue rather than closing it.</para>
+    ///
+    /// <para>A NULL column stays false, exactly as <c>=</c> did:
+    /// <c>lower(NULL) = 'x'</c> is NULL, which is not true.</para>
+    /// </remarks>
+    public static Expression CaseInsensitiveEqualsBody(Expression column, string value)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        ArgumentNullException.ThrowIfNull(value);
+
+        return Expression.Equal(
+            Expression.Call(column, LowerMethod),
+            Expression.Constant(value.ToLowerInvariant(), typeof(string)));
+    }
+
+    private static readonly System.Reflection.MethodInfo LowerMethod =
+        typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)
+        ?? throw new InvalidOperationException("string.ToLower() not found.");
+
     private sealed class ParameterReplacer : ExpressionVisitor
     {
         private readonly ParameterExpression _from;
