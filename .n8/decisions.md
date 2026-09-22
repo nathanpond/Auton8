@@ -11127,3 +11127,12 @@ shared engine as a test resource.
 Pins by discovery: SLIM_BACKEND 3023 → 3028, FLOWABLE 293 → 294, FULL_LOCAL
 539 → 540.
 
+**What the second gate of this movement caught (#653).** Running FULL prepare on
+the deployable at publish made the engine refuse four compensation diagrams and
+turned `ExecutionErrorSurfaceTests`' synchronous script failure asynchronous
+(`ForceAsyncScriptTasks` is a prepare step) -- seven red in full-local, all
+diagrams published raw through the API on purpose. Publish now aligns the
+primary process id with the model's key and nothing else
+(`AlignPrimaryProcessKey`): a caller who publishes raw XML is asking for that
+XML to run, and prepare's other rewrites change what a diagram means.
+

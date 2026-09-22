@@ -106,6 +106,43 @@ public static partial class WorkflowBpmnXml
                """.TrimStart();
     }
 
+    /// <summary>
+    /// The one thing publish needs from prepare (#653): the primary process
+    /// carries the model's key, so the definition the engine produces is the
+    /// one the record is looked up by. Nothing else -- prepare's other rewrites
+    /// (async script tasks, gateway conditions, snapshots) change what a
+    /// diagram MEANS, and a caller who publishes raw XML through the API is
+    /// asking for that XML to run. Measured: running full prepare here made the
+    /// engine refuse four compensation diagrams and turned a synchronous script
+    /// failure asynchronous. A no-op when the id already is the key.
+    /// </summary>
+    public static string AlignPrimaryProcessKey(string xml, string processKey)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return xml;
+        var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+        var process = ResolvePrimaryProcess(document);
+        if (process is null) return xml;
+
+        var oldId = process.Attribute("id")?.Value;
+        var newId = NormalizeProcessKey(processKey);
+        if (string.IsNullOrWhiteSpace(oldId) || string.Equals(oldId, newId, StringComparison.Ordinal)) return xml;
+
+        process.SetAttributeValue("id", newId);
+        foreach (var participant in document.Descendants(BpmnNamespace + "participant")
+                     .Where(p => p.Attribute("processRef")?.Value == oldId))
+        {
+            participant.SetAttributeValue("processRef", newId);
+        }
+        foreach (var plane in document.Descendants(BpmndiNamespace + "BPMNPlane")
+                     .Where(p => p.Attribute("bpmnElement")?.Value == oldId))
+        {
+            plane.SetAttributeValue("bpmnElement", newId);
+        }
+
+        var declaration = document.Declaration is null ? "" : $"{document.Declaration}\n";
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
     public static string ApplyProcessMetadata(string xml, string processKey, string workflowName)
     {
         var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
