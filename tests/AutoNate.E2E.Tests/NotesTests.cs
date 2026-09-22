@@ -67,7 +67,10 @@ public sealed class NotesTests : E2ETestBase
 
         var hierarchy = await CreateHierarchyAsync(page);
 
-        await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex(@"/notes/\d+$"));
+        // Commit, not Load -- see the note in CreateHierarchyAsync (#640).
+        await page.WaitForURLAsync(
+            new System.Text.RegularExpressions.Regex(@"/notes/\d+$"),
+            new() { WaitUntil = WaitUntilState.Commit });
         await Assertions.Expect(page.GetByText(hierarchy.PageTitle, new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
@@ -348,7 +351,29 @@ public sealed class NotesTests : E2ETestBase
         await page.GetByRole(AriaRole.Button, new() { Name = "Add project" }).ClickAsync();
         await page.GetByPlaceholder("Acme launch").FillAsync(projectName);
         await page.GetByRole(AriaRole.Button, new() { Name = "Create project" }).ClickAsync();
-        await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex(@"/notes/\d+$"));
+        // COMMIT, NOT LOAD (#640). `WaitForURLAsync` defaults to WaitUntil=Load --
+        // the document's load event, which means every stylesheet, script and
+        // image, INCLUDING this route's lazily-fetched chunks (Excalidraw,
+        // BlockNote). On a loaded CI runner that legitimately arrives after the
+        // 30 s default, and the run goes red having proved nothing:
+        //
+        //   System.TimeoutException : Timeout 30000ms exceeded.
+        //   waiting for navigation until "Load"
+        //     at NotesTests.CreateHierarchyAsync(IPage page) line 351
+        //     at NotesTests.NotesPage_CreateDrawingNote_MountsExcalidrawCanvas() line 297
+        //
+        // -- a failure reported against the Excalidraw test, raised in SHARED
+        // SETUP on the test's first line, before any Excalidraw assertion ran.
+        //
+        // This line's claim is that the ROUTER landed on /notes/N. Subresource
+        // loading is not part of that claim, and the next statement independently
+        // proves the page is interactive by clicking a button on it under
+        // Playwright's own actionability wait. So the condition is narrowed to
+        // what is being asserted rather than the budget being raised -- a bigger
+        // number would still be waiting on the wrong event.
+        await page.WaitForURLAsync(
+            new System.Text.RegularExpressions.Regex(@"/notes/\d+$"),
+            new() { WaitUntil = WaitUntilState.Commit });
 
         await page.GetByRole(AriaRole.Button, new() { Name = "New cabinet" }).ClickAsync();
         await page.GetByPlaceholder("Operations").FillAsync(cabinetName);
