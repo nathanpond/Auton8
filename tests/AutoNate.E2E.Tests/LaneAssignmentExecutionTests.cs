@@ -12,6 +12,7 @@ namespace AutoNate.E2E.Tests;
 /// lane's group does NOT see it; a lane whose group was deleted is refused at
 /// publish and nothing reaches the engine.
 /// </summary>
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class LaneAssignmentExecutionTests : E2ETestBase
 {

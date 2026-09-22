@@ -240,6 +240,9 @@ public sealed class ExecutionAuthorizationFromCacheTests
         }
 
         factory.FlowableStub.InstancesById.Remove(Instance);
+        // #658. Finished, so gone from the runtime table -- and still in HISTORY,
+        // which is what makes it a finished run rather than a deleted one.
+        factory.FlowableStub.HistoricInstanceIds.Add(Instance);
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -368,6 +371,68 @@ public sealed class ExecutionAuthorizationFromCacheTests
         await GrantAsync(factory, "/workflowexecution/*[startedby=bob]", effect: "deny");
 
         Assert.True(await AuthorizeAsync(factory, "inst-632-ok"));
+    }
+
+    /// <summary>
+    /// #658, the complement of #634's fact: a terminal row whose instance the
+    /// engine no longer has in HISTORY either is a tombstone, and is dropped --
+    /// otherwise every run wiped by delete-all or history cleanup authorized its
+    /// instance gates forever.
+    /// </summary>
+    [Fact]
+    public async Task A_completed_run_gone_from_history_too_is_dropped_from_the_cache()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-658";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE workflow_execution_cache SET status = 'completed'
+                WHERE flowable_instance_id = {Instance}
+                """);
+        }
+        // Not in the runtime table, not in history: deleted from the engine.
+        factory.FlowableStub.InstancesById.Remove(Instance);
+        factory.FlowableStub.HistoricInstanceIds.Remove(Instance);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+            Assert.Null(await readThrough.GetInstanceAsync(Instance, CancellationToken.None));
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var gone = await db.WorkflowExecutionCache.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.FlowableInstanceId == Instance);
+            Assert.Null(gone);
+        }
+    }
+
+    /// <summary>#658. Delete-all clears the cache with the engine, as the single delete always has.</summary>
+    [Fact]
+    public async Task Delete_all_removes_the_cache_rows_with_the_engines_instances()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+        await SeedCachedInstanceAsync(factory, "inst-658-a", "alice");
+        await SeedCachedInstanceAsync(factory, "inst-658-b", "bob");
+
+        var response = await client.PostAsync("/api/executions/delete-all", null);
+
+        response.EnsureSuccessStatusCode();
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        Assert.Equal(0, await db.WorkflowExecutionCache.AsNoTracking().CountAsync());
     }
 
     private static async Task SeedCachedInstanceAsync(

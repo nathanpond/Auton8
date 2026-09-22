@@ -63,15 +63,13 @@ internal sealed class StubFlowableClient : IFlowableClient
                 Suspended = false
             })
             .ToList();
-        if (definitions.All(d => d.Key != model.ProcessKey))
-        {
-            definitions.Insert(0, new FlowableProcessDefinitionSummary
-            {
-                Id = "stub-pd", Key = model.ProcessKey, Name = model.ProcessKey, Version = 1, DeploymentId = deploymentId, Suspended = false
-            });
-        }
         DeployedSets[deploymentId] = definitions;
-        var primary = definitions.First(d => d.Key == model.ProcessKey);
+        // Like the engine: no definition under the model's key is a failure, not
+        // a definition the stub invents (#653 prepares the deployable, so the key
+        // is always there for a caller that went through the endpoint).
+        var primary = definitions.FirstOrDefault(d => d.Key == model.ProcessKey)
+            ?? throw new InvalidOperationException(
+                $"Stub deployment of '{model.ProcessKey}' produced no definition under that key; it produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
 
         return Task.FromResult(new WorkflowDeploymentInfo
         {
@@ -210,6 +208,12 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     // Tests can seed this to assert the count-based auto-naming flow.
     public Dictionary<string, int> InstanceCountsByDefinitionKey { get; } = new();
+
+    /// <summary>#658. Instances the engine's HISTORY still holds; a live instance is in history too.</summary>
+    public HashSet<string> HistoricInstanceIds { get; } = new(StringComparer.Ordinal);
+
+    public Task<bool> HistoricProcessInstanceExistsAsync(string processInstanceId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(HistoricInstanceIds.Contains(processInstanceId) || InstancesById.ContainsKey(processInstanceId));
 
     public Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(
         string processDefinitionKey, CancellationToken cancellationToken = default)

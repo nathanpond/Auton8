@@ -67,11 +67,34 @@ public sealed class FlowableClient(
         // them and left the rest where Auton8 could never see them (#578). Asking
         // by deployment id returns exactly what this upload produced, and cannot
         // be confused by a concurrent publish of the same key.
-        var definitions = await GetProcessDefinitionsByDeploymentAsync(deploymentId, cancellationToken);
-        var primary = definitions.FirstOrDefault(d => string.Equals(d.Key, model.ProcessKey, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException(
-                $"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found in it. "
-                + $"It produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
+        IReadOnlyList<FlowableProcessDefinitionSummary> definitions;
+        FlowableProcessDefinitionSummary primary;
+        try
+        {
+            definitions = await GetProcessDefinitionsByDeploymentAsync(deploymentId, cancellationToken);
+            primary = definitions.FirstOrDefault(d => string.Equals(d.Key, model.ProcessKey, StringComparison.Ordinal))
+                ?? throw new InvalidOperationException(
+                    $"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found in it. "
+                    + $"It produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // #653. The window after the POST and before the caller has an id to
+            // withdraw: a failed readback, or a set without the primary, used to
+            // leave the deployment in the engine with nothing recording it. Withdraw
+            // it here, where the id is known, then let the failure surface.
+            try
+            {
+                await DeleteDeploymentAsync(deploymentId, cascade: true, cancellationToken);
+            }
+            catch (Exception withdrawal) when (withdrawal is not OperationCanceledException)
+            {
+                throw new AggregateException(
+                    $"Deployment {deploymentId} could not be read back AND could not be withdrawn; it is orphaned in the engine.",
+                    exception, withdrawal);
+            }
+            throw;
+        }
 
         return new WorkflowDeploymentInfo
         {
@@ -1198,6 +1221,15 @@ public sealed class FlowableClient(
         }
 
         await EnsureSuccessAsync(runtimeDeleteResponse, "cancel the running process instance");
+    }
+
+    public async Task<bool> HistoricProcessInstanceExistsAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return false;
+        await EnsureSuccessAsync(response, $"read the history of process instance {processInstanceId}");
+        return true;
     }
 
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default)

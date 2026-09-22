@@ -424,7 +424,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             // copying, and `make infra-reset` deletes. A clean checkout failed
             // instantly with "error validating resources path"; only
             // `make test-full-local` hid it, because infra-ensure runs first.
-            info.ArgumentList.Add(Path.Combine(repoRoot, "infra", "dapr", "components"));
+            // #660. Overridable, so a run can point the sidecar at a components
+            // directory of its own -- a queue group or durable name that is not
+            // the dev container's, for one.
+            info.ArgumentList.Add(
+                Environment.GetEnvironmentVariable("AUTONATE_E2E_DAPR_COMPONENTS") is { Length: > 0 } componentsDir
+                    ? componentsDir
+                    : Path.Combine(repoRoot, "infra", "dapr", "components"));
             info.ArgumentList.Add("--log-level");
             info.ArgumentList.Add("warn");
             info.ArgumentList.Add("--");

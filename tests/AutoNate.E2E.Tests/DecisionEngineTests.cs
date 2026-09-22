@@ -38,6 +38,7 @@ namespace AutoNate.E2E.Tests;
 /// rather than at the first real use.
 /// </para>
 /// </remarks>
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class DecisionEngineTests
 {

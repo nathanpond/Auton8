@@ -503,7 +503,14 @@ public static class WorkflowEndpoints
                         // have nothing left to rewrite.
                         WorkflowBpmnXml.ExpandForDeployment(
                             WorkflowBpmnXml.PinBusinessRuleTaskDecisions(
-                                model.BpmnXml, pinnedDecisionKeys)),
+                                // #653. PREPARED FIRST, whoever is calling. The studio
+                                // prepares on every save, so for it this is a no-op; a
+                                // direct API caller whose body's process id is not the
+                                // model's key used to deploy that id verbatim, the
+                                // readback by key then found nothing, and the deployment
+                                // stayed in the engine with nothing recording it.
+                                WorkflowBpmnXml.ApplyProcessMetadata(model.BpmnXml, model.ProcessKey, model.Name),
+                                pinnedDecisionKeys)),
                         definitionIdsByKey),
                     // #223. Unset in production; nothing is stamped and the engine
                     // uses its own configured callback URL.

@@ -11079,3 +11079,51 @@ each -- a diagnostic that took the app down, 4 h 6 m of red. Each placeholder
 once now, and the whole report path (log + SystemIssue) sits inside a try, so
 nothing the probe does can stop the app. The gate was killed and re-run.
 
+## M5 fix pass, round three, second movement, 2026-09-22
+
+Owner answers, verbatim options: the NATS stream -- "Recreate it now"; #660 --
+"Build the queue group now"; the carried mediums -- "Fix all five mediums first";
+Outcomes -- "Waive it".
+
+**The stream was recreated** (`$JS.API.STREAM.DELETE.workflow-execution`; the
+next app start re-provisioned it) and the two Dapr specs measured one instance
+per message on it. The startup probe from the first movement now reads 1 there.
+
+**#660 measured, then blocked.** Dapr's JetStream component applies
+`durableName` and `queueGroupName` as-is to every topic's consumer; on a
+fixture-local components copy with both set, delivery stopped entirely (0 of 2
+specs, 0 instances) because the first topic owns the durable and the rest bind to
+it. A queue group here means one component per engine topic and routing in the
+subscriber, or an idempotency store (a table: Rule 4). Both are the owner's;
+`pubsub.yaml` is unchanged and the fixture keeps `AUTONATE_E2E_DAPR_COMPONENTS`
+as the way it was measured.
+
+**#653 -- prepare the deployable at publish.** The endpoint runs
+`ApplyProcessMetadata` on the body before expansion, so the key the record is
+looked up by is the key the engine deploys, whoever calls; the studio prepares on
+save so nothing changes for it. The readback failing withdraws the deployment by
+the id the POST returned. The stub stopped inventing a primary the engine would
+not produce.
+
+**#658 -- history decides.** A terminal cached row is served only while the
+engine's history still has the instance; gone from history is gone for good and
+the row is dropped -- the tie-break #634's fix said the poll would provide and
+the poll never did. Delete-all clears the cache rows with the engine, as the
+single delete always had.
+
+**#655 -- the cell asks for the counterpart.** The Message Flow oracle row keeps
+`instance-ends` and adds: the sender must have a counterpart when it ends.
+Removing the flow now turns the cell red.
+
+**#652 and #643 together.** Seven engine classes ran outside the sequential
+collection, which is why bulk-delete could only be asserted at the wiring. They
+are in it now, a guard keeps the next one in, and the admin spec drives
+delete-all for real: gone from the list, 404 in history. Engine-wide by design
+-- the control promises that -- and the full-local runbook already treats the
+shared engine as a test resource.
+
+**Outcomes waived** on PR #644 in the owner's words.
+
+Pins by discovery: SLIM_BACKEND 3023 → 3028, FLOWABLE 293 → 294, FULL_LOCAL
+539 → 540.
+

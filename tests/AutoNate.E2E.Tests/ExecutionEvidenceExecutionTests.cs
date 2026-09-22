@@ -1047,6 +1047,29 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
                 + "did not happen, so nothing here is evidence that this element sends (#454).");
         }
 
+        // #655. A message flow's effect is the SEND at its source delivering,
+        // and `instance-ends` alone cannot see a send that failed: the send task
+        // records `noTargetProcess` and the linear pool ends anyway. So the cell
+        // also asks whether the sender now has a counterpart -- the instance its
+        // send started -- which is exactly what removing the flow takes away.
+        if (string.Equals(expectedType, "messageFlow", StringComparison.Ordinal))
+        {
+            var linked = 0;
+            for (var attempt = 0; attempt < 40 && linked == 0; attempt++)
+            {
+                var counterparts = await api.GetAsync($"/api/executions/{instance}/counterparts");
+                Assert.True(counterparts.Ok, $"{name}: reading counterparts failed: {counterparts.Status}");
+                using var linkedDocument = JsonDocument.Parse(await counterparts.TextAsync());
+                linked = linkedDocument.RootElement.GetArrayLength();
+                if (linked == 0) await Task.Delay(500);
+            }
+            var sent = await VariableValueAsync(api, instance, "sendMessageResult");
+            Assert.True(linked > 0,
+                $"{name}: the sender ended, but nothing it sent started a counterpart "
+                + $"(`sendMessageResult = '{sent ?? "(nothing)"}'`). The flow is the send's addressing; "
+                + "an ended instance with no counterpart is the flow proving nothing (#655).");
+        }
+
         var observed = await ObserveAsync(api, instance, effect, expectedType, xml);
         _output.WriteLine($"{name,-34} {effect,-17} {observed.Detail}");
 

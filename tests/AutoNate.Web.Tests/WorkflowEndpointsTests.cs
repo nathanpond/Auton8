@@ -826,6 +826,35 @@ public sealed class WorkflowEndpointsTests
         Assert.Equal(new[] { deployed }, factory.FlowableStub.DeletedDeployments);
     }
 
+    /// <summary>
+    /// #653. A direct API caller whose body carries a process id other than the
+    /// model's key: the deployable is PREPARED, so the engine is asked to deploy
+    /// the key the record will be looked up by. Before this the raw id deployed,
+    /// the readback by key found nothing, and the deployment stayed in the engine
+    /// with nothing recording it.
+    /// </summary>
+    [Fact]
+    public async Task Publish_DeploysThePreparedCopy_WhenTheBodysProcessIdIsNotTheKey()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var body = SimpleBpmn.Replace("<bpmn:process id=\"", "<bpmn:process id=\"somethingelse_", StringComparison.Ordinal);
+        Assert.NotEqual(SimpleBpmn, body);
+        var model = new WorkflowModel { Id = id, Name = "Renamed", ProcessKey = "renamed_key", BpmnXml = body };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+
+        response.EnsureSuccessStatusCode();
+        var deployed = Assert.Single(factory.FlowableStub.DeployedModels);
+        Assert.Contains("<bpmn:process id=\"renamed_key\"", deployed.BpmnXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("somethingelse_", deployed.BpmnXml, StringComparison.Ordinal);
+        Assert.Empty(factory.FlowableStub.DeletedDeployments);
+    }
+
     /// <summary>Every read delegates; only the record of a publish fails.</summary>
     private sealed class FailingPublishStore(IWorkflowModelStore inner) : IWorkflowModelStore
     {

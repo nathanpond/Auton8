@@ -19,6 +19,9 @@ namespace AutoNate.E2E.Tests;
 /// would 404. Hierarchy + Explain are both wired through the icon menu
 /// and exist in every fresh DB.
 /// </summary>
+// #652 / #643. One fact here needs the engine (Dapr), so the whole class runs
+// in the sequential collection: engine-global state must not be raced.
+[Collection(AutoNateE2ECollection.Name)]
 public sealed class MiscPagesTests : E2ETestBase
 {
     public MiscPagesTests(AutoNateE2EFixture fixture) : base(fixture) { }

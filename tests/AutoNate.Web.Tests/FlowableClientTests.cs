@@ -689,6 +689,31 @@ public sealed class FlowableClientTests
         Assert.Equal(new[] { "buyer", "seller" }, deployment.Definitions.Select(d => d.ProcessDefinitionKey).ToArray());
     }
 
+    /// <summary>#653. The readback failing is not allowed to leave the deployment behind.</summary>
+    [Fact]
+    public async Task DeployProcessAsync_WithdrawsTheDeployment_WhenTheReadbackFails()
+    {
+        var (client, stub) = CreateClient();
+        var deletes = new List<string>();
+        stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-9" });
+        stub.WhenStatus(HttpMethod.Get, "service/repository/process-definitions", HttpStatusCode.InternalServerError);
+        stub.When(HttpMethod.Delete, "service/repository/deployments/dep-9", request =>
+        {
+            deletes.Add(request.RequestUri!.PathAndQuery);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+
+        await Assert.ThrowsAnyAsync<Exception>(() => client.DeployProcessAsync(new WorkflowModel
+        {
+            Id = Guid.NewGuid(), Name = "Orphan", ProcessKey = "orphan",
+            BpmnXml = "<definitions xmlns=\"http://www.omg.org/spec/BPMN/20100524/MODEL\"><process id=\"orphan\"/></definitions>"
+        }));
+
+        var url = Assert.Single(deletes);
+        Assert.Contains("dep-9", url, StringComparison.Ordinal);
+        Assert.Contains("cascade=true", url, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task DeleteDeploymentAsync_DeletesTheDeploymentWithCascade()
     {
@@ -1351,6 +1376,13 @@ public sealed class FlowableClientTests
         stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-7" });
         stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions",
             new { data = Array.Empty<object>() });
+        // #653. The failure now withdraws the deployment before surfacing.
+        var deletes = new List<string>();
+        stub.When(HttpMethod.Delete, "service/repository/deployments/dep-7", request =>
+        {
+            deletes.Add(request.RequestUri!.PathAndQuery);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             client.DeployProcessAsync(new WorkflowModel
@@ -1358,6 +1390,7 @@ public sealed class FlowableClientTests
                 Id = Guid.NewGuid(), ProcessKey = "ghost", Name = "Ghost", BpmnXml = SimpleBpmn
             }));
         Assert.Contains("ghost", ex.Message);
+        Assert.Contains("cascade=true", Assert.Single(deletes), StringComparison.Ordinal);
     }
 
     [Fact]

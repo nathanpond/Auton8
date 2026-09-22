@@ -26,6 +26,7 @@ namespace AutoNate.E2E.Tests;
 /// engine is asked directly there too.
 /// </para>
 /// </remarks>
+[Collection(AutoNateE2ECollection.Name)]
 [Trait("RequiresService", "Flowable")]
 public sealed class MultiPoolPublishRefusalTests : E2ETestBase
 {

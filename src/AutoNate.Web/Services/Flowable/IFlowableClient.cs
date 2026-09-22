@@ -36,6 +36,11 @@ public interface IFlowableClient
     // key. Drives "ModelName (N+1)" auto-naming on workflow start.
     Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
+    // #658. Whether the engine still has a HISTORY row for the instance. The
+    // runtime table holds only live instances, so a runtime 404 says nothing
+    // about a finished run; history is where "gone for good" is answered.
+    Task<bool> HistoricProcessInstanceExistsAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
