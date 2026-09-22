@@ -59,6 +59,50 @@ public sealed class EfCoreWorkflowModelStore(
         return entity?.ToModel();
     }
 
+    public async Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(
+        string processDefinitionKey, CancellationToken cancellationToken = default)
+    {
+        // The workflow's own key first: the common case, and byte-for-byte the
+        // lookup every single-pool caller already makes.
+        var own = await GetPublishedByProcessKeyAsync(processDefinitionKey, cancellationToken);
+        if (own is not null) return own;
+
+        // Then the deployed set. JSONB containment on the version row, joined to
+        // the model whose PUBLISHED version it is -- a stale version row for a
+        // since-republished workflow must not answer. Newest publication first,
+        // for the same reason GetPublishedByProcessKeyAsync orders (#561).
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var needle = System.Text.Json.JsonSerializer.Serialize(
+            new[] { new { processDefinitionKey } });
+        var versions = await dbContext.WorkflowModelVersions
+            .FromSqlInterpolated($"""
+                SELECT v.*
+                FROM workflow_model_versions v
+                JOIN workflow_models m
+                  ON m.id = v.workflow_model_id
+                 AND m.published_version_number = v.version_number
+                WHERE v.deployed_definitions @> {needle}::jsonb
+                ORDER BY v.published_at_utc DESC, v.version_number DESC
+                LIMIT 1
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var version = versions.FirstOrDefault();
+        if (version is null) return null;
+
+        var model = await dbContext.WorkflowModels
+            .AsNoTracking()
+            .SingleOrDefaultAsync(m => m.Id == version.WorkflowModelId, cancellationToken);
+        if (model is null) return null;
+
+        return model.ToModel() with
+        {
+            BpmnXml = version.BpmnXml,
+            ProcessKey = version.ProcessKey,
+            Name = version.Name
+        };
+    }
+
     public async Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
         string processKey, CancellationToken cancellationToken = default)
     {
@@ -217,6 +261,8 @@ public sealed class EfCoreWorkflowModelStore(
         existingVersion.ProcessDefinitionId = deployment.ProcessDefinitionId;
         existingVersion.ProcessDefinitionKey = deployment.ProcessDefinitionKey;
         existingVersion.ProcessDefinitionVersion = deployment.ProcessDefinitionVersion;
+        // #169. The whole set, beside the primary's columns.
+        existingVersion.DeployedDefinitions = PersistenceModelMapper.SerializeDeployedDefinitions(deployment.Definitions);
         existingVersion.PublishedAtUtc = deployment.DeployedAtUtc.UtcDateTime;
 
         await dbContext.SaveChangesAsync(cancellationToken);

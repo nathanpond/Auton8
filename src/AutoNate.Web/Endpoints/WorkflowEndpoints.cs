@@ -9,6 +9,7 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Decisions;
 using AutoNate.Web.Services.Flowable.Cache;
 using AutoNate.Web.Services.Events;
@@ -221,9 +222,31 @@ public static class WorkflowEndpoints
             var dbWarnings = await WorkflowBpmnXml.BuildRecordTypeShortCodeWarningsAsync(
                 preparedXml, dbContextFactory, cancellationToken);
 
-            var combinedWarnings = dbWarnings.Count == 0
-                ? validation.Warnings
-                : validation.Warnings.Concat(dbWarnings).ToArray();
+            // #169. Said in the studio, not silently: which pool is the one
+            // `start` starts, and which pools are drawn only for context and
+            // deploy as nothing. Warnings, because neither stops a publish.
+            var participants = WorkflowBpmnXml.DescribeCollaboration(preparedXml);
+            var collaborationWarnings = new List<string>();
+            if (participants.Count > 1)
+            {
+                var primary = participants.FirstOrDefault(p => p.IsPrimary);
+                if (primary is not null)
+                {
+                    collaborationWarnings.Add(
+                        $"This diagram has {participants.Count} pools. Starting the workflow starts the '{primary.Name}' pool; "
+                        + "the others start when a message reaches them.");
+                }
+                foreach (var pool in participants.Where(p => !p.IsExecutable))
+                {
+                    collaborationWarnings.Add(
+                        $"Pool '{pool.Name}' contains nothing to run, so it will be deployed as nothing. "
+                        + "That is the right shape for a counterparty you integrate with; draw a flow inside it if it should run here.");
+                }
+            }
+            var combinedWarnings = validation.Warnings
+                .Concat(dbWarnings)
+                .Concat(collaborationWarnings)
+                .ToArray();
 
             var prepared = request.Model with
             {
@@ -272,6 +295,7 @@ public static class WorkflowEndpoints
             IFlowableDecisionClient decisionEngine,
             IAuditEventPublisher auditPublisher,
             IAuthorizer authorizer,
+            IGroupStore groups,
             IOptions<WorkflowBehaviorOptions> behaviorOptions,
             ClaimsPrincipal actor,
             ILoggerFactory loggerFactory,
@@ -330,6 +354,28 @@ public static class WorkflowEndpoints
             if (validationErrors.Count > 0)
             {
                 return Results.BadRequest(new { errors = validationErrors });
+            }
+
+            // #171. A lane names a group. A group that has since been deleted or
+            // archived would deploy that lane's user tasks with nobody able to
+            // see them -- a send into the void wearing a lane's name. Refused
+            // here, naming the lane, before anything reaches the engine.
+            var laneErrors = new List<string>();
+            foreach (var lane in WorkflowBpmnXml.ExtractLaneGroups(model.BpmnXml))
+            {
+                var group = Guid.TryParse(lane.GroupId, out var groupId)
+                    ? await groups.GetAsync(groupId, cancellationToken)
+                    : null;
+                if (group is null || group.IsArchived)
+                {
+                    laneErrors.Add(
+                        $"Lane '{lane.LaneName}' is assigned to a group that no longer exists ({lane.GroupId}). "
+                        + "Its user tasks would deploy with nobody able to see them. Open the lane and pick a group, or clear its group.");
+                }
+            }
+            if (laneErrors.Count > 0)
+            {
+                return Results.BadRequest(new { errors = laneErrors });
             }
 
             // #113. Every call activity is resolved to the child definition that
@@ -501,7 +547,45 @@ public static class WorkflowEndpoints
                         : StatusCodes.Status502BadGateway);
             }
 
-            var published = await store.PublishAsync(model, deployment, cancellationToken);
+            // #169. THE WINDOW THAT HAD NO MECHANISM. See WorkflowPublishCompensation
+            // for why the deployment is withdrawn when the record fails, and why
+            // the two failures are reported apart.
+            var outcome = await WorkflowPublishCompensation.RecordOrWithdrawAsync(
+                deployment,
+                ct => store.PublishAsync(model, deployment, ct),
+                (deploymentId, ct) => flowable.DeleteDeploymentAsync(deploymentId, cascade: true, ct),
+                cancellationToken);
+            if (!outcome.Succeeded)
+            {
+                var log = loggerFactory.CreateLogger("AutoNate.Web.WorkflowPublish");
+                if (outcome.Compensated)
+                {
+                    log.LogError(outcome.RecordFailure,
+                        "Recording the publish of workflow {WorkflowId} failed after deployment {DeploymentId} succeeded; "
+                        + "the deployment was deleted so nothing is left in the engine that Auton8 cannot see.",
+                        model.Id, deployment.DeploymentId);
+                }
+                else
+                {
+                    log.LogCritical(outcome.CompensationFailure,
+                        "Recording the publish of workflow {WorkflowId} failed after deployment {DeploymentId} succeeded, "
+                        + "AND deleting that deployment failed ({RecordFailure}). The engine now holds definitions Auton8 has no row for.",
+                        model.Id, deployment.DeploymentId, outcome.RecordFailure?.Message);
+                }
+
+                return Results.Json(
+                    new
+                    {
+                        errors = new[]
+                        {
+                            outcome.Compensated
+                                ? "The workflow was deployed but could not be recorded, so the deployment was withdrawn. Nothing was published; try again."
+                                : "The workflow was deployed but could not be recorded, and withdrawing the deployment also failed. An administrator needs to look at the engine."
+                        }
+                    },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+            var published = outcome.Published!;
             // A fresh deployment is always active in Flowable — null out any
             // stale suspended flag so the SPA shows "Pause" rather than "Resume".
             var augmented = published with { IsSuspended = false };
@@ -661,7 +745,13 @@ public static class WorkflowEndpoints
                 return Results.BadRequest(new { message = "This workflow has not been published to Flowable yet, so it cannot be paused." });
             }
 
-            await flowable.SuspendProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
+            // #169. Every definition in the published set, not the primary alone:
+            // pausing a collaboration must pause the counterparty's pool too, or
+            // a message flow into it would still start instances.
+            foreach (var key in await PublishedDefinitionKeysAsync(store, model, cancellationToken))
+            {
+                await flowable.SuspendProcessDefinitionAsync(key, cancellationToken);
+            }
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
@@ -688,7 +778,11 @@ public static class WorkflowEndpoints
                 return Results.BadRequest(new { message = "This workflow has not been published to Flowable yet, so it cannot be resumed." });
             }
 
-            await flowable.ActivateProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
+            // #169. The set, as for pause.
+            foreach (var key in await PublishedDefinitionKeysAsync(store, model, cancellationToken))
+            {
+                await flowable.ActivateProcessDefinitionAsync(key, cancellationToken);
+            }
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
@@ -723,6 +817,34 @@ public static class WorkflowEndpoints
         {
             return new Dictionary<string, bool>(StringComparer.Ordinal);
         }
+    }
+
+    /// <summary>
+    /// The process definition keys a workflow's published version deployed (#169):
+    /// the whole set for a collaboration, the one primary for everything else, and
+    /// the primary alone for a version row written before the set was recorded.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> PublishedDefinitionKeysAsync(
+        IWorkflowModelStore store,
+        WorkflowModel model,
+        CancellationToken cancellationToken)
+    {
+        var primary = model.LastDeployment?.ProcessDefinitionKey;
+        if (model.PublishedVersionNumber is { } number)
+        {
+            var versions = await store.ListVersionsAsync(model.Id, cancellationToken);
+            var published = versions.FirstOrDefault(v => v.VersionNumber == number);
+            if (published is not null && published.Deployment.Definitions.Count > 0)
+            {
+                return published.Deployment.Definitions
+                    .Select(d => d.ProcessDefinitionKey)
+                    .Where(k => !string.IsNullOrWhiteSpace(k))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(primary) ? [] : [primary];
     }
 
     private static async Task<WorkflowModel> WithRuntimeStateAsync(

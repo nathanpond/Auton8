@@ -150,6 +150,76 @@ public sealed class ApiSeeder
     }
 
     /// <summary>
+    /// A two-step workflow — <c>UserTask_1</c> "Review" then <c>UserTask_2</c>
+    /// "Approve" — for specs that need a KNOWN next activity (#79).
+    /// </summary>
+    /// <remarks>
+    /// The single-task diagram above cannot prove that <i>move execution state</i>
+    /// or <i>force-complete</i> did anything: with one task there is nowhere to
+    /// move to and nothing to advance into. Two named activities give every
+    /// admin control a target and a complement — "the task is now Approve" and
+    /// "Review is no longer current" are both assertable.
+    /// </remarks>
+    public async Task<WorkflowDto> CreateAndPublishTwoStepWorkflowAsync(
+        string processKey,
+        string name,
+        string? firstAssignee = null)
+    {
+        var modelId = Guid.NewGuid();
+        var bpmnXml = TwoStepBpmn(processKey, name, firstAssignee);
+        var now = DateTimeOffset.UtcNow;
+
+        var saveResponse = await _request.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id = modelId,
+                name,
+                processKey,
+                bpmnXml,
+                isDraft = true,
+                draftVersionNumber = 1,
+                createdAtUtc = now,
+                updatedAtUtc = now
+            }
+        });
+        await EnsureSuccessAsync(saveResponse, "save two-step workflow");
+        var saved = await saveResponse.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from POST /api/workflows/.");
+
+        var publishResponse = await _request.PostAsync(
+            $"/api/workflows/{modelId}/publish",
+            new APIRequestContextOptions { DataObject = saved });
+        await EnsureSuccessAsync(publishResponse, "publish two-step workflow");
+
+        return new WorkflowDto(modelId, name, processKey);
+    }
+
+    /// <summary>
+    /// Starts an instance WITH process variables, so an execution begins life with
+    /// recorded variable state the admin controls can then read back and change
+    /// (#79). The engine — not the cache — holds them, which is what makes a later
+    /// read-back through Flowable's own REST a check of the write rather than of
+    /// the read model against itself.
+    /// </summary>
+    public async Task<ExecutionDto> StartExecutionAsync(
+        string processKey,
+        string instanceName,
+        Dictionary<string, object?> variables)
+    {
+        var response = await _request.PostAsync(
+            $"/api/workflows/{processKey}/start",
+            new APIRequestContextOptions { DataObject = new { name = instanceName, variables } });
+        await EnsureSuccessAsync(response, "start execution with variables");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /start.");
+
+        return new ExecutionDto(
+            Id: json.GetProperty("id").GetString()!,
+            Name: instanceName);
+    }
+
+    /// <summary>
     /// Starts a workflow instance via <c>POST /api/workflows/{processKey}/start</c>
     /// with the given display name. The Flowable response is relayed through
     /// the endpoint; we read the new instance id off it so cancel/delete tests
@@ -424,6 +494,73 @@ public sealed class ApiSeeder
             <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="UserTask_1" />
             <bpmn:sequenceFlow id="Flow_2" sourceRef="UserTask_1" targetRef="EndEvent_1" />
           </bpmn:process>
+        </bpmn:definitions>
+        """;
+    }
+
+    // DI is not decoration here. Without it Flowable deploys the process "without
+    // BPMN diagram notation", and /api/executions/{id}/diagram -- which is how
+    // move-state and force-complete are read back -- refuses to answer at all
+    // (#79). Kept as a C# comment: an XML comment may not contain "--", and the
+    // first version of this note, inside the XML, failed every seed at publish.
+    private static string TwoStepBpmn(string processKey, string name, string? firstAssignee)
+    {
+        var assigneeAttribute = string.IsNullOrWhiteSpace(firstAssignee)
+            ? string.Empty
+            : $" flowable:assignee=\"{System.Security.SecurityElement.Escape(firstAssignee)}\"";
+        return $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1"
+                          targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{processKey}}" name="{{name}}" isExecutable="true">
+            <bpmn:startEvent id="StartEvent_1">
+              <bpmn:outgoing>Flow_1</bpmn:outgoing>
+            </bpmn:startEvent>
+            <bpmn:userTask id="UserTask_1" name="Review"{{assigneeAttribute}}>
+              <bpmn:incoming>Flow_1</bpmn:incoming>
+              <bpmn:outgoing>Flow_2</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:userTask id="UserTask_2" name="Approve">
+              <bpmn:incoming>Flow_2</bpmn:incoming>
+              <bpmn:outgoing>Flow_3</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:endEvent id="EndEvent_1">
+              <bpmn:incoming>Flow_3</bpmn:incoming>
+            </bpmn:endEvent>
+            <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="UserTask_1" />
+            <bpmn:sequenceFlow id="Flow_2" sourceRef="UserTask_1" targetRef="UserTask_2" />
+            <bpmn:sequenceFlow id="Flow_3" sourceRef="UserTask_2" targetRef="EndEvent_1" />
+          </bpmn:process>
+          <bpmndi:BPMNDiagram id="Diagram_1">
+            <bpmndi:BPMNPlane id="Plane_1" bpmnElement="{{processKey}}">
+              <bpmndi:BPMNShape id="Shape_Start" bpmnElement="StartEvent_1">
+                <dc:Bounds x="100" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_Task1" bpmnElement="UserTask_1">
+                <dc:Bounds x="200" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_Task2" bpmnElement="UserTask_2">
+                <dc:Bounds x="360" y="80" width="100" height="80" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNShape id="Shape_End" bpmnElement="EndEvent_1">
+                <dc:Bounds x="520" y="100" width="36" height="36" />
+              </bpmndi:BPMNShape>
+              <bpmndi:BPMNEdge id="Edge_1" bpmnElement="Flow_1">
+                <di:waypoint x="136" y="118" /><di:waypoint x="200" y="118" />
+              </bpmndi:BPMNEdge>
+              <bpmndi:BPMNEdge id="Edge_2" bpmnElement="Flow_2">
+                <di:waypoint x="300" y="118" /><di:waypoint x="360" y="118" />
+              </bpmndi:BPMNEdge>
+              <bpmndi:BPMNEdge id="Edge_3" bpmnElement="Flow_3">
+                <di:waypoint x="460" y="118" /><di:waypoint x="520" y="118" />
+              </bpmndi:BPMNEdge>
+            </bpmndi:BPMNPlane>
+          </bpmndi:BPMNDiagram>
         </bpmn:definitions>
         """;
     }

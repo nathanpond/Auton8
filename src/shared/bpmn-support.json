@@ -612,31 +612,31 @@
     {
       "name": "Pool / Participant",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "participant",
       "eventDefinition": null,
-      "reason": "A pool is the boundary drawn around a process, not a step inside one. It deploys and carries no execution semantics: no instance ever enters it, so no run can prove it (#325 AC5).",
-      "evidence": "deployed and started"
+      "reason": "A pool is a deployed process definition. Publishing a collaboration deploys one definition per pool that contains a flow, as one Flowable deployment, versioned together; a pool drawn only to show a counterparty deploys as nothing and prepare says so. It does not execute the way a task does -- its contents do -- which is the shape of 'executes' recorded in the manifest guard's declared departure (#169).",
+      "evidence": "two-pool diagram deployed as two definitions under one deployment id; each started; single-pool and no-pool diagrams unchanged"
     },
     {
       "name": "Lane",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "lane",
       "eventDefinition": null,
-      "reason": "A lane partitions a diagram visually. It deploys and carries no execution semantics: no instance ever enters it, so no run can prove it (#325 AC5).",
-      "evidence": "deployed and started"
+      "reason": "A lane names an Auton8 group (#171). At deploy, every user task the lane lists that has no assignment of its own takes that group as its candidate group; a task with its own assignee or candidates keeps them. Executes by expansion, like Business Rule Task: the engine never enters the lane, it offers the lane's tasks to the lane's people.",
+      "evidence": "deployed, started, and the lane's task offered to a member of its group and not to a non-member (LaneAssignmentExecutionTests)"
     },
     {
       "name": "Message Flow",
       "category": "Collaboration",
-      "studio": "coming-soon",
-      "engine": "annotation",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "messageFlow",
       "eventDefinition": null,
-      "reason": "A message flow connects two participants across a pool boundary and is not an executable path. It deploys and carries no execution semantics (#325 AC5).",
+      "reason": "A message flow is the addressing of the send at its source. Auton8 resolves the flow's target -- the pool's process key, the message the target answers to, its correlation key -- onto the send task or message event it leaves, and #112's send behaviour delivers through the same correlator the API uses; the engine itself never executes the flow, it executes the send. A flow inside one pool, between endpoints that are not a send/receive pair, or into a pool that deploys nothing is refused at publish, naming it (#170).",
       "evidence": "deployed and started"
     },
     {

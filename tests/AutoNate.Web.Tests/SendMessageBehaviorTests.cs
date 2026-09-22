@@ -138,6 +138,10 @@ public sealed class SendMessageBehaviorTests
             BpmnXml = xml
         };
 
+        // #170. A single-pool stub: a definition key IS the process key.
+        public Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default) =>
+            GetPublishedByProcessKeyAsync(processDefinitionKey, cancellationToken);
+
         public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
             string processKey, CancellationToken cancellationToken = default) =>
             Task.FromResult(publishedXml is null ? null : Model(publishedXml));

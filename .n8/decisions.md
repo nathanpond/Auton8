@@ -10753,3 +10753,253 @@ buffered messages on a shared dev stack. Almost certainly harmless (`max_age` is
 24 h, Dapr's consumers are `deliverPolicy: new`, and the app re-provisions at
 startup) — but destructive to shared infrastructure and not mine to do. The tool
 refused it and the refusal was right. Full evidence is on the issue.
+
+## #79 — execution admin controls covered, 2026-09-21
+
+**Rule-scope decision: six controls through the operator endpoints, one through
+the UI.** The SPA reaches reassign, due date, force-complete, move-state and the
+variable editors through the bpmn-js context menu, which has no stable accessible
+target for Playwright. Bulk-delete has a real button and a real confirm dialog and
+the least forgiving failure mode, so its dialog is the part driven. Every control
+is asserted on its effect read back from the engine or the engine-facing API,
+with a complement.
+
+**Bulk-delete asserts WIRING, not the engine wipe, and this is a narrowing of the
+AC stated rather than hidden.** `FlowableClient.DeleteAllWorkflowExecutionsAsync`
+pages every historic instance Flowable has -- engine-wide, not Auton8-scoped --
+and six engine-touching E2E classes run outside `AutoNateE2ECollection`, in
+parallel, against the same engine. A spec that confirmed the real dialog on a
+full-local run would wipe a neighbour's mid-flight instances: an intermittent red
+that would look like *their* flake. So the request is intercepted at the browser;
+cancelling sends zero requests, confirming sends exactly one with the right
+method and path, and nothing reaches the server. Filed as **#643**
+(`needs-triage`), because the hazard endangers every spec that mutates
+engine-global state, not only this one.
+
+**Seeding goes through the engine.** `ApiSeeder.CreateAndPublishTwoStepWorkflowAsync`
+and a variables overload of `StartExecutionAsync`; the must-have's key link says
+the cache would test the read model against itself.
+
+**Three of my own mistakes, each caught by a run rather than by reading:** an XML
+comment containing `--` inside the seed BPMN failed every publish; the history
+predicate named `endTime` where the route projects `endedAtUtc`; the log
+predicate looked for a flat `activityId` where rows nest `task.taskDefinitionKey`.
+The timeout message now dumps the rows, which is what found the last two.
+
+**Ten consecutive runs, 10/10 green, 7/7 each.** FLOWABLE 271 -> 278,
+FULL_LOCAL 512 -> 519; neither slim pin moves.
+
+**Issues:** #79
+
+## #169 — a collaboration publishes as one deployment, many definitions, 2026-09-21
+
+**Owner decision applied:** `Pool / Participant` → `studio: supported`,
+`engine: executes` (epic #40's call, made 2026-09-21). The declared departure in
+`BpmnSupportManifestTests` says HOW a pool executes -- by containing a process,
+not by being a step -- which is the honest form of widening "every element the
+studio offers executes". Reason baseline regenerated; the diff was exactly that
+row.
+
+**Discretion: the shared version identity is the Flowable deployment id.** One
+uploaded file with N `<process>` elements is already one deployment holding N
+definitions, co-versioned and all-or-nothing -- measured, and the story named it
+the obvious candidate. The set is recorded as a JSON **column** on the version
+row (`deployed_definitions`), not a table: inside Rule 4's line, and the primary
+keeps the 1:1 columns so every existing reader is unchanged.
+
+**Discretion: the primary pool is the first participant, in collaboration order,
+whose process contains a flow node; it carries the workflow key and is what
+`start` starts.** Other pools start by message (#170's subject). A single-pool or
+no-pool diagram reduces to `FirstOrDefault()` exactly, asserted -- that is the
+regression that matters most. The prepare response says which pool starts and
+which pools deploy as nothing, as warnings, so the studio shows it.
+
+**Rule 1: the save path.** `ApplyProcessMetadata` renamed the first process and
+never rewrote `participant/@processRef`, so a two-pool diagram was broken before
+publish was reached. Fixed; the participant follows the rename; non-primary
+pools take their participant's name as the process name so an execution's
+definition name IS the pool name.
+
+**Rule 1: compensation.** Deploy succeeded, `store.PublishAsync` failed, and
+`IFlowableClient` had no delete-deployment call -- a window open for every
+single-pool publish too. `WorkflowPublishCompensation.RecordOrWithdrawAsync` is
+shaped as two delegates rather than a class over two interfaces, because the
+test project has no mocking library and a fake of a thirty-member interface is a
+place for the tested behaviour to hide. Both failures are reported apart: "the
+engine still holds an orphan" is the more serious fact and must not vanish into
+the first error.
+
+**#578's refusal inverted, not deleted.** `BuildMultiPoolParticipantErrors`
+became `BuildCollaborationErrors`: dangling `processRef`, duplicate process ids,
+no executable pool. The unit test and the E2E that proved the refusal now prove
+the capability, and the E2E keeps the "nothing reached the engine" shape for
+what is refused now.
+
+**Found while flipping the manifest, and worth its own line:** offering the pool
+would have put a coming-soon Lane one click away inside it. The withheld pool
+had been denying `bpmn-icon-lane` by proxy, through its own `menuClassNames`;
+with the pool offered that class left the deny set AND joined the supported
+set. The lane's `notOnThePalette` note now names its glyph and is judged by its
+OWN manifest status, in `palette.js` and in the guard that mirrors it. The
+guard caught it before the studio did.
+
+**Not delivered here, said plainly:** AC 6's second half -- counterpart
+executions started by a message flow are navigable from one another -- has no
+subject until #170 creates counterparts. The participant half lands here.
+
+**Measured:** inverted E2E 3/3 against a live engine (two definitions under one
+deployment id; republish advanced the unchanged pool to v2 under the same id;
+dangling ref refused with `total: 0` for both keys). Unit 83/83 across the
+refusal, manifest, palette and compensation classes. SPA lint 98/0, tsc clean.
+Pins: SLIM_BACKEND 2962 → 2974, FLOWABLE 278 → 280, FULL_LOCAL 519 → 521.
+
+**Issues:** #169
+
+## #169, second movement — what the first gate caught, 2026-09-21
+
+**Seventeen backend failures, one cause I should have known.** `deployed_definitions`
+was added to `DatabaseSchemaInitializer` alone; the backend test database
+applies `BaseSchema.sql` alone, and every later-added column in that file is an
+`ALTER TABLE … ADD COLUMN IF NOT EXISTS` for exactly this reason. `42703: column
+w.deployed_definitions does not exist` in sixteen tests that never mention it.
+Added in both places, in the file's own style, with the measurement in the
+comment.
+
+**The seventeenth was the execution-evidence guard refusing the manifest flip**
+-- "Pool / Participant claims `executes` and has no row saying whether it was
+ever RUN" -- which is #325's guard doing precisely its job. The row is a
+DECLARATION (`task-appears`), and the live oracle gained the cell that measures
+it. Two conventions the oracle enforces that I learned by being refused:
+`Ev_1` must BE the declared element, authored and deployed (my first cell made
+the user task `Ev_1` and failed on `Expected: "participant", Actual:
+"userTask"`); and containment is by descendants, so a participant -- an empty
+element whose process is a sibling -- needed `NestedIdsIn` to follow
+`processRef`. That is expressed as "a pool contains the process it references",
+not as a special case in the pool's cell. A participant has no activity row, so
+it joins `NeverEntered`. `ExecutionOracleSizeTests` 50 → 51; FLOWABLE 280 → 281,
+FULL_LOCAL 521 → 522.
+
+**Also learned the hard way:** `dotnet test --no-build` after editing a test file
+runs the stale binary -- one run reported the OLD tally literals as still wrong
+after I had changed them. And a `--filter` naming a theory I had guessed the
+name of matched only the size pin and reported green in 1 ms. Both are the
+"filter matching nothing reads as a faster, greener run" shape this project
+documents, and I walked into both in one hour.
+
+## #170 — message flows execute, 2026-09-21
+
+**A message flow is the addressing, not a decoration.** `ApplyMessageFlows`
+stamps the target pool's process id, message name and correlation key onto the
+flow's source at prepare time, and `ExtractMessageSendDeclarations` resolves the
+same from the flow at run time when the attributes are absent. An explicit
+attribute still wins: an author who typed a target meant it, and the flow is the
+default beneath that, never an override above it. Logged as a `(planner)` call.
+
+**Declarations are scoped to a pool only where there are pools to tell apart.**
+The first cut scoped `ExtractMessageDeclarations` whenever a process id was
+supplied, and two dispatcher facts went to zero starts: their single-process
+stub diagrams carry a process id that is not the registration key, which every
+caller before this overload had relied on being harmless. Scoping now applies
+only when the diagram holds more than one process AND the supplied id names one
+of them; a single-process diagram answers for any key it is addressed by. A
+scope that changes the answer for diagrams it was not written for is a
+regression wearing a feature's name.
+
+**A flow drawn to the pool itself is accepted and resolved to the pool's one
+message start.** BPMN allows `targetRef` to be a participant and the studio
+draws exactly that for a collapsed pool. It is also the ONLY way a message flow
+can reach a pool that deploys nothing -- anything a flow could end AT is a flow
+node, and a pool holding one deploys -- so the "deploys as nothing" refusal the
+story asks for is unreachable without it. The first version of that refusal
+test removed the start event and asserted on the wrong error (a dangling ref),
+which was the test telling me the path did not exist. Two refusals name the
+pool: empty, and no single message start.
+
+**Flowable wraps historic-variable rows under `variable`.** The upstream half
+of the counterpart lookup deserialised the row as the variable and read an
+empty name; the E2E spec's reverse direction timed out on `Counterparts were:`
+nothing. Probed the endpoint by hand, found the existing
+`FlowableHistoricVariableInstanceResponse` already modelled it (#173), reused it.
+The two-directional assertion in `A_flow_into_a_start_event_starts_a_counterpart_linked_both_ways`
+is what caught it -- the sender side passed alone.
+
+**`$"""` cannot hold `${…}`.** The Message Flow oracle arm used `${{…}}` inside a
+single-dollar raw string, which is CS9006, and the E2E project stopped
+compiling; tier discovery reported FLOWABLE 0 / FULL_LOCAL 0, which is the
+"filter matching nothing reads as a faster run" shape again, this time as a
+build failure hiding behind a count. Switched the arm to `$$"""`.
+
+Pins by discovery: SLIM_BACKEND 2975 → 2993, FLOWABLE 282 → 286, FULL_LOCAL
+523 → 527.
+
+**#170, what the first gate caught.** Two guards, both doing their job: the
+event catalog's parity test refused `ExecutionCounterpartsViewed` published
+with no catalog entry (invisible on the Events page, undiscoverable by
+subscribers), and `ExecutionReadSourceGuardTests` refused an eighteenth GET
+route on ExecutionEndpoints that injects `IFlowableClient` without being on
+the allowed list with a reason. Both fixed in the file's own shape: the entry,
+and `/counterparts` allowed as STRUCTURAL like `/children` -- the link is a
+process variable read from history in both directions, which no cache column
+holds -- with the route pin moved 17 → 18.
+
+## #171 — a lane's group is the default assignment of its tasks, 2026-09-21
+
+**Resolved on the deployed copy, not the stored diagram.** `ExpandForDeployment`
+writes `flowable:candidateGroups` from the lane onto each listed user task that
+has nothing of its own; prepare (what save stores) leaves the task unassigned
+and the group on the lane. That is what lets the property editor say "from the
+lane" instead of showing an assignment the author never made, and it is why
+`(planner)` candidateGroups was the natural mapping: the engine already offers
+a task to its candidate groups; the lane only has to say which.
+
+**The group is written by id, and the task list asks the engine for the actor's
+group ids.** Flowable's `candidateUser` expands to groups only through its own
+IdM, which Auton8 does not populate, so `GET /api/tasks/assigned-to-me` gains a
+third query, `candidateGroups=<ids>`, resolved through `IGroupStore`. An actor
+in no group issues no third query -- unit-asserted, because a query for "" is a
+query the engine answers. Ids rather than names: a renamed group keeps its lane.
+The studio's existing free-text candidate-groups field is left as it was; it
+never had a consumer and gaining one is a separate decision.
+
+**Override honoured by NOT also writing the lane's group.** The E2E asserts the
+lane's group does not see a task that has its own assignee. Writing both would
+have passed a member-sees check and made every specifically assigned task the
+whole team's.
+
+**Nested lanes: the innermost lane naming a group wins.** bpmn-js lists a node
+in every lane whose bounds contain it, inner and outer alike; taking the
+deepest is the rule in both the expansion and the studio's description. Flat
+lanes satisfy the AC (`Claude's Discretion`); nesting is proven at the XML
+level only.
+
+**A flow-node's lane is reported from `flowNodeRef`, never from bounds.** The
+classic lane bug is a task that looks inside a lane and is not listed by it;
+a description that read the canvas would hide exactly that. The studio E2E
+drags with the real mouse so bpmn-js's own lane-update behaviour is what keeps
+membership in step, and asserts the lane LEFT as well as the lane entered.
+
+**Lane moves to `executes` with a declared departure**, the same shape as
+Business Rule Task and Message Flow: the engine never enters it, and a run
+proves it anyway. The oracle's cell carries no group (the oracle has none to
+name) and proves the lane deploys and its task appears; the assignment is
+`LaneAssignmentExecutionTests`' claim, named on the evidence row.
+
+**Rule 2, in scope:** the property-coverage vitest guard demanded a round-trip
+test for the new `groupId` property, which it got (`lane-round-trip.test.js`,
+seven facts); the guard is why it was not forgotten.
+
+Pins by discovery: SLIM_BACKEND 2993 → 3007, SLIM_E2E 240 → 243, FLOWABLE
+286 → 290, FULL_LOCAL 527 → 534.
+
+**Rule 1, in scope (#171): the studio's save was losing lanes.** `saveXml`
+picks the highest-scoring of four XML candidates, two of which rebuild the
+process from its flow elements and cannot carry a laneSet; the scorer counted
+only flow-node tags, so a rebuild tied bpmn-js's own output and, on a later
+candidate, won -- LaneStudioTests' first run came back with no `<bpmn:lane>` at
+all, on a diagram whose two lanes were drawn and visible. The scorer now counts
+the structural constructs those rebuilds drop (lanes, participants, message
+flows, data objects, artifacts), so the candidate that kept them wins; a vitest
+pins that a candidate with a laneSet outscores the same diagram without one.
+This is the drag spec earning its keep before the story shipped: the lane bug
+it exists to catch turned up in a different coat.
+

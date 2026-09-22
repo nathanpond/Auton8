@@ -24,5 +24,8 @@ public partial class WorkflowModelVersion
 
     public int ProcessDefinitionVersion { get; set; }
 
+    /// <summary>JSON list of every definition in the deployment (#169); null on older rows.</summary>
+    public string? DeployedDefinitions { get; set; }
+
     public DateTime PublishedAtUtc { get; set; }
 }

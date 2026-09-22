@@ -58,6 +58,21 @@ public interface IWorkflowModelStore
     /// is the model row's, because versions do not carry it.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The published workflow that deployed a definition with this key (#170) --
+    /// the workflow's own key, or any pool's key in its deployed set.
+    /// </summary>
+    /// <remarks>
+    /// After #169 a non-primary pool's process key is a definition INSIDE the
+    /// primary's workflow, not a <c>workflow_models</c> row. A message addressed
+    /// to that pool has to find the workflow that owns it, and the version row
+    /// records the set for exactly this lookup. Same field contract as
+    /// <see cref="GetPublishedByProcessKeyAsync"/>: the published version's xml.
+    /// </remarks>
+    Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(
+        string processDefinitionKey,
+        CancellationToken cancellationToken = default);
+
     Task<WorkflowModel?> GetPublishedByProcessKeyAsync(
         string processKey, CancellationToken cancellationToken = default);
 

@@ -438,6 +438,10 @@ public sealed class AgentSkillAuthorizationTests
         public virtual Task<WorkflowModel?> GetAsync(Guid id, CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) => throw Boom();
+        // #170. A single-pool stub: a definition key IS the process key.
+        public Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default) =>
+            GetPublishedByProcessKeyAsync(processDefinitionKey, cancellationToken);
+
         public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default) => throw Boom();
         public Task<WorkflowModel> PublishAsync(WorkflowModel model, WorkflowDeploymentInfo deployment, CancellationToken cancellationToken = default) => throw Boom();

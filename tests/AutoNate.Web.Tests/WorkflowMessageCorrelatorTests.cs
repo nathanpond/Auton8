@@ -299,6 +299,10 @@ public sealed class WorkflowMessageCorrelatorTests
             throw new NotSupportedException(
                 "This caller must ask GetPublishedByProcessKeyAsync (#553).");
 
+        // #170. A single-pool stub: a definition key IS the process key.
+        public Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default) =>
+            GetPublishedByProcessKeyAsync(processDefinitionKey, cancellationToken);
+
         public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             Task.FromResult(model);
 

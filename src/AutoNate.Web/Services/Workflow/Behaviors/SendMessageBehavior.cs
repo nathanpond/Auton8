@@ -100,6 +100,9 @@ public sealed class SendMessageBehavior : IWorkflowBehavior
             declaration.MessageName,
             correlationValue,
             variables: null,
+            // #170. If this send STARTS the counterpart, the new instance records
+            // this one as what started it.
+            startedByInstanceId: context.ProcessInstanceId,
             cancellationToken);
 
         _log.LogInformation(

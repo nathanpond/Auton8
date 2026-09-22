@@ -1074,6 +1074,11 @@ public static class EventCatalog
                     "Fires from GET /api/executions/{processInstanceId}/children.",
                     ["resource: { processInstanceId }. details: { childCount }."]),
                 new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionCounterpartsViewed,
+                    "Someone read the counterpart executions linked to this one by a message flow (#170): the instance a send from it started, or the sender that started it.",
+                    "Fires from GET /api/executions/{processInstanceId}/counterparts.",
+                    ["resource: { processInstanceId }. details: { resultCount }."]),
+                new EventCatalogEntry(
                     WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionStateMoved,
                     "An admin moved an execution to a different BPMN activity.",
                     "Fires from POST /api/executions/{processInstanceId}/move-state.",

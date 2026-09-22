@@ -11,6 +11,7 @@ using AutoNate.Web.Models.Forms;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Flowable.Cache;
 using Microsoft.AspNetCore.Mvc;
@@ -690,6 +691,28 @@ public static class ExecutionEndpoints
             return Results.Ok(children);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        // #170. Instances linked to this one by a message flow: what its sends
+        // started, and what started it. The same gate and shape as /children,
+        // because to an operator a counterpart and a called workflow are the
+        // same question -- "what else is this run entangled with?"
+        executions.MapGet("/{processInstanceId}/counterparts", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var counterparts = await flowable.GetCounterpartInstancesAsync(
+                processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionCounterpartsViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = counterparts.Count },
+                cancellationToken);
+            return Results.Ok(counterparts);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
         executions.MapGet("/{processInstanceId}/activities/{activityId}/completed-assignees", async (
             string processInstanceId,
             string activityId,
@@ -1163,6 +1186,7 @@ public static class ExecutionEndpoints
         tasks.MapGet("/assigned-to-me", async (
             HttpContext http,
             IFlowableClient flowable,
+            IGroupStore groups,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
@@ -1172,7 +1196,11 @@ public static class ExecutionEndpoints
                 return Results.Unauthorized();
             }
 
-            var list = await flowable.GetTasksAssignedToUserAsync(actorId, cancellationToken);
+            // #171. Work a lane offered to one of the actor's groups is theirs
+            // to see. The groups are Auton8's, resolved here, because the engine
+            // knows nothing of them.
+            var list = await flowable.GetTasksAssignedToUserAsync(
+                actorId, await CandidateGroupsOfAsync(groups, actorId, cancellationToken), cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.TasksAssignedToMeViewed,
@@ -1530,6 +1558,18 @@ public static class ExecutionEndpoints
     public sealed record UpdateProcessVariablesRequest(IReadOnlyList<ProcessVariableUpdate> Variables);
 
     public sealed record ReassignTaskRequest(string? Assignee);
+
+    /// <summary>
+    /// The candidate-group identities a user answers to (#171): the ids of the
+    /// Auton8 groups they belong to, which is what a lane writes onto its tasks.
+    /// </summary>
+    internal static async Task<IReadOnlyCollection<string>> CandidateGroupsOfAsync(
+        IGroupStore groups, string actorId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(actorId, out var userId)) return Array.Empty<string>();
+        var memberships = await groups.ListGroupsForUserAsync(userId, cancellationToken);
+        return memberships.Select(g => g.Id.ToString()).ToArray();
+    }
 
     public sealed record UpdateTaskDueDateRequest(DateTimeOffset? DueDate);
 

@@ -57,6 +57,28 @@ internal sealed class StubFlowableClient : IFlowableClient
         });
     }
 
+    // #169. The set a deployment produced, and the withdrawal of one. The stub
+    // records withdrawals so a test can assert the compensation reached the
+    // engine boundary; it produces the primary alone as its "set", which is
+    // what a single-pool publish reads back.
+    public List<string> DeletedDeployments { get; } = [];
+
+    public Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(
+        string deploymentId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<FlowableProcessDefinitionSummary>>([]);
+
+    public Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<FlowableProcessInstanceSummary>>([]);
+
+    public Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default)
+    {
+        DeletedDeployments.Add(deploymentId);
+        return Task.CompletedTask;
+    }
+
     // Tests can seed this to drive both GetLatestProcessDefinitionAsync and
     // the bulk variant. Keyed by processDefinitionKey.
     public Dictionary<string, FlowableProcessDefinitionSummary> ProcessDefinitionsByKey { get; } = new();
@@ -443,6 +465,13 @@ internal sealed class StubFlowableClient : IFlowableClient
             .Take(size)
             .ToArray();
         return Task.FromResult<IReadOnlyList<FlowableHistoricActivityEvent>>(page);
+    }
+
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId, IReadOnlyCollection<string> candidateGroups, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"TasksForUserGroups:{userId}:{string.Join(",", candidateGroups)}");
+        return GetTasksAssignedToUserAsync(userId, cancellationToken);
     }
 
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(

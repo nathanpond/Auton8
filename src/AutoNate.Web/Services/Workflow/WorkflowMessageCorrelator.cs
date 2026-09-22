@@ -46,24 +46,44 @@ public sealed class WorkflowMessageCorrelator(
         string? MessageName = null,
         IReadOnlyList<string>? AvailableMessages = null);
 
+    /// <summary>
+    /// The process variable a message-started instance carries naming the
+    /// instance whose send started it (#170). What <c>/counterparts</c> reads.
+    /// </summary>
+    public const string CounterpartOfVariable = "autonateCounterpartOf";
+
+    public Task<Result> CorrelateAsync(
+        string processKey,
+        string? messageName,
+        string? correlationValue,
+        IReadOnlyDictionary<string, object?>? variables,
+        CancellationToken cancellationToken = default) =>
+        CorrelateAsync(processKey, messageName, correlationValue, variables, startedByInstanceId: null, cancellationToken);
+
     public async Task<Result> CorrelateAsync(
         string processKey,
         string? messageName,
         string? correlationValue,
         IReadOnlyDictionary<string, object?>? variables,
+        string? startedByInstanceId,
         CancellationToken cancellationToken = default)
     {
         // PUBLISHED, not the draft (#553). Correlating a message targets a
         // RUNNING instance, so the diagram that decides which messages are
         // addressable has to be the one the engine deployed -- not whatever
         // the author has since typed into the draft.
-        var model = await models.GetPublishedByProcessKeyAsync(processKey, cancellationToken);
+        //
+        // BY DEFINITION KEY, not model key (#170): after #169 the target may be
+        // a pool inside another workflow's deployed set.
+        var model = await models.GetPublishedByDefinitionKeyAsync(processKey, cancellationToken);
         if (model is null || string.IsNullOrWhiteSpace(model.BpmnXml))
         {
             return new Result(Outcome.UnknownProcess);
         }
 
-        var declarations = WorkflowBpmnXml.ExtractMessageDeclarations(model.BpmnXml);
+        // SCOPED to the addressed process (#170). A diagram holding several pools
+        // holds several processes' declarations; the message is for one of them.
+        var declarations = WorkflowBpmnXml.ExtractMessageDeclarations(model.BpmnXml, processKey);
         if (declarations.Count == 0)
         {
             return new Result(Outcome.UnknownMessage, AvailableMessages: Array.Empty<string>());
@@ -152,8 +172,21 @@ public sealed class WorkflowMessageCorrelator(
         var start = selected.FirstOrDefault(d => d.Kind == WorkflowMessageTargetKind.Start);
         if (start is not null)
         {
+            // #170. A message-started instance remembers who started it, so the
+            // two executions are navigable from each other. On START only: a
+            // delivery advances an instance that already has its own history.
+            var startVariables = variables;
+            if (!string.IsNullOrWhiteSpace(startedByInstanceId))
+            {
+                var merged = new Dictionary<string, object?>(variables ?? new Dictionary<string, object?>(), StringComparer.Ordinal)
+                {
+                    [CounterpartOfVariable] = startedByInstanceId
+                };
+                startVariables = merged;
+            }
+
             var instanceId = await flowable.StartProcessInstanceByMessageAsync(
-                start.MessageName, variables, cancellationToken);
+                start.MessageName, startVariables, cancellationToken);
             return new Result(
                 Outcome.Started,
                 ProcessInstanceId: instanceId,

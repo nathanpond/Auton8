@@ -114,12 +114,15 @@ public sealed class BpmnSupportManifestTests
             // absent from the image, the DMN engine is NOT, which the old reason
             // conflated), so publish rewrites the deployed copy into a
             // flowable:type=dmn service task. Same shape as Complex Gateway (#218).
-            ["studio:supported"] = 49,
+            // 51/3 and 54/7 until #171 made Lane authorable and executable BY
+            // EXPANSION: the lane's group becomes candidateGroups on the tasks it
+            // lists. Both axes moved on one row, the same shape as #111.
+            ["studio:supported"] = 52,
             ["studio:withdrawn"] = 15,
-            ["studio:coming-soon"] = 5,
-            ["engine:executes"] = 52,
+            ["studio:coming-soon"] = 2,
+            ["engine:executes"] = 55,
             ["engine:cannot-execute"] = 8,
-            ["engine:annotation"] = 9,
+            ["engine:annotation"] = 6,
         };
 
         var drifted = expected
@@ -205,10 +208,20 @@ public sealed class BpmnSupportManifestTests
         // the expanded form wrote route='big' into a process variable, and
         // BusinessRuleTaskExecutionTests asserts a gateway after it takes the path
         // the table chose.
+        // Pool / Participant left this list in #169. The guard's bar: "an
+        // element moving INTO supported is a claim that an author can configure
+        // it and it runs." An author draws pools and the studio offers them;
+        // publishing deploys one definition per executable pool as one Flowable
+        // deployment, and the E2E starts each. Lane and Message Flow stay, as
+        // #171 and #170's subjects.
+        // Message Flow left this list in #170: an author draws it from the pool
+        // context pad, and the send at its source delivers across it.
+        // Lane left in #171: an author adds one from the pool's context pad and
+        // names its group in the lane editor, and at deploy the tasks in it are
+        // offered to that group -- measured on a member and a non-member.
         string[] expectedComingSoon =
         [
-            "Data Input", "Data Output", "Lane",
-            "Message Flow", "Pool / Participant",
+            "Data Input", "Data Output",
         ];
 
         static string Diff(string label, IEnumerable<string> actual, IEnumerable<string> expected)
@@ -395,8 +408,13 @@ public sealed class BpmnSupportManifestTests
         // element is refused at DEPLOY (KIE is absent from the image; the DMN
         // engine is not), so publish rewrites the deployed copy into a
         // flowable:type=dmn service task.
-        Assert.Equal(38, Count("executes"));
-        Assert.Equal(9, Count("annotation"));
+        // #169 moved Pool / Participant from annotation to executes: 38 -> 39, 9 -> 8.
+        // #170 moved Message Flow from annotation to executes: 39 -> 40, 8 -> 7.
+        // #171 moved Lane from annotation to executes: 40 -> 41, 7 -> 6. "No
+        // instance ever enters it" is still true; what changed is that a run can
+        // now PROVE the lane -- its tasks are offered to its group.
+        Assert.Equal(41, Count("executes"));
+        Assert.Equal(6, Count("annotation"));
         Assert.Equal(7, Count("cannot-execute"));
     }
 
@@ -718,9 +736,28 @@ public sealed class BpmnSupportManifestTests
             // proves it by starting an instance; the obstacle is that the
             // execution oracle's entry assertion is activity-shaped, which is
             // work rather than a reclassification.
-            ["Pool / Participant"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
-            ["Lane"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
-            ["Message Flow"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: deploys, and no instance ever enters it, so no run can prove it."),
+            // #169, owner's decision on epic #40: a pool IS a deployed process
+            // definition once a collaboration publishes as a set, so `annotation`
+            // -- "no instance ever enters it" -- became false the moment that
+            // shipped. The departure is upward and deserves saying HOW a pool
+            // executes, because it is not the way a task does: nothing runs the
+            // pool; its contents run, as their own definition, under the same
+            // deployment id as every other pool in the diagram. #103's verdict
+            // was measured before pools could deploy at all.
+            ["Pool / Participant"] = (BpmnSupportManifest.EngineExecutes, "#169: a pool deploys as its own process definition, one per executable pool, co-versioned under one Flowable deployment. It executes by containing a process, not by being a step; measured by deploying a two-pool diagram and starting each definition."),
+            // #171. A lane is never entered, and it was never going to be; what
+            // #325 AC5 could not see is that a lane can have an EFFECT without
+            // being a step. Its group is written onto the user tasks it lists at
+            // deploy, and "executes" here means what it means for Business Rule
+            // Task: the drawn thing is rewritten into something the engine runs,
+            // and a run proves it -- a member sees the task, a non-member does not.
+            ["Lane"] = (BpmnSupportManifest.EngineExecutes, "#171: a lane's group becomes candidateGroups on the user tasks it lists that have no assignment of their own; executes by expansion, measured by a group member seeing the task and a non-member not (LaneAssignmentExecutionTests)."),
+            // #170. The engine never executes a message flow; it executes the SEND
+            // at the flow's source, and the flow is that send's addressing --
+            // resolved at prepare and again at run time from the stored diagram.
+            // "executes" here means what it meant for Message End and Send Task,
+            // which the same behaviour bridge runs: the drawn thing delivers.
+            ["Message Flow"] = (BpmnSupportManifest.EngineExecutes, "#170: a message flow resolves to its source's send -- target pool, message name, correlation key -- and that send delivers through #112's correlator; measured end to end across two pools, sender advancing the receiver."),
             ["Data Store Reference"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
             ["Data Input"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
             ["Data Output"] = (BpmnSupportManifest.EngineAnnotation, "#325 AC5: a design-time declaration creating no runtime variable; no instance enters it."),
@@ -1513,9 +1550,7 @@ public sealed class BpmnSupportManifestTests
             "Data Output",
             "Data Store Reference",
             "Group",
-            "Lane",
-            "Message Flow",
-            "Pool / Participant",
+            // Lane left this list in #171: it executes by expansion.
             "Text Annotation",
         ];
 

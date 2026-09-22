@@ -246,6 +246,10 @@ public sealed class WorkflowSignalBroadcasterTests
         public Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        // #170. A single-pool stub: a definition key IS the process key.
+        public Task<WorkflowModel?> GetPublishedByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default) =>
+            GetPublishedByProcessKeyAsync(processDefinitionKey, cancellationToken);
+
         public Task<WorkflowModel?> GetPublishedByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<WorkflowModel?> GetAsync(Guid workflowModelId, CancellationToken cancellationToken = default) =>

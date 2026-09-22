@@ -41,6 +41,11 @@ public sealed class ExecutionReadSourceGuardTests
         ["/{processInstanceId}/children"] =
             "STRUCTURAL: workflow_execution_cache has no parent-instance column, so the parent/child "
             + "relation cannot be expressed in it at all. Adding one is a projection and schema change.",
+        ["/{processInstanceId}/counterparts"] =
+            "STRUCTURAL, like /children (#170): the link between a sender and the instance its message "
+            + "started is a process VARIABLE on the started instance (autonateCounterpartOf), read from "
+            + "history in both directions. The cache has no column for it; adding one is a projection "
+            + "and schema change.",
         ["/{processInstanceId}/activities/{activityId}/completed-assignees"] =
             "History-derived; same sibling read-through as /history.",
         ["/{processInstanceId}/activities/{activityId}/instances"] =
@@ -148,9 +153,10 @@ public sealed class ExecutionReadSourceGuardTests
         // crept arm, the one that catches NEW live reads, that depends on the
         // regex seeing them. House style for pins here is exact (tests/tiers.env,
         // ExecutionOracleSizeTests): growth has to be as visible as loss.
+        // 17 -> 18 in #170: /counterparts.
         Assert.True(
-            allRoutes.Count == 17,
-            $"Expected 17 GET routes in {EndpointsPath}; found {allRoutes.Count}. "
+            allRoutes.Count == 18,
+            $"Expected 18 GET routes in {EndpointsPath}; found {allRoutes.Count}. "
             + "If a route was added or removed, move this number in the same commit. "
             + "If MapGet's shape changed, this guard is looking at nothing.");
 

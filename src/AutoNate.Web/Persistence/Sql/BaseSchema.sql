@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS workflow_model_versions (
     published_at_utc TIMESTAMPTZ NOT NULL
 );
 
+-- #169. The deployed set, beside the primary's 1:1 columns above. Here AND in
+-- DatabaseSchemaInitializer, the way every later-added column in this file is:
+-- the backend test database applies this file alone, so a column added only to
+-- the initializer reads as `42703: column deployed_definitions does not exist`
+-- in seventeen tests that never mention it -- measured, on the first gate.
+ALTER TABLE workflow_model_versions
+    ADD COLUMN IF NOT EXISTS deployed_definitions JSONB NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS workflow_model_versions_workflow_model_id_version_number_key
     ON workflow_model_versions (workflow_model_id, version_number);
 

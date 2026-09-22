@@ -25,6 +25,13 @@ internal static class DatabaseSchemaInitializer
             published_at_utc TIMESTAMPTZ NOT NULL
         );
 
+        -- #169. A publish deploys a SET of definitions (one per executable pool);
+        -- the set is recorded on the version row. A column, not a table: the
+        -- primary definition keeps the 1:1 columns above, so every existing
+        -- reader is unchanged, and the set is only ever read alongside them.
+        ALTER TABLE workflow_model_versions
+            ADD COLUMN IF NOT EXISTS deployed_definitions JSONB NULL;
+
         CREATE UNIQUE INDEX IF NOT EXISTS workflow_model_versions_workflow_model_id_version_number_key
             ON workflow_model_versions (workflow_model_id, version_number);
 

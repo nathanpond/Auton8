@@ -70,9 +70,46 @@ public sealed record class WorkflowModelVersion
     public DateTimeOffset PublishedAtUtc { get; init; }
 }
 
+/// <summary>
+/// One deployed definition of a set (#169). A single-pool workflow has exactly
+/// one, equal to the primary; a collaboration has one per executable pool.
+/// </summary>
+public sealed record class WorkflowDeployedDefinition
+{
+    public required string ProcessDefinitionKey { get; init; }
+
+    public required string ProcessDefinitionId { get; init; }
+
+    public int ProcessDefinitionVersion { get; init; }
+
+    /// <summary>The engine's name for it -- the participant's name, for a pool.</summary>
+    public string? Name { get; init; }
+}
+
+/// <summary>
+/// What a participant of a collaboration would deploy as (#169).
+/// </summary>
+public sealed record WorkflowParticipantInfo(
+    string Id,
+    string Name,
+    string? ProcessId,
+    bool IsExecutable,
+    bool IsPrimary);
+
 public sealed record class WorkflowDeploymentInfo
 {
+    /// <summary>
+    /// The shared version identity of the set (#169). Flowable already groups the
+    /// definitions of one uploaded file under one deployment, co-versioned and
+    /// all-or-nothing, so this id IS the identity the AC asks for.
+    /// </summary>
     public string DeploymentId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Every definition the deployment produced (#169). Empty on rows written
+    /// before this existed; readers fall back to the primary columns below.
+    /// </summary>
+    public IReadOnlyList<WorkflowDeployedDefinition> Definitions { get; init; } = [];
 
     public string ProcessDefinitionId { get; init; } = string.Empty;
 

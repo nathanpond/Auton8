@@ -1,3 +1,4 @@
+using AutoNate.Web.Services.Workflow;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -58,18 +59,58 @@ public sealed class FlowableClient(
 
         using var response = await _httpClient.PostAsync("service/repository/deployments", content, cancellationToken);
         await EnsureSuccessAsync(response, "deploy the BPMN workflow");
+        var deploymentId = await ReadDeploymentIdAsync(response, cancellationToken);
 
-        var processDefinition = await GetLatestProcessDefinitionAsync(model.ProcessKey, cancellationToken)
-            ?? throw new InvalidOperationException($"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found.");
+        // #169. READ THE SET BACK BY DEPLOYMENT, not the primary by key. One
+        // uploaded file with N <process> elements is one deployment holding N
+        // definitions; asking for `latest=true` by the workflow key returned one of
+        // them and left the rest where Auton8 could never see them (#578). Asking
+        // by deployment id returns exactly what this upload produced, and cannot
+        // be confused by a concurrent publish of the same key.
+        var definitions = await GetProcessDefinitionsByDeploymentAsync(deploymentId, cancellationToken);
+        var primary = definitions.FirstOrDefault(d => string.Equals(d.Key, model.ProcessKey, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found in it. "
+                + $"It produced: {string.Join(", ", definitions.Select(d => d.Key))}.");
 
         return new WorkflowDeploymentInfo
         {
-            DeploymentId = await ReadDeploymentIdAsync(response, cancellationToken),
-            ProcessDefinitionId = processDefinition.Id,
-            ProcessDefinitionKey = processDefinition.Key,
-            ProcessDefinitionVersion = processDefinition.Version,
-            DeployedAtUtc = DateTimeOffset.UtcNow
+            DeploymentId = deploymentId,
+            ProcessDefinitionId = primary.Id,
+            ProcessDefinitionKey = primary.Key,
+            ProcessDefinitionVersion = primary.Version,
+            DeployedAtUtc = DateTimeOffset.UtcNow,
+            Definitions = definitions
+                .Select(d => new WorkflowDeployedDefinition
+                {
+                    ProcessDefinitionKey = d.Key,
+                    ProcessDefinitionId = d.Id,
+                    ProcessDefinitionVersion = d.Version,
+                    Name = string.IsNullOrWhiteSpace(d.Name) ? null : d.Name
+                })
+                .ToList()
         };
+    }
+
+    public async Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(
+        string deploymentId,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"service/repository/process-definitions?deploymentId={Uri.EscapeDataString(deploymentId)}&size=200";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "list the process definitions of a deployment");
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableProcessDefinitionResponse>>(response, cancellationToken);
+        return payload.Data.Select(ToSummary).ToList();
+    }
+
+    public async Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default)
+    {
+        var url = $"service/repository/deployments/{Uri.EscapeDataString(deploymentId)}"
+            + (cascade ? "?cascade=true" : string.Empty);
+        using var response = await _httpClient.DeleteAsync(url, cancellationToken);
+        // A deployment that is already gone is the outcome this call wants.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return;
+        await EnsureSuccessAsync(response, "delete a deployment");
     }
 
     public async Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
@@ -1308,7 +1349,13 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default) =>
+        GetTasksAssignedToUserAsync(userId, Array.Empty<string>(), cancellationToken);
+
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId,
+        IReadOnlyCollection<string> candidateGroups,
+        CancellationToken cancellationToken = default)
     {
         var encodedUserId = Uri.EscapeDataString(userId);
         var assigneeUrl = $"service/runtime/tasks?assignee={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
@@ -1320,18 +1367,36 @@ public sealed class FlowableClient(
         // footgun for whoever copies this pattern next.
         var assigneeTask = _httpClient.GetAsync(assigneeUrl, cancellationToken);
         var candidateTask = _httpClient.GetAsync(candidateUrl, cancellationToken);
+        // #171. Tasks offered to any of the actor's groups. Flowable's
+        // `candidateGroups` takes a comma-separated list and answers with every
+        // task holding a candidate identity link for one of them. Not sent at
+        // all when the actor is in no group: a query for "" is not a query for
+        // nothing.
+        var groups = candidateGroups.Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.Ordinal).ToArray();
+        var groupTask = groups.Length == 0
+            ? null
+            : _httpClient.GetAsync(
+                $"service/runtime/tasks?candidateGroups={Uri.EscapeDataString(string.Join(",", groups))}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}",
+                cancellationToken);
 
         using var assigneeResponse = await assigneeTask;
         using var candidateResponse = await candidateTask;
+        using var groupResponse = groupTask is null ? null : await groupTask;
 
         await EnsureSuccessAsync(assigneeResponse, "query tasks assigned to user");
         await EnsureSuccessAsync(candidateResponse, "query tasks where user is a candidate");
 
         var assigneePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(assigneeResponse, cancellationToken);
         var candidatePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(candidateResponse, cancellationToken);
+        IEnumerable<FlowableTaskResponse> groupTasks = [];
+        if (groupResponse is not null)
+        {
+            await EnsureSuccessAsync(groupResponse, "query tasks offered to the user's groups");
+            groupTasks = (await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(groupResponse, cancellationToken)).Data;
+        }
 
         var mergedById = new Dictionary<string, FlowableTaskResponse>(StringComparer.Ordinal);
-        foreach (var task in assigneePayload.Data.Concat(candidatePayload.Data))
+        foreach (var task in assigneePayload.Data.Concat(candidatePayload.Data).Concat(groupTasks))
         {
             if (string.IsNullOrWhiteSpace(task.Id))
             {
@@ -2233,6 +2298,87 @@ public sealed class FlowableClient(
                 StartUserId = item.StartUserId
             })
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        var results = new List<FlowableProcessInstanceSummary>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // Downstream: instances a send from THIS one started. History, not
+        // runtime, so a counterpart that has already finished is still linked.
+        var query = new Dictionary<string, object?>
+        {
+            ["variables"] = new[]
+            {
+                new { name = WorkflowMessageCorrelator.CounterpartOfVariable, value = processInstanceId, operation = "equals", type = "string" }
+            }
+        };
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/historic-process-instances", query, cancellationToken);
+        await EnsureSuccessAsync(response, $"list counterpart instances of {processInstanceId}");
+        var page = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(
+            response, cancellationToken);
+        foreach (var item in page.Data ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(item.Id) || !seen.Add(item.Id)) continue;
+            results.Add(new FlowableProcessInstanceSummary
+            {
+                Id = item.Id,
+                Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                ActivityId = null,
+                Suspended = false,
+                StartUserId = item.StartUserId
+            });
+        }
+
+        // Upstream: the instance whose send started THIS one, if any. A 404 is
+        // the ordinary answer -- most instances were not message-started.
+        using var upstream = await _httpClient.GetAsync(
+            $"service/history/historic-variable-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}"
+            + $"&variableName={Uri.EscapeDataString(WorkflowMessageCorrelator.CounterpartOfVariable)}",
+            cancellationToken);
+        if (upstream.IsSuccessStatusCode)
+        {
+            // Each row wraps its variable under `variable`; the row itself carries
+            // only ids and timestamps (see FlowableHistoricVariableInstanceResponse).
+            var variables = await DeserializeAsync<FlowableListResponse<FlowableHistoricVariableInstanceResponse>>(upstream, cancellationToken);
+            var starter = variables.Data?
+                .Select(v => v.Variable)
+                .FirstOrDefault(v => string.Equals(v?.Name, WorkflowMessageCorrelator.CounterpartOfVariable, StringComparison.Ordinal))
+                ?.Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(starter) && seen.Add(starter))
+            {
+                using var starterResponse = await _httpClient.GetAsync(
+                    $"service/history/historic-process-instances/{Uri.EscapeDataString(starter)}", cancellationToken);
+                if (starterResponse.IsSuccessStatusCode)
+                {
+                    var item = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(starterResponse, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(item.Id))
+                    {
+                        results.Add(new FlowableProcessInstanceSummary
+                        {
+                            Id = item.Id,
+                            Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                            ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                            ActivityId = null,
+                            Suspended = false,
+                            StartUserId = item.StartUserId
+                        });
+                    }
+                }
+            }
+        }
+
+        return results;
     }
 
     public async Task<string> StartProcessInstanceByMessageAsync(

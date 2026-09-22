@@ -73,7 +73,8 @@
     {
       "localName": "lane",
       "eventDefinition": null,
-      "reason": "Added by the pool's own 'add lane' control, not by any element menu. Coming soon; when it ships it becomes a catalog row."
+      "className": "bpmn-icon-lane",
+      "reason": "Added by the pool's own 'add lane' control on the context pad, not by any element menu, so it has no catalog row. Carries its glyph so the menu filter judges it by ITS OWN status -- withheld while it was coming soon, and offered since #171 made a lane mean something (its group becomes the default assignment of the tasks in it)."
     },
     {
       "localName": "messageFlow",
@@ -535,10 +536,7 @@
       "type": "bpmn:Participant",
       "createFactory": "participant",
       "localName": "participant",
-      "eventDefinition": null,
-      "menuClassNames": [
-        "bpmn-icon-lane"
-      ]
+      "eventDefinition": null
     },
     {
       "id": "create.data-object",

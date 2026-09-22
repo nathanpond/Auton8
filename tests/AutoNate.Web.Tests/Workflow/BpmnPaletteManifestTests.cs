@@ -233,6 +233,15 @@ public sealed class BpmnPaletteManifestTests
                 .Concat(entry.TryGetProperty("menuEntryIds", out var ids)
                     ? ids.EnumerateArray().Select(n => n.GetString())
                     : []))
+            // #169. A notOnThePalette note that names a glyph is a deny key too,
+            // judged by its own manifest status -- palette.js does the same.
+            .Concat(palette.RootElement.GetProperty("notOnThePalette").EnumerateArray()
+                .Where(note => note.TryGetProperty("className", out _)
+                               && note.TryGetProperty("localName", out var ln) && ln.GetString() != "*"
+                               && withheldNames.Contains(Key(
+                                   ln.GetString()!,
+                                   note.TryGetProperty("eventDefinition", out var ed2) ? ed2.GetString() : null)))
+                .Select(note => note.GetProperty("className").GetString()))
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n!)
             .Order(StringComparer.Ordinal)
@@ -256,11 +265,14 @@ public sealed class BpmnPaletteManifestTests
             "bpmn-icon-intermediate-event-none",
             "bpmn-icon-intermediate-event-throw-link",
             "bpmn-icon-intermediate-event-throw-message",
-            "bpmn-icon-lane",
+            // #169 offered the pool and removed "bpmn-icon-participant" from this
+            // list. "bpmn-icon-lane" stayed then, denied by the lane note's OWN
+            // coming-soon status rather than by the pool's proxy -- and left in
+            // #171, when the lane became supported. The note still exists and
+            // still carries the class; what changed is the status it is judged by.
             "bpmn-icon-loop-marker",
             "bpmn-icon-manual",
             "bpmn-icon-manual-task",
-            "bpmn-icon-participant",
             "bpmn-icon-start-event-compensation",
             "bpmn-icon-start-event-message",
             "bpmn-icon-start-event-non-interrupting-message",
@@ -394,7 +406,6 @@ public sealed class BpmnPaletteManifestTests
     [InlineData("create.manual-task", "Manual Task")]
     [InlineData("create.task", "Task (Generic)")]
     [InlineData("append.boundary-cancel", "Cancel Boundary")]
-    [InlineData("create.participant", "Pool / Participant")]
     public void An_entry_whose_manifest_element_is_not_supported_is_not_offered(
         string entryId, string elementName)
     {
@@ -416,6 +427,9 @@ public sealed class BpmnPaletteManifestTests
     [InlineData("create.adhoc-sub-process", "Ad-Hoc Sub-Process")]
     [InlineData("create.intermediate-throw-compensation", "Intermediate Throw (Compensation)")]
     [InlineData("create.user-task", "User Task")]
+    // #169: the pool is offered now that a collaboration publishes as a set. The
+    // row above it in the not-offered theory is what this replaces.
+    [InlineData("create.participant", "Pool / Participant")]
     [InlineData("create.complex-gateway", "Complex Gateway")]
     // #111. Moved here from the not-offered theory above, which is the whole
     // visible effect of the story on the palette: the element an author draws is

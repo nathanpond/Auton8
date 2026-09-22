@@ -6,6 +6,16 @@ public interface IFlowableClient
 {
     Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default);
 
+    /// <summary>Every definition one deployment produced (#169).</summary>
+    Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetProcessDefinitionsByDeploymentAsync(string deploymentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a deployment, and with <paramref name="cascade"/> everything it
+    /// started (#169). The compensation for a publish whose deploy succeeded and
+    /// whose record did not -- a window that had no mechanism before this.
+    /// </summary>
+    Task DeleteDeploymentAsync(string deploymentId, bool cascade, CancellationToken cancellationToken = default);
+
     Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
     // Bulk fetch of every "latest=true" process definition. Used by the
@@ -120,6 +130,13 @@ public interface IFlowableClient
     // Returns the number of instances deleted so the caller can surface it.
     Task<int> DeleteAllWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Instances linked to this one by a message flow (#170): those a send from
+    /// it STARTED, and the one whose send started it. Read from the
+    /// `autonateCounterpartOf` process variable, running and finished alike.
+    /// </summary>
+    Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetCounterpartInstancesAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     // Stops a running process instance and leaves the historic record in
     // place so the executions list can show it as "Cancelled". No-op if the
     // instance has already finished.
@@ -128,6 +145,15 @@ public interface IFlowableClient
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default);
+
+    // #171. The same, plus every task whose candidate groups name any of the
+    // actor's Auton8 groups. Flowable's `candidateUser` only expands to groups
+    // through its own IdM, which Auton8 does not populate, so the groups are
+    // passed explicitly; an empty set issues no group query at all.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
+        string userId,
+        IReadOnlyCollection<string> candidateGroups,
+        CancellationToken cancellationToken = default);
 
     // Paged enumeration of every runtime task (active + claimed, not yet completed).
     // Used by the projection-framework polling feed to seed the workflow_task_cache

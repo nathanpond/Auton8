@@ -240,12 +240,29 @@ public sealed class ExecutionEvidenceTests
             ("Intermediate Throw (Message)", "instance-ends"),
             ("Intermediate Throw (None)", "instance-ends"),
             ("Intermediate Throw (Signal)", "instance-ends"),
+            // #171. A lane is never an activity; the user task it lists is. The
+            // proof of the lane's own effect -- the task offered to the lane's
+            // group -- lives in LaneAssignmentExecutionTests; the oracle's cell
+            // proves the lane deploys and the task inside it appears.
+            ("Lane", "task-appears"),
             ("Message Boundary", "host-cancelled"),
+            // #170. The flow itself is never an activity; the SEND at its source is.
+            // A linear primary pool -- start, send task, end -- whose send crosses
+            // the flow into the counterparty's start event: the instance ending
+            // proves the send ran as the flow's addressing, and MessageFlowExecutionTests
+            // proves the message arrived. Also in NeverEntered.
+            ("Message Flow", "instance-ends"),
             ("Message End", "instance-ends"),
             ("Message Start Event", "instance-starts"),
             ("Multi-Instance (Parallel)", "tasks-appear-together"),
             ("Multi-Instance (Sequential)", "tasks-appear-in-turn"),
             ("Parallel Gateway (AND)", "variable-written"),
+            // #169. A pool executes by CONTAINING a process: the collaboration is
+            // published as one deployment with a definition per pool, the primary
+            // pool's process is what `start` starts, and a user task inside it
+            // appearing is what proves the pool ran. Never entered as an activity
+            // -- a participant has no history row -- so it is also in NeverEntered.
+            ("Pool / Participant", "task-appears"),
             ("Receive Task", "instance-waits"),
             ("Script Task", "variable-written"),
             ("Send Task", "instance-ends"),
@@ -542,6 +559,13 @@ public sealed class ExecutionEvidenceTests
         [
             """("boundaryEvent", "compensate")""",
             """("dataObjectReference", null)""",
+            // #169. A participant is the boundary around a process, not a step in
+            // one; the engine records no activity instance for it.
+            """("participant", null)""",
+            // #170. A message flow is a connection, not a step; no activity row.
+            """("messageFlow", null)""",
+            // #171. A lane is a partition of a pool, not a step; no activity row.
+            """("lane", null)""",
         ];
 
         var source = OracleSource();

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Endpoints;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Flowable;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -333,7 +335,11 @@ public sealed class LookupWorkflowExecutionsSkill : IAgentSkill
         var take = ReadTake(args, 25, 100);
         var flowable = context.Services.GetRequiredService<IFlowableClient>();
         var actorId = context.Session.UserId.ToString();
-        var list = await flowable.GetTasksAssignedToUserAsync(actorId, ct);
+        // #171. The same groups the task list resolves, so the assistant's
+        // answer and the page agree about what is offered to this person.
+        var groups = context.Services.GetRequiredService<IGroupStore>();
+        var list = await flowable.GetTasksAssignedToUserAsync(
+            actorId, await ExecutionEndpoints.CandidateGroupsOfAsync(groups, actorId, ct), ct);
         return JsonSerializer.SerializeToElement(new
         {
             kind = "my_workflow_tasks",
