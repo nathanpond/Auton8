@@ -10932,3 +10932,13 @@ build failure hiding behind a count. Switched the arm to `$$"""`.
 Pins by discovery: SLIM_BACKEND 2975 → 2993, FLOWABLE 282 → 286, FULL_LOCAL
 523 → 527.
 
+**#170, what the first gate caught.** Two guards, both doing their job: the
+event catalog's parity test refused `ExecutionCounterpartsViewed` published
+with no catalog entry (invisible on the Events page, undiscoverable by
+subscribers), and `ExecutionReadSourceGuardTests` refused an eighteenth GET
+route on ExecutionEndpoints that injects `IFlowableClient` without being on
+the allowed list with a reason. Both fixed in the file's own shape: the entry,
+and `/counterparts` allowed as STRUCTURAL like `/children` -- the link is a
+process variable read from history in both directions, which no cache column
+holds -- with the route pin moved 17 → 18.
+
