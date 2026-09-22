@@ -617,7 +617,7 @@
       "localName": "participant",
       "eventDefinition": null,
       "reason": "A pool is a deployed process definition. Publishing a collaboration deploys one definition per pool that contains a flow, as one Flowable deployment, versioned together; a pool drawn only to show a counterparty deploys as nothing and prepare says so. It does not execute the way a task does -- its contents do -- which is the shape of 'executes' recorded in the manifest guard's declared departure (#169).",
-      "evidence": "two-pool diagram deployed as two definitions under one deployment id; each started; single-pool and no-pool diagrams unchanged"
+      "evidence": "two-pool diagram deployed as two definitions under one deployment id and the primary started (MultiPoolPublishRefusalTests); a pool with nothing in it publishes as nothing, asked of the engine by key; single-pool and no-pool diagrams prepare as before"
     },
     {
       "name": "Lane",

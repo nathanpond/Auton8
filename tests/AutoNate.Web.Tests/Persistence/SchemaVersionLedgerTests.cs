@@ -220,4 +220,53 @@ public sealed class SchemaVersionLedgerTests
 
         Assert.Equal(1L, (long)(await command.ExecuteScalarAsync())!);
     }
+
+    /// <summary>
+    /// #659. An install that recorded `WorkflowCacheSchemaSql` before #631 put the
+    /// eight `lower()` indexes inside it never gets them from that step again.
+    /// Simulated by dropping the indexes and the new step's ledger row after a
+    /// first run: the second run must recreate all eight -- which only a step of
+    /// their own can do.
+    /// </summary>
+    [Fact]
+    public async Task The_case_insensitive_indexes_reach_a_database_that_already_recorded_the_cache_schema_step()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync(seedLocalAdmin: false);
+        await using var provider = BuildProvider(database.ConnectionString);
+        await DatabaseSchemaInitializer.EnsureAsync(provider);
+
+        string[] indexes =
+        [
+            "ix_workflow_execution_cache_def_status_lower", "ix_workflow_execution_cache_started_by_lower",
+            "ix_workflow_task_cache_assignee_lower", "ix_groups_name_lower", "ix_roles_name_lower",
+            "ix_forms_short_code_lower", "ix_record_types_short_code_lower", "ix_workflow_models_process_key_lower",
+        ];
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = string.Join(" ", indexes.Select(i => $"DROP INDEX IF EXISTS {i};"))
+                + " DELETE FROM schema_versions WHERE step_name = 'CaseInsensitiveIndexesSql';";
+            await drop.ExecuteNonQueryAsync();
+            Assert.Equal(0, await CountLowerIndexesAsync(connection));
+        }
+
+        // The upgraded install's next start: WorkflowCacheSchemaSql is recorded
+        // and skipped; the indexes must come from somewhere else.
+        await DatabaseSchemaInitializer.EnsureAsync(provider);
+
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            Assert.Equal(indexes.Length, await CountLowerIndexesAsync(connection));
+        }
+    }
+
+    private static async Task<int> CountLowerIndexesAsync(NpgsqlConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT count(*) FROM pg_indexes WHERE tablename IN ('workflow_execution_cache','workflow_task_cache','groups','roles','forms','record_types','workflow_models') AND indexdef ILIKE '%lower(%';";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
 }

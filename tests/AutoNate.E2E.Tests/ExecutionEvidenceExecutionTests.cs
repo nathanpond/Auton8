@@ -125,7 +125,9 @@ public sealed class ExecutionEvidenceExecutionTests : E2ETestBase
         // Pinned alongside the backend suite's `obliged` list, which names the
         // same set in the slim tier. Both move together or one of them fails,
         // which is the point (#429, #433).
-        Assert.Equal(51, DeclaredEffects().Count);
+        // #666. The same constant `ExecutionOracleSizeTests` pins; two literals
+        // drifted apart twice, so there is one now.
+        Assert.Equal(ExecutionOracleSizeTests.Cells, DeclaredEffects().Count);
     }
 
     /// <summary>

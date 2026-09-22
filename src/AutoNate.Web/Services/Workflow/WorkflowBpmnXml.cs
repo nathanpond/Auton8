@@ -242,6 +242,11 @@ public static partial class WorkflowBpmnXml
         ExpandBusinessRuleTasks(document);
         NamespaceScriptTaskResultVariables(document);
         ApplySignalScopes(document);
+        // #645. A pool with nothing in it deploys as nothing, on EVERY path that
+        // deploys. Prepare already did this; /publish deploys the body it is
+        // given, and the story's own oracle cell left its empty counterparty in
+        // the engine as a live definition.
+        NeutraliseEmptyPools(document);
         // #171. A lane's group becomes the candidate group of the user tasks it
         // holds. Here, on the DEPLOYED copy, so the stored diagram keeps saying
         // "no assignment of its own" and the studio can say where one came from.
@@ -4859,26 +4864,35 @@ public static partial class WorkflowBpmnXml
             if (resolved is null) continue;
             var (targetProcessId, messageName, messageRef, targetKey) = resolved.Value;
 
-            source.SetAttributeValue(FlowableNamespace + TargetProcessKeyAttribute, targetProcessId);
+            // #648. ONE rule for all three: the flow fills a blank and never
+            // overwrites what the author typed. The key had this rule from the
+            // start (#170's discretion); the target and the name did not, so a
+            // studio author's explicit target was rewritten on every save while
+            // run time -- which reads the same attributes -- let it win.
+            FillIfBlank(source, FlowableNamespace + TargetProcessKeyAttribute, targetProcessId);
 
             if (source.Name.LocalName == "sendTask")
             {
-                source.SetAttributeValue(FlowableNamespace + "autonateMessageName", messageName);
+                FillIfBlank(source, FlowableNamespace + "autonateMessageName", messageName);
             }
             else if (messageRef is not null)
             {
-                // A throw or end event names its message by reference. Point it at
-                // the target's message so both ends agree by construction.
-                source.Element(BpmnNamespace + "messageEventDefinition")?.SetAttributeValue("messageRef", messageRef);
+                // A throw or end event names its message by reference; the flow
+                // supplies one where the author left it off.
+                var definition = source.Element(BpmnNamespace + "messageEventDefinition");
+                if (definition is not null) FillIfBlank(definition, "messageRef", messageRef);
             }
 
-            // Inferred, never overwritten (Claude's Discretion on #170): the
-            // author's own key wins; the target's declared key fills a blank.
-            if (string.IsNullOrWhiteSpace(source.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value)
-                && !string.IsNullOrWhiteSpace(targetKey))
-            {
-                source.SetAttributeValue(FlowableNamespace + CorrelationKeyAttribute, targetKey);
-            }
+            FillIfBlank(source, FlowableNamespace + CorrelationKeyAttribute, targetKey);
+        }
+    }
+
+    private static void FillIfBlank(XElement element, XName attribute, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (string.IsNullOrWhiteSpace(element.Attribute(attribute)?.Value))
+        {
+            element.SetAttributeValue(attribute, value);
         }
     }
 
@@ -4886,6 +4900,8 @@ public static partial class WorkflowBpmnXml
     /// A message flow that could never deliver is refused before deployment
     /// (#170): inside one pool, between endpoints that are not a send/receive
     /// pair, into a pool that deploys nothing, or between ids that do not exist.
+    /// A source with MORE THAN ONE flow is refused too (#649): a send delivers
+    /// to one target, so the second flow would be drawn and never sent.
     /// </summary>
     private static IReadOnlyList<string> BuildMessageFlowErrors(XDocument document)
     {
@@ -4894,6 +4910,22 @@ public static partial class WorkflowBpmnXml
 
         var byId = ElementsById(document);
         var errors = new List<string>();
+
+        // #649. Fan-out. `ResolveMessageFlowTarget` takes the first flow leaving
+        // a source, so a second one was silently dropped -- the send-into-the-void
+        // shape this whole check exists to end. Refused by name until Auton8
+        // implements one send reaching several pools.
+        foreach (var group in flows
+                     .Where(f => !string.IsNullOrWhiteSpace(f.Attribute("sourceRef")?.Value))
+                     .GroupBy(f => f.Attribute("sourceRef")!.Value, StringComparer.Ordinal)
+                     .Where(g => g.Count() > 1))
+        {
+            var sourceLabel = byId.TryGetValue(group.Key, out var sourceElement) ? Label(sourceElement) : group.Key;
+            var names = string.Join(", ", group.Select(f => $"'{f.Attribute("name")?.Value ?? f.Attribute("id")?.Value ?? "(unnamed)"}'"));
+            errors.Add($"'{sourceLabel}' has {group.Count()} message flows leaving it ({names}). "
+                + "A send delivers to one target, so only the first would ever be sent. "
+                + "Keep one message flow per sender; to reach several pools, use one sender per pool.");
+        }
         foreach (var flow in flows)
         {
             var flowName = flow.Attribute("name")?.Value ?? flow.Attribute("id")?.Value ?? "(unnamed message flow)";
@@ -5298,6 +5330,28 @@ public static partial class WorkflowBpmnXml
     /// authored, which is what "moving it out of all lanes leaves no stale
     /// group" means on the deployed copy.
     /// </remarks>
+    /// <summary>
+    /// Every participant whose process contains no flow node is marked
+    /// non-executable (#645), so the engine deploys the diagram and creates no
+    /// definition for the empty pool. Idempotent with prepare's own marking.
+    /// </summary>
+    private static void NeutraliseEmptyPools(XDocument document)
+    {
+        var processesById = document.Descendants(BpmnNamespace + "process")
+            .Where(p => !string.IsNullOrWhiteSpace(p.Attribute("id")?.Value))
+            .GroupBy(p => p.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        foreach (var participant in document.Descendants(BpmnNamespace + "participant"))
+        {
+            var processRef = participant.Attribute("processRef")?.Value;
+            if (string.IsNullOrWhiteSpace(processRef) || !processesById.TryGetValue(processRef, out var process)) continue;
+            if (!HasFlowNodes(process))
+            {
+                process.SetAttributeValue("isExecutable", "false");
+            }
+        }
+    }
+
     private static void ApplyLaneAssignments(XDocument document)
     {
         var elementsById = ElementsById(document);

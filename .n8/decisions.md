@@ -11003,3 +11003,71 @@ pins that a candidate with a laneSet outscores the same diagram without one.
 This is the drag spec earning its keep before the story shipped: the lane bug
 it exists to catch turned up in a different coat.
 
+## M5 verification fix pass, round three, 2026-09-22
+
+Ten `confirmed sev:high` bugs gated the milestone after the second verification
+round. Scope decision: the ten blockers, plus the mediums that live in the same
+files and cost minutes (#654, #656, #657, #659); #652, #653, #655, #658, #660 and
+the lows #661–#665 are carried, and #327 stays on its owner decision.
+
+**#645 — the collaboration step at publish, not only prepare.** `ExpandForDeployment`
+now marks every empty pool non-executable, so the path every caller uses deploys
+it as nothing; the engine fact asks by key and gets `total 0`. The Pool row's
+evidence string stopped claiming "each started".
+
+**#646 — the stub produces a set.** `StubFlowableClient.DeployProcessAsync` returns
+one definition per executable process and records the set by deployment id, which
+is what makes the endpoint's set branch reachable; pause and resume are asserted
+on BOTH keys, and a publish whose record fails is asserted to withdraw the
+deployment by the engine's id, through a decorating store that throws only on
+`PublishAsync`. HTTP-shape facts pin `?deploymentId=` and `?cascade=true`.
+
+**#648 — one rule for the three attributes.** The flow fills a blank and never
+overwrites what the author typed: `FillIfBlank` for the target, the name, the
+end event's messageRef and the key alike. The correlation key already had it; the
+others did not, so a studio author's explicit target was rewritten on every save.
+
+**#649 — fan-out refused, not truncated.** A source with more than one message
+flow is refused naming the source and both flows; two senders with one flow each
+are fine. Auton8 does not implement one send reaching several pools, and a
+silently dropped second flow is the void this whole check exists to end.
+
+**#651 — the tenth site.** `RecordSelectorCompiler.CompileStatusTag` goes through
+`CaseInsensitiveEquals` like the nine #631 fixed; the pair through the real
+authorizer finds `Open` for `[status=OPEN]` and not `Closed`.
+
+**#659 — a step of their own.** The eight `lower()` indexes moved into
+`CaseInsensitiveIndexesSql`, applied after `WorkflowCacheSchemaSql`; the fact
+drops them and the ledger row after a first run and asserts the second run
+recreates all eight. (First cut placed the step before the cache tables existed
+and every ledger fact went red with `42P01` -- ordering by dependency, not by
+recency.)
+
+**#656 — one rule on both sides.** The studio's `describeContainingLane` takes the
+innermost lane NAMING A GROUP, as the expansion does, and reports the innermost
+lane only when none names a group -- so the note can still say which lane has
+none.
+
+**#666 / #667.** One pin (`ExecutionOracleSizeTests.Cells`) read by both
+assertions; the tab is "Linked Workflows" and the call-activity spec waits for
+that.
+
+**#636 — measured to the server, and stopped there.** One publish stored four
+copies on `workflow.messages`; a plain NATS client with no sidecar stored four;
+`system.>` stored four and `workflow.execution.>` stored one; the config carries
+no duplicates, sources, mirror or republish and did not change during a run; no
+configuration operation on a throwaway stream (identical updates, reorders,
+remove/re-add cycles, live consumers) stored more than once. The app cannot
+repair state it cannot produce. What it does now: a startup probe that publishes
+one message, counts what the stream stored, and raises a critical SystemIssue
+when the answer is not one (auto-resolved when it is again); the two Dapr specs
+settle before counting; the subscriber ignores callbacks from a torn-down
+subscription generation (a doubling path that exists on a probe flap, though not
+the one measured). The E2E fixture can tee the app's output to a file
+(`AUTONATE_E2E_APP_LOG`), which is how the dispatcher's four starts were seen at
+all. Blocker to the owner: recreate the stream (the only remedy that has cleared
+it), let the app do so itself, or take it upstream.
+
+Pins by discovery: SLIM_BACKEND 3007 → 3023, SLIM_E2E 243 → 245, FLOWABLE 290 →
+293, FULL_LOCAL 534 → 539.
+

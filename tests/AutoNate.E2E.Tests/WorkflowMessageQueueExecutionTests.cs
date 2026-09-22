@@ -53,7 +53,13 @@ public sealed class WorkflowMessageQueueExecutionTests : E2ETestBase
             () => InstanceCountAsync(key), n => n > 0,
             $"the bus message '{messageName}' to start an instance of '{key}'");
 
-        Assert.Equal(1, started);
+        // #636. SETTLE, THEN COUNT. The duplicate landed 66 ms after the first
+        // instance when it was measured; a count taken on the first read that
+        // returns > 0 passes with two. One is the claim, so the count is taken
+        // again after every late arrival would have landed.
+        Assert.True(started >= 1);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, await InstanceCountAsync(key));
     }
 
     /// <summary>

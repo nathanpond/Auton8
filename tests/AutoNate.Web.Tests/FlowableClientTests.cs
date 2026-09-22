@@ -649,6 +649,74 @@ public sealed class FlowableClientTests
             r.Url.Contains("finished=true"));
     }
 
+    // --- DeployProcessAsync / DeleteDeploymentAsync (#646) ---------------------
+
+    /// <summary>
+    /// #169's readback asks by DEPLOYMENT id, not by key -- the distinction #578
+    /// turned on -- and the whole set comes back.
+    /// </summary>
+    [Fact]
+    public async Task DeployProcessAsync_ReadsTheWholeSetBackByDeploymentId()
+    {
+        var (client, stub) = CreateClient();
+        var queries = new List<string>();
+        stub.WhenJson(HttpMethod.Post, "service/repository/deployments", new { id = "dep-1" });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions", request =>
+        {
+            queries.Add(request.RequestUri!.Query);
+            return StubHttpMessageHandler.JsonResponse(new
+            {
+                data = new[]
+                {
+                    new { id = "buyer:1:dep-1", key = "buyer", name = "Buyer", version = 1, deploymentId = "dep-1", suspended = false },
+                    new { id = "seller:1:dep-1", key = "seller", name = "Seller", version = 1, deploymentId = "dep-1", suspended = false }
+                },
+                total = 2
+            });
+        });
+
+        var deployment = await client.DeployProcessAsync(new WorkflowModel
+        {
+            Id = Guid.NewGuid(), Name = "Two pools", ProcessKey = "buyer",
+            BpmnXml = "<definitions xmlns=\"http://www.omg.org/spec/BPMN/20100524/MODEL\"><process id=\"buyer\"/><process id=\"seller\"/></definitions>"
+        });
+
+        var query = Assert.Single(queries);
+        Assert.Contains("deploymentId=dep-1", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("latest=true", query, StringComparison.Ordinal);
+        Assert.Equal("dep-1", deployment.DeploymentId);
+        Assert.Equal("buyer:1:dep-1", deployment.ProcessDefinitionId);
+        Assert.Equal(new[] { "buyer", "seller" }, deployment.Definitions.Select(d => d.ProcessDefinitionKey).ToArray());
+    }
+
+    [Fact]
+    public async Task DeleteDeploymentAsync_DeletesTheDeploymentWithCascade()
+    {
+        var (client, stub) = CreateClient();
+        var deletes = new List<string>();
+        stub.When(HttpMethod.Delete, "service/repository/deployments/dep-1", request =>
+        {
+            deletes.Add(request.RequestUri!.PathAndQuery);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+
+        await client.DeleteDeploymentAsync("dep-1", cascade: true);
+
+        var url = Assert.Single(deletes);
+        Assert.Contains("/service/repository/deployments/dep-1", url, StringComparison.Ordinal);
+        Assert.Contains("cascade=true", url, StringComparison.Ordinal);
+    }
+
+    /// <summary>A deployment already gone is not a failure to withdraw it.</summary>
+    [Fact]
+    public async Task DeleteDeploymentAsync_ToleratesAnAlreadyMissingDeployment()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Delete, "service/repository/deployments/dep-gone", HttpStatusCode.NotFound);
+
+        await client.DeleteDeploymentAsync("dep-gone", cascade: true);
+    }
+
     // --- GetTasksAssignedToUserAsync -----------------------------------------
 
     /// <summary>

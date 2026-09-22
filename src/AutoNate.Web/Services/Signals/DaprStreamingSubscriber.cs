@@ -73,6 +73,15 @@ public sealed class DaprStreamingSubscriber(
     // Tracks the previous probe outcome so we only re-subscribe on the
     // Down→Up edge instead of churning on every successful tick.
     private bool _lastProbeHealthy = true;
+
+    // #636. Which tear-down generation a handler belongs to. Every reset of the
+    // subscription set increments it; a callback that arrives from a handle of
+    // an earlier generation is a stream the SDK's dispose did not stop, and its
+    // message has already been -- or is about to be -- delivered by the live
+    // handle. Measured: one bus message started two instances after one
+    // recovery, four after two. The stale callback is acknowledged and
+    // dropped, never dispatched.
+    private int _generation;
     private DateTimeOffset? _firstUnhealthyAt;
     private DateTimeOffset? _lastRestartAt;
 
@@ -118,6 +127,7 @@ public sealed class DaprStreamingSubscriber(
                 }
             }
             _subscriptions.Clear();
+            Interlocked.Increment(ref _generation);
         }
         finally
         {
@@ -400,6 +410,7 @@ public sealed class DaprStreamingSubscriber(
                 }
             }
             _subscriptions.Clear();
+            Interlocked.Increment(ref _generation);
         }
         finally
         {
@@ -464,11 +475,12 @@ public sealed class DaprStreamingSubscriber(
 
                 try
                 {
+                    var generation = Volatile.Read(ref _generation);
                     var handle = await _pubSubClient.SubscribeAsync(
                         _daprOptions.PubSubName,
                         topic,
                         BuildOptions(),
-                        (message, ct) => HandleMessageAsync(topic, message, ct),
+                        (message, ct) => HandleMessageAsync(topic, generation, message, ct),
                         _lifetimeCts.Token);
                     _subscriptions[topic] = handle;
                     _logger.LogInformation("Subscribed to Dapr topic {Topic}.", topic);
@@ -505,9 +517,21 @@ public sealed class DaprStreamingSubscriber(
 
     private async Task<TopicResponseAction> HandleMessageAsync(
         string topic,
+        int generation,
         TopicMessage message,
         CancellationToken cancellationToken)
     {
+        if (generation != Volatile.Read(ref _generation))
+        {
+            // #636. See _generation. Acknowledged so the sidecar does not
+            // redeliver it on this stream either.
+            _logger.LogWarning(
+                "Dropping a message on topic {Topic} from a torn-down subscription (generation {Stale}, current {Current}): "
+                + "the stream kept delivering after its handle was disposed. The live subscription delivers it.",
+                topic, generation, Volatile.Read(ref _generation));
+            return TopicResponseAction.Success;
+        }
+
         try
         {
             var rawPayload = message.Data.IsEmpty

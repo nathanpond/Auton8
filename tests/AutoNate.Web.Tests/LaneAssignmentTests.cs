@@ -155,20 +155,29 @@ public sealed class LaneAssignmentTests
         Assert.Equal("11111111-1111-1111-1111-111111111111", lane.Attribute(Autonate + WorkflowBpmnXml.LaneGroupAttribute)?.Value);
     }
 
+    /// <summary>
+    /// #657. A diagram with NO laneSet at all: the expansion leaves every user
+    /// task's attributes exactly as authored. The previous version of this fact
+    /// fed a diagram WITH lanes (a blank group), and so never tested the case
+    /// its name claimed.
+    /// </summary>
     [Fact]
     public void A_diagram_without_lanes_is_unchanged_by_the_expansion()
     {
-        var xml = Diagram().Replace("autonate:groupId=\"11111111-1111-1111-1111-111111111111\"", "", StringComparison.Ordinal);
-        var withLanes = WorkflowBpmnXml.ExpandForDeployment(xml);
-        var noLanesAtAll = Diagram(financeGroup: "");
-        var deployed = WorkflowBpmnXml.ExpandForDeployment(noLanesAtAll);
+        var noLanes = System.Text.RegularExpressions.Regex.Replace(
+            Diagram(), "<bpmn:laneSet.*?</bpmn:laneSet>", "", System.Text.RegularExpressions.RegexOptions.Singleline);
+        Assert.DoesNotContain("laneSet", noLanes, StringComparison.Ordinal);
+        Assert.DoesNotContain("<bpmn:lane ", noLanes, StringComparison.Ordinal);
+
+        var deployed = WorkflowBpmnXml.ExpandForDeployment(noLanes);
+
         foreach (var id in new[] { "approve", "audit", "review", "loose" })
         {
-            Assert.Null(CandidateGroups(withLanes, id) is { } g && g != "reviewers" ? g : null);
-            Assert.Null(CandidateGroups(deployed, id));
+            var before = Task(noLanes, id).Attributes().Select(a => $"{a.Name}={a.Value}").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            var after = Task(deployed, id).Attributes().Select(a => $"{a.Name}={a.Value}").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            Assert.Equal(before, after);
         }
-        // audit keeps exactly what it was authored with.
-        Assert.Equal("ana", Task(deployed, "audit").Attribute(Flowable + "assignee")?.Value);
+        Assert.DoesNotContain("candidateGroups", deployed, StringComparison.Ordinal);
     }
 
     [Fact]

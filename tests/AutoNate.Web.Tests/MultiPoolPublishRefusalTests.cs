@@ -261,4 +261,37 @@ public sealed class MultiPoolPublishRefusalTests
     {
         Assert.Empty(WorkflowBpmnXml.DescribeCollaboration(NoCollaboration));
     }
+
+    /// <summary>
+    /// #645. On EVERY path that deploys, not only prepare: the deployable copy
+    /// marks a pool with nothing in it non-executable, so the engine creates no
+    /// definition for it. /publish deploys the body it is given, and the story's
+    /// own oracle cell had left its empty counterparty in the engine.
+    /// </summary>
+    [Fact]
+    public void An_empty_pool_is_marked_non_executable_on_the_deployed_copy()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:collaboration id="Collab_1">
+                <bpmn:participant id="P_1" name="Us" processRef="us" />
+                <bpmn:participant id="P_2" name="Counterparty" processRef="cp" />
+              </bpmn:collaboration>
+              <bpmn:process id="us" name="Us" isExecutable="true">
+                <bpmn:startEvent id="s" /><bpmn:sequenceFlow id="f" sourceRef="s" targetRef="e" /><bpmn:endEvent id="e" />
+              </bpmn:process>
+              <bpmn:process id="cp" name="Counterparty" isExecutable="true" />
+            </bpmn:definitions>
+            """;
+
+        var deployed = System.Xml.Linq.XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        System.Xml.Linq.XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        var processes = deployed.Descendants(bpmn + "process").ToDictionary(p => p.Attribute("id")!.Value, p => p.Attribute("isExecutable")?.Value);
+
+        Assert.Equal("false", processes["cp"]);
+        // The complement: the pool that has a process is still deployed.
+        Assert.Equal("true", processes["us"]);
+    }
 }

@@ -2516,14 +2516,28 @@ function describeContainingLane(businessObject) {
   }
   if (!process || !Array.isArray(process.laneSets)) return null;
 
-  let best = null;
-  let bestDepth = -1;
+  // #656. The rule the expansion applies: the innermost lane NAMING A GROUP
+  // decides the assignment. A group-less inner lane inside a group-bearing
+  // outer one contributes nothing, so the outer lane is what the task's
+  // assignment comes from -- and what the editor must say. Only when no lane
+  // names a group is the innermost lane reported, so the note can still say
+  // which lane has no group.
+  let bestWithGroup = null;
+  let bestWithGroupDepth = -1;
+  let bestAny = null;
+  let bestAnyDepth = -1;
   const visit = (lanes, depth) => {
     for (const lane of lanes ?? []) {
       const refs = Array.isArray(lane.flowNodeRef) ? lane.flowNodeRef : [];
-      if (refs.some((ref) => ref === businessObject || ref?.id === businessObject.id) && depth > bestDepth) {
-        best = lane;
-        bestDepth = depth;
+      if (refs.some((ref) => ref === businessObject || ref?.id === businessObject.id)) {
+        if (depth > bestAnyDepth) {
+          bestAny = lane;
+          bestAnyDepth = depth;
+        }
+        if (readAutoNateAttribute(lane, "groupId") && depth > bestWithGroupDepth) {
+          bestWithGroup = lane;
+          bestWithGroupDepth = depth;
+        }
       }
       visit(lane.childLaneSet?.lanes, depth + 1);
     }
@@ -2531,6 +2545,7 @@ function describeContainingLane(businessObject) {
   for (const laneSet of process.laneSets) {
     visit(laneSet.lanes, 0);
   }
+  const best = bestWithGroup ?? bestAny;
 
   return best
     ? {

@@ -511,10 +511,17 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         var stdoutBuffer = new List<string>();
         var stderrBuffer = new List<string>();
 
+        // #636. Optional tee of the app's output to a file, because the buffers
+        // below live in memory and are only ever printed when the app fails to
+        // START -- a spec that fails on what the app DID leaves no trace of what
+        // the app logged. Set AUTONATE_E2E_APP_LOG to a path to keep it.
+        var appLogPath = Environment.GetEnvironmentVariable("AUTONATE_E2E_APP_LOG");
+        var appLog = string.IsNullOrWhiteSpace(appLogPath) ? null : new StreamWriter(appLogPath, append: true) { AutoFlush = true };
         _appProcess.OutputDataReceived += (_, e) =>
         {
             if (e.Data is null) return;
             stdoutBuffer.Add(e.Data);
+            appLog?.WriteLine(e.Data);
 
             // #223. The port is chosen up front now, so the log line is only the
             // readiness signal — the URL is not parsed out of it. Binding "+"
@@ -527,7 +534,9 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         };
         _appProcess.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is not null) stderrBuffer.Add(e.Data);
+            if (e.Data is null) return;
+            stderrBuffer.Add(e.Data);
+            appLog?.WriteLine("[stderr] " + e.Data);
         };
         _appProcess.Exited += (_, _) =>
         {

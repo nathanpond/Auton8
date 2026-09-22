@@ -32,15 +32,20 @@ namespace AutoNate.E2E.Tests;
 /// </remarks>
 public sealed class ExecutionOracleSizeTests
 {
+    // Moves with `obliged` in ExecutionEvidenceTests, which names the same
+    // set. Both are edited together or one of them fails.
+    // #169 added Pool / Participant: 50 -> 51.
+    // #170 added Message Flow: 51 -> 52.
+    // #171 added Lane: 52 -> 53.
+    // #666. ONE pin. The oracle's own `The_oracle_runs_every_declared_cell`
+    // reads this constant too, after #169 and #170 each moved this number and
+    // left the oracle's literal behind -- a Flowable-traited fact no slim gate
+    // runs, red for two stories without anyone seeing it.
+    internal const int Cells = 53;
+
     [Fact]
     public void The_live_engine_oracle_has_not_shrunk()
     {
-        // Moves with `obliged` in ExecutionEvidenceTests, which names the same
-        // set. Both are edited together or one of them fails.
-        // #169 added Pool / Participant: 50 -> 51.
-        // #170 added Message Flow: 51 -> 52.
-        const int Cells = 53;
-
         var actual = ExecutionEvidenceExecutionTests.DeclaredEffects().Count;
 
         Assert.True(
