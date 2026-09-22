@@ -10991,3 +10991,15 @@ seven facts); the guard is why it was not forgotten.
 Pins by discovery: SLIM_BACKEND 2993 → 3007, SLIM_E2E 240 → 243, FLOWABLE
 286 → 290, FULL_LOCAL 527 → 534.
 
+**Rule 1, in scope (#171): the studio's save was losing lanes.** `saveXml`
+picks the highest-scoring of four XML candidates, two of which rebuild the
+process from its flow elements and cannot carry a laneSet; the scorer counted
+only flow-node tags, so a rebuild tied bpmn-js's own output and, on a later
+candidate, won -- LaneStudioTests' first run came back with no `<bpmn:lane>` at
+all, on a diagram whose two lanes were drawn and visible. The scorer now counts
+the structural constructs those rebuilds drop (lanes, participants, message
+flows, data objects, artifacts), so the candidate that kept them wins; a vitest
+pins that a candidate with a laneSet outscores the same diagram without one.
+This is the drag spec earning its keep before the story shipped: the lane bug
+it exists to catch turned up in a different coat.
+

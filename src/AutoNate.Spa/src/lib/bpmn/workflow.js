@@ -328,12 +328,20 @@ function pickBestBpmnXml(candidates) {
   return bestXml ?? candidates.find((candidate) => typeof candidate === "string") ?? "";
 }
 
-function scoreBpmnXml(xml) {
+export function scoreBpmnXml(xml) {
   if (typeof xml !== "string" || !xml.trim()) {
     return 0;
   }
 
-  const elementMatches = xml.match(/<bpmn:(startEvent|endEvent|userTask|serviceTask|scriptTask|businessRuleTask|sendTask|receiveTask|manualTask|task|exclusiveGateway|inclusiveGateway|parallelGateway|eventBasedGateway|complexGateway|subProcess|callActivity|boundaryEvent|intermediateCatchEvent|intermediateThrowEvent|sequenceFlow)\b/g);
+  // #171. Structural constructs count too. The registry and manual rebuilds
+  // below reconstruct a process from its FLOW ELEMENTS and drop everything
+  // else -- laneSets, lanes, the collaboration and its participants and message
+  // flows, data objects -- so a score that only counts flow nodes let a rebuild
+  // tie bpmn-js's own output and win on a later candidate, and every lane the
+  // author drew was gone on save. Measured in LaneStudioTests: a two-lane pool
+  // came back with no laneSet at all. Counting what those rebuilds cannot
+  // carry makes the candidate that kept it win.
+  const elementMatches = xml.match(/<bpmn:(startEvent|endEvent|userTask|serviceTask|scriptTask|businessRuleTask|sendTask|receiveTask|manualTask|task|exclusiveGateway|inclusiveGateway|parallelGateway|eventBasedGateway|complexGateway|subProcess|adHocSubProcess|transaction|callActivity|boundaryEvent|intermediateCatchEvent|intermediateThrowEvent|sequenceFlow|collaboration|participant|messageFlow|laneSet|childLaneSet|lane|dataObject|dataObjectReference|dataStoreReference|textAnnotation|association|group)\b/g);
   const shapeMatches = xml.match(/<bpmndi:(BPMNShape|BPMNEdge)\b/g);
 
   return (elementMatches?.length ?? 0) * 10 + (shapeMatches?.length ?? 0);

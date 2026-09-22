@@ -120,9 +120,13 @@ public sealed class LaneStudioTests : E2ETestBase
         return XDocument.Parse(document.RootElement.GetProperty("bpmnXml").GetString()!);
     }
 
-    private static string[] Members(XDocument xml, string laneId) =>
-        xml.Descendants(Bpmn + "lane").Single(l => l.Attribute("id")?.Value == laneId)
-            .Elements(Bpmn + "flowNodeRef").Select(r => r.Value.Trim()).ToArray();
+    private static string[] Members(XDocument xml, string laneId)
+    {
+        var lane = xml.Descendants(Bpmn + "lane").SingleOrDefault(l => l.Attribute("id")?.Value == laneId);
+        Assert.True(lane is not null,
+            $"No lane '{laneId}' in the saved XML. Lanes present: [{string.Join(", ", xml.Descendants(Bpmn + "lane").Select(l => l.Attribute("id")?.Value))}]\n{xml}");
+        return lane!.Elements(Bpmn + "flowNodeRef").Select(r => r.Value.Trim()).ToArray();
+    }
 
     [Fact]
     public async Task Dragging_a_task_into_another_lane_moves_its_membership_not_only_its_position()
@@ -162,8 +166,9 @@ public sealed class LaneStudioTests : E2ETestBase
         Assert.DoesNotContain("approve", Members(xml, "Lane_finance"));
 
         // The bounds moved too, which is the half that always worked.
-        var shape = xml.Descendants().Single(e => e.Name.LocalName == "BPMNShape" && e.Attribute("bpmnElement")?.Value == "approve");
-        var y = double.Parse(shape.Elements().Single(e => e.Name.LocalName == "Bounds").Attribute("y")!.Value, System.Globalization.CultureInfo.InvariantCulture);
+        var shape = xml.Descendants().SingleOrDefault(e => e.Name.LocalName == "BPMNShape" && e.Attribute("bpmnElement")?.Value == "approve");
+        Assert.True(shape is not null, $"No BPMNShape for 'approve' in the saved XML:\n{xml}");
+        var y = double.Parse(shape!.Elements().Single(e => e.Name.LocalName == "Bounds").Attribute("y")!.Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(y >= 240, $"the task's shape should now sit in the Legal lane (y >= 240), but y = {y}");
     }
 
@@ -193,7 +198,8 @@ public sealed class LaneStudioTests : E2ETestBase
         await Assertions.Expect(dialog.GetByText("Lane", new() { Exact = true }).First).ToBeVisibleAsync();
 
         // A picker over the groups that exist, not a text field.
-        var picker = dialog.GetByRole(AriaRole.Textbox, new() { Name = "Group" });
+        // Mantine's Select is a combobox, like the model selector above.
+        var picker = dialog.GetByRole(AriaRole.Combobox, new() { Name = "Group" });
         await picker.ClickAsync();
         await page.GetByRole(AriaRole.Option, new() { Name = groupName, Exact = true }).ClickAsync(new() { Timeout = 10_000 });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Apply", Exact = true }).ClickAsync();
