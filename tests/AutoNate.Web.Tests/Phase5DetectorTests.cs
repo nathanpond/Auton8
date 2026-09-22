@@ -135,6 +135,37 @@ public sealed class WorkflowExecutionErrorOpenDetectorTests
         Assert.Equal(3, facts.RootElement.GetProperty("errorCount").GetInt32());
     }
 
+    /// <summary>
+    /// #327. An issue an operator opens names the activity, and a generated id
+    /// names nothing they can find in the diagram they drew.
+    /// </summary>
+    [Fact]
+    public async Task The_issue_names_the_authored_activity_not_the_generated_one()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var processId = Guid.NewGuid().ToString();
+        await SeedExecutionErrorsAsync(db, processId, 1);
+
+        var flowable = new StubFlowableClient();
+        flowable.InstancesById[processId] = new FlowableProcessInstanceSummary
+        {
+            Id = processId, ProcessDefinitionId = "def:1", ActivityId = "task1", Suspended = false
+        };
+        // What the seeded rows carry, mapped back to what the author drew.
+        flowable.ExpansionSourceMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["task0"] = "cg"
+        };
+
+        var detector = CreateDetector(db, flowable);
+        await detector.RunOnceAsync(CancellationToken.None);
+
+        await using var read = db.CreateDbContext();
+        var issue = Assert.Single(await read.SystemIssues.AsNoTracking().ToListAsync());
+        using var facts = JsonDocument.Parse(issue.FactsJson);
+        Assert.Equal("cg", facts.RootElement.GetProperty("mostRecentActivityId").GetString());
+    }
+
     [Fact]
     public async Task Errors_against_completed_process_resolve_any_open_issue()
     {

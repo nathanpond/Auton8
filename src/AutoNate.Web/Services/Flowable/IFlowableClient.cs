@@ -107,6 +107,21 @@ public interface IFlowableClient
     Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default);
 
+    // #327. The same map, asked for by DEFINITION. A list renders many rows of
+    // few definitions, and the map is a property of the definition, so this is
+    // what lets the executions list map its current step without a history
+    // round trip per row.
+    Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapByDefinitionAsync(
+        string processDefinitionId, CancellationToken cancellationToken = default);
+
+    // #327, the reverse direction. An operator who reads an authored id must be
+    // able to use it: this turns one back into the generated id the engine
+    // knows. An id with no mapping is returned unchanged -- it is either
+    // already the engine's, or it is wrong, and the engine is what should say
+    // so rather than a guess here.
+    Task<string> ResolveEngineActivityIdAsync(
+        string processInstanceId, string activityId, CancellationToken cancellationToken = default);
+
     // Chronological per-activity history for a process instance, ascending by
     // start time. Drives the History tab on the workflow execution modal.
     Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);

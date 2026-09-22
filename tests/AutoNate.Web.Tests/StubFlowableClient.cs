@@ -383,6 +383,21 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapByDefinitionAsync(
+        string processDefinitionId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(ExpansionSourceMap);
+
+    /// <summary>#327. The map read backwards, as the real client reads it.</summary>
+    public Task<string> ResolveEngineActivityIdAsync(
+        string processInstanceId, string activityId, CancellationToken cancellationToken = default)
+    {
+        foreach (var (generated, authored) in ExpansionSourceMap)
+        {
+            if (string.Equals(authored, activityId, StringComparison.Ordinal)) return Task.FromResult(generated);
+        }
+        return Task.FromResult(activityId);
+    }
+
     public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

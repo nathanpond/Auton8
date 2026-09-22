@@ -11184,3 +11184,36 @@ those two fields.
 keep today's fan-out. Components are files; topics are runtime. Options are in
 the issue; none of them is a small change.
 
+## #327 — the eight id-bearing surfaces, 2026-09-22
+
+Owner decision of 2026-09-21, implemented: map the five read surfaces and the
+reverse direction; leave the query layer raw.
+
+**One map, asked for two ways.** `GetExpansionSourceMapAsync(instanceId)`already existed and is cached per DEFINITION; #327 adds
+`GetExpansionSourceMapByDefinitionAsync` so the executions LIST can map a page
+of rows with one lookup per distinct definition instead of a history round trip
+per row, and `ResolveEngineActivityIdAsync` for the reverse -- the map read
+backwards, because an operator's id is an authored one.
+
+**Mapped:** `/api/executions/{id}/log` (its error rows), the assistant's
+`get_execution` and `list_execution_history`, the error-open detector's issue
+facts and summary, and the executions list's current step. **Reverse:**
+move-state and completed-assignees resolve an authored id before it reaches the
+engine, and `/activities/{id}/instances` resolves before filtering history --
+so an id read off a mapped screen is usable against the engine, which is the
+half #327 called the sharpest.
+
+**Never fatal, and that is new.** The map is cosmetic, and it is now consulted
+on paths that must work without it -- move-state, completed assignees, a list of
+200 rows. Both fetches (the instance lookup and the definition's resource) now
+return an empty map on any failure rather than throwing, so an engine that will
+not answer costs a reader a generated id, not the call. Caught by an existing
+client test that stubbed neither route and began to fail the moment the mapping
+was added to its path.
+
+**The query layer stays raw, asserted rather than assumed.**
+`GeneratedIdQueryLayerTests` names the four query entities and fails if any of
+them starts mapping -- a saved query filters on what the engine stores -- and
+names the four read surfaces and fails if any of them stops. Both halves rot in
+opposite directions, so both are guarded.
+

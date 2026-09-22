@@ -212,11 +212,26 @@ public sealed class LookupWorkflowExecutionsSkill : IAgentSkill
                 id = instance.Id,
                 name = instance.Name,
                 processDefinitionId = instance.ProcessDefinitionId,
-                activityId = instance.ActivityId,
+                // #327. The assistant repeating a generated id is the worst of
+                // the eight: it sounds authoritative and names nothing the
+                // author can find.
+                activityId = await AuthoredActivityIdAsync(flowable, id, instance.ActivityId, ct),
                 startUserId = instance.StartUserId,
                 suspended = instance.Suspended
             }
         });
+    }
+
+    /// <summary>
+    /// The id an author would recognise for one activity (#327), or the id as
+    /// given when nothing maps it.
+    /// </summary>
+    private static async Task<string?> AuthoredActivityIdAsync(
+        IFlowableClient flowable, string processInstanceId, string? activityId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(activityId)) return activityId;
+        var map = await flowable.GetExpansionSourceMapAsync(processInstanceId, ct);
+        return map.TryGetValue(activityId, out var authored) ? authored : activityId;
     }
 
     private static async Task<JsonElement> InvokeListHistoryAsync(
@@ -235,9 +250,12 @@ public sealed class LookupWorkflowExecutionsSkill : IAgentSkill
 
         var flowable = context.Services.GetRequiredService<IFlowableClient>();
         var history = await flowable.GetWorkflowExecutionHistoryAsync(id, ct);
+        // #327. One lookup for the page, then every row is the id the author
+        // would recognise; a row with no mapping keeps the id it has.
+        var authoredHistoryIds = await flowable.GetExpansionSourceMapAsync(id, ct);
         var items = history.Take(take).Select(h => new
         {
-            activityId = h.ActivityId,
+            activityId = authoredHistoryIds.GetValueOrDefault(h.ActivityId ?? string.Empty, h.ActivityId),
             activityName = h.ActivityName,
             activityType = h.ActivityType,
             startedAtUtc = h.StartedAtUtc,

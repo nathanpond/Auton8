@@ -394,6 +394,31 @@ public sealed class FlowableClient(
                         .First(),
                     StringComparer.Ordinal);
 
+            // #327. The current step falls back to the ACTIVITY ID when the
+            // step is not a named task, and a generated id (`cg__autonateRoute`)
+            // exists in no diagram the author has seen. The map belongs to the
+            // definition, so a page of many rows costs one lookup per distinct
+            // definition -- and that is cached for an hour.
+            var expansionByDefinition = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+            foreach (var definitionId in historicPayload.Data
+                         .Where(instance => !string.IsNullOrWhiteSpace(instance.Id)
+                                            && runtimeById.ContainsKey(instance.Id!)
+                                            && !string.IsNullOrWhiteSpace(instance.ProcessDefinitionId))
+                         .Select(instance => instance.ProcessDefinitionId!)
+                         .Distinct(StringComparer.Ordinal))
+            {
+                expansionByDefinition[definitionId] =
+                    await GetExpansionSourceMapByDefinitionAsync(definitionId, cancellationToken);
+            }
+
+            string? Authored(string? definitionId, string? activityId) =>
+                !string.IsNullOrWhiteSpace(definitionId)
+                && !string.IsNullOrWhiteSpace(activityId)
+                && expansionByDefinition.TryGetValue(definitionId, out var map)
+                && map.TryGetValue(activityId, out var authored)
+                    ? authored
+                    : activityId;
+
             return historicPayload.Data
                 .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
                 .Select(instance =>
@@ -404,7 +429,9 @@ public sealed class FlowableClient(
 
                     var isRunning = runtimeInstance is not null;
                     var currentStep = isRunning
-                        ? FirstNonEmpty(currentTask?.Name, runtimeInstance?.ActivityId)
+                        ? FirstNonEmpty(
+                            currentTask?.Name,
+                            Authored(instance.ProcessDefinitionId, runtimeInstance?.ActivityId))
                         : null;
 
                     lastActivityByProcessInstanceId.TryGetValue(instance.Id!, out var lastActivityAtUtc);
@@ -806,22 +833,48 @@ public sealed class FlowableClient(
     public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
-        using var instanceResponse = await _httpClient.GetAsync(
-            $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}",
-            cancellationToken);
-        if (!instanceResponse.IsSuccessStatusCode)
+        FlowableHistoricProcessInstanceResponse instance;
+        try
         {
-            // A mapping we cannot build is not worth failing a history view for.
+            using var instanceResponse = await _httpClient.GetAsync(
+                $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}",
+                cancellationToken);
+            if (!instanceResponse.IsSuccessStatusCode)
+            {
+                // A mapping we cannot build is not worth failing a history view for.
+                return new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+
+            instance = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(
+                instanceResponse, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // #327. The map is now consulted on the way IN as well (an operator's
+            // authored id resolved back for the engine), so this runs on paths
+            // that must not fail for it -- move-state, completed assignees. An
+            // unavailable map means an unmapped id, which is what those callers
+            // had before the mapping existed at all.
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
-
-        var instance = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(
-            instanceResponse, cancellationToken);
         var definitionId = instance.ProcessDefinitionId;
         if (string.IsNullOrWhiteSpace(definitionId))
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
+
+        return await GetExpansionSourceMapByDefinitionAsync(definitionId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapByDefinitionAsync(
+        string processDefinitionId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processDefinitionId))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var definitionId = processDefinitionId;
 
         // Keyed on the definition, which is immutable once deployed, so this is
         // fetched once per definition rather than once per history view.
@@ -832,19 +885,54 @@ public sealed class FlowableClient(
             return cached;
         }
 
-        using var modelResponse = await _httpClient.GetAsync(
-            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata",
-            cancellationToken);
-        if (!modelResponse.IsSuccessStatusCode)
+        // #327. Never fatal. This map is cosmetic -- it decides which id a
+        // reader is SHOWN -- and it is now fetched on the executions list as
+        // well as the history view, so an engine that will not answer for a
+        // definition must cost the reader a generated id, not the whole page.
+        try
+        {
+            using var modelResponse = await _httpClient.GetAsync(
+                $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata",
+                cancellationToken);
+            if (!modelResponse.IsSuccessStatusCode)
+            {
+                return new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+
+            var map = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.BuildExpansionSourceMap(
+                await modelResponse.Content.ReadAsStringAsync(cancellationToken));
+
+            _cache.Set(cacheKey, map, TimeSpan.FromHours(1));
+            return map;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
+    }
 
-        var map = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.BuildExpansionSourceMap(
-            await modelResponse.Content.ReadAsStringAsync(cancellationToken));
+    public async Task<string> ResolveEngineActivityIdAsync(
+        string processInstanceId, string activityId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(activityId) || string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            return activityId;
+        }
 
-        _cache.Set(cacheKey, map, TimeSpan.FromHours(1));
-        return map;
+        // The map runs generated -> authored, so the reverse lookup is what an
+        // operator's id needs. Unmapped is passed through, deliberately: the id
+        // is either already the engine's or it is wrong, and the engine's own
+        // answer is better than a guess made here (#327).
+        var map = await GetExpansionSourceMapAsync(processInstanceId, cancellationToken);
+        foreach (var (generated, authored) in map)
+        {
+            if (string.Equals(authored, activityId, StringComparison.Ordinal))
+            {
+                return generated;
+            }
+        }
+
+        return activityId;
     }
 
     public async Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -1787,6 +1875,11 @@ public sealed class FlowableClient(
             throw new ArgumentException("Target activity id must be provided.", nameof(targetActivityId));
         }
 
+        // #327. The operator read this id off a screen that now shows AUTHORED
+        // ids, so it may be one the engine has never heard of. Resolved back
+        // before it is sent; an id with no mapping goes as it came.
+        targetActivityId = await ResolveEngineActivityIdAsync(processInstanceId, targetActivityId, cancellationToken);
+
         // Cancel everything currently in flight (no end time on the historic
         // activity row) and start a fresh execution token at the target.
         // Flowable's change-state API requires both lists in one call so the
@@ -2534,6 +2627,9 @@ public sealed class FlowableClient(
         string activityId,
         CancellationToken cancellationToken = default)
     {
+        // #327, as for move-state: an authored id reaching the engine.
+        activityId = await ResolveEngineActivityIdAsync(processInstanceId, activityId, cancellationToken);
+
         var url = $"service/history/historic-task-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}"
                   + $"&taskDefinitionKey={Uri.EscapeDataString(activityId)}&finished=true&size={WorkflowExecutionQuerySize}";
 
