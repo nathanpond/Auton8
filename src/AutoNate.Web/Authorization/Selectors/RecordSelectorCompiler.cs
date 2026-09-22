@@ -162,8 +162,14 @@ public sealed class RecordSelectorCompiler : SelectorCompilerBase<RecordEntity>
         }
         else
         {
+            // #631. Case-insensitive, matching InMemorySelectorEvaluator -- and
+            // matching RecordTypeSelectorCompiler, which has normalised this same
+            // short code since it was written. The two disagreeing is why
+            // `[shortcode=lead]` found a record type while `[recordtype=lead]`
+            // found no records.
+            var lowered = raw.ToLowerInvariant();
             var fromShortCode = context.Db.RecordTypes
-                .Where(t => t.ShortCode == raw)
+                .Where(t => t.ShortCode.ToLower() == lowered)
                 .Select(t => (Guid?)t.Id)
                 .FirstOrDefault();
             if (fromShortCode is { } found)

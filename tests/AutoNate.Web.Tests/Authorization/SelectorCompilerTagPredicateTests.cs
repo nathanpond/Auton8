@@ -258,6 +258,129 @@ public sealed class SelectorCompilerTagPredicateTests
         Assert.DoesNotContain(liveId, visibleIds);
     }
 
+    // ── #631: the two paths agree on case, and "insensitive" is not "fuzzy" ──
+    //
+    // The agreement property covers this across generated selectors, and its
+    // generator pool had to gain case variants before it could -- every value in
+    // it was already lowercase, which is why five divergences were found there
+    // and this sixth had to be found by reading. Measured: with the variants
+    // added and the fix reverted, the property reports 1567 lockouts and 0 leaks.
+    //
+    // These are the direct, named cases the property still cannot reach.
+    //
+    // `[shortcode=lead]` against a stored `LEAD` is NOT here: the test above
+    // already asserts it, because RecordTypeSelectorCompiler has normalised short
+    // codes since it was written. That one compiler getting it right is precisely
+    // what made the other eight look deliberate.
+
+    [Fact]
+    public async Task WorkflowModel_ProcessKey_MatchesRegardlessOfCase()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var actorId = Guid.NewGuid();
+        var (leadId, dealId) = await SeedTwoWorkflowModelsAsync(db);
+
+        // Stored `lead`, authored `LEAD`. Before #631 this matched in memory and
+        // returned nothing here -- a grant that works on a single-instance check
+        // and is silently empty in a list.
+        var grants = db.CreatePermissionGrantStore();
+        await grants.CreateAsync(new CreatePermissionGrantInput(
+            EntityKinds.User, actorId.ToString(),
+            Actions.View, "/workflowmodel/*[processkey=LEAD]", "allow", 0), actorId);
+
+        var visibleIds = await FilterAsync<WorkflowModelEntity>(
+            db, actorId, EntityKinds.WorkflowModel,
+            ctx => ctx.WorkflowModels.AsNoTracking().AsQueryable(),
+            m => m.Id);
+
+        Assert.Contains(leadId, visibleIds);
+
+        // The complement, and the point of it: case-insensitive must not have
+        // become value-insensitive. `deal` is a different value, not a different
+        // spelling of the same one.
+        Assert.DoesNotContain(dealId, visibleIds);
+    }
+
+    [Fact]
+    public async Task Role_Name_MatchesRegardlessOfCase()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var actorId = Guid.NewGuid();
+
+        Guid editorsId, viewersId;
+        await using (var ctx = db.CreateDbContext())
+        {
+            editorsId = Guid.NewGuid();
+            viewersId = Guid.NewGuid();
+            await ctx.Roles.AddRangeAsync(
+                NewRole(editorsId, "Editors", actorId),
+                NewRole(viewersId, "Viewers", actorId));
+            await ctx.SaveChangesAsync();
+        }
+
+        var grants = db.CreatePermissionGrantStore();
+        await grants.CreateAsync(new CreatePermissionGrantInput(
+            EntityKinds.User, actorId.ToString(),
+            Actions.View, "/role/*[name=eDiToRs]", "allow", 0), actorId);
+
+        var visibleIds = await FilterAsync<RoleEntity>(
+            db, actorId, EntityKinds.Role,
+            ctx => ctx.Roles.AsNoTracking().AsQueryable(),
+            r => r.Id);
+
+        Assert.Contains(editorsId, visibleIds);
+        Assert.DoesNotContain(viewersId, visibleIds);
+    }
+
+    /// <summary>
+    /// `%` and `_` are literal characters in a tag value, not wildcards (#631).
+    /// </summary>
+    /// <remarks>
+    /// <para>THE TEST THAT REJECTS THE OBVIOUS IMPLEMENTATION. Making the SQL side
+    /// case-insensitive is a one-word change if you reach for
+    /// <c>EF.Functions.ILike</c> — and <c>ILIKE</c> reads <c>_</c> as "any single
+    /// character" and <c>%</c> as "any characters". A grant authored
+    /// <c>[name=E_itors]</c> would then match the stored <c>Editors</c>, and
+    /// <c>[name=%]</c> would match every role in the table: a widening hidden
+    /// inside the widening this change already is.</para>
+    /// <para>The agreement property cannot catch it — no value in its pools
+    /// contains either character — so it is asserted here by name rather than
+    /// left for someone to find later.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Role_Name_TreatsWildcardCharactersAsLiterals()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var actorId = Guid.NewGuid();
+
+        Guid editorsId, viewersId;
+        await using (var ctx = db.CreateDbContext())
+        {
+            editorsId = Guid.NewGuid();
+            viewersId = Guid.NewGuid();
+            await ctx.Roles.AddRangeAsync(
+                NewRole(editorsId, "Editors", actorId),
+                NewRole(viewersId, "Viewers", actorId));
+            await ctx.SaveChangesAsync();
+        }
+
+        var grants = db.CreatePermissionGrantStore();
+        await grants.CreateAsync(new CreatePermissionGrantInput(
+            EntityKinds.User, actorId.ToString(),
+            // Under ILIKE this reads as `E` + any single character + `itors`,
+            // which matches the stored `Editors`. Under `lower() =` it is a role
+            // literally named "E_itors", and there is no such role.
+            Actions.View, "/role/*[name=E_itors]", "allow", 0), actorId);
+
+        var visibleIds = await FilterAsync<RoleEntity>(
+            db, actorId, EntityKinds.Role,
+            ctx => ctx.Roles.AsNoTracking().AsQueryable(),
+            r => r.Id);
+
+        Assert.DoesNotContain(editorsId, visibleIds);
+        Assert.DoesNotContain(viewersId, visibleIds);
+    }
+
     // ---- helpers ----
 
     private static async Task<HashSet<Guid>> FilterAsync<T>(

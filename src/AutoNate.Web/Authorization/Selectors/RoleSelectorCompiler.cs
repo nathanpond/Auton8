@@ -32,7 +32,10 @@ public sealed class RoleSelectorCompiler : SelectorCompilerBase<RoleEntity>
 
     private static Expression<Func<RoleEntity, bool>> CompileName(TagExpr tag)
     {
+        // #631. Case-insensitive, matching InMemorySelectorEvaluator. Same
+        // caveat as GroupSelectorCompiler.CompileName: `roles_name_key` is UNIQUE
+        // on the raw column, so one grant can now match two rows.
         var name = RequireLiteral(tag);
-        return r => r.Name == name;
+        return CaseInsensitiveEquals(r => r.Name, name);
     }
 }

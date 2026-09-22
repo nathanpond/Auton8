@@ -34,8 +34,11 @@ public sealed class WorkflowModelSelectorCompiler : SelectorCompilerBase<Workflo
 
     private static Expression<Func<WorkflowModelEntity, bool>> CompileProcessKey(TagExpr tag)
     {
+        // #631. Case-insensitive, matching InMemorySelectorEvaluator -- and
+        // matching WorkflowExecutionCacheSelectorCompiler's `processkey`, which
+        // reads the same author-chosen key off a different table.
         var key = RequireLiteral(tag);
-        return m => m.ProcessKey == key;
+        return CaseInsensitiveEquals(m => m.ProcessKey, key);
     }
 
     private static Expression<Func<WorkflowModelEntity, bool>> CompileDraft(TagExpr tag)

@@ -39,16 +39,47 @@ internal static class SelectorGenerators
     // advertised or compiled, so there is nothing left to exclude.
     private static readonly string[] SharedTags = ["processkey", "definitionkey", "assignee"];
 
+    // #631. CASE VARIANTS, and their absence is the whole story.
+    //
+    // Every value in the pools above is already lowercase, so was every literal
+    // this generator had ever produced. The one construct that separated the two
+    // paths -- a tag value whose case differs from the stored value -- therefore
+    // could not be generated, and the agreement property ran thousands of cases
+    // without ever being able to see it. Five divergences were found here; the
+    // sixth was found by reading, which is what a property test exists to make
+    // unnecessary.
+    //
+    // Rows keep their pool casing and only the SELECTOR's literal varies, which
+    // is the real shape: an operator types `Alice`, the projection wrote `alice`.
+    //
+    // ASCII only, deliberately. `OrdinalIgnoreCase` and Postgres `lower()` agree
+    // across ASCII and do NOT agree on, say, U+0130; generating those would
+    // assert an agreement the fix does not claim. See
+    // ExpressionUtilities.CaseInsensitiveEqualsBody.
+    private static Gen<string> CaseVaried(string[] pool) =>
+        Gen.Elements(pool).SelectMany(v => Gen.Frequency(
+            (3, Gen.Constant(v)),
+            (2, Gen.Constant(v.ToUpperInvariant())),
+            (1, Gen.Constant(v.Length == 0 ? v : char.ToUpperInvariant(v[0]) + v[1..]))));
+
     private static Gen<ValueNode> ValueFor(string tag) => tag switch
     {
-        "processkey" => Gen.Elements(ProcessKeys).Select(v => (ValueNode)new LiteralValue { Text = v }),
-        "definitionkey" => Gen.Elements(DefinitionKeys).Select(v => (ValueNode)new LiteralValue { Text = v }),
+        "processkey" => CaseVaried(ProcessKeys).Select(v => (ValueNode)new LiteralValue { Text = v }),
+        "definitionkey" => CaseVaried(DefinitionKeys).Select(v => (ValueNode)new LiteralValue { Text = v }),
         _ => Gen.Frequency(
-            (4, Gen.Elements(Users).Select(v => (ValueNode)new LiteralValue { Text = v })),
+            (4, CaseVaried(Users).Select(v => (ValueNode)new LiteralValue { Text = v })),
             // The actor-relative form, which resolves to the actor's id on both
             // paths and is the construct most likely to diverge.
             (2, Gen.Constant((ValueNode)new CurrentUserValue())),
             (1, Gen.Constant((ValueNode)new CurrentUserValue { PinnedId = ActorUserId.ToString() })),
+            // #631. Upper-cased too. ResolveTagValue hands a pinned id to the
+            // SAME comparison a literal takes, so an operator who pasted a GUID
+            // in upper case diverged exactly as `[assignee=Alice]` did -- and
+            // nothing generated that either.
+            (1, Gen.Constant((ValueNode)new CurrentUserValue
+            {
+                PinnedId = ActorUserId.ToString().ToUpperInvariant()
+            })),
             // WildcardValue is BACK IN, as of #574. It was excluded while the
             // two paths read it as exact complements — `IS NOT NULL` in memory,
             // `IS NULL` in SQL (GHSA-vrw7-qxhw-m9q8) — because leaving it in

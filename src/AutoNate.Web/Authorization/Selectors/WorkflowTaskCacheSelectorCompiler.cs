@@ -120,8 +120,10 @@ public sealed class WorkflowTaskCacheSelectorCompiler : ISelectorCompiler<Workfl
             return Expression.Lambda<Func<WorkflowTaskCache, bool>>(hasAnyValue, p);
         }
 
+        // #631. `lower(col) = <lowered value>`, the twin of the execution cache's
+        // line. See ExpressionUtilities.CaseInsensitiveEqualsBody.
         var value = ResolveTagValue(tag, context);
-        var body = Expression.Equal(accessor.Body, Expression.Constant(value, typeof(string)));
+        var body = ExpressionUtilities.CaseInsensitiveEqualsBody(accessor.Body, value);
         return Expression.Lambda<Func<WorkflowTaskCache, bool>>(body, p);
     }
 

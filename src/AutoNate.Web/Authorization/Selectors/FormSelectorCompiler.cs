@@ -35,8 +35,12 @@ public sealed class FormSelectorCompiler : SelectorCompilerBase<FormEntity>
 
     private static Expression<Func<FormEntity, bool>> CompileShortCode(TagExpr tag)
     {
+        // #631. Case-insensitive, matching InMemorySelectorEvaluator.
+        // RecordTypeSelectorCompiler reached the same place years earlier by a
+        // different route -- RecordTypeShortCode.Normalize -- which is why
+        // `[shortcode=lead]` worked on record types and nowhere else.
         var code = RequireLiteral(tag);
-        return f => f.ShortCode == code;
+        return CaseInsensitiveEquals(f => f.ShortCode, code);
     }
 
     private static Expression<Func<FormEntity, bool>> CompileSiteAvailable(TagExpr tag)
