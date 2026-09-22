@@ -11217,3 +11217,45 @@ them starts mapping -- a saved query filters on what the engine stores -- and
 names the four read surfaces and fails if any of them stops. Both halves rot in
 opposite directions, so both are guarded.
 
+## M5 fix pass, round four: the carried lows, 2026-09-22
+
+Owner answer: clear #327 and the five lows before re-verifying.
+
+**#661.** The backlog row for E2E-060 now says what the spec does -- bulk-delete
+IS asserted on its effect since #652 -- and no longer claims a due-date seed
+that never existed. The tautological `Assert.NotEqual` is gone.
+
+**#662.** The Seller fixture's process is called `not-the-pool-name`, so the
+engine calling the definition `Seller` proves the rename rather than repeating
+the input; the one-pool and no-pool facts compare every element id before and
+after instead of three substrings.
+
+**#663.** The studio's coming-soon note no longer tells authors that pools,
+lanes and message flows carry no execution semantics and that a multi-pool
+diagram is refused -- all false since #169/#170/#171 -- and the palette's
+messageFlow note says supported. The tautological scope test now feeds a
+genuine single-process diagram (the case its name always claimed), and the
+widening it accepts on a multi-pool diagram addressed by an unknown key is
+asserted rather than left to be discovered.
+
+**#664.** Team Tasks resolves each supervisee's groups, so it agrees with that
+person's own list about their lane-offered work. The lane's group goes through
+the command stack, so undo reverts it -- which also changes what clearing does:
+the attribute becomes null rather than disappearing, and moddle omits a null
+attribute when it serialises, so the saved diagram is the same either way. The
+test that asserted on the KEY now asserts on the value, which is what the
+requirement was about. `pickBestBpmnXml`'s selection rule is pinned: highest
+score, first candidate on a tie -- which shows the ledger's earlier account of
+the lane loss ("tied and won on a later candidate") was wrong; a rebuild must
+have scored strictly higher.
+
+**#665.** Force-complete records a synchronous engine failure the way its
+sibling does, instead of letting it reach the unhandled handler. The
+raw-message guard's helper-parameter branch -- the one #626 widened the scan to
+reach -- has a synthetic offence proving it fires. The per-activity route has a
+cache-miss fact beside the collapse's. The `sinceUtc` descriptions on
+`IFlowableClient` and the stub, which outlived the code by two stories, say what
+#590 measured. Explain compares path ids ordinally, as the evaluator and every
+compiler do. And the shared generator must keep producing a case-varied literal
+-- the input #631 needed and could not produce.
+

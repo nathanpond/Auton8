@@ -200,9 +200,11 @@ public interface IFlowableClient
 
     // Paged enumeration of historic activity instances across every process.
     // Used by the projection-framework history feed to populate the append-only
-    // workflow_event_log_cache. `sinceUtc` filters to entries that started after
-    // the given time — null means "page from the beginning". Sorted by start
-    // time ascending so the consumer can advance a watermark deterministically.
+    // workflow_event_log_cache. There is NO time filter -- #590 measured that
+    // Flowable ignores one on this collection -- and the order is start time
+    // DESCENDING, which is what bounds the feed instead. The stale description
+    // of an ascending, `sinceUtc`-filtered page outlived the code by two
+    // stories; #630 pinned the ordering and this is the rest of that (#665).
     /// <summary>
     /// Historic activity events, <b>newest first</b> (#590).
     /// </summary>
@@ -220,6 +222,12 @@ public interface IFlowableClient
     // Fan-out helper for "tasks assigned to anyone in this set." Used when a
     // supervisor needs to see tasks for the people they supervise without
     // assuming any back-end query supports list-of-assignees.
+    // #664. The same, per user, with each one's groups -- so Team Tasks shows a
+    // supervisee's lane-offered work, which their OWN list has shown since #171.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> candidateGroupsByUserId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
         IReadOnlyCollection<string> userIds,
         CancellationToken cancellationToken = default);

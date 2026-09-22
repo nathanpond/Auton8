@@ -61,7 +61,6 @@ public sealed class WorkflowExecutionAdminTests : E2ETestBase
             $"the task to show assignee {SecondAssignee}");
         var moved = Assert.Single(tasks, t => t.Id == reviewTask.Id);
         Assert.Equal(SecondAssignee, moved.Assignee);
-        Assert.NotEqual(FirstAssignee, moved.Assignee);
 
         // The engine's view: the row the API is a projection OF. A projection that
         // wrote "bob" without the engine agreeing would pass the block above.

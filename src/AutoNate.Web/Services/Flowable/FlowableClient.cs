@@ -1602,12 +1602,20 @@ public sealed class FlowableClient(
         return namesById;
     }
 
-    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
         IReadOnlyCollection<string> userIds,
+        CancellationToken cancellationToken = default) =>
+        GetTasksAssignedToUsersAsync(
+            userIds.ToDictionary(id => id, _ => (IReadOnlyCollection<string>)Array.Empty<string>(), StringComparer.Ordinal),
+            cancellationToken);
+
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> candidateGroupsByUserId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(userIds);
-        if (userIds.Count == 0)
+        ArgumentNullException.ThrowIfNull(candidateGroupsByUserId);
+        var userIds = candidateGroupsByUserId.Keys.ToArray();
+        if (userIds.Length == 0)
         {
             return Array.Empty<FlowableTaskSummary>();
         }
@@ -1617,7 +1625,8 @@ public sealed class FlowableClient(
         var perUser = await Task.WhenAll(userIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
-            .Select(id => GetTasksAssignedToUserAsync(id, cancellationToken)));
+            .Select(id => GetTasksAssignedToUserAsync(
+                id, candidateGroupsByUserId.GetValueOrDefault(id, []), cancellationToken)));
 
         return perUser
             .SelectMany(list => list)

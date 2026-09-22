@@ -1008,6 +1008,7 @@ public static class ExecutionEndpoints
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
             WorkflowTaskCacheRefresher cacheRefresher,
+            WorkflowExecutionErrorRecorder errorRecorder,
             IAuditEventPublisher auditPublisher,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -1020,6 +1021,15 @@ public static class ExecutionEndpoints
                 when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return StaleTask(taskId, exception, loggerFactory);
+            }
+            // #665. The same recording its sibling does. An operator forcing a
+            // task through is the person least able to see a job log, and this
+            // branch used to let the exception escape to the unhandled handler
+            // -- a 500 with nothing on the execution's error surface.
+            catch (FlowableRequestException exception)
+            {
+                return await SynchronousStepFailureAsync(
+                    taskId, exception, errorRecorder, cacheRefresher, loggerFactory, cancellationToken);
             }
 
             // This route names the instance, so the refresher does not have to
@@ -1239,6 +1249,7 @@ public static class ExecutionEndpoints
         tasks.MapGet("/assigned-to-team", async (
             HttpContext http,
             IFlowableClient flowable,
+            IGroupStore groups,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
@@ -1258,9 +1269,19 @@ public static class ExecutionEndpoints
                 .Select(e => e.ToId)
                 .ToListAsync(cancellationToken);
 
+            // #664. Each supervisee's GROUPS too, so work a lane offered them
+            // appears here as it does in their own list. Without it Team Tasks
+            // and "assigned to me" disagreed about the same person's work.
+            var candidateGroupsBySupervisee = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+            foreach (var supervisee in supervisees.Distinct(StringComparer.Ordinal))
+            {
+                candidateGroupsBySupervisee[supervisee] =
+                    await CandidateGroupsOfAsync(groups, supervisee, cancellationToken);
+            }
+
             var list = supervisees.Count == 0
                 ? Array.Empty<FlowableTaskSummary>()
-                : await flowable.GetTasksAssignedToUsersAsync(supervisees, cancellationToken);
+                : await flowable.GetTasksAssignedToUsersAsync(candidateGroupsBySupervisee, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.TasksAssignedToTeamViewed,

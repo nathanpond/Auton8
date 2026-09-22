@@ -270,4 +270,36 @@ public sealed class NoEndpointReturnsARawEngineMessageTests
         Assert.NotEmpty(Offences(Shipped));
         Assert.Empty(Offences(Fixed));
     }
+
+    /// <summary>
+    /// #665. The branch #626 widened the scan to reach -- the exception handed
+    /// to a HELPER rather than caught inline -- with a synthetic offence, so the
+    /// widening is proven rather than attested. Until #626 the scan read catch
+    /// blocks only, and the raw body reached `/history` through exactly this
+    /// shape.
+    /// </summary>
+    [Fact]
+    public void The_scan_reaches_an_exception_handed_to_a_helper()
+    {
+        const string Offending = """
+            private static IResult Describe(string taskId, FlowableRequestException exception, ILogger logger)
+            {
+                logger.LogWarning(exception, "failed");
+                return Results.Json(new { message = exception.Message }, statusCode: 502);
+            }
+            """;
+
+        const string Fixed = """
+            private static IResult Describe(string taskId, FlowableRequestException exception, ILogger logger)
+            {
+                logger.LogWarning(exception, "failed");
+                return Results.Json(
+                    new { message = EngineRefusal.Describe(exception, "this step") },
+                    statusCode: 502);
+            }
+            """;
+
+        Assert.NotEmpty(Offences(Offending));
+        Assert.Empty(Offences(Fixed));
+    }
 }

@@ -589,4 +589,46 @@ public sealed class MultiInstanceHistoryEndpointTests
                 DateTimeOffset.UtcNow)],
             db, CancellationToken.None);
     }
+
+    /// <summary>
+    /// #665. The sibling of the collapse's miss fact (#627): the per-activity
+    /// route resolves its element variable through the read-through too, and a
+    /// regression there would null every `elementValue` in the expanded row
+    /// rather than fail loudly.
+    /// </summary>
+    [Fact]
+    public async Task A_cache_miss_still_answers_for_the_expanded_instances()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+        await SeedDefinitionAsync(factory);
+        var now = DateTimeOffset.UtcNow;
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            Row("review", "Review", now.AddMinutes(-9), now.AddMinutes(-8)),
+            Row("review", "Review", now.AddMinutes(-9), endedAt: null)
+        ];
+        factory.FlowableStub.InstancesById[Instance] = new FlowableProcessInstanceSummary
+        {
+            Id = Instance,
+            ProcessDefinitionId = DefinitionId,
+            Name = "Review flow"
+        };
+        // A real MISS: the engine still has the instance, the cache does not.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                DELETE FROM workflow_execution_cache WHERE flowable_instance_id = {Instance}
+                """);
+        }
+
+        var response = await client.GetAsync($"/api/executions/{Instance}/activities/review/instances");
+
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, document.RootElement.GetArrayLength());
+    }
 }

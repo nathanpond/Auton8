@@ -79,7 +79,7 @@
     {
       "localName": "messageFlow",
       "eventDefinition": null,
-      "reason": "A connection between pools, drawn from the context pad, not an entry in any element menu. Coming soon."
+      "reason": "A connection between pools, drawn from the context pad, not an entry in any element menu, so it has no catalog row. Supported since #170: the send at its source delivers across it."
     }
   ],
   "entries": [

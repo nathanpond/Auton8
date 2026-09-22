@@ -5648,11 +5648,11 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
             */}
             <p className="workflow-bpmn-types-note">
               Flowable runs these. The studio has no property editor for them yet, so
-              publishing one is refused until its story lands — except the
-              collaboration shapes (pools, lanes, message flows), which deploy and
-              carry no execution semantics. Publishing a diagram with more than one
-              pool is refused: only one pool&rsquo;s process would be reachable
-              afterwards.
+              publishing one is refused until its story lands. The collaboration
+              shapes are no longer among them: a diagram with several pools publishes
+              as one deployment holding a definition per pool, a message flow carries
+              the send at its source to the pool it points at, and a lane hands its
+              user tasks to the group it names.
             </p>
             {comingSoon.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">

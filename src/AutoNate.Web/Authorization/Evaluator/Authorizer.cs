@@ -758,7 +758,11 @@ public sealed class Authorizer : IAuthorizer
         // Path id filter is a quick reject regardless of kind.
         if (ast.Path.Ids is { } ids && !ast.Path.IdsAreWildcard)
         {
-            if (!ids.Contains(target.Id, StringComparer.OrdinalIgnoreCase))
+            // #665. ORDINAL, as the evaluator (InMemorySelectorEvaluator) and
+            // every SQL compiler's `IN` are. Explain is meant to answer "why did
+            // this decision come out that way", and a looser comparison here
+            // made it answer for a decision the enforcing paths never made.
+            if (!ids.Contains(target.Id, StringComparer.Ordinal))
             {
                 return false;
             }
