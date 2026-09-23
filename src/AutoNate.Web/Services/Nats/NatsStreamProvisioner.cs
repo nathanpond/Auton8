@@ -174,8 +174,11 @@ public sealed class NatsStreamProvisioner(
     }
 
     /// <summary>
-    /// The subject the fidelity probe publishes on (#636). Under the `system.>`
+    /// The prefix the fidelity probe publishes under (#636). Under the `system.>`
     /// wildcard the stream already captures, so it needs no subject of its own.
+    /// Each check appends its own unique suffix (#676) -- two checks never share
+    /// a literal subject, so concurrent app hosts against the same live stream
+    /// can't observe each other's probe traffic.
     /// </summary>
     public const string FidelityProbeSubject = "system.stream-fidelity-probe";
 
@@ -214,9 +217,15 @@ public sealed class NatsStreamProvisioner(
     private async Task CheckStorageFidelityAsync(NatsJSContext js, string streamName, CancellationToken cancellationToken)
     {
         int copies;
+        // A unique subject per check, not the bare constant (#676): two app hosts
+        // booting concurrently against the same live stream -- every test host
+        // in a `dotnet test` run, or every replica on a rolling restart -- would
+        // otherwise publish and measure on the identical subject and each count
+        // the other's probe message as a false duplicate.
+        var probeSubject = $"{FidelityProbeSubject}.{Guid.NewGuid():N}";
         try
         {
-            copies = await MeasureStorageFidelityAsync(js, streamName, FidelityProbeSubject, cancellationToken);
+            copies = await MeasureStorageFidelityAsync(js, streamName, probeSubject, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
