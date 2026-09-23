@@ -11278,9 +11278,14 @@ and the operator is told which handler and why in the author's own words. It
 records now and rethrows, so the answer is what it always was. The gap #665
 named was the missing record, not the response.
 
-**`SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`** failed once with
-a `TaskCanceledException` in a 30-minute slim run and passed 10/10 on its own
-and in full-local at the same commit. Not this pass's code (BusWatcher
-subscriptions). Filed rather than re-run and forgotten: a test that fails under
-load is a gate that lies sometimes.
-
+**`SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`** failed in two
+consecutive slim runs while passing 10/10 alone and in full-local at the same
+commit, first as a `TaskCanceledException` and then, legibly, as
+`55006: database "autonate_test_…" is being accessed by other users` out of
+`PostgresTestDatabase.DisposeAsync`. Not the assertion and not this pass's code:
+the teardown terminates the database's backends and then drops, and the app
+under test is still shutting down, so a hosted service's pooled connection can
+arrive in between. The drop is `WITH (FORCE)` now -- terminate and drop in one
+statement, which is what the E2E fixture already did -- with a retry for a
+connection that lands even inside that. Filed as #670 with the first, wrong
+symptom; corrected there.
