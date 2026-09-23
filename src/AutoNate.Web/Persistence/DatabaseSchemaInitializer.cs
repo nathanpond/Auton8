@@ -3512,20 +3512,9 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_def_status
             ON workflow_execution_cache (process_definition_key, status);
 
-        -- #631. Selector tag values compare case-INsensitively now, so every
-        -- grant predicate on these columns is `lower(col) = $n`. Without the
-        -- functional twins below, `lower()` makes the two btrees above
-        -- unusable and an authorization filter -- which runs on every list
-        -- request -- falls back to a sequential scan.
-        --
-        -- Added only where a plain index already exists. `process_definition_id`
-        -- and the task cache's two key columns carry none, so they get none:
-        -- an index nothing was using is not made necessary by this change.
-        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_def_status_lower
-            ON workflow_execution_cache (lower(process_definition_key), lower(status));
-
-        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_started_by_lower
-            ON workflow_execution_cache (lower(started_by));
+        -- #631's case-insensitive functional twins for this table live in
+        -- CaseInsensitiveIndexesSql (#659), their own ledger step -- not here,
+        -- so a database that already recorded this step still gets them.
 
         CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_record_id
             ON workflow_execution_cache (record_id) WHERE record_id IS NOT NULL;
@@ -3561,10 +3550,9 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_assignee_status
             ON workflow_task_cache (assignee, status);
 
-        -- #631. `assignee` alone, not (assignee, status): `status` is not a
-        -- workflowtask selector tag, so no grant predicate ever lowers it.
-        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_assignee_lower
-            ON workflow_task_cache (lower(assignee));
+        -- #631's `assignee`-alone functional twin (not (assignee, status):
+        -- `status` is not a workflowtask selector tag, so no grant predicate
+        -- ever lowers it) lives in CaseInsensitiveIndexesSql (#659) too.
 
         CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_instance
             ON workflow_task_cache (flowable_instance_id);
@@ -3578,28 +3566,15 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_auth_tags
             ON workflow_task_cache USING GIN (auth_tags jsonb_path_ops);
 
-        -- #631, the remaining five. Each of these columns carries a UNIQUE index
-        -- on its raw value, which `lower()` cannot use, and each is a selector
-        -- tag: groups/roles `name`, workflow models `processkey`, forms and
-        -- record types `shortcode`.
-        --
-        -- NOT UNIQUE themselves, deliberately. A unique index on `lower(name)`
-        -- would refuse to build wherever two rows already differ only by case --
-        -- turning a read-path fix into a startup failure on exactly the data that
-        -- makes the fix interesting. Whether those constraints SHOULD be
-        -- case-insensitive is a separate decision with its own migration; see the
-        -- note on GroupSelectorCompiler.CompileName.
-        CREATE INDEX IF NOT EXISTS ix_groups_name_lower ON groups (lower(name));
-
-        CREATE INDEX IF NOT EXISTS ix_roles_name_lower ON roles (lower(name));
-
-        CREATE INDEX IF NOT EXISTS ix_forms_short_code_lower ON forms (lower(short_code));
-
-        CREATE INDEX IF NOT EXISTS ix_record_types_short_code_lower
-            ON record_types (lower(short_code));
-
-        CREATE INDEX IF NOT EXISTS ix_workflow_models_process_key_lower
-            ON workflow_models (lower(process_key));
+        -- #631's remaining five functional twins (groups/roles `name`, workflow
+        -- models `processkey`, forms and record types `shortcode` -- each a
+        -- selector tag column carrying a UNIQUE index on its raw value, which
+        -- `lower()` cannot use) live in CaseInsensitiveIndexesSql (#659), not
+        -- here. NOT UNIQUE themselves, deliberately -- a unique index on
+        -- `lower(name)` would refuse to build wherever two rows already differ
+        -- only by case, turning a read-path fix into a startup failure on
+        -- exactly the data that makes the fix interesting; see the note on
+        -- GroupSelectorCompiler.CompileName.
 
         CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_created_time_brin
             ON workflow_task_cache USING BRIN (created_time);

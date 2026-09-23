@@ -268,6 +268,46 @@ public sealed class ExecutionAuthorizationFromCacheTests
     }
 
     /// <summary>
+    /// #675. The history tie-break must fail OPEN: it only gates whether to
+    /// STOP serving an already-known-good terminal row, so a transient failure
+    /// of the history endpoint itself must not turn a previously-successful
+    /// read into an error.
+    /// </summary>
+    [Fact]
+    public async Task A_transient_history_failure_still_serves_the_terminal_cached_row()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-675";
+        await SeedCachedInstanceAsync(factory, Instance, "alice");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE workflow_execution_cache SET status = 'completed'
+                WHERE flowable_instance_id = {Instance}
+                """);
+        }
+
+        factory.FlowableStub.InstancesById.Remove(Instance);
+        factory.FlowableStub.ThrowOnHistoricProcessInstanceExistsAsync = true;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var readThrough = scope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+
+            var served = await readThrough.GetInstanceAsync(Instance, CancellationToken.None);
+
+            Assert.NotNull(served);
+            Assert.Equal("completed", served!.Status);
+        }
+    }
+
+    /// <summary>
     /// The complement: a run that is genuinely gone IS still removed (#634).
     /// </summary>
     /// <remarks>

@@ -11289,3 +11289,32 @@ arrive in between. The drop is `WITH (FORCE)` now -- terminate and drop in one
 statement, which is what the E2E fixture already did -- with a retry for a
 connection that lands even inside that. Filed as #670 with the first, wrong
 symptom; corrected there.
+
+## Blocker: #672 — an engine-started instance may never reach Auton8's execution list, 2026-09-23
+
+**Root cause not established; guessing at a fix in the shared cache/projection
+pipeline risked a wider regression than this one story.**
+
+#672 was originally filed as "the executions list doesn't name which participant
+a non-primary pool's instance belongs to." Reading the actual code first (before
+writing a fix) found that part already works: `WorkflowExecutionSummary.WorkflowModelName`
+resolves per-instance from the live engine's own process-definition name, which
+#662 already fixed to read "Seller"/"Supplier" per pool.
+
+Writing the missing E2E fact to confirm it found a different, more severe defect
+instead: a Supplier instance started by a message flow (engine-internal, not
+through Auton8's own `/api/workflows/{key}/start`) never appeared in
+`/api/executions/` across three attempts totalling up to 180s of polling —
+past `ExecutionPollInterval`'s 60s default several times over. Ruled out
+pagination (27 total instances in the engine, the missing one sorts first),
+authorization (`FilterQueryAsync` short-circuits unfiltered for the seeded
+admin's `IsSuperAdmin`), and a bare timing issue (waited three full poll
+cycles). Confirmed via the live engine directly (curl) that the instance exists
+and is named correctly by the engine.
+
+Could not narrow further without instrumenting `FlowableExecutionPollingFeed.TickAsync`
+and `FlowableExecutionProjection.ApplyAsync` with temporary diagnostic logging
+(both only log on exception, so a silent skip and a silent success are
+indistinguishable from the app's own console output) — decided against adding
+and reverting exploratory instrumentation mid-exec-pass. Issue relabeled
+`sev:high` + `blocked`; the reproduction steps are recorded on the issue.

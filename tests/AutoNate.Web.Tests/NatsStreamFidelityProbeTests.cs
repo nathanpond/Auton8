@@ -68,4 +68,25 @@ public sealed class NatsStreamFidelityProbeTests : IAsyncLifetime
 
         Assert.Equal(1, copies);
     }
+
+    /// <summary>
+    /// #676: two checks that ran concurrently against the shared live stream
+    /// used to share one literal probe subject, so each could count the
+    /// other's message as a false duplicate. The production fix is a unique
+    /// subject per check; this proves the isolation the fix relies on holds
+    /// under real concurrency, not just sequential calls.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_checks_on_their_own_subjects_do_not_observe_each_others_probe()
+    {
+        var js = new NatsJSContext(_nats!);
+        var subjectA = $"{_stream}.probe.{Guid.NewGuid():N}";
+        var subjectB = $"{_stream}.probe.{Guid.NewGuid():N}";
+
+        var results = await Task.WhenAll(
+            NatsStreamProvisioner.MeasureStorageFidelityAsync(js, _stream, subjectA, CancellationToken.None),
+            NatsStreamProvisioner.MeasureStorageFidelityAsync(js, _stream, subjectB, CancellationToken.None));
+
+        Assert.Equal(new[] { 1, 1 }, results);
+    }
 }
