@@ -130,6 +130,68 @@ public sealed class SynchronousStepFailureTests
     }
 
     /// <summary>
+    /// The complement round 1 flagged as missing: a step that succeeds records
+    /// nothing, and an execution with no failures reports isErrored:false
+    /// (#678, #222's AC5).
+    /// </summary>
+    /// <remarks>
+    /// Every existing fact in this file drives a FAILING completion. Nothing
+    /// proved the positive case — that ordinary, successful work leaves no
+    /// trace on the error surface — which is the half of the AC that would
+    /// catch a recorder gone trigger-happy.
+    /// </remarks>
+    [Fact]
+    public async Task A_successful_completion_records_nothing()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-678";
+        await SeedTaskAsync(factory, "task-678", Instance, "approve");
+
+        // The /history endpoint reads live from IFlowableClient, not the
+        // event-log cache -- seed the stub's own history store so the
+        // isErrored check below is against a real row, not vacuously true
+        // over an empty array nothing populated.
+        factory.FlowableStub.HistoryByInstance[Instance] =
+        [
+            new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = "approve",
+                ActivityName = "approve",
+                ActivityType = "userTask",
+                StartedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5),
+                EndedAtUtc = DateTimeOffset.UtcNow,
+                TaskId = "task-678"
+            }
+        ];
+
+        // No CompleteThrows set: this completion succeeds.
+        var response = await client.PostAsJsonAsync("/api/tasks/task-678/complete", new { });
+        Assert.True(response.IsSuccessStatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+
+        Assert.False(
+            await db.WorkflowExecutionErrors.AnyAsync(e => e.ProcessInstanceId == Instance),
+            "A successful completion is not a failure of the process.");
+
+        // With zero completions AND zero error rows, /history takes its own
+        // no-enrichment-needed shortcut (ExecutionEndpoints.cs's `if
+        // (completions.Count == 0 && errorsByActivity.Count == 0)`) and never
+        // stamps IsErrored at all -- a nullable bool that's never set is
+        // omitted from the JSON, not written as `false`. That omission IS the
+        // "no failures" answer this codebase's convention gives; the
+        // assertion that matters is that nothing claims to be errored.
+        var history = await client.GetStringAsync($"/api/executions/{Instance}/history");
+        Assert.Contains("\"activityId\":\"approve\"", history, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"isErrored\":true", history, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A task the engine no longer has is still a 409, not a recorded failure (#604, #222).
     /// </summary>
     /// <remarks>

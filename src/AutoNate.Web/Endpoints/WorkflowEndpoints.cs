@@ -662,11 +662,38 @@ public static class WorkflowEndpoints
             // jobs. What is left is an expression evaluated inline during a
             // transition, and on start there is no transition out of a wait state
             // for one to fail on.
-            var instance = await flowable.StartProcessInstanceAsync(
-                processKey,
-                name,
-                mergedVariables,
-                cancellationToken);
+            //
+            // #678. That exposure still needs a caller-facing reason, same as
+            // /publish -- what was missing wasn't the decision to leave nothing
+            // behind, it was ever telling the caller why. Without this catch a
+            // synchronous failure here propagated unhandled: a bare 500 in
+            // Production, the raw engine body on the dev-exception page in
+            // Development (exactly the leak #626 closed everywhere else).
+            FlowableProcessInstanceSummary instance;
+            try
+            {
+                instance = await flowable.StartProcessInstanceAsync(
+                    processKey,
+                    name,
+                    mergedVariables,
+                    cancellationToken);
+            }
+            catch (FlowableRequestException exception)
+            {
+                var described = DescribeEngineRefusal(exception);
+                var isDiagramProblem = EngineRefusal.IsTheDiagramsFault(exception.Message);
+
+                loggerFactory.CreateLogger("AutoNate.Web.WorkflowStart").LogWarning(
+                    exception,
+                    "Flowable refused to start {ProcessKey}. Caller was told: {Described}",
+                    processKey, described);
+
+                return Results.Json(
+                    new { errors = new[] { described } },
+                    statusCode: isDiagramProblem
+                        ? StatusCodes.Status400BadRequest
+                        : StatusCodes.Status502BadGateway);
+            }
 
             // #609. STARTING IS A WRITE, so the caller's next read shows it.
             //
