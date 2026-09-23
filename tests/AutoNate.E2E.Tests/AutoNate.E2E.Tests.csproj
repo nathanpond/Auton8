@@ -9,7 +9,7 @@
 
     <ItemGroup>
         <PackageReference Include="Deque.AxeCore.Playwright" Version="4.13.0" />
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
         <PackageReference Include="Microsoft.Playwright" Version="1.50.0" />
         <!-- #660. The fixture writes its own Dapr components with a run-scoped
              DURABLE consumer name, and a durable outlives the process: this is
