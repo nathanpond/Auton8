@@ -47,7 +47,7 @@ public sealed class MultiPoolPublishRefusalTests : E2ETestBase
             <bpmn:sequenceFlow id="bf2" sourceRef="bt" targetRef="be" />
             <bpmn:endEvent id="be" name="End" />
           </bpmn:process>
-          <bpmn:process id="{sellerKey}" name="Seller" isExecutable="true">
+          <bpmn:process id="{sellerKey}" name="not-the-pool-name" isExecutable="true">
             <bpmn:startEvent id="ss" name="Start" />
             <bpmn:sequenceFlow id="sf" sourceRef="ss" targetRef="st" />
             <bpmn:userTask id="st" name="Sell" />
@@ -115,10 +115,15 @@ public sealed class MultiPoolPublishRefusalTests : E2ETestBase
             new APIRequestContextOptions { DataObject = new { name = TestNames.Prefixed("run") } });
         Assert.True(started.Ok, await started.TextAsync());
 
+        // #662. The process in the file is called `not-the-pool-name`; the engine
+        // calls the definition `Seller` only because prepare gave the non-primary
+        // pool its PARTICIPANT's name. Asserting on a name the raw XML already
+        // carried proved nothing, which is what this fact used to do.
         var sellerDefinition = await engine.GetStringAsync(
             $"service/repository/process-definitions?key={Uri.EscapeDataString(sellerKey)}");
         using var sellerPage = JsonDocument.Parse(sellerDefinition);
         Assert.Equal("Seller", sellerPage.RootElement.GetProperty("data")[0].GetProperty("name").GetString());
+        Assert.DoesNotContain("not-the-pool-name", sellerDefinition, StringComparison.Ordinal);
     }
 
     /// <summary>

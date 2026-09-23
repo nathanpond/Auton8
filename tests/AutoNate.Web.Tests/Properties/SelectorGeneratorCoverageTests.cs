@@ -113,5 +113,14 @@ public sealed class SelectorGeneratorCoverageTests
         Assert.Contains(
             asts,
             a => Exprs(a).OfType<TagExpr>().Any(t => t.Value is WildcardValue));
+
+        // #665. A CASE-VARIED literal, required of the generator the AGREEMENT
+        // property samples. #631 was a divergence that property could not
+        // produce an input for, and the fix was to vary the case here -- so
+        // losing the variation would re-blind it with nothing turning red.
+        Require("case-varied literal", a => Exprs(a).OfType<TagExpr>()
+            .Any(t => t.Value is LiteralValue literal
+                      && literal.Text.Any(char.IsUpper)
+                      && literal.Text.Any(char.IsLower)));
     }
 }

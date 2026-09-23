@@ -333,10 +333,57 @@ public sealed class MessageFlowTests
     [Fact]
     public void Unscoped_declarations_are_what_a_single_process_diagram_always_was()
     {
+        // #663. A SINGLE-process diagram, which is what the name claims and what
+        // every caller before the scoped overload relied on: asking by a key that
+        // is not the process id still answers. The previous version compared the
+        // overload with its own default on a TWO-process diagram, which is true
+        // by definition.
+        const string singleProcess = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions {Ns}>
+              <bpmn:message id="Msg_1" name="ping" />
+              <bpmn:process id="stored-id" name="Stored" isExecutable="true">
+                <bpmn:startEvent id="start"><bpmn:messageEventDefinition messageRef="Msg_1" /></bpmn:startEvent>
+                <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+                <bpmn:endEvent id="end" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var unscoped = WorkflowBpmnXml.ExtractMessageDeclarations(singleProcess, processId: null);
+        // The key the store was addressed by has drifted from the process id (#558).
+        var byAnotherKey = WorkflowBpmnXml.ExtractMessageDeclarations(singleProcess, processId: "the-workflow-key");
+
+        Assert.Equal(new[] { "start" }, unscoped.Select(d => d.ElementId).ToArray());
+        Assert.Equal(new[] { "start" }, byAnotherKey.Select(d => d.ElementId).ToArray());
+    }
+
+    /// <summary>
+    /// #663. The widening the scope rule accepts, stated rather than left to be
+    /// discovered: on a MULTI-pool diagram an id that names no pool falls back to
+    /// every pool's declarations.
+    /// </summary>
+    [Fact]
+    public void A_multi_pool_diagram_addressed_by_an_unknown_key_answers_for_every_pool()
+    {
         var xml = SendTaskToReceiveTask();
+
+        var unknown = WorkflowBpmnXml.ExtractMessageDeclarations(xml, processId: "no-such-process");
+        var everything = WorkflowBpmnXml.ExtractMessageDeclarations(xml, processId: null);
+
+        Assert.NotEmpty(unknown);
         Assert.Equal(
-            WorkflowBpmnXml.ExtractMessageDeclarations(xml).Select(d => d.ElementId).Order(),
-            WorkflowBpmnXml.ExtractMessageDeclarations(xml, processId: null).Select(d => d.ElementId).Order());
+            everything.Select(d => d.ElementId).Order(StringComparer.Ordinal),
+            unknown.Select(d => d.ElementId).Order(StringComparer.Ordinal));
+        // The complement: a key that DOES name a pool scopes to it. Every
+        // declaration in this diagram is the Supplier's receive task, so the
+        // narrowing shows on the Customer side -- which is the point, since a
+        // scope that never excludes anything is not a scope.
+        Assert.Equal(
+            everything.Select(d => d.ElementId).Order(StringComparer.Ordinal),
+            WorkflowBpmnXml.ExtractMessageDeclarations(xml, processId: "supplier")
+                .Select(d => d.ElementId).Order(StringComparer.Ordinal));
+        Assert.Empty(WorkflowBpmnXml.ExtractMessageDeclarations(xml, processId: "customer"));
     }
 
     // ── refusals ─────────────────────────────────────────────────────────────

@@ -476,8 +476,12 @@ public sealed class DaprStreamingSubscriber(
                 try
                 {
                     var generation = Volatile.Read(ref _generation);
+                    // #660. The engine topics subscribe through a component of
+                    // their own, whose consumer is durable and queue-grouped, so
+                    // replicas compete for a message instead of each taking a
+                    // copy. Everything else is unchanged.
                     var handle = await _pubSubClient.SubscribeAsync(
-                        _daprOptions.PubSubName,
+                        PubSubNameFor(_daprOptions, topic),
                         topic,
                         BuildOptions(),
                         (message, ct) => HandleMessageAsync(topic, generation, message, ct),
@@ -590,6 +594,15 @@ public sealed class DaprStreamingSubscriber(
             return TopicResponseAction.Drop;
         }
     }
+
+    /// <summary>
+    /// The pub/sub component this topic subscribes through (#660): its own,
+    /// when one is configured for it, and the shared one otherwise.
+    /// </summary>
+    internal static string PubSubNameFor(DaprOptions options, string topic) =>
+        options.TopicPubSubNames.TryGetValue(topic, out var dedicated) && !string.IsNullOrWhiteSpace(dedicated)
+            ? dedicated
+            : options.PubSubName;
 
     private static DaprSubscriptionOptions BuildOptions()
     {

@@ -79,6 +79,70 @@ public sealed class VisibleTasksAndCheckTests
         Assert.DoesNotContain("own-1", ids);
     }
 
+    /// <summary>
+    /// #664. A supervisee's lane-offered work belongs in Team Tasks, as it has
+    /// been in their own list since #171: the two views disagreed about the
+    /// same person's work because only one of them asked for their groups.
+    /// </summary>
+    [Fact]
+    public async Task AssignedToTeam_AsksForEachSuperviseesGroups()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var alice = Guid.NewGuid();
+        Guid groupId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider
+                .GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.EntityEdges.Add(new AutoNate.Web.Persistence.Scaffolded.EntityEdge
+            {
+                Id = Guid.NewGuid(),
+                EdgeKind = EdgeKinds.Supervisor,
+                FromKind = EntityKinds.User,
+                FromId = AdminUserId.ToString(),
+                ToKind = EntityKinds.User,
+                ToId = alice.ToString(),
+                Data = "{}",
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = AdminUserId
+            });
+
+            groupId = Guid.NewGuid();
+            db.Groups.Add(new AutoNate.Web.Persistence.Scaffolded.Group
+            {
+                Id = groupId,
+                Name = $"finance-{groupId:N}"[..20],
+                IsArchived = false,
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = AdminUserId,
+                UpdatedAtUtc = DateTime.UtcNow,
+                UpdatedBy = AdminUserId
+            });
+            // The group must exist before its member: one SaveChanges left EF
+            // free to order the inserts the other way round.
+            await db.SaveChangesAsync();
+
+            db.GroupMembers.Add(new AutoNate.Web.Persistence.Scaffolded.GroupMember
+            {
+                GroupId = groupId,
+                UserId = alice,
+                AddedAtUtc = DateTime.UtcNow,
+                AddedBy = AdminUserId
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+        (await client.GetAsync("/api/tasks/assigned-to-team")).EnsureSuccessStatusCode();
+
+        // The supervisee's groups reached the engine query...
+        Assert.Contains($"TasksForUserGroups:{alice}:{groupId}", factory.FlowableStub.Calls);
+        // ...and a supervisee in no group still asks for none, rather than "".
+        Assert.DoesNotContain($"TasksForUserGroups:{alice}:", factory.FlowableStub.Calls);
+    }
+
     [Fact]
     public async Task AuthCheck_ParallelResults_ReflectGrants()
     {

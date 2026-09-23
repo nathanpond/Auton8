@@ -11136,3 +11136,156 @@ primary process id with the model's key and nothing else
 (`AlignPrimaryProcessKey`): a caller who publishes raw XML is asking for that
 XML to run, and prepare's other rewrites change what a diagram means.
 
+## #660 — a component per engine topic, 2026-09-22
+
+Owner answer, verbatim option: "One component per engine topic".
+
+**Why one per topic and not one for all.** Dapr's JetStream component applies
+`durableName` and `queueGroupName` as-is to every topic it serves
+(components-contrib `pubsub/jetstream`: `consumerConfig.Durable = v`, then
+`nats.Bind(stream, consumer)`), so a single component carrying those two lines
+gave all ~18 topics one consumer, the first topic's filter subject won, and
+delivery stopped -- measured, 0 of 2 bus specs, which is what blocked the first
+attempt. A component that serves ONE topic has no such ambiguity.
+
+**What ships.** `pubsub-workflow-messages` and `pubsub-workflow-signals`, each
+with a durable queue-grouped consumer; `DaprOptions.TopicPubSubNames` (base
+config, since the map is a constant of the deployment rather than of an
+environment) and a per-topic lookup on the SUBSCRIBE side only -- publishing
+keeps the shared component, because a subject is a subject.
+
+**The E2E fixture writes its own components per run.** Same app-id means the
+same queue group, so a suite run and the compose container are replicas by
+Dapr's definition and would take each other's messages. The fixture copies the
+tracked components and rewrites the two consumer names to `e2e-<run>-<topic>`,
+deletes them at teardown, and sweeps `e2e-` consumers older than two hours at
+start -- the FlowableDeploymentSweep pattern, for the same reason: a durable
+consumer outlives its process and Dapr cannot set an inactivity threshold.
+Measured on a live run: `workflow.messages` and `workflow.signals` were each
+served by `durable=e2e-4659c8f9-… group=e2e-4659c8f9-…`, and zero engine-topic
+consumers remained afterwards.
+
+**Rule 3, in scope.** `ensure-up.sh` never refreshed
+`autonate-web-dapr/components` -- the mount existed and held whatever someone
+last copied by hand, fifteen days stale, predating these components entirely.
+Without that copy a containerised app could not join the queue group at all, so
+the fix would have been real only for a locally run app. Hostnames there are the
+compose service names, which is what the hand copies carried.
+
+**Proof, and its complement.** `NatsQueueGroupTests` against the real NATS: two
+clients bound to ONE durable consumer receive a message once between them; two
+consumers of their own each receive it -- the pre-#660 shape, so a test that
+stopped telling them apart fails. `DaprEngineTopicComponentTests` guards the
+configuration both ways, including that the SHARED component must NOT carry
+those two fields.
+
+**Known residual, filed as #669**: a workflow declaring its own
+`flowable:topic` still subscribes through the shared component, so custom topics
+keep today's fan-out. Components are files; topics are runtime. Options are in
+the issue; none of them is a small change.
+
+## #327 — the eight id-bearing surfaces, 2026-09-22
+
+Owner decision of 2026-09-21, implemented: map the five read surfaces and the
+reverse direction; leave the query layer raw.
+
+**One map, asked for two ways.** `GetExpansionSourceMapAsync(instanceId)`already existed and is cached per DEFINITION; #327 adds
+`GetExpansionSourceMapByDefinitionAsync` so the executions LIST can map a page
+of rows with one lookup per distinct definition instead of a history round trip
+per row, and `ResolveEngineActivityIdAsync` for the reverse -- the map read
+backwards, because an operator's id is an authored one.
+
+**Mapped:** `/api/executions/{id}/log` (its error rows), the assistant's
+`get_execution` and `list_execution_history`, the error-open detector's issue
+facts and summary, and the executions list's current step. **Reverse:**
+move-state and completed-assignees resolve an authored id before it reaches the
+engine, and `/activities/{id}/instances` resolves before filtering history --
+so an id read off a mapped screen is usable against the engine, which is the
+half #327 called the sharpest.
+
+**Never fatal, and that is new.** The map is cosmetic, and it is now consulted
+on paths that must work without it -- move-state, completed assignees, a list of
+200 rows. Both fetches (the instance lookup and the definition's resource) now
+return an empty map on any failure rather than throwing, so an engine that will
+not answer costs a reader a generated id, not the call. Caught by an existing
+client test that stubbed neither route and began to fail the moment the mapping
+was added to its path.
+
+**The query layer stays raw, asserted rather than assumed.**
+`GeneratedIdQueryLayerTests` names the four query entities and fails if any of
+them starts mapping -- a saved query filters on what the engine stores -- and
+names the four read surfaces and fails if any of them stops. Both halves rot in
+opposite directions, so both are guarded.
+
+## M5 fix pass, round four: the carried lows, 2026-09-22
+
+Owner answer: clear #327 and the five lows before re-verifying.
+
+**#661.** The backlog row for E2E-060 now says what the spec does -- bulk-delete
+IS asserted on its effect since #652 -- and no longer claims a due-date seed
+that never existed. The tautological `Assert.NotEqual` is gone.
+
+**#662.** The Seller fixture's process is called `not-the-pool-name`, so the
+engine calling the definition `Seller` proves the rename rather than repeating
+the input; the one-pool and no-pool facts compare every element id before and
+after instead of three substrings.
+
+**#663.** The studio's coming-soon note no longer tells authors that pools,
+lanes and message flows carry no execution semantics and that a multi-pool
+diagram is refused -- all false since #169/#170/#171 -- and the palette's
+messageFlow note says supported. The tautological scope test now feeds a
+genuine single-process diagram (the case its name always claimed), and the
+widening it accepts on a multi-pool diagram addressed by an unknown key is
+asserted rather than left to be discovered.
+
+**#664.** Team Tasks resolves each supervisee's groups, so it agrees with that
+person's own list about their lane-offered work. The lane's group goes through
+the command stack, so undo reverts it -- which also changes what clearing does:
+the attribute becomes null rather than disappearing, and moddle omits a null
+attribute when it serialises, so the saved diagram is the same either way. The
+test that asserted on the KEY now asserts on the value, which is what the
+requirement was about. `pickBestBpmnXml`'s selection rule is pinned: highest
+score, first candidate on a tie -- which shows the ledger's earlier account of
+the lane loss ("tied and won on a later candidate") was wrong; a rebuild must
+have scored strictly higher.
+
+**#665.** Force-complete records a synchronous engine failure the way its
+sibling does, instead of letting it reach the unhandled handler. The
+raw-message guard's helper-parameter branch -- the one #626 widened the scan to
+reach -- has a synthetic offence proving it fires. The per-activity route has a
+cache-miss fact beside the collapse's. The `sinceUtc` descriptions on
+`IFlowableClient` and the stub, which outlived the code by two stories, say what
+#590 measured. Explain compares path ids ordinally, as the evaluator and every
+compiler do. And the shared generator must keep producing a case-varied literal
+-- the input #631 needed and could not produce.
+
+**What the fourth pass's gate caught.** Two real things and one flake.
+
+**A pool's name never reached the engine through `/publish`.** #169 AC6 -- an
+execution can say which participant it belongs to -- rests on the non-primary
+process taking its participant's name, and that happened only in prepare. The
+E2E asserted it and passed anyway, because the fixture had ALSO called its
+process `Seller`; renaming the fixture's process for #662 made the assertion
+able to fail, and it did. The publish-time alignment now names the pools as
+well as aligning the key -- identity, not semantics, which is why it belongs
+there and the rest of prepare does not (#653).
+
+**#665's force-complete recording had taken the author's words away.** Copying
+the sibling wholesale replaced the response with the engine's generic refusal,
+and `A_failing_compensation_handler_is_surfaced_not_swallowed` pins the
+opposite: a compensation handler that throws is the AUTHOR's script failing,
+and the operator is told which handler and why in the author's own words. It
+records now and rethrows, so the answer is what it always was. The gap #665
+named was the missing record, not the response.
+
+**`SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`** failed in two
+consecutive slim runs while passing 10/10 alone and in full-local at the same
+commit, first as a `TaskCanceledException` and then, legibly, as
+`55006: database "autonate_test_…" is being accessed by other users` out of
+`PostgresTestDatabase.DisposeAsync`. Not the assertion and not this pass's code:
+the teardown terminates the database's backends and then drops, and the app
+under test is still shutting down, so a hosted service's pooled connection can
+arrive in between. The drop is `WITH (FORCE)` now -- terminate and drop in one
+statement, which is what the E2E fixture already did -- with a retry for a
+connection that lands even inside that. Filed as #670 with the first, wrong
+symptom; corrected there.

@@ -229,14 +229,38 @@ public sealed class MultiPoolPublishRefusalTests
     [Fact]
     public void One_pool_and_no_pool_diagrams_prepare_as_before()
     {
+        // #662. Every element the author drew, by id, before and after -- not a
+        // handful of substrings. The claim is that the collaboration work
+        // changed nothing for these two shapes, and a substring check cannot
+        // see something it was not asked about.
+        static string ProcessId(string xml) => System.Xml.Linq.XDocument.Parse(xml)
+            .Descendants()
+            .First(e => e.Name.LocalName == "process")
+            .Attribute("id")!.Value;
+
+        static string[] Ids(string xml) => System.Xml.Linq.XDocument.Parse(xml)
+            .Descendants()
+            .Select(e => (string?)e.Attribute("id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
         var one = WorkflowBpmnXml.ApplyProcessMetadata(OnePool, "solo", "Solo");
         Assert.Contains("<bpmn:process id=\"solo\" name=\"Solo\" isExecutable=\"true\"", one, StringComparison.Ordinal);
         Assert.Contains("processRef=\"solo\"", one, StringComparison.Ordinal);
         Assert.DoesNotContain("processRef=\"only\"", one, StringComparison.Ordinal);
+        // The process id is the one thing prepare is allowed to change here.
+        Assert.Equal(
+            Ids(OnePool).Select(id => id == ProcessId(OnePool) ? "solo" : id).Order(StringComparer.Ordinal).ToArray(),
+            Ids(one));
 
         var none = WorkflowBpmnXml.ApplyProcessMetadata(NoCollaboration, "solo", "Solo");
         Assert.Contains("<bpmn:process id=\"solo\" name=\"Solo\" isExecutable=\"true\"", none, StringComparison.Ordinal);
         Assert.DoesNotContain("participant", none, StringComparison.Ordinal);
+        Assert.Equal(
+            Ids(NoCollaboration).Select(id => id == ProcessId(NoCollaboration) ? "solo" : id).Order(StringComparer.Ordinal).ToArray(),
+            Ids(none));
     }
 
     // ── what the studio is told ─────────────────────────────────────────────

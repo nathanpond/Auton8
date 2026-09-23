@@ -400,6 +400,7 @@ main() {
     "$MOUNTS_ROOT/dapr-scheduler/data" \
     "$MOUNTS_ROOT/dapr-dashboard/components" \
     "$MOUNTS_ROOT/flowable-dapr/components" \
+    "$MOUNTS_ROOT/autonate-web-dapr/components" \
     "$MOUNTS_ROOT/flowable" \
     "$MOUNTS_ROOT/hocuspocus" \
     "$MOUNTS_ROOT/executor" \
@@ -411,6 +412,18 @@ main() {
   cp "$REPO_ROOT"/infra/dapr/components/pubsub.yaml "$MOUNTS_ROOT/flowable-dapr/components/"
   sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' "$MOUNTS_ROOT/flowable-dapr/components/pubsub.yaml"
   rm -f "$MOUNTS_ROOT/flowable-dapr/components/pubsub.yaml.bak"
+
+  # #660. The app sidecar's components were mounted and never refreshed: the
+  # files in that directory were whatever someone last copied by hand, fifteen
+  # days stale when this was written and predating the engine-topic components
+  # entirely -- so a containerised app could not have joined the queue group at
+  # all. Hostnames are the compose service names here, which is what the copies
+  # already carried; `host.docker.internal` is flowable-dapr's convention, not
+  # this one.
+  cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$MOUNTS_ROOT/autonate-web-dapr/components/"
+  sed -i.bak -e 's|nats://localhost:4222|nats://nats:4222|' -e 's|localhost:6379|redis:6379|' \
+    "$MOUNTS_ROOT/autonate-web-dapr/components/"*.yaml
+  rm -f "$MOUNTS_ROOT/autonate-web-dapr/components/"*.bak
 
   local desired_flowable_hash
   desired_flowable_hash="$(compute_flowable_build_hash)"

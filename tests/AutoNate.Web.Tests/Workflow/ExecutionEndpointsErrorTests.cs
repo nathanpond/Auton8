@@ -295,6 +295,72 @@ public sealed class ExecutionEndpointsErrorTests
         Assert.Contains("maybe", row.ErrorMessage ?? "", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// #327. The log is the fourth id-bearing surface and the last of the read
+    /// ones: it served the raw generated id while the diagram and history views
+    /// beside it had been mapped since #218.
+    /// </summary>
+    [Fact]
+    public async Task LogEndpoint_MapsTheGeneratedIdAndLeavesAnUnmappedOneAlone()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var processId = $"proc-{Guid.NewGuid():N}";
+        const string generated = "cg__autonateRoute";
+        const string authored = "cg";
+        factory.FlowableStub.ExpansionSourceMap =
+            new Dictionary<string, string>(StringComparer.Ordinal) { [generated] = authored };
+        await SeedErrorsAsync(factory, processId,
+            (generated, "the routing script blew up", "trace", "2026-05-05T10:00:00Z"),
+            ("userTask_1", "a task failed", "trace", "2026-05-05T10:01:00Z"));
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+        var response = await client.GetAsync($"/api/executions/{processId}/log");
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains($"\"activityId\":\"{authored}\"", body, StringComparison.Ordinal);
+        // The generated id is gone, not merely accompanied.
+        Assert.DoesNotContain(generated, body, StringComparison.Ordinal);
+        // The complement: an id the map says nothing about is shown as it is.
+        Assert.Contains("\"activityId\":\"userTask_1\"", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// #327's reverse direction: an operator reads an authored id off the
+    /// history view and asks for that activity's instances. Before this the
+    /// mapping was one-way and the answer was an empty list.
+    /// </summary>
+    [Fact]
+    public async Task ActivityInstancesEndpoint_AcceptsTheAuthoredId()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var processId = $"proc-{Guid.NewGuid():N}";
+        const string generated = "cg__autonateRoute";
+        const string authored = "cg";
+        factory.FlowableStub.ExpansionSourceMap =
+            new Dictionary<string, string>(StringComparer.Ordinal) { [generated] = authored };
+        factory.FlowableStub.HistoryByInstance[processId] =
+        [
+            new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = generated,
+                ActivityName = "Decide",
+                ActivityType = "serviceTask",
+                StartedAtUtc = DateTimeOffset.Parse("2026-05-05T10:00:00Z"),
+                EndedAtUtc = DateTimeOffset.Parse("2026-05-05T10:00:01Z")
+            }
+        ];
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+        var response = await client.GetAsync($"/api/executions/{processId}/activities/{authored}/instances");
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Decide", body, StringComparison.Ordinal);
+    }
+
     private static async Task SeedErrorsAsync(
         AutoNateWebApplicationFactory factory,
         string processId,

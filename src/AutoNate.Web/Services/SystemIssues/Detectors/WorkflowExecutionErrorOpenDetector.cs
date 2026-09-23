@@ -73,11 +73,20 @@ public sealed class WorkflowExecutionErrorOpenDetector(
                 continue;
             }
 
+            // #327. An issue an operator opens names the activity; a generated
+            // id names nothing they can find in the diagram they drew.
+            var expansionSources = await flowableClient.GetExpansionSourceMapAsync(
+                group.ProcessInstanceId, cancellationToken);
+            var mostRecentActivityId =
+                expansionSources.TryGetValue(group.MostRecent.ActivityId, out var authoredActivityId)
+                    ? authoredActivityId
+                    : group.MostRecent.ActivityId;
+
             var facts = JsonSerializer.Serialize(new
             {
                 processInstanceId = group.ProcessInstanceId,
                 errorCount = group.ErrorCount,
-                mostRecentActivityId = group.MostRecent.ActivityId,
+                mostRecentActivityId,
                 mostRecentActivityName = group.MostRecent.ActivityName,
                 mostRecentOccurredAtUtc = group.MostRecent.OccurredAtUtc,
                 mostRecentRawFlowableEventType = group.MostRecent.RawFlowableEventType
@@ -90,7 +99,7 @@ public sealed class WorkflowExecutionErrorOpenDetector(
                 Fingerprint: FingerprintFor(group.ProcessInstanceId),
                 Title: $"Workflow execution failure on process {group.ProcessInstanceId}",
                 Summary: group.MostRecent.ErrorMessage
-                    ?? $"{group.ErrorCount} error(s) recorded; most recent at activity '{group.MostRecent.ActivityName ?? group.MostRecent.ActivityId}'.",
+                    ?? $"{group.ErrorCount} error(s) recorded; most recent at activity '{group.MostRecent.ActivityName ?? mostRecentActivityId}'.",
                 RelatedEntityKind: "workflow_execution",
                 RelatedEntityId: group.ProcessInstanceId,
                 FactsJson: facts), cancellationToken);

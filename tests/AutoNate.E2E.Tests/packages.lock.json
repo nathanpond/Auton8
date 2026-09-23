@@ -45,6 +45,15 @@
         "resolved": "17.14.15",
         "contentHash": "mXQPJsbuUD2ydq4/ffd8h8tSOFCXec+2xJOVNCvXjuMOq/+5EKHq3D2m2MC2+nUaXeFMSt66VS/J4HdKBixgcw=="
       },
+      "NATS.Client.JetStream": {
+        "type": "Direct",
+        "requested": "[2.5.10, )",
+        "resolved": "2.5.10",
+        "contentHash": "uvR+88I0VczCDuADPwcTIklfuNxpEVgNDsU0LWLwBHMexRwaF0j0iPSvfWpCH6lHJFGQIywpaiH88oxGZMRLsQ==",
+        "dependencies": {
+          "NATS.Client.Core": "2.5.10"
+        }
+      },
       "Npgsql": {
         "type": "Direct",
         "requested": "[9.0.3, )",
@@ -108,6 +117,11 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
         }
       },
+      "Microsoft.Extensions.Primitives": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "9+PnzmQFfEFNR9J2aDTfJGGupShHjOuGw4VUv+JB044biSHrnmCIMD+mJHmb2H7YryrfBEXDurxQ47gJZdCKNQ=="
+      },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
         "resolved": "17.10.0",
@@ -120,6 +134,15 @@
         "dependencies": {
           "Microsoft.TestPlatform.ObjectModel": "17.10.0",
           "Newtonsoft.Json": "13.0.1"
+        }
+      },
+      "NATS.Client.Core": {
+        "type": "Transitive",
+        "resolved": "2.5.10",
+        "contentHash": "+B5Sv5gMy9MbaaSI2n7eZkPVDBf49hhPAyllDklcm1NRXkRZ60xBvepnJNtTVI5KmmZyzWdwBa1pw5CO7nPwhQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "6.0.1",
+          "Microsoft.Extensions.Primitives": "6.0.0"
         }
       },
       "Newtonsoft.Json": {

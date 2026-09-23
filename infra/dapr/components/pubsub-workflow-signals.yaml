@@ -1,0 +1,40 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub-workflow-signals
+spec:
+  type: pubsub.jetstream
+  version: v1
+  metadata:
+    - name: natsURL
+      value: nats://localhost:4222
+    - name: streamName
+      value: workflow-execution
+    # Same as the shared component: consumers are future-only, so a reconnect
+    # never replays the stream's history as fresh work.
+    - name: deliverPolicy
+      value: new
+    # #660. A DURABLE consumer plus a queue group is what makes N replicas of
+    # this app COMPETE for a bus message instead of each starting its own
+    # instance of the workflow. Dapr's ephemeral consumers -- what every topic
+    # had before -- are per process: two replicas meant two consumers, two
+    # deliveries, two workflow instances, by construction.
+    #
+    # ONE COMPONENT PER TOPIC, and that is not tidiness. The component applies
+    # `durableName` to every topic it serves, so a single component carrying
+    # these two lines gave all ~18 topics the same consumer, the first topic's
+    # filter subject won, and delivery stopped entirely -- measured, 0 of 2 bus
+    # specs. A component that serves one topic has no such ambiguity.
+    #
+    # The name is the DEPLOYMENT's, not the process's: every replica of
+    # `autonate-web` joins this group and they share the work. Two processes on
+    # one machine (the compose container and a local `make app-dapr`) are also
+    # replicas by that definition and will compete -- which is the semantic
+    # asked for. The E2E fixture writes its own copy of this file with a
+    # run-scoped name so a suite run never competes with either.
+    - name: durableName
+      value: autonate-web-workflow-signals
+    - name: queueGroupName
+      value: autonate-web-workflow-signals
+scopes:
+  - autonate-web

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scoreBpmnXml } from "../workflow.js";
+import { scoreBpmnXml, pickBestBpmnXml } from "../workflow.js";
 
 /**
  * The save picks the best of several XML candidates by score (#171). Two of
@@ -39,5 +39,32 @@ describe("the save candidate score", () => {
   it("scores nothing for an empty candidate", () => {
     expect(scoreBpmnXml("")).toBe(0);
     expect(scoreBpmnXml(null)).toBe(0);
+  });
+});
+
+
+/**
+ * #664. The scorer is only half of it: `pickBestBpmnXml` is what actually
+ * chooses, and nothing pinned its rule. A tie keeps the FIRST candidate, which
+ * is bpmn-js's own `saveXML` -- the ledger's account of the lane loss said
+ * "tied and won on a later candidate", and that could not have happened.
+ */
+describe("the save candidate selection", () => {
+  it("takes the highest score", () => {
+    expect(pickBestBpmnXml([flowOnly, withLanes])).toBe(withLanes);
+    expect(pickBestBpmnXml([withLanes, flowOnly])).toBe(withLanes);
+  });
+
+  it("keeps the first candidate on a tie, which is bpmn-js's own output", () => {
+    const copy = `${withLanes}`;
+    expect(pickBestBpmnXml([withLanes, copy])).toBe(withLanes);
+  });
+
+  it("skips empty candidates rather than choosing one", () => {
+    expect(pickBestBpmnXml(["", null, undefined, flowOnly])).toBe(flowOnly);
+  });
+
+  it("returns an empty string when there is nothing to choose", () => {
+    expect(pickBestBpmnXml([null, "", undefined])).toBe("");
   });
 });

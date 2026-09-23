@@ -658,9 +658,28 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             await terminateCommand.ExecuteNonQueryAsync();
         }
 
-        await using var dropCommand = adminConnection.CreateCommand();
-        dropCommand.CommandText = $"drop database if exists \"{_databaseName}\";";
-        await dropCommand.ExecuteNonQueryAsync();
+        // WITH (FORCE), and a retry. Terminating the backends above leaves a
+        // window: the app under test is still shutting down, and a hosted
+        // service's pooled connection can come back between the terminate and
+        // the drop. Measured twice in a full `make test-slim` run --
+        // `55006: database "autonate_test_…" is being accessed by other users`
+        // out of SubscriptionManagerTests' teardown, while the same class passed
+        // alone and in full-local. FORCE terminates and drops in one statement;
+        // the retry covers a connection that arrives even inside that.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var dropCommand = adminConnection.CreateCommand();
+                dropCommand.CommandText = $"drop database if exists \"{_databaseName}\" with (force);";
+                await dropCommand.ExecuteNonQueryAsync();
+                return;
+            }
+            catch (PostgresException exception) when (exception.SqlState == "55006" && attempt < 3)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt));
+            }
+        }
     }
 
     private async Task InitializeAsync()

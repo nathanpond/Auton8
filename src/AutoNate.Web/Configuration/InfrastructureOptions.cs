@@ -55,4 +55,16 @@ public sealed class DaprOptions
     public string StateStoreName { get; set; } = string.Empty;
 
     public string PubSubName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Topics that subscribe through a component of their own rather than
+    /// <see cref="PubSubName"/> (#660), keyed by topic name.
+    /// </summary>
+    /// <remarks>
+    /// Only the SUBSCRIBE side reads this. Publishing keeps using the shared
+    /// component: a component is a connection and a consumer policy, and the
+    /// subject a message lands on is the same either way. A topic that is not
+    /// listed here behaves exactly as it always has.
+    /// </remarks>
+    public Dictionary<string, string> TopicPubSubNames { get; set; } = new(StringComparer.Ordinal);
 }

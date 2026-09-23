@@ -309,7 +309,7 @@ function shouldPreferDefinitionsXml(definitionsXml, savedXml) {
   return definitionsScore > savedScore;
 }
 
-function pickBestBpmnXml(candidates) {
+export function pickBestBpmnXml(candidates) {
   let bestXml = null;
   let bestScore = -1;
 
@@ -2572,11 +2572,13 @@ export function updateLaneProperties(modelerHandle, payload) {
     throw new Error(`Lane '${payload.id}' is no longer available in the diagram.`);
   }
 
-  writeAutoNateAttribute(element.businessObject, "groupId", normalizeOptionalString(payload.groupId));
-  // Through the command stack, so the change is undoable and marks the diagram
-  // dirty even when only the group changed.
+  // #664. BOTH through the command stack, so undo reverts the group as well as
+  // the name. `writeAutoNateAttribute` mutates `$attrs` directly, which the
+  // stack never sees -- an author who undid a lane edit got the old name back
+  // and kept the new group.
   modeling.updateProperties(element, {
-    name: normalizeOptionalString(payload.name)
+    name: normalizeOptionalString(payload.name),
+    "autonate:groupId": normalizeOptionalString(payload.groupId)
   });
 }
 

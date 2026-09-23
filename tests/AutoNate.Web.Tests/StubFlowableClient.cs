@@ -383,6 +383,21 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapByDefinitionAsync(
+        string processDefinitionId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(ExpansionSourceMap);
+
+    /// <summary>#327. The map read backwards, as the real client reads it.</summary>
+    public Task<string> ResolveEngineActivityIdAsync(
+        string processInstanceId, string activityId, CancellationToken cancellationToken = default)
+    {
+        foreach (var (generated, authored) in ExpansionSourceMap)
+        {
+            if (string.Equals(authored, activityId, StringComparison.Ordinal)) return Task.FromResult(generated);
+        }
+        return Task.FromResult(activityId);
+    }
+
     public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
@@ -497,7 +512,9 @@ internal sealed class StubFlowableClient : IFlowableClient
     }
 
     // Tests for the history projection seed this list; the global page method
-    // returns entries filtered by sinceUtc and paged by start/size.
+    // returns entries newest-first and paged by start/size, with NO time filter
+    // -- as the engine does. The description of a `sinceUtc` filter is what the
+    // stub used to do, and #590 is the bug that caused (#665).
     public List<FlowableHistoricActivityEvent> HistoricActivityEvents { get; } = new();
 
     /// <summary>
@@ -540,6 +557,17 @@ internal sealed class StubFlowableClient : IFlowableClient
         TasksByUser.TryGetValue(userId, out var tasks);
         IReadOnlyList<FlowableTaskSummary> list = tasks?.AsReadOnly() ?? (IReadOnlyList<FlowableTaskSummary>)Array.Empty<FlowableTaskSummary>();
         return Task.FromResult(list);
+    }
+
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> candidateGroupsByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var (userId, groups) in candidateGroupsByUserId)
+        {
+            Calls.Add($"TasksForUserGroups:{userId}:{string.Join(",", groups)}");
+        }
+        return GetTasksAssignedToUsersAsync(candidateGroupsByUserId.Keys.ToArray(), cancellationToken);
     }
 
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(

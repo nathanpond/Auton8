@@ -66,6 +66,16 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     private IBrowser? _browser;
     private string _testConnString = string.Empty;
 
+    /// <summary>
+    /// The components directory this run's sidecar loaded, and the durable
+    /// consumers named in it (#660). Written per run so a suite never joins the
+    /// queue group a developer's app or the compose container is in -- same
+    /// app-id means same group, and they would take each other's messages.
+    /// </summary>
+    private string? _daprComponentsDir;
+
+    private readonly List<string> _runScopedConsumers = [];
+
     public string BaseUrl { get; private set; } = string.Empty;
 
     public IBrowser Browser =>
@@ -81,6 +91,99 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     /// Never fails the run: a suite that cannot start because cleanup failed is worse
     /// than the mess it was clearing.
     /// </remarks>
+    private static async Task SweepStaleNatsConsumersAsync()
+    {
+        try
+        {
+            Console.WriteLine($"[e2e-nats-sweep] {await Support.NatsConsumerSweep.SweepAsync()}.");
+        }
+        catch (Exception exception)
+        {
+            // No NATS, or no stream yet: a diagnostic, never a reason not to run.
+            Console.WriteLine($"[e2e-nats-sweep] Skipped: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The Dapr components for this run (#660): the tracked ones, with the
+    /// engine topics' durable and queue-group names scoped to the run.
+    /// </summary>
+    /// <remarks>
+    /// Without the scoping a suite run and the compose container are two
+    /// replicas of `autonate-web` in one queue group, competing -- so a bus
+    /// message would land in whichever won, and the spec asserting it started a
+    /// workflow would fail for a reason with nothing to do with the code under
+    /// test. `AUTONATE_E2E_DAPR_COMPONENTS` still wins, so a run can be pointed
+    /// at a hand-written directory.
+    /// </remarks>
+    private string ResolveDaprComponentsPath(string repoRoot)
+    {
+        if (Environment.GetEnvironmentVariable("AUTONATE_E2E_DAPR_COMPONENTS") is { Length: > 0 } explicitDirectory)
+        {
+            return explicitDirectory;
+        }
+
+        var source = Path.Combine(repoRoot, "infra", "dapr", "components");
+        var runId = Support.TestNames.ShortSlug();
+        var target = Path.Combine(Path.GetTempPath(), $"autonate-e2e-components-{runId}");
+        Directory.CreateDirectory(target);
+
+        foreach (var file in Directory.EnumerateFiles(source, "*.yaml"))
+        {
+            var scoped = ScopeConsumerNamesToRun(File.ReadAllText(file), runId, _runScopedConsumers);
+            File.WriteAllText(Path.Combine(target, Path.GetFileName(file)), scoped);
+        }
+
+        _daprComponentsDir = target;
+        return target;
+    }
+
+    /// <summary>
+    /// Rewrites an `autonate-web-workflow-&lt;topic&gt;` consumer name to
+    /// `e2e-&lt;run&gt;-&lt;topic&gt;`, collecting what it wrote so the run can
+    /// delete them. A component naming no such consumer passes through whole.
+    /// </summary>
+    internal static string ScopeConsumerNamesToRun(string yaml, string runId, List<string> collected)
+    {
+        return Regex.Replace(
+            yaml,
+            @"(?m)^(?<lead>[ \t]*value:[ \t]*)autonate-web-workflow-(?<topic>[A-Za-z0-9-]+)[ \t]*$",
+            match =>
+            {
+                var scoped = $"{Support.NatsConsumerSweep.SuitePrefix}{runId}-{match.Groups["topic"].Value}";
+                collected.Add(scoped);
+                return match.Groups["lead"].Value + scoped;
+            });
+    }
+
+    /// <summary>
+    /// This run's durable consumers, and the components directory that named
+    /// them (#660). Best-effort: the age-based sweep at the next run's start is
+    /// what covers a run that never got here.
+    /// </summary>
+    private async Task DropOwnNatsConsumersAsync()
+    {
+        try
+        {
+            await Support.NatsConsumerSweep.DeleteAsync(_runScopedConsumers);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[e2e-nats-sweep] Could not delete this run's consumers: {exception.Message}");
+        }
+
+        try
+        {
+            if (_daprComponentsDir is not null && Directory.Exists(_daprComponentsDir))
+            {
+                Directory.Delete(_daprComponentsDir, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+        }
+    }
+
     private static async Task SweepStaleFlowableDeploymentsAsync()
     {
         try
@@ -109,6 +212,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         WipeStaleStaticWebAssetsManifests(repoRoot);
         WipeWwwroot(repoRoot);
         await SweepStaleFlowableDeploymentsAsync();
+        await SweepStaleNatsConsumersAsync();
 
         // Build a fresh `AutoNate_E2E` database before the app starts so the
         // app's `DatabaseSchemaInitializer.EnsureAsync` (Program.cs) runs
@@ -186,6 +290,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // that destroys concurrent runs for one that fills the cluster, which is
         // the failure #191 and #258 were both about.
         await DropOwnDatabaseAsync();
+        await DropOwnNatsConsumersAsync();
     }
 
     private async Task DropOwnDatabaseAsync()
@@ -427,10 +532,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             // #660. Overridable, so a run can point the sidecar at a components
             // directory of its own -- a queue group or durable name that is not
             // the dev container's, for one.
-            info.ArgumentList.Add(
-                Environment.GetEnvironmentVariable("AUTONATE_E2E_DAPR_COMPONENTS") is { Length: > 0 } componentsDir
-                    ? componentsDir
-                    : Path.Combine(repoRoot, "infra", "dapr", "components"));
+            info.ArgumentList.Add(ResolveDaprComponentsPath(repoRoot));
             info.ArgumentList.Add("--log-level");
             info.ArgumentList.Add("warn");
             info.ArgumentList.Add("--");

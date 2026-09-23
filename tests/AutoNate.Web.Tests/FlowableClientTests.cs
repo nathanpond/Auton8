@@ -862,6 +862,155 @@ public sealed class FlowableClientTests
         Assert.All(tasks, t => Assert.Equal("My Process (4)", t.ProcessInstanceName));
     }
 
+    // --- #327: the id a reader is shown, and the id the engine is sent --------
+
+    /// <summary>
+    /// A diagram whose expansion generates ids the author has never seen.
+    /// </summary>
+    private const string ComplexGatewayDiagram = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="D" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="p" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Route">
+              <bpmn:extensionElements>
+                <autonate:routingScript><![CDATA[return 'fa';]]></autonate:routingScript>
+              </bpmn:extensionElements>
+            </bpmn:complexGateway>
+            <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="a" />
+            <bpmn:userTask id="a" name="Route A" />
+            <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="b" />
+            <bpmn:userTask id="b" name="Route B" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    /// <summary>The deployed copy, and the generated id that stands for `cg` in it.</summary>
+    private static (string Xml, string GeneratedId) ExpandedGateway()
+    {
+        var xml = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayDiagram);
+        var generated = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.BuildExpansionSourceMap(xml)
+            .First(pair => pair.Value == "cg").Key;
+        Assert.NotEqual("cg", generated);
+        return (xml, generated);
+    }
+
+    /// <summary>
+    /// #327. The executions list falls back to the ACTIVITY ID when the current
+    /// step is not a named task, and a generated id exists in no diagram the
+    /// reader has seen.
+    /// </summary>
+    [Fact]
+    public async Task GetWorkflowExecutionsAsync_ShowsTheAuthoredIdAsTheCurrentStep()
+    {
+        var (client, stub) = CreateClient();
+        var (expanded, generated) = ExpandedGateway();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances", new
+        {
+            data = new[]
+            {
+                new { id = "inst-1", processDefinitionId = "pd-1",
+                      startTime = "2026-04-01T00:00:00Z", endTime = (string?)null, deleteReason = (string?)null }
+            }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/runtime/process-instances", new
+        {
+            data = new[] { new { id = "inst-1", processDefinitionId = "pd-1", activityId = generated, suspended = false } }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks", new { data = Array.Empty<object>() });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances", new { data = Array.Empty<object>() });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1",
+            new { id = "pd-1", key = "k", name = "My Flow", version = 1 });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata", _ =>
+            StubHttpMessageHandler.TextResponse(expanded, mediaType: "application/xml"));
+
+        var executions = await client.GetWorkflowExecutionsAsync();
+
+        Assert.Equal("cg", Assert.Single(executions).CurrentStep);
+    }
+
+    /// <summary>The complement: an id the map says nothing about is shown as it is.</summary>
+    [Fact]
+    public async Task GetWorkflowExecutionsAsync_LeavesAnUnmappedCurrentStepAlone()
+    {
+        var (client, stub) = CreateClient();
+        var (expanded, _) = ExpandedGateway();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances", new
+        {
+            data = new[]
+            {
+                new { id = "inst-1", processDefinitionId = "pd-1",
+                      startTime = "2026-04-01T00:00:00Z", endTime = (string?)null, deleteReason = (string?)null }
+            }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/runtime/process-instances", new
+        {
+            data = new[] { new { id = "inst-1", processDefinitionId = "pd-1", activityId = "a", suspended = false } }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks", new { data = Array.Empty<object>() });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances", new { data = Array.Empty<object>() });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1",
+            new { id = "pd-1", key = "k", name = "My Flow", version = 1 });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata", _ =>
+            StubHttpMessageHandler.TextResponse(expanded, mediaType: "application/xml"));
+
+        var executions = await client.GetWorkflowExecutionsAsync();
+
+        Assert.Equal("a", Assert.Single(executions).CurrentStep);
+    }
+
+    /// <summary>
+    /// #327's reverse direction: the operator read `cg` off a mapped screen, and
+    /// the engine only knows the generated id.
+    /// </summary>
+    [Fact]
+    public async Task GetCompletedAssigneesForActivityAsync_AsksTheEngineWithTheGeneratedId()
+    {
+        var (client, stub) = CreateClient();
+        var (expanded, generated) = ExpandedGateway();
+        var queries = new List<string>();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances/inst-1",
+            new { id = "inst-1", processDefinitionId = "pd-1", startTime = "2026-04-01T00:00:00Z" });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata", _ =>
+            StubHttpMessageHandler.TextResponse(expanded, mediaType: "application/xml"));
+        stub.When(HttpMethod.Get, "service/history/historic-task-instances", request =>
+        {
+            queries.Add(Uri.UnescapeDataString(request.RequestUri!.Query));
+            return StubHttpMessageHandler.JsonResponse(new { data = Array.Empty<object>() });
+        });
+
+        await client.GetCompletedAssigneesForActivityAsync("inst-1", "cg");
+
+        var query = Assert.Single(queries);
+        Assert.Contains($"taskDefinitionKey={generated}", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("taskDefinitionKey=cg&", query, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The complement, and the property that keeps this safe: an engine that
+    /// will not answer for the map costs a reader a generated id, not the call.
+    /// </summary>
+    [Fact]
+    public async Task An_unavailable_map_does_not_fail_the_call_that_asked_for_it()
+    {
+        var (client, stub) = CreateClient();
+        var queries = new List<string>();
+        stub.WhenStatus(HttpMethod.Get, "service/history/historic-process-instances/inst-1", HttpStatusCode.InternalServerError);
+        stub.When(HttpMethod.Get, "service/history/historic-task-instances", request =>
+        {
+            queries.Add(Uri.UnescapeDataString(request.RequestUri!.Query));
+            return StubHttpMessageHandler.JsonResponse(new { data = Array.Empty<object>() });
+        });
+
+        await client.GetCompletedAssigneesForActivityAsync("inst-1", "cg");
+
+        Assert.Contains("taskDefinitionKey=cg", Assert.Single(queries), StringComparison.Ordinal);
+    }
+
     // --- GetWorkflowExecutionsAsync ------------------------------------------
 
     [Fact]

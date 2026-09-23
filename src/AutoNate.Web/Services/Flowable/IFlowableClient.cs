@@ -107,6 +107,21 @@ public interface IFlowableClient
     Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default);
 
+    // #327. The same map, asked for by DEFINITION. A list renders many rows of
+    // few definitions, and the map is a property of the definition, so this is
+    // what lets the executions list map its current step without a history
+    // round trip per row.
+    Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapByDefinitionAsync(
+        string processDefinitionId, CancellationToken cancellationToken = default);
+
+    // #327, the reverse direction. An operator who reads an authored id must be
+    // able to use it: this turns one back into the generated id the engine
+    // knows. An id with no mapping is returned unchanged -- it is either
+    // already the engine's, or it is wrong, and the engine is what should say
+    // so rather than a guess here.
+    Task<string> ResolveEngineActivityIdAsync(
+        string processInstanceId, string activityId, CancellationToken cancellationToken = default);
+
     // Chronological per-activity history for a process instance, ascending by
     // start time. Drives the History tab on the workflow execution modal.
     Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);
@@ -185,9 +200,11 @@ public interface IFlowableClient
 
     // Paged enumeration of historic activity instances across every process.
     // Used by the projection-framework history feed to populate the append-only
-    // workflow_event_log_cache. `sinceUtc` filters to entries that started after
-    // the given time — null means "page from the beginning". Sorted by start
-    // time ascending so the consumer can advance a watermark deterministically.
+    // workflow_event_log_cache. There is NO time filter -- #590 measured that
+    // Flowable ignores one on this collection -- and the order is start time
+    // DESCENDING, which is what bounds the feed instead. The stale description
+    // of an ascending, `sinceUtc`-filtered page outlived the code by two
+    // stories; #630 pinned the ordering and this is the rest of that (#665).
     /// <summary>
     /// Historic activity events, <b>newest first</b> (#590).
     /// </summary>
@@ -205,6 +222,12 @@ public interface IFlowableClient
     // Fan-out helper for "tasks assigned to anyone in this set." Used when a
     // supervisor needs to see tasks for the people they supervise without
     // assuming any back-end query supports list-of-assignees.
+    // #664. The same, per user, with each one's groups -- so Team Tasks shows a
+    // supervisee's lane-offered work, which their OWN list has shown since #171.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> candidateGroupsByUserId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
         IReadOnlyCollection<string> userIds,
         CancellationToken cancellationToken = default);

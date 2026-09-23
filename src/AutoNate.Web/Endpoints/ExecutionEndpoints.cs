@@ -418,9 +418,13 @@ public static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+            // #327. History carries the engine's ids; the caller read an
+            // authored one off the diagram or the history view.
+            var engineActivityId = await flowable.ResolveEngineActivityIdAsync(
+                processInstanceId, activityId, cancellationToken);
 
             var instances = history
-                .Where(e => string.Equals(e.ActivityId, activityId, StringComparison.Ordinal))
+                .Where(e => string.Equals(e.ActivityId, engineActivityId, StringComparison.Ordinal))
                 .OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue)
                 .ThenBy(e => e.TaskId, StringComparer.Ordinal)
                 .ToArray();
@@ -527,16 +531,24 @@ public static class ExecutionEndpoints
                 }
             }
 
+            // #327. The log is a read surface, and `cg__autonateRoute` exists in
+            // no diagram its reader has seen. Mapped to the authored id; an id
+            // with no mapping is shown as it is rather than guessed at.
+            var logExpansionSources = await flowable.GetExpansionSourceMapAsync(processInstanceId, cancellationToken);
+            string Authored(string activityId) =>
+                logExpansionSources.TryGetValue(activityId, out var source) ? source : activityId;
+
             var errorEntries = errorRows.Select(row => new WorkflowExecutionLogEntry
             {
                 Kind = "error",
                 OccurredAtUtc = new DateTimeOffset(DateTime.SpecifyKind(row.OccurredAtUtc, DateTimeKind.Utc)),
                 Error = new WorkflowExecutionLogError
                 {
-                    ActivityId = row.ActivityId,
+                    ActivityId = Authored(row.ActivityId),
                     ActivityName = !string.IsNullOrWhiteSpace(row.ActivityName)
                         ? row.ActivityName
-                        : activityNames.GetValueOrDefault(row.ActivityId),
+                        : activityNames.GetValueOrDefault(row.ActivityId)
+                            ?? activityNames.GetValueOrDefault(Authored(row.ActivityId)),
                     ErrorMessage = string.IsNullOrWhiteSpace(row.ErrorMessage) ? null : row.ErrorMessage,
                     RawFlowableEventType = string.IsNullOrWhiteSpace(row.RawFlowableEventType) ? null : row.RawFlowableEventType
                 }
@@ -996,6 +1008,7 @@ public static class ExecutionEndpoints
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
             WorkflowTaskCacheRefresher cacheRefresher,
+            WorkflowExecutionErrorRecorder errorRecorder,
             IAuditEventPublisher auditPublisher,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -1008,6 +1021,31 @@ public static class ExecutionEndpoints
                 when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return StaleTask(taskId, exception, loggerFactory);
+            }
+            // #665. RECORD, then let it go on exactly as it did. An operator
+            // forcing a task through is the person least able to read a job log,
+            // and this branch left nothing on the execution's error surface.
+            //
+            // What it must NOT do is answer in the engine's generic words the
+            // way its sibling does: a compensation handler that throws is the
+            // AUTHOR's script failing, and `A_failing_compensation_handler_is_
+            // surfaced_not_swallowed` pins that the operator is told which
+            // handler and why, in the author's own words. Describing that away
+            // was measured -- it turned the spec red.
+            catch (FlowableRequestException exception)
+            {
+                var owner = await cacheRefresher.OwnerOfAsync(taskId, cancellationToken);
+                if (owner is { } found)
+                {
+                    await errorRecorder.RecordSynchronousFailureAsync(
+                        found.InstanceId,
+                        found.ActivityId,
+                        EngineRefusal.Describe(exception, "this step"),
+                        exception.StackTrace,
+                        cancellationToken);
+                }
+
+                throw;
             }
 
             // This route names the instance, so the refresher does not have to
@@ -1227,6 +1265,7 @@ public static class ExecutionEndpoints
         tasks.MapGet("/assigned-to-team", async (
             HttpContext http,
             IFlowableClient flowable,
+            IGroupStore groups,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
@@ -1246,9 +1285,19 @@ public static class ExecutionEndpoints
                 .Select(e => e.ToId)
                 .ToListAsync(cancellationToken);
 
+            // #664. Each supervisee's GROUPS too, so work a lane offered them
+            // appears here as it does in their own list. Without it Team Tasks
+            // and "assigned to me" disagreed about the same person's work.
+            var candidateGroupsBySupervisee = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+            foreach (var supervisee in supervisees.Distinct(StringComparer.Ordinal))
+            {
+                candidateGroupsBySupervisee[supervisee] =
+                    await CandidateGroupsOfAsync(groups, supervisee, cancellationToken);
+            }
+
             var list = supervisees.Count == 0
                 ? Array.Empty<FlowableTaskSummary>()
-                : await flowable.GetTasksAssignedToUsersAsync(supervisees, cancellationToken);
+                : await flowable.GetTasksAssignedToUsersAsync(candidateGroupsBySupervisee, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.TasksAssignedToTeamViewed,

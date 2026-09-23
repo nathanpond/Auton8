@@ -53,9 +53,12 @@ describe("lane properties round-trip", () => {
     updateLaneProperties(handle, { id: "l1", name: "Finance", groupId: "g-finance" });
     updateLaneProperties(handle, { id: "l1", name: "Finance", groupId: null });
     expect(describeElementById(handle, "l1").laneGroupId).toBeNull();
-    // Absent, not "": publish reads presence, and an empty id would be a lane
-    // pointing at a group called nothing.
-    expect(Object.keys(lane.$attrs)).not.toContain("autonate:groupId");
+    // Never the empty string: publish reads presence, and `groupId=""` is a lane
+    // pointing at a group called nothing. Since #664 the write goes through the
+    // command stack so undo can revert it, and that sets the attribute to null
+    // rather than removing the key -- moddle omits a null attribute when it
+    // serialises, so the saved diagram carries nothing either way.
+    expect(lane.$attrs["autonate:groupId"] ?? null).toBeNull();
   });
 
   it("a user task reports the lane that lists it, with the lane's group", () => {
