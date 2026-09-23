@@ -89,6 +89,9 @@ public sealed class VisibleTasksAndCheckTests
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
         var alice = Guid.NewGuid();
+        // #673. A second supervisee with NO group, so the complement below is a
+        // genuinely different subject rather than a same-subject non-match.
+        var bob = Guid.NewGuid();
         Guid groupId;
         await using (var scope = factory.Services.CreateAsyncScope())
         {
@@ -103,6 +106,18 @@ public sealed class VisibleTasksAndCheckTests
                 FromId = AdminUserId.ToString(),
                 ToKind = EntityKinds.User,
                 ToId = alice.ToString(),
+                Data = "{}",
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = AdminUserId
+            });
+            db.EntityEdges.Add(new AutoNate.Web.Persistence.Scaffolded.EntityEdge
+            {
+                Id = Guid.NewGuid(),
+                EdgeKind = EdgeKinds.Supervisor,
+                FromKind = EntityKinds.User,
+                FromId = AdminUserId.ToString(),
+                ToKind = EntityKinds.User,
+                ToId = bob.ToString(),
                 Data = "{}",
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = AdminUserId
@@ -139,8 +154,11 @@ public sealed class VisibleTasksAndCheckTests
 
         // The supervisee's groups reached the engine query...
         Assert.Contains($"TasksForUserGroups:{alice}:{groupId}", factory.FlowableStub.Calls);
-        // ...and a supervisee in no group still asks for none, rather than "".
-        Assert.DoesNotContain($"TasksForUserGroups:{alice}:", factory.FlowableStub.Calls);
+        // ...and a DIFFERENT supervisee, genuinely in no group, still gets asked
+        // for — with an empty group list, not omitted and not "" standing in for
+        // nothing (#673's complement: a different subject, not alice's own call
+        // failing to match a string it was never going to match).
+        Assert.Contains($"TasksForUserGroups:{bob}:", factory.FlowableStub.Calls);
     }
 
     [Fact]
