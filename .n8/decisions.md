@@ -11259,3 +11259,28 @@ cache-miss fact beside the collapse's. The `sinceUtc` descriptions on
 compiler do. And the shared generator must keep producing a case-varied literal
 -- the input #631 needed and could not produce.
 
+**What the fourth pass's gate caught.** Two real things and one flake.
+
+**A pool's name never reached the engine through `/publish`.** #169 AC6 -- an
+execution can say which participant it belongs to -- rests on the non-primary
+process taking its participant's name, and that happened only in prepare. The
+E2E asserted it and passed anyway, because the fixture had ALSO called its
+process `Seller`; renaming the fixture's process for #662 made the assertion
+able to fail, and it did. The publish-time alignment now names the pools as
+well as aligning the key -- identity, not semantics, which is why it belongs
+there and the rest of prepare does not (#653).
+
+**#665's force-complete recording had taken the author's words away.** Copying
+the sibling wholesale replaced the response with the engine's generic refusal,
+and `A_failing_compensation_handler_is_surfaced_not_swallowed` pins the
+opposite: a compensation handler that throws is the AUTHOR's script failing,
+and the operator is told which handler and why in the author's own words. It
+records now and rethrows, so the answer is what it always was. The gap #665
+named was the missing record, not the response.
+
+**`SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`** failed once with
+a `TaskCanceledException` in a 30-minute slim run and passed 10/10 on its own
+and in full-local at the same commit. Not this pass's code (BusWatcher
+subscriptions). Filed rather than re-run and forgotten: a test that fails under
+load is a gate that lies sometimes.
+

@@ -1022,14 +1022,30 @@ public static class ExecutionEndpoints
             {
                 return StaleTask(taskId, exception, loggerFactory);
             }
-            // #665. The same recording its sibling does. An operator forcing a
-            // task through is the person least able to see a job log, and this
-            // branch used to let the exception escape to the unhandled handler
-            // -- a 500 with nothing on the execution's error surface.
+            // #665. RECORD, then let it go on exactly as it did. An operator
+            // forcing a task through is the person least able to read a job log,
+            // and this branch left nothing on the execution's error surface.
+            //
+            // What it must NOT do is answer in the engine's generic words the
+            // way its sibling does: a compensation handler that throws is the
+            // AUTHOR's script failing, and `A_failing_compensation_handler_is_
+            // surfaced_not_swallowed` pins that the operator is told which
+            // handler and why, in the author's own words. Describing that away
+            // was measured -- it turned the spec red.
             catch (FlowableRequestException exception)
             {
-                return await SynchronousStepFailureAsync(
-                    taskId, exception, errorRecorder, cacheRefresher, loggerFactory, cancellationToken);
+                var owner = await cacheRefresher.OwnerOfAsync(taskId, cancellationToken);
+                if (owner is { } found)
+                {
+                    await errorRecorder.RecordSynchronousFailureAsync(
+                        found.InstanceId,
+                        found.ActivityId,
+                        EngineRefusal.Describe(exception, "this step"),
+                        exception.StackTrace,
+                        cancellationToken);
+                }
+
+                throw;
             }
 
             // This route names the instance, so the refresher does not have to

@@ -125,22 +125,65 @@ public static partial class WorkflowBpmnXml
 
         var oldId = process.Attribute("id")?.Value;
         var newId = NormalizeProcessKey(processKey);
-        if (string.IsNullOrWhiteSpace(oldId) || string.Equals(oldId, newId, StringComparison.Ordinal)) return xml;
+        // NOT an early return when the id already matches: the pools still need
+        // their names, and a studio-saved diagram is exactly the case where the
+        // id matches (#662).
+        if (!string.IsNullOrWhiteSpace(oldId) && !string.Equals(oldId, newId, StringComparison.Ordinal))
+        {
+            process.SetAttributeValue("id", newId);
+            foreach (var participant in document.Descendants(BpmnNamespace + "participant")
+                         .Where(p => p.Attribute("processRef")?.Value == oldId))
+            {
+                participant.SetAttributeValue("processRef", newId);
+            }
 
-        process.SetAttributeValue("id", newId);
-        foreach (var participant in document.Descendants(BpmnNamespace + "participant")
-                     .Where(p => p.Attribute("processRef")?.Value == oldId))
-        {
-            participant.SetAttributeValue("processRef", newId);
+            foreach (var plane in document.Descendants(BpmndiNamespace + "BPMNPlane")
+                         .Where(p => p.Attribute("bpmnElement")?.Value == oldId))
+            {
+                plane.SetAttributeValue("bpmnElement", newId);
+            }
         }
-        foreach (var plane in document.Descendants(BpmndiNamespace + "BPMNPlane")
-                     .Where(p => p.Attribute("bpmnElement")?.Value == oldId))
-        {
-            plane.SetAttributeValue("bpmnElement", newId);
-        }
+
+        NamePoolsAfterTheirParticipants(document, process);
 
         var declaration = document.Declaration is null ? "" : $"{document.Declaration}\n";
         return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// Every non-primary pool's process takes its participant's name, so the
+    /// engine's definition name IS the pool name and an execution can say which
+    /// participant it belongs to (#169 AC6).
+    /// </summary>
+    /// <remarks>
+    /// Identity, not semantics -- which is why it belongs in the publish-time
+    /// alignment beside the key, and not in the rest of prepare. Found by making
+    /// #169's own assertion able to fail (#662): the fixture had called its
+    /// process `Seller` too, so the engine's `Seller` proved nothing, and
+    /// through `/publish` -- the path every caller uses -- the name was never
+    /// applied at all.
+    /// </remarks>
+    private static void NamePoolsAfterTheirParticipants(XDocument document, XElement primaryProcess)
+    {
+        var processesById = document.Descendants(BpmnNamespace + "process")
+            .Where(p => !string.IsNullOrWhiteSpace(p.Attribute("id")?.Value))
+            .GroupBy(p => p.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        foreach (var participant in document.Descendants(BpmnNamespace + "participant"))
+        {
+            var processRef = participant.Attribute("processRef")?.Value;
+            var participantName = participant.Attribute("name")?.Value;
+            if (string.IsNullOrWhiteSpace(processRef)
+                || string.IsNullOrWhiteSpace(participantName)
+                || !processesById.TryGetValue(processRef, out var process)
+                || ReferenceEquals(process, primaryProcess))
+            {
+                continue;
+            }
+
+            process.SetAttributeValue("name", participantName);
+        }
     }
 
     public static string ApplyProcessMetadata(string xml, string processKey, string workflowName)
