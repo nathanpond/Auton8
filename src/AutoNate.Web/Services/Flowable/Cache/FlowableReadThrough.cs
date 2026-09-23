@@ -83,7 +83,22 @@ public sealed class FlowableReadThrough : IFlowableReadThrough
             // a finished run is still in history; a run that is gone is not.
             if (cached is not null && WorkflowExecutionStatuses.IsTerminal(cached.Status))
             {
-                if (await _flowable.HistoricProcessInstanceExistsAsync(instanceId, cancellationToken))
+                // #675. Fails OPEN, same shape as the runtime lookup above: this
+                // call only gates whether to STOP serving an already-known-good
+                // terminal row, so a transient Flowable hiccup on the history
+                // endpoint must not turn a previously-successful read into an
+                // error -- it should behave as if the instance is still there.
+                bool stillInHistory;
+                try
+                {
+                    stillInHistory = await _flowable.HistoricProcessInstanceExistsAsync(instanceId, cancellationToken);
+                }
+                catch
+                {
+                    stillInHistory = true;
+                }
+
+                if (stillInHistory)
                 {
                     return cached;
                 }

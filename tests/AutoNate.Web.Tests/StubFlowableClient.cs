@@ -212,8 +212,13 @@ internal sealed class StubFlowableClient : IFlowableClient
     /// <summary>#658. Instances the engine's HISTORY still holds; a live instance is in history too.</summary>
     public HashSet<string> HistoricInstanceIds { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>#675. Set to simulate a transient failure of the history endpoint.</summary>
+    public bool ThrowOnHistoricProcessInstanceExistsAsync { get; set; }
+
     public Task<bool> HistoricProcessInstanceExistsAsync(string processInstanceId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(HistoricInstanceIds.Contains(processInstanceId) || InstancesById.ContainsKey(processInstanceId));
+        ThrowOnHistoricProcessInstanceExistsAsync
+            ? throw new FlowableRequestException(System.Net.HttpStatusCode.ServiceUnavailable, "query the historic process instance", "simulated transient failure")
+            : Task.FromResult(HistoricInstanceIds.Contains(processInstanceId) || InstancesById.ContainsKey(processInstanceId));
 
     public Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(
         string processDefinitionKey, CancellationToken cancellationToken = default)
