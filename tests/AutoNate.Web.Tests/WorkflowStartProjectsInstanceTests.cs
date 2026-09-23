@@ -64,6 +64,45 @@ public sealed class WorkflowStartProjectsInstanceTests
     }
 
     /// <summary>
+    /// A synchronous start failure carries the caller a reason, never the
+    /// engine's raw words (#678, #222's AC3).
+    /// </summary>
+    /// <remarks>
+    /// Round 1's failed-completion path already had this (`/publish`,
+    /// `/complete`); the start path never did — a synchronous failure there
+    /// propagated unhandled, which is a bare 500 in Production and the raw
+    /// engine body on the dev-exception page in Development, exactly the
+    /// class of leak #626 closed everywhere else it was found.
+    /// </remarks>
+    [Fact]
+    public async Task A_synchronous_start_failure_carries_a_reason_not_the_engines_words()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        // Shaped like a real Flowable validation refusal: a stack frame and a
+        // container id, which must never reach the caller.
+        factory.FlowableStub.StartProcessInstanceThrows = new AutoNate.Web.Services.Flowable.FlowableRequestException(
+            System.Net.HttpStatusCode.InternalServerError,
+            "start a process instance",
+            """{"exception":"org.flowable.common.engine.api.FlowableException: Unknown property used in expression at org.flowable.engine.impl.bpmn.behavior.ExclusiveGatewayActivityBehavior.leave(ExclusiveGatewayActivityBehavior.java:82) [container 9f3c1a]"}""");
+
+        var response = await client.PostAsJsonAsync("/api/workflows/start_fails_678/start", new { });
+
+        Assert.False(response.IsSuccessStatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+
+        // A caller-facing reason exists...
+        Assert.Contains("errors", body, StringComparison.Ordinal);
+
+        // ...AND it carries none of the engine's internals.
+        Assert.DoesNotContain("org.flowable", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("container 9f3c1a", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExclusiveGatewayActivityBehavior", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Cancelling keeps the row and marks it cancelled (#609).
     /// </summary>
     /// <remarks>

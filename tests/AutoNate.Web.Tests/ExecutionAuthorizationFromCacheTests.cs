@@ -475,6 +475,68 @@ public sealed class ExecutionAuthorizationFromCacheTests
         Assert.Equal(0, await db.WorkflowExecutionCache.AsNoTracking().CountAsync());
     }
 
+    /// <summary>
+    /// The complement every existing fact in this file avoids (#679, #104):
+    /// a genuinely fresh cache row makes the read-through skip Flowable
+    /// entirely, not just serve the cached value when Flowable happens to
+    /// agree or throw.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SeedCachedInstanceAsync"/> deliberately ages every row it
+    /// seeds past <c>ReadThroughFreshness</c>, specifically so the OTHER
+    /// facts in this file reach the degradation path they're testing. That
+    /// choice means nothing here ever proved the freshness gate itself —
+    /// only that the cache is a good fallback, never that it is consulted
+    /// first when nothing is wrong. This seeds a row and leaves it fresh.
+    /// </remarks>
+    [Fact]
+    public async Task A_fresh_cached_instance_is_served_without_asking_the_engine()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
+
+        const string Instance = "inst-679";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var projection = scope.ServiceProvider.GetRequiredService<FlowableExecutionProjection>();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+
+            await projection.ApplyAsync(
+                [new ChangeEvent<WorkflowExecutionSummary>(
+                    ChangeOp.Upsert, Instance,
+                    new WorkflowExecutionSummary
+                    {
+                        Id = Instance,
+                        Name = "fresh run",
+                        ProcessDefinitionId = "invoice:1:1",
+                        Status = "running",
+                        StartUserId = "alice",
+                        StartedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+                        LastActivityAtUtc = DateTimeOffset.UtcNow
+                    },
+                    DateTimeOffset.UtcNow)],
+                db, CancellationToken.None);
+            // Left fresh, deliberately -- last_sync_at stays at "now", set above.
+        }
+
+        // If the read-through asked the engine anyway, this would answer for
+        // an instance the stub has never heard of and the row would come
+        // back null or wrong -- fail loud, not just uncounted.
+        factory.FlowableStub.GetProcessInstanceThrows = new InvalidOperationException(
+            "The stub should never be asked about a genuinely fresh row.");
+
+        using var readScope = factory.Services.CreateScope();
+        var readThrough = readScope.ServiceProvider.GetRequiredService<IFlowableReadThrough>();
+
+        var served = await readThrough.GetInstanceAsync(Instance, CancellationToken.None);
+
+        Assert.NotNull(served);
+        Assert.Equal("fresh run", served!.Name);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, c => c.StartsWith($"GetInstance:{Instance}", StringComparison.Ordinal));
+    }
+
     private static async Task SeedCachedInstanceAsync(
         AutoNateWebApplicationFactory factory, string instanceId, string startedBy)
     {

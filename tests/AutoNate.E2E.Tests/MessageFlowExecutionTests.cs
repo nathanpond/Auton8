@@ -200,6 +200,44 @@ public sealed class MessageFlowExecutionTests : E2ETestBase
     }
 
     /// <summary>
+    /// #672. The engine starts this Supplier instance on its own -- nothing in
+    /// Auton8 ever calls the read-through for it, so it depends entirely on
+    /// the background poller reaching the executions list. Before #672's fix,
+    /// the poller's batch never flushed unless it happened to accumulate
+    /// MaxBatchSize items, which a small live engine never does -- the row
+    /// simply never arrived, no matter how long you waited. Also proves the
+    /// list names the Supplier's OWN participant, not the Customer's --
+    /// #662's pool-naming fix composing correctly with the list's per-instance
+    /// name resolution once the row exists at all.
+    /// </summary>
+    [Fact]
+    public async Task The_executions_list_eventually_names_an_engine_started_instances_own_participant()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+        var customerKey = $"cust{Guid.NewGuid():N}"[..20];
+        var supplierKey = $"supp{Guid.NewGuid():N}"[..20];
+        var messageName = $"placed{Guid.NewGuid():N}"[..20];
+
+        await PublishAsync(api, customerKey, EndEventToStartEvent(customerKey, supplierKey, messageName));
+
+        using var engine = EngineClient();
+        var customer = await StartAsync(api, customerKey, new { });
+        var supplierInstance = await EventuallyEngineInstanceAsync(engine, supplierKey);
+
+        var supplierRow = await EventuallyExecutionRowAsync(api, supplierInstance,
+            "the Supplier instance's row to reach the executions list and name its own participant");
+        Assert.Equal("Supplier", Str(supplierRow, "workflowModelName"));
+
+        // The complement: the Customer instance's own row names ITS
+        // participant, not the Supplier's -- proving per-instance resolution,
+        // not both rows sharing one value.
+        var customerRow = await EventuallyExecutionRowAsync(api, customer,
+            "the Customer instance's row to name its own participant");
+        Assert.Equal("Customer", Str(customerRow, "workflowModelName"));
+    }
+
+    /// <summary>
     /// Refused before deployment, and NOTHING reached the engine: the flow's
     /// target pool contains nothing to run. The send-into-the-void shape.
     /// </summary>
@@ -434,6 +472,39 @@ public sealed class MessageFlowExecutionTests : E2ETestBase
         Assert.Fail($"Timed out waiting for {what}. Counterparts were: {string.Join(", ", ids)}");
         return ids;
     }
+
+    // #672. An instance the ENGINE starts on its own (a message flow into a
+    // start event, here) has no Auton8-side start call to seed its cache row
+    // immediately -- only the background poller picks it up, on its own
+    // interval (ExecutionPollInterval, default 60s). The deadline has to
+    // clear a full poll cycle, not just settle time.
+    private static async Task<JsonElement> EventuallyExecutionRowAsync(
+        IAPIRequestContext api, string instanceId, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        List<string?> seenIds = [];
+        while (DateTime.UtcNow < deadline)
+        {
+            var response = await api.GetAsync("/api/executions/");
+            Assert.True(response.Ok, await response.TextAsync());
+            using var document = JsonDocument.Parse(await response.TextAsync());
+            seenIds = document.RootElement.EnumerateArray().Select(e => Str(e, "id")).ToList();
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (Str(element, "id") == instanceId) return element.Clone();
+            }
+
+            await Task.Delay(1_000);
+        }
+
+        Assert.Fail($"Timed out waiting for {what}. Looking for '{instanceId}'. List had {seenIds.Count} rows: {string.Join(", ", seenIds)}");
+        return default;
+    }
+
+    private static string? Str(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString()
+            : null;
 
     private static HttpClient EngineClient() => FlowableDeploymentSweep.CreateClient(
         Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",

@@ -118,6 +118,26 @@ public sealed class ProjectionWorker : BackgroundService
         }
     }
 
+    // #672. This used to be a bare pass-through: `await foreach` over the feed,
+    // flushing only once the buffer reached MaxBatchSize. MaxBatchWindow was
+    // configured and documented ("the flush happens implicitly, when the
+    // source pauses") but nothing implemented it -- an IAsyncEnumerable's
+    // MoveNextAsync just suspends until the next item, there is no such
+    // thing as an implicit pause boundary. A feed emitting fewer items per
+    // tick than MaxBatchSize (the ordinary case -- a live engine rarely has
+    // 250 instances) buffered forever, undelivered, for as long as the app
+    // ran. Measured: an instance nothing but a direct write-through (#609)
+    // ever wrote a row for -- e.g. one a message flow started on another
+    // pool, with nobody calling the read-through for it -- never reached the
+    // cache at all, because the only feed that would ever have written it
+    // never flushed.
+    //
+    // The fix keeps a `MoveNextAsync` call alive ACROSS loop iterations
+    // (calling it again while a call is still outstanding is not valid on an
+    // IAsyncEnumerator) and races it against a deadline that starts ticking
+    // the moment the buffer holds its first unflushed item. Reaching
+    // MaxBatchSize still flushes immediately, on its own path -- the window
+    // never delays a batch that's already full.
     private async Task DrainLoopAsync<TSource>(
         IProjection<TSource> projection,
         IChangeFeed<TSource> feed,
@@ -125,35 +145,79 @@ public sealed class ProjectionWorker : BackgroundService
     {
         var opts = _options.Value;
         var buffer = new List<ChangeEvent<TSource>>(opts.MaxBatchSize);
+        var enumerator = feed.StreamAsync(stoppingToken).GetAsyncEnumerator(stoppingToken);
+        await using var disposeEnumerator = enumerator;
 
-        await foreach (var change in BatchAsync(feed.StreamAsync(stoppingToken), opts, stoppingToken))
+        Task<bool>? pendingMoveNext = null;
+        DateTime? windowDeadline = null;
+
+        try
         {
-            buffer.Add(change);
-            if (buffer.Count >= opts.MaxBatchSize)
+            while (true)
             {
-                await FlushAsync(projection, feed, buffer, stoppingToken);
-                buffer.Clear();
+                pendingMoveNext ??= enumerator.MoveNextAsync().AsTask();
+
+                if (buffer.Count > 0 && windowDeadline is { } deadline)
+                {
+                    var remaining = deadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        await FlushAsync(projection, feed, buffer, stoppingToken);
+                        buffer.Clear();
+                        windowDeadline = null;
+                        continue;
+                    }
+
+                    var winner = await Task.WhenAny(pendingMoveNext, Task.Delay(remaining, stoppingToken));
+                    if (winner != pendingMoveNext)
+                    {
+                        // The window elapsed before another item arrived.
+                        // pendingMoveNext is still outstanding -- leave it
+                        // set so the next iteration awaits the SAME task
+                        // rather than issuing a second, overlapping
+                        // MoveNextAsync call.
+                        await FlushAsync(projection, feed, buffer, stoppingToken);
+                        buffer.Clear();
+                        windowDeadline = null;
+                        continue;
+                    }
+                }
+
+                bool hasNext;
+                try
+                {
+                    hasNext = await pendingMoveNext;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                pendingMoveNext = null;
+                if (!hasNext)
+                {
+                    break;
+                }
+
+                buffer.Add(enumerator.Current);
+                windowDeadline ??= DateTime.UtcNow + opts.MaxBatchWindow;
+
+                if (buffer.Count >= opts.MaxBatchSize)
+                {
+                    await FlushAsync(projection, feed, buffer, stoppingToken);
+                    buffer.Clear();
+                    windowDeadline = null;
+                }
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown.
         }
 
         if (buffer.Count > 0)
         {
             await FlushAsync(projection, feed, buffer, stoppingToken);
-        }
-    }
-
-    private static async IAsyncEnumerable<ChangeEvent<TSource>> BatchAsync<TSource>(
-        IAsyncEnumerable<ChangeEvent<TSource>> source,
-        ProjectionOptions opts,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        // Pass-through enumerator. The MaxBatchWindow flush happens implicitly:
-        // when the source pauses, we yield whatever is in flight at the next
-        // outer batch boundary. Sophisticated time-windowed batching can come
-        // later if dashboards complain — start simple.
-        await foreach (var change in source.WithCancellation(cancellationToken))
-        {
-            yield return change;
         }
     }
 
