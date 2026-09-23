@@ -11330,3 +11330,25 @@ iterations and racing it against a real deadline. Confirmed end-to-end with
 a live E2E repro of the original scenario. Shared infrastructure — the fix
 applies to every projection (execution, task, variable, history caches),
 not just the executions list.
+
+## Release: v0.4.0 — 2026-09-23
+
+Tagged `44925a8c68b7b3d8e43adfd940c59b6cc22da1a6` on `master`, covering M0
+through M5 (M5 just closed via `/n8-verify`). Milestone gate confirmed clean
+across all of them: zero open confirmed bugs at `sev:high`/`sev:critical`.
+
+The tag's own validation caught a real mistake before anything published:
+PR #683 bumped `src/AutoNate.Spa/package.json`'s version but missed
+`Directory.Build.props`, which is the file `release.yml`'s "Validate the tag"
+job actually checks. The first `v0.4.0` tag push failed validation cleanly —
+no images built, no release created — exactly as the workflow's own design
+promises ("fail before anything is pushed... not fixable after the fact").
+Fixed in PR #684, then the failed tag was deleted and recreated on the
+corrected commit. Second run: all four images published (flowable,
+autonate-web, executor, hocuspocus), release assets attached, GitHub Release
+created — https://github.com/nathanpond/Auton8/releases/tag/v0.4.0.
+
+Publish-only, per the workflow's own stated design — nothing deployed
+anywhere. M6 (Trusted Data Repository), M7, M8, M9 (v1.0 completeness) and
+M10 (v1.0 audit and hardening) remain open and unplanned; this is a
+mid-project checkpoint release, not v1.0.
