@@ -11318,3 +11318,15 @@ and `FlowableExecutionProjection.ApplyAsync` with temporary diagnostic logging
 indistinguishable from the app's own console output) — decided against adding
 and reverting exploratory instrumentation mid-exec-pass. Issue relabeled
 `sev:high` + `blocked`; the reproduction steps are recorded on the issue.
+
+**Resolved 2026-09-23, PR #681.** Added the temporary diagnostic logging this
+entry declined to add mid-verification, on a dedicated exec pass instead.
+Root cause: `ProjectionWorker.DrainLoopAsync`'s batching helper never
+implemented `MaxBatchWindow` despite its own comment claiming it did — the
+only flush paths were `MaxBatchSize` (250) or the feed's stream completing
+(app shutdown). A live engine with fewer instances than that buffered
+forever. Fixed by keeping a `MoveNextAsync` call alive across loop
+iterations and racing it against a real deadline. Confirmed end-to-end with
+a live E2E repro of the original scenario. Shared infrastructure — the fix
+applies to every projection (execution, task, variable, history caches),
+not just the executions list.
