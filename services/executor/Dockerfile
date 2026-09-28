@@ -3,7 +3,7 @@
 # build step at install time even in the runtime image (when npm rebuilds
 # the prebuilt artifacts for the local arch).
 # node:24-alpine
-FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
+FROM node@sha256:a723b54c35a76e947095a20a67d39585bb09c862e6b1adeb8a9f518f95e34fb0 AS build
 
 WORKDIR /src
 
@@ -31,7 +31,7 @@ COPY src ./src
 RUN npx tsc
 
 # node:24-alpine
-FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime
+FROM node@sha256:a723b54c35a76e947095a20a67d39585bb09c862e6b1adeb8a9f518f95e34fb0 AS runtime
 
 WORKDIR /app
 
