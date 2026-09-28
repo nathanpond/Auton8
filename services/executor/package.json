@@ -17,7 +17,7 @@
   "dependencies": {
     "isolated-vm": "^7.0.1",
     "nats": "^2.29.2",
-    "pyodide": "^314.0.6"
+    "pyodide": "^314.0.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
