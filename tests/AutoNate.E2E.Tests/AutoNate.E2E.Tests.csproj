@@ -15,7 +15,7 @@
              DURABLE consumer name, and a durable outlives the process: this is
              how the run cleans up after itself, and sweeps what a killed run
              left behind. Same version the app uses. -->
-        <PackageReference Include="NATS.Client.JetStream" Version="2.5.10" />
+        <PackageReference Include="NATS.Client.JetStream" Version="3.3.0" />
         <PackageReference Include="Npgsql" Version="9.0.3" />
         <PackageReference Include="xunit" Version="2.9.0" />
         <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">

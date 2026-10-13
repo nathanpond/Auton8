@@ -47,11 +47,11 @@
       },
       "NATS.Client.JetStream": {
         "type": "Direct",
-        "requested": "[2.5.10, )",
-        "resolved": "2.5.10",
-        "contentHash": "uvR+88I0VczCDuADPwcTIklfuNxpEVgNDsU0LWLwBHMexRwaF0j0iPSvfWpCH6lHJFGQIywpaiH88oxGZMRLsQ==",
+        "requested": "[3.3.0, )",
+        "resolved": "3.3.0",
+        "contentHash": "lCZ04cBaY9oFbmpMY2HzAn92mp0sT5C9Q0NGOOp0MlI7DYFRFoYf/b/5waZMvVqtli/v0jlBD+ZtrunJTMKNCg==",
         "dependencies": {
-          "NATS.Client.Core": "2.5.10"
+          "NATS.Client.Core": "3.3.0"
         }
       },
       "Npgsql": {
@@ -136,14 +136,29 @@
           "Newtonsoft.Json": "13.0.1"
         }
       },
-      "NATS.Client.Core": {
+      "NATS.Client.Abstractions": {
         "type": "Transitive",
-        "resolved": "2.5.10",
-        "contentHash": "+B5Sv5gMy9MbaaSI2n7eZkPVDBf49hhPAyllDklcm1NRXkRZ60xBvepnJNtTVI5KmmZyzWdwBa1pw5CO7nPwhQ==",
+        "resolved": "3.3.0",
+        "contentHash": "NVH32TcVvXiOL77VxtSiLSPpokLTbiFj0uVCdNEp+11Z7IlMNOg1TEUzBBi+lZU8wTyEJFmbpu22Aaw6XPdn0g==",
         "dependencies": {
-          "Microsoft.Extensions.Logging.Abstractions": "6.0.1",
           "Microsoft.Extensions.Primitives": "6.0.0"
         }
+      },
+      "NATS.Client.Core": {
+        "type": "Transitive",
+        "resolved": "3.3.0",
+        "contentHash": "x5Faw180Giv2KUz+kwoK6NQOttuy70fkk1Q0/Vyj8ATtGLrYevsJ9r7rs97ktJfX0+Ck93BQI1qWIVBy8b+3Hw==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "6.0.1",
+          "Microsoft.Extensions.Primitives": "6.0.0",
+          "NATS.Client.Abstractions": "3.3.0",
+          "NATS.NKeys": "1.0.1"
+        }
+      },
+      "NATS.NKeys": {
+        "type": "Transitive",
+        "resolved": "1.0.1",
+        "contentHash": "xtURX0fexmMd10noG3Uc8gFgwaH7QLQxxgdaVoQKFo0+8a4blwe8vPGgY2S5pzeVYcRXyjlIoA4AR4JgtThyjQ=="
       },
       "Newtonsoft.Json": {
         "type": "Transitive",
