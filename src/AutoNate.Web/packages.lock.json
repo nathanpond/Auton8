@@ -23,9 +23,9 @@
       },
       "CsvHelper": {
         "type": "Direct",
-        "requested": "[33.0.1, )",
-        "resolved": "33.0.1",
-        "contentHash": "fev4lynklAU2A9GVMLtwarkwaanjSYB4wUqO2nOJX5hnzObORzUqVLe+bDYCUyIIRQM4o5Bsq3CcyJR89iMmEQ=="
+        "requested": "[34.0.0, )",
+        "resolved": "34.0.0",
+        "contentHash": "yiFG6lPSgNFhraURmM/e4ROhbnNzMOZI1HxMvjNzn5lkc9dx3aN/sm/N4UM+rV6CPpZBQfrJfwEKUxkndeRKUQ=="
       },
       "Dapr.AspNetCore": {
         "type": "Direct",
