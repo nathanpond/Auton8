@@ -29,7 +29,7 @@ env:
 jobs:
   validate:
     name: Validate the tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -59,7 +59,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.image }}
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       autonate-web: ${{ steps.digest.outputs.autonate-web }}
       hocuspocus: ${{ steps.digest.outputs.hocuspocus }}
@@ -200,7 +200,7 @@ jobs:
   assets:
     name: Release assets
     needs: [validate, publish]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write   # attach assets to the release
     steps:
