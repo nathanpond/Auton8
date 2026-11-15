@@ -36,7 +36,7 @@ env:
 jobs:
   spa:
     name: SPA (lint, typecheck, build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -102,7 +102,7 @@ jobs:
   # ShardReportScriptTests).
   backend-discover:
     name: Backend discovery
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # For the SPA bundle only - see the download step below.
     needs: spa
     timeout-minutes: 20
@@ -276,7 +276,7 @@ jobs:
 
   backend:
     name: Backend tests (shard ${{ matrix.shard.index }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: backend-discover
     # Each shard is a fraction of a suite that takes ~40 minutes whole. The
     # ceiling catches a hung fixture, not a slow runner, so it keeps headroom
@@ -507,7 +507,7 @@ jobs:
 
   backend-reconcile:
     name: Backend reconciliation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [backend-discover, backend]
     # `always()` is load-bearing. By default a failing shard skips this job,
     # which would mask a lost test behind the very failure it caused - the one
@@ -534,7 +534,7 @@ jobs:
 
   backend-coverage:
     name: Backend coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [backend]
     # `always()`, for the same reason backend-reconcile uses it: a failing
     # shard must not hide a coverage regression. A shard that produced no
@@ -622,7 +622,7 @@ jobs:
 
   image:
     name: App image (build + smoke test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The application image is otherwise built only when a release is cut, so a
     # Dockerfile can break and nothing says so until the worst possible moment.
     # That is not hypothetical: digest-pinning once put the image tag in a
@@ -725,7 +725,11 @@ jobs:
 
   e2e:
     name: E2E (Playwright)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: on 2026-11-09 `latest` rolled to 26.04, which
+    # Playwright 1.50's `install --with-deps chromium` refuses outright. Every
+    # job is pinned to the same image so the tiers run on one OS. Move them
+    # together, deliberately, once Playwright supports the newer image.
+    runs-on: ubuntu-24.04
     # Not an artifact dependency any more — just don't spend 20 minutes on
     # browser tests when lint or typecheck already failed.
     needs: spa

@@ -1,6 +1,6 @@
 # Audit conventions (harvested from the removed `/audit` dispatcher, 2026-08-30)
 
-Codebase-wide audits for AutoNate now run through `/n8-audit`, which files findings as GitHub issues. The per-area checklists that used to live in `.claude/skills/audit-*` are preserved in the sibling `audit-*-checklist.md` files here. Conventions that applied across all of them:
+Codebase-wide audits for AutoNate now run through `/n8-audit`, which files findings as GitHub issues — except security findings, which go to draft security advisories (`security_findings: advisories` in `.n8/config.yml`). The per-area checklists that used to live in `.claude/skills/audit-*` are preserved in the sibling `audit-*-checklist.md` files here. Conventions that applied across all of them:
 
 - **Scope is the whole codebase**, not the diff — `code-review` / `security-review` cover pending changes.
 - **Delegate breadth, verify depth**: parallel `Explore` agents, one concern each, hard cap on findings; then read every cited `file:line` yourself before filing. Agent grep results are candidates, not findings.
