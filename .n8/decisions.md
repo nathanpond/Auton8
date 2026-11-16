@@ -11352,3 +11352,15 @@ Publish-only, per the workflow's own stated design — nothing deployed
 anywhere. M6 (Trusted Data Repository), M7, M8, M9 (v1.0 completeness) and
 M10 (v1.0 audit and hardening) remain open and unplanned; this is a
 mid-project checkpoint release, not v1.0.
+
+## Ad-hoc — 2026-11-15 (Dependabot backlog resolution)
+
+- **Change:** Mantine is held at 9.5.2 (`mantine-datatable` 9.4.0). `@mantine/*` and `mantine-datatable` are excluded from the SPA Dependabot group (#747).
+  **Why:** Mantine 9.8 fails three E2E specs, bisected to the Mantine family alone: datastore uploads never appear (#189), primary-button contrast text, and FileInput's accessible name. Inside the group it held back about 25 unrelated bumps.
+  **Affects:** M10 #189 is now a three-spec regression, not one. Every Mantine upgrade waits on it, and Mantine will arrive as its own red Dependabot PR until it's fixed.
+- **Change:** CsvHelper 34 declined (#740 closed); CsvHelper stays on 33.x.
+  **Why:** 34 is an API rewrite under six CSV ingestion paths whose malformed-row tolerance is load-bearing (`CsvConfiguration`, `HeaderRecord`, `GetField`, the bad-data hooks are all gone).
+  **Affects:** M10, #746 (port or pin deliberately).
+- **Change:** Sidecar images pinned as `node:24-alpine@sha256:…`, not `node@sha256:…` with the tag in a comment; all CI runners pinned to `ubuntu-24.04` (#742, #747).
+  **Why:** Dependabot followed the untagged `node:latest` (Debian) for the bare-digest form. `ubuntu-latest` moved to 26.04, which Playwright 1.50 refuses.
+  **Affects:** M10 #185 (Node runtime decision). Moving off 24-alpine or off ubuntu-24.04 is now a deliberate edit, not something that drifts.
