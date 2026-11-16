@@ -54,6 +54,12 @@
       </PackageReference>
       <PackageReference Include="Npgsql" Version="9.0.5" />
       <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+      <!-- Pins the runtime EF Core to the Design package's version. Design is
+           PrivateAssets=all, so it raises the EF version Web compiles against
+           without raising the one that flows to Web's dependents (which get
+           whatever Npgsql's provider floors at). The two drifting apart is a
+           CS1705 in every test project. Bump this together with Design. -->
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.22" />
       <!-- DuckDB embeds in-process for the projection framework's cold tier:
            Parquet archives of workflow_event_log_cache (older than 90 days)
            are queried via WorkflowAnalyticsQueryEntity. The .Full variant

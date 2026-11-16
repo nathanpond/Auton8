@@ -120,6 +120,15 @@
           "Mono.TextTemplating": "3.0.0"
         }
       },
+      "Microsoft.EntityFrameworkCore.Relational": {
+        "type": "Direct",
+        "requested": "[9.0.22, )",
+        "resolved": "9.0.22",
+        "contentHash": "BwTl8180y2ct3po1+5MYk72HY0qZsbB4nqj/bbaHi9stz23Sxsf3xcG0CtASjm0T5UzBPVLAj9CNinuWfiLx3Q==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "9.0.22"
+        }
+      },
       "Microsoft.IdentityModel.Protocols.OpenIdConnect": {
         "type": "Direct",
         "requested": "[8.23.0, )",
@@ -447,14 +456,6 @@
         "type": "Transitive",
         "resolved": "9.0.22",
         "contentHash": "wtYr03ZnX3a7x92WE0yELwyhN2EooJ7BTlY4N2gBPaVBsg2XwjEKyyGBLbkhc9fgKaQ6ed1fEgnHmZ9YCfTlLQ=="
-      },
-      "Microsoft.EntityFrameworkCore.Relational": {
-        "type": "Transitive",
-        "resolved": "9.0.22",
-        "contentHash": "BwTl8180y2ct3po1+5MYk72HY0qZsbB4nqj/bbaHi9stz23Sxsf3xcG0CtASjm0T5UzBPVLAj9CNinuWfiLx3Q==",
-        "dependencies": {
-          "Microsoft.EntityFrameworkCore": "9.0.22"
-        }
       },
       "Microsoft.Extensions.DependencyModel": {
         "type": "Transitive",
