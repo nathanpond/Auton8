@@ -18,11 +18,16 @@ updates:
         # the SPA uses (needs a migration, with hocuspocus server-util in
         # lock-step); every @eigenpal/docx-editor-* version is deprecated on
         # npm (roadmap decision); @hocuspocus/provider must move with the
-        # server in services/hocuspocus. Each still gets its own PR.
+        # server in services/hocuspocus. Mantine >= 9.6 breaks datastore file
+        # uploads, and 9.8 also changes Button auto-contrast and FileInput's
+        # accessible name (#189); mantine-datatable moves with it. Each still
+        # gets its own PR.
         exclude-patterns:
           - "@blocknote/*"
           - "@eigenpal/*"
           - "@hocuspocus/provider"
+          - "@mantine/*"
+          - "mantine-datatable"
   - package-ecosystem: npm
     directory: /services/hocuspocus
     schedule: { interval: weekly, day: monday }
