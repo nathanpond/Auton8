@@ -78,7 +78,11 @@ public sealed class PinnedImageTests
         sb.AppendLine();
         sb.AppendLine("  docker buildx imagetools inspect <image> | awk '/^Digest:/{print $2; exit}'");
         sb.AppendLine();
-        sb.AppendLine("then write `name@sha256:...  # original:tag`, keeping the tag as a comment.");
+        sb.AppendLine("then write `name:tag@sha256:...` (tag and digest together). Docker pulls by");
+        sb.AppendLine("the digest alone, and Dependabot reads the tag to know which line to follow.");
+        sb.AppendLine("A bare `name@sha256:...` with the tag only in a comment makes Dependabot");
+        sb.AppendLine("follow `latest`: on 2026-11-09 it proposed swapping node:24-alpine for");
+        sb.AppendLine("Debian node:latest (#735, #736).");
         sb.AppendLine();
         foreach (var v in violations)
         {
