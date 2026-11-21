@@ -139,7 +139,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             // need their own pass. Counts are reported per class — one number for
             // everything would let a category quietly stop working.
             var resources = await Infrastructure.TestResourceSweep.SweepAsync(AbandonedAfter);
-            if (resources.Roles + resources.Schemas + resources.Directories > 0)
+            if (resources.Total > 0)
             {
                 Console.WriteLine($"[test-db-sweep] Also removed {resources}.");
             }

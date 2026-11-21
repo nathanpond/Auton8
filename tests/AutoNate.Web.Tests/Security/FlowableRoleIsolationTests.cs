@@ -49,6 +49,11 @@ public sealed class FlowableRoleIsolationTests
             await Exec(admin, $"CREATE ROLE \"{role}\" LOGIN PASSWORD '{rolePassword}'");
             try
             {
+                // #301. A LOGIN role with a known password, cluster-wide: if this
+                // process dies before the finally below, the stamp is what lets
+                // a later run's sweep take it.
+                await Exec(admin, Infrastructure.TestResourceSweep.StampScratchRoleSql(role));
+
                 // Pooling=false is load-bearing, not tidiness. With pooling on,
                 // the positive control's physical connection is returned to the
                 // pool and handed straight back after the revoke without
@@ -159,6 +164,12 @@ public sealed class FlowableRoleIsolationTests
                 // certainly completed before the catalog is read.
                 (await factory.CreateClient().GetAsync("/api/health/live")).EnsureSuccessStatusCode();
             }
+
+            // #301. The initializer created the writer — a LOGIN role, under a
+            // name only this test uses — so it is stamped here, at the first
+            // moment it is known to exist, for the sweep to take if the finally
+            // below never runs.
+            await Exec(admin, Infrastructure.TestResourceSweep.StampScratchRoleSql(writer));
 
             // PUBLIC must not hold CONNECT. Asked of the server through
             // aclexplode rather than by parsing the ACL text: an aclitem[] is

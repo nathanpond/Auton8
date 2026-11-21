@@ -67,6 +67,15 @@ public sealed class RoleCreationRaceTests
                     catch (PostgresException ex) { return ex; }
                 }));
 
+            // #301. Stamped after the race, not before: the race is the
+            // production CREATE and stamping first would need the role to exist.
+            // A crash before this line leaves the role for the DROP at the top of
+            // the next run, which is the one name this test can always find again.
+            // Best-effort: if every create failed there is no role to stamp, and
+            // the assertion below is the failure worth reporting, not this one.
+            try { await ExecAsync(Infrastructure.TestResourceSweep.StampScratchRoleSql(ScratchRole)); }
+            catch (PostgresException) { }
+
             var failures = results.Where(e => e is not null).ToArray();
             Assert.True(
                 failures.Length == 0,

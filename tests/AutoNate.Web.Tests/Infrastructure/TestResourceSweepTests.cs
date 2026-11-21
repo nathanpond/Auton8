@@ -57,7 +57,7 @@ public sealed class TestResourceSweepTests
         {
             // "postgres" is real; the second name was dropped by another test class
             // between the listing and the connect, as far as this sweep can tell.
-            var dropped = await TestResourceSweep.SweepOrphanedPluginRolesAsync(
+            var dropped = await TestResourceSweep.SweepOrphanedSchemaRolesAsync(
                 ["postgres", $"autonate_test_{Guid.NewGuid():N}"]);
 
             Assert.True(
@@ -91,7 +91,7 @@ public sealed class TestResourceSweepTests
             // A real database this connection is refused on: connecting as a role
             // with no CONNECT privilege fails with something other than
             // "database does not exist".
-            var dropped = await TestResourceSweep.SweepOrphanedPluginRolesAsync(
+            var dropped = await TestResourceSweep.SweepOrphanedSchemaRolesAsync(
                 ["postgres", "template0"]);
 
             Assert.Equal(0, dropped);
@@ -166,6 +166,165 @@ public sealed class TestResourceSweepTests
         }
     }
 
+    // ── #301: the role families #214 named but the sweep never matched ─────
+
+    /// <summary>A <c>dsrw_*</c> role with no <c>ds_*</c> schema anywhere is dropped (#301).</summary>
+    /// <remarks>
+    /// <c>SqlDataStoreProvisioner.ReadRoleNameFor</c> is production code, so this is
+    /// the same structural rule as <c>plg_*</c>, not a prefix sweep. The complement,
+    /// <see cref="A_datastore_read_role_backing_a_live_schema_survives"/>, is what
+    /// keeps it from being one.
+    /// </remarks>
+    [Fact]
+    public async Task An_orphaned_datastore_read_role_is_removed()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var role = "dsrw_" + Guid.NewGuid().ToString("N")[..16];
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+
+        try
+        {
+            var dropped = await TestResourceSweep.SweepOrphanedSchemaRolesAsync(databases: null);
+
+            Assert.True(dropped > 0, "The role pass dropped nothing.");
+            Assert.False(await RoleExistsAsync(role),
+                "An orphaned datastore read role survived — the sweep still matches only plg_*.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    /// <summary>A <c>dsrw_*</c> role whose datastore schema is live survives (#301).</summary>
+    /// <remarks>
+    /// The case that matters on a developer's cluster: a real SqlType datastore has
+    /// exactly this role and schema in <c>autonate_datastores</c>. The schema is the
+    /// FULL id and the role the first 16 hex of it, so this also pins that the
+    /// match is the prefix relationship the provisioner writes, not equality.
+    /// </remarks>
+    [Fact]
+    public async Task A_datastore_read_role_backing_a_live_schema_survives()
+    {
+        var id = Guid.NewGuid();
+        var role = AutoNate.Web.Services.DataStores.Sql.SqlDataStoreProvisioner.ReadRoleNameFor(id);
+        var schema = AutoNate.Web.Services.DataStores.Sql.SqlDataStoreProvisioner.SchemaNameFor(id);
+        var database = await CreateUnownedDatabaseAsync();
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+        await ExecuteAsync(database, $"create schema \"{schema}\";");
+
+        try
+        {
+            await TestResourceSweep.SweepAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await RoleExistsAsync(role),
+                "The sweep dropped the read role of a live datastore — this is a developer's real data store.");
+            Assert.True(await SchemaExistsAsync(database, schema),
+                "The sweep dropped a schema in a database it does not own.");
+        }
+        finally
+        {
+            await DropDatabaseAsync(database);
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    /// <summary>A scratch role stamped longer ago than the cut-off is dropped (#301).</summary>
+    [Fact]
+    public async Task An_old_stamped_scratch_role_is_removed()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        // A LOGIN role, which is what FlowableRoleIsolationTests leaks.
+        var role = $"probe_role_{Guid.NewGuid():N}"[..23];
+        await ExecuteAsync("postgres", $"create role \"{role}\" login;");
+        await StampAsync(role, $"{DateTimeOffset.UtcNow.AddHours(-3):O}");
+
+        try
+        {
+            var dropped = await TestResourceSweep.SweepStampedScratchRolesAsync(TimeSpan.FromHours(2));
+
+            Assert.True(dropped > 0, "The scratch-role pass dropped nothing.");
+            Assert.False(await RoleExistsAsync(role), "A stamped scratch role older than the cut-off survived.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    /// <summary>
+    /// A freshly stamped scratch role survives — a live run owns it (#301).
+    /// </summary>
+    /// <remarks>
+    /// Stamped through <see cref="TestResourceSweep.StampScratchRoleSql"/> itself, so
+    /// the SQL the tests really run is the SQL proved to round-trip through the
+    /// sweep's parse. The old-stamp fact above cannot satisfy this by dropping
+    /// everything marked.
+    /// </remarks>
+    [Fact]
+    public async Task A_fresh_stamped_scratch_role_survives()
+    {
+        var role = $"probe_role_{Guid.NewGuid():N}"[..23];
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+        await ExecuteAsync("postgres", TestResourceSweep.StampScratchRoleSql(role));
+
+        try
+        {
+            await TestResourceSweep.SweepStampedScratchRolesAsync(TimeSpan.FromHours(2));
+            Assert.True(await RoleExistsAsync(role), "The sweep dropped a scratch role a live run created moments ago.");
+
+            // And the stamp it wrote is one the sweep can read, as roughly now.
+            // Checked through the parse rather than by sweeping with a zero
+            // cut-off, which would take every concurrent test's scratch role too.
+            var comment = (string?)await ScalarAsync("postgres",
+                "select shobj_description(oid, 'pg_authid') from pg_roles where rolname = @n;", role);
+            Assert.True(TestResourceSweep.TryReadScratchStamp(comment, out var created),
+                $"StampScratchRoleSql wrote '{comment}', which the sweep cannot parse — every role it stamps would leak.");
+            Assert.InRange(created, DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(1));
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    /// <summary>
+    /// Neither a scratch-shaped name nor an unparseable stamp is enough (#301).
+    /// </summary>
+    /// <remarks>
+    /// The sweep matches the stamp, not a naming convention, so a developer's own
+    /// <c>probe_*</c> role is safe; and a stamp it cannot read is live, the same
+    /// direction the database sweep takes. (An unreadable stamp has no age, so no
+    /// cut-off could take it — this asserts the parse failure is not read as old.)
+    /// </remarks>
+    [Fact]
+    public async Task An_unstamped_or_unreadably_stamped_role_survives()
+    {
+        var unstamped = $"probe_role_{Guid.NewGuid():N}"[..23];
+        var garbled = $"probe_role_{Guid.NewGuid():N}"[..23];
+        await ExecuteAsync("postgres", $"create role \"{unstamped}\";");
+        await ExecuteAsync("postgres", $"create role \"{garbled}\";");
+        await StampAsync(garbled, "not-a-timestamp");
+
+        try
+        {
+            await TestResourceSweep.SweepStampedScratchRolesAsync(TimeSpan.FromHours(2));
+
+            Assert.True(await RoleExistsAsync(unstamped), "The sweep dropped a role nothing marked as scratch.");
+            Assert.True(await RoleExistsAsync(garbled), "The sweep dropped a role whose stamp it could not read.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{unstamped}\";");
+            await ExecuteAsync("postgres", $"drop role if exists \"{garbled}\";");
+        }
+    }
+
+    private static Task StampAsync(string role, string stamp) =>
+        ExecuteAsync("postgres", $"comment on role \"{role}\" is '{TestResourceSweep.ScratchRoleMarker}{stamp}';");
+
     /// <summary>
     /// Every class reports a real count, proved by planting one of each (#299).
     /// </summary>
@@ -189,11 +348,14 @@ public sealed class TestResourceSweepTests
         await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
 
         var role = $"plg_cnt{Guid.NewGuid():N}"[..20];
+        var scratchRole = $"probe_cnt{Guid.NewGuid():N}"[..20];
         var directory = Path.Combine(Path.GetTempPath(), $"autonate-pgtests-{Guid.NewGuid():N}");
         // Old enough to be swept, unlike the run's own content roots.
         var (database, schema) = await PlantOldSuiteDatabaseWithSchemaAsync();
 
         await ExecuteAsync("postgres", $"create role \"{role}\";");
+        await ExecuteAsync("postgres", $"create role \"{scratchRole}\";");
+        await StampAsync(scratchRole, $"{DateTimeOffset.UtcNow.AddHours(-3):O}");
         Directory.CreateDirectory(directory);
         Directory.SetCreationTimeUtc(directory, DateTime.UtcNow.AddHours(-3));
 
@@ -224,12 +386,14 @@ public sealed class TestResourceSweepTests
 
             // The numbers, not the labels.
             Assert.True(counts.Roles > 0, $"The role pass reported nothing: {counts}");
+            Assert.True(counts.ScratchRoles > 0, $"The scratch-role pass reported nothing: {counts}");
             Assert.True(counts.Schemas > 0, $"The schema pass reported nothing: {counts}");
             Assert.True(counts.Directories > 0, $"The directory pass reported nothing: {counts}");
 
             // And the planted items are actually gone, so a count that increments
             // without doing anything fails too.
             Assert.False(await RoleExistsAsync(role), "An orphaned plugin role survived.");
+            Assert.False(await RoleExistsAsync(scratchRole), "An old stamped scratch role survived.");
             Assert.False(Directory.Exists(directory), "An old temp directory survived.");
             Assert.False(await SchemaExistsAsync(database, schema),
                 "A plugin schema in an abandoned suite database survived.");
@@ -237,12 +401,14 @@ public sealed class TestResourceSweepTests
             // The string still names each class, because that is what a human reads
             // in the log when one of the numbers above is zero.
             Assert.Contains("roles=", counts.ToString(), StringComparison.Ordinal);
+            Assert.Contains("scratchRoles=", counts.ToString(), StringComparison.Ordinal);
             Assert.Contains("schemas=", counts.ToString(), StringComparison.Ordinal);
             Assert.Contains("directories=", counts.ToString(), StringComparison.Ordinal);
         }
         finally
         {
             await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+            await ExecuteAsync("postgres", $"drop role if exists \"{scratchRole}\";");
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
             await ExecuteOnPostgresAsync($"drop database if exists \"{database}\" with (force);");
         }

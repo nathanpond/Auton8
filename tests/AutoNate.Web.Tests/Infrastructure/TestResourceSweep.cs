@@ -25,9 +25,70 @@ namespace AutoNate.Web.Tests.Infrastructure;
 /// a plugin is genuinely installed, its schema is right there and the role is left
 /// alone.
 /// </para>
+/// <para>
+/// **`dsrw_*` is the same shape (#301).** <c>SqlDataStoreProvisioner.ReadRoleNameFor</c>
+/// is production code too — <c>"dsrw_" + id[..16]</c>, backing the schema
+/// <c>"ds_" + id</c> — so it gets the same structural rule rather than a prefix: a
+/// <c>dsrw_*</c> role is dropped only when no live database the suite does not own
+/// holds a <c>ds_*</c> schema it reads.
+/// </para>
+/// <para>
+/// **Roles only a test creates are stamped, not pattern-matched (#301).** A scratch
+/// role written by a test (<c>probe_role_*</c>, <c>probe_writer_*</c>,
+/// <c>autonate_race_probe</c>) carries <c>COMMENT ON ROLE</c> = <see cref="ScratchRoleMarker"/>
+/// plus its creation time, written by <see cref="StampScratchRoleSql"/> straight after
+/// the create. The sweep matches that intent, not a name, so the next test that
+/// needs a scratch role stamps it rather than having to be added to a list here —
+/// which is how three families came to be missed in the first place. The age rule is
+/// the database sweep's: unstamped or unparseable is live, and only a stamp older than
+/// the cut-off is taken.
+/// </para>
 /// </remarks>
 internal static class TestResourceSweep
 {
+    /// <summary>
+    /// The <c>COMMENT ON ROLE</c> prefix that marks a role as suite scratch (#301).
+    /// </summary>
+    internal const string ScratchRoleMarker = "autonate-suite-scratch-role ";
+
+    /// <summary>
+    /// SQL stamping <paramref name="role"/> as suite scratch created now (#301).
+    /// </summary>
+    /// <remarks>
+    /// Run it immediately after the <c>CREATE ROLE</c>, before the test does anything
+    /// that can fail: the stamp is what lets a crashed run's role be swept later, so
+    /// the window in which it is missing is the window in which a leak is permanent.
+    /// </remarks>
+    internal static string StampScratchRoleSql(string role) =>
+        $"comment on role \"{role.Replace("\"", "\"\"", StringComparison.Ordinal)}\" is "
+        + $"'{ScratchRoleMarker}{DateTimeOffset.UtcNow:O}';";
+
+    /// <summary>Reads the creation time out of a role comment <see cref="StampScratchRoleSql"/> wrote.</summary>
+    internal static bool TryReadScratchStamp(string? comment, out DateTimeOffset created)
+    {
+        created = default;
+        return comment is not null
+            && comment.StartsWith(ScratchRoleMarker, StringComparison.Ordinal)
+            && DateTimeOffset.TryParse(comment[ScratchRoleMarker.Length..],
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out created);
+    }
+
+    /// <summary>
+    /// The production-named role families that exist to serve a schema (#214, #301).
+    /// </summary>
+    /// <remarks>
+    /// Each maps a role to the schema-name prefix whose presence proves it is in use.
+    /// <c>plg_x</c> serves exactly the schema <c>plg_x</c>; <c>dsrw_&lt;16 hex&gt;</c>
+    /// serves <c>ds_&lt;32 hex&gt;</c>, whose first 16 hex are the role's.
+    /// </remarks>
+    private static readonly (string RolePrefix, string SchemaLike, Func<string, string, bool> Serves)[] SchemaRoleFamilies =
+    [
+        ("plg_", "plg\\_%", static (role, schema) => string.Equals(role, schema, StringComparison.Ordinal)),
+        ("dsrw_", "ds\\_%", static (role, schema) =>
+            schema.StartsWith("ds_" + role["dsrw_".Length..], StringComparison.Ordinal)),
+    ];
+
     /// <summary>Databases the suite owns, and may therefore sweep schemas inside.</summary>
     private static bool IsSuiteOwnedDatabase(string name) =>
         name.StartsWith("autonate_test_", StringComparison.Ordinal)
@@ -38,38 +99,49 @@ internal static class TestResourceSweep
         || name.StartsWith("autonate_e2e_", StringComparison.Ordinal)
         || string.Equals(name, "AutoNate_E2E", StringComparison.Ordinal);
 
-    internal sealed record Counts(int Roles, int Schemas, int Directories)
+    internal sealed record Counts(int Roles, int ScratchRoles, int Schemas, int Directories)
     {
         // Per class, so "cleaned up 400 things" cannot hide one category doing
-        // nothing — which is how a sweep silently stops working.
+        // nothing — which is how a sweep silently stops working. The two role
+        // passes are separate classes for the same reason: they decide on
+        // different evidence, and either can break without the other noticing.
         public override string ToString() =>
-            $"roles={Roles}, schemas={Schemas}, directories={Directories}";
+            $"roles={Roles}, scratchRoles={ScratchRoles}, schemas={Schemas}, directories={Directories}";
+
+        public int Total => Roles + ScratchRoles + Schemas + Directories;
     }
 
     internal static async Task<Counts> SweepAsync(TimeSpan olderThan)
     {
-        var roles = await SweepOrphanedPluginRolesAsync();
+        var roles = await SweepOrphanedSchemaRolesAsync();
+        var scratchRoles = await SweepStampedScratchRolesAsync(olderThan);
         var schemas = await SweepPluginSchemasInSuiteDatabasesAsync(olderThan);
         var directories = SweepTempDirectories(olderThan);
-        return new Counts(roles, schemas, directories);
+        return new Counts(roles, scratchRoles, schemas, directories);
     }
 
     /// <summary>
-    /// Drops `plg_*` roles that no live database has a schema for.
+    /// Drops `plg_*` and `dsrw_*` roles that no live database has a schema for.
     /// </summary>
-    private static async Task<int> SweepOrphanedPluginRolesAsync() =>
-        await SweepOrphanedPluginRolesAsync(databases: null);
+    private static async Task<int> SweepOrphanedSchemaRolesAsync() =>
+        await SweepOrphanedSchemaRolesAsync(databases: null);
 
     // #215. The database list is injectable so a test can include a name that is
     // not there — the state the sweep is really exposed to, because the suite
     // drops a database per test class in parallel with it. Reproducing that by
     // timing is not possible from outside; supplying the list is exact.
-    internal static async Task<int> SweepOrphanedPluginRolesAsync(
+    internal static async Task<int> SweepOrphanedSchemaRolesAsync(
         IReadOnlyList<string>? databases)
     {
         var roles = await QueryStringsAsync("postgres",
-            "select rolname from pg_roles where rolname like 'plg\\_%';");
+            "select rolname from pg_roles where rolname like 'plg\\_%' or rolname like 'dsrw\\_%';");
         if (roles.Count == 0) return 0;
+
+        // One query per database for every family's schemas, so adding a family
+        // does not multiply the connections #258 cut down.
+        var schemaFilter = string.Join(" or ",
+            SchemaRoleFamilies.Select(family => $"schema_name like '{family.SchemaLike}'"));
+        var schemaSql = $"select schema_name from information_schema.schemata where {schemaFilter};";
 
         // #258. Only databases the suite does NOT own.
         //
@@ -95,8 +167,7 @@ internal static class TestResourceSweep
         {
             try
             {
-                foreach (var schema in await QueryStringsAsync(database,
-                    "select schema_name from information_schema.schemata where schema_name like 'plg\\_%';"))
+                foreach (var schema in await QueryStringsAsync(database, schemaSql))
                 {
                     schemasInUse.Add(schema);
                 }
@@ -131,8 +202,7 @@ internal static class TestResourceSweep
                 try
                 {
                     await Task.Delay(250);
-                    foreach (var schema in await QueryStringsAsync(database,
-                        @"select schema_name from information_schema.schemata where schema_name like 'plg\_%';"))
+                    foreach (var schema in await QueryStringsAsync(database, schemaSql))
                     {
                         schemasInUse.Add(schema);
                     }
@@ -152,7 +222,7 @@ internal static class TestResourceSweep
         if (unreadableDatabases > 0) return 0;
 
         var dropped = 0;
-        foreach (var role in roles.Where(role => !schemasInUse.Contains(role)))
+        foreach (var role in roles.Where(role => !IsServingASchema(role, schemasInUse)))
         {
             try
             {
@@ -162,6 +232,82 @@ internal static class TestResourceSweep
             catch (PostgresException)
             {
                 // Still owns something somewhere. Leaving it is correct.
+            }
+        }
+
+        return dropped;
+    }
+
+    // A role from a family with no matching rule is kept: the query above only
+    // returns family names, so this is unreachable today, and if it ever is
+    // reached the safe answer to "is this serving something?" is yes.
+    private static bool IsServingASchema(string role, IReadOnlySet<string> schemasInUse)
+    {
+        foreach (var family in SchemaRoleFamilies)
+        {
+            if (!role.StartsWith(family.RolePrefix, StringComparison.Ordinal)) continue;
+            return schemasInUse.Any(schema => family.Serves(role, schema));
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Drops roles a test stamped as scratch, once the stamp is older than the cut-off (#301).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// These are roles no production code creates, so there is no structural
+    /// signal to read — but there is the test's own declaration, which is better
+    /// than a name: <see cref="StampScratchRoleSql"/> writes it immediately after
+    /// the create. Matching on the stamp means a role a test forgot to stamp leaks
+    /// visibly rather than a role a developer happened to name <c>probe_*</c>
+    /// being dropped.
+    /// </para>
+    /// <para>
+    /// The age rule is <c>SuiteDatabasesOlderThanAsync</c>'s, in the same
+    /// direction: a stamp that does not parse is live, and so is one newer than
+    /// the cut-off, because a run in progress owns it. A role that still owns or
+    /// holds privileges on anything refuses the drop, and is left.
+    /// </para>
+    /// </remarks>
+    internal static async Task<int> SweepStampedScratchRolesAsync(TimeSpan olderThan)
+    {
+        var cutoff = DateTimeOffset.UtcNow - olderThan;
+        var candidates = new List<string>();
+
+        await using (var connection = new NpgsqlConnection(PostgresTestDatabase.AdminConnectionStringFor("postgres")))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                select r.rolname, shobj_description(r.oid, 'pg_authid')
+                from pg_roles r
+                where starts_with(coalesce(shobj_description(r.oid, 'pg_authid'), ''), @marker);
+                """;
+            command.Parameters.AddWithValue("marker", ScratchRoleMarker);
+
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (!TryReadScratchStamp(reader.GetString(1), out var created)) continue; // live
+                if (created >= cutoff) continue;                                         // live
+                candidates.Add(reader.GetString(0));
+            }
+        }
+
+        var dropped = 0;
+        foreach (var role in candidates)
+        {
+            try
+            {
+                await ExecuteAsync("postgres", $"drop role if exists \"{role.Replace("\"", "\"\"", StringComparison.Ordinal)}\";");
+                dropped++;
+            }
+            catch (PostgresException)
+            {
+                // Still owns or holds something somewhere. Leaving it is correct.
             }
         }
 
